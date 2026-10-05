@@ -1,0 +1,2 @@
+# Tools built by `make` (see $(PIN_ROOT)/source/tools/Config/makefile.default.rules).
+TOOL_ROOTS := memprint_trace

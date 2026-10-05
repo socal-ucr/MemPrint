@@ -1,0 +1,20 @@
+# Pin build outputs
+obj-intel64/
+*.o
+*.so
+
+# Workload sources are cloned and patched by scripts/setup.sh
+workloads/src/
+
+# Generated data (traces, run results, analysis outputs)
+traces/
+results/
+data/
+figures/
+*.pdf
+*.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
