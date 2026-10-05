@@ -15,12 +15,13 @@
  *
  *   splitter  Instruments every memory reference.  Writes the exact
  *             footprint (SamplingInterval = 1) and, for every interval k in
- *             -intervals, splits a 1-in-k subsample of the references into
- *             -bins disjoint bins (one CSV per interval and bin).
+ *             -intervals, -bins disjoint bins that each hold an independent
+ *             1-in-k subsample of the references (one CSV per interval and bin).
  *
  *   sampler   Samples 1-in-i memory references at instrumentation time and
- *             Poisson-bootstraps every sampled reference into -s bins
- *             (lambda = s / r, each reference lands in distinct bins).
+ *             Poisson-bootstraps every sampled reference into distinct bins
+ *             out of -s (lambda = s / r), so each bin holds roughly a
+ *             1-in-(i*r) subsample (exactly i / (E[min(Poisson(lambda), s)] / s)).
  *             Writes the union of the bins plus one CSV per bin.
  *
  * Output (in -outdir, which is created if missing):
@@ -92,18 +93,20 @@ struct MEMREF
 // Per-thread state; each thread only touches its own slot.
 struct ThreadData
 {
-    UINT32 observations = 0;     // references seen by BufferFull
+    UINT64 observations = 0;     // references seen by BufferFull
     FootprintMap footprint;      // splitter: exact footprint
     vector< FootprintMap > bins; // splitter: [interval * numBins + bin]; sampler: [bin]
-    vector< UINT32 > binObservations;
+    vector< UINT64 > binObservations;
 };
 ThreadData* threadData[MAX_THREADS];
 
 static UINT32 seed[MAX_THREADS]; // 32-bit LCG state per thread
 
-vector< UINT32 > intervals; // splitter
+vector< UINT32 > intervals;          // splitter
+vector< UINT64 > intervalThresholds; // splitter: accept a reference into interval k iff lcg < threshold[k]
 UINT32 numBins;             // bins per interval (splitter) or bootstrap bins (sampler)
 double lambda;              // sampler
+UINT64 sampledBinInterval;  // sampler: effective sampling interval of one bootstrap bin
 
 string outputFileNamePrefix;
 ofstream outputFile;
@@ -200,10 +203,11 @@ static VOID SplitReference(ThreadData* td, THREADID tid, ADDRINT address, UINT32
 {
     Record(td->footprint, address, size);
 
+    // Keep the reference with probability bins/interval and put it in a uniform bin,
+    // so every bin is a 1-in-interval subsample.
     for (UINT32 k = 0; k < intervals.size(); k++)
     {
-        UINT32 probMask = intervals[k] / numBins;
-        if (lcg_step(seed[tid]) % probMask == 0)
+        if (lcg_step(seed[tid]) < intervalThresholds[k])
         {
             UINT32 bin = (lcg_step(seed[tid]) / 256) % numBins;
             Record(td->bins[k * numBins + bin], address, size);
@@ -216,6 +220,7 @@ static VOID BootstrapReference(ThreadData* td, THREADID tid, ADDRINT address, UI
 {
     UINT32 times = sample_poisson(lambda, tid);
     if (times == 0) return;
+    if (times > numBins) times = numBins; // cannot place in more distinct bins than exist
 
     // Place the reference in `times` distinct bins.
     vector< bool > used(numBins, false);
@@ -239,8 +244,8 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
     struct MEMREF* reference = (struct MEMREF*)buf;
     for (UINT64 i = 0; i < numElements; i++, reference++)
     {
-        UINT32 address = reference->ea;
-        UINT32 size    = reference->size;
+        ADDRINT address = reference->ea;
+        UINT32 size     = reference->size;
         if (address == 0) continue;
 
         ++td->observations;
@@ -298,7 +303,7 @@ static VOID WriteTotal(ofstream& out, UINT64 bytes, size_t uniqueAddresses, UINT
     out << "Total," << bytes << "," << uniqueAddresses << "," << observations << "," << interval << endl;
 }
 
-static VOID WriteBin(UINT32 binInterval, UINT32 bin, UINT32 mapIndex, Footprint* total)
+static VOID WriteBin(UINT64 binInterval, UINT32 bin, UINT32 mapIndex, Footprint* total)
 {
     ostringstream name;
     name << outputFileNamePrefix << "_SubSample_" << binInterval << "_bin_" << bin << ".csv";
@@ -373,9 +378,8 @@ VOID Fini(INT32 code, VOID* v)
     }
     else
     {
-        UINT32 binInterval = KnobSamplingInterval.Value() * numBins / KnobSampleReplication.Value();
         for (UINT32 j = 0; j < numBins; j++)
-            WriteBin(binInterval, j, j, &total);
+            WriteBin(sampledBinInterval, j, j, &total);
     }
 
     for (UINT32 t = 0; t < MAX_THREADS; t++)
@@ -395,6 +399,22 @@ INT32 Usage(const string& message = "")
     cerr << "MemPrint memory-footprint tracer (splitter / sampler)." << endl;
     cerr << endl << KNOB_BASE::StringKnobSummary() << endl;
     return -1;
+}
+
+// Effective sampling interval of one bootstrap bin: a sampled reference lands in
+// min(Poisson(lambda), bins) distinct bins, so a given bin receives it with
+// probability E[min(Poisson(lambda), bins)] / bins (~ 1/r when lambda << bins).
+static UINT64 BootstrapBinInterval(UINT32 interval, UINT32 bins, double lambda)
+{
+    double pmf = exp(-lambda), expected = 0, tail = 1;
+    for (UINT32 k = 0; k < bins; k++)
+    {
+        expected += k * pmf;
+        tail -= pmf;
+        pmf *= lambda / (k + 1);
+    }
+    expected += bins * tail;
+    return (UINT64)llround(interval * bins / expected);
 }
 
 static BOOL ParseIntervals(const string& list)
@@ -421,7 +441,10 @@ int main(int argc, char* argv[])
         if (numBins == 0) return Usage("-bins must be positive");
         if (!ParseIntervals(KnobIntervals.Value())) return Usage("-intervals must be a list of positive integers");
         for (UINT32 interval : intervals)
-            if (interval / numBins == 0) return Usage("every interval must be >= -bins");
+        {
+            if (interval < numBins) return Usage("every interval must be >= -bins");
+            intervalThresholds.push_back(((UINT64)numBins << 32) / interval);
+        }
     }
     else if (KnobMode.Value() == "sampler")
     {
@@ -429,7 +452,8 @@ int main(int argc, char* argv[])
         numBins = KnobNumSplits.Value();
         if (KnobSamplingInterval.Value() == 0 || numBins == 0 || KnobSampleReplication.Value() == 0)
             return Usage("-i, -s and -r must be positive");
-        lambda = static_cast< double >(numBins) / KnobSampleReplication.Value();
+        lambda             = static_cast< double >(numBins) / KnobSampleReplication.Value();
+        sampledBinInterval = BootstrapBinInterval(KnobSamplingInterval.Value(), numBins, lambda);
     }
     else
         return Usage("unknown -mode " + KnobMode.Value());
