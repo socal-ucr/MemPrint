@@ -52,7 +52,8 @@ SAMPLER_RUNS = pd.DataFrame([
     (16384, .482788, INSTR_ONLY, 31.631165, 31.148377),
 ], columns=["vertices", "avg_runtime_without_pin", "SI", "avg_w_PIN", "PIN_overhead"])
 
-# The sampler ran with -s 10 -r 1, so each bin's effective interval is 10x -i.
+# The sampler ran with -s 50 -r 5. The paper plots each run at 10x -i, the old
+# tool's bin label i*s/r; the true per-bin interval is i*r = 5x -i.
 SAMPLER_BIN_FACTOR = 10
 
 # miniVite under the splitter (full trace): total and instrumentation-only overhead (s).
