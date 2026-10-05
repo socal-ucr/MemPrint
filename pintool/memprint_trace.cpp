@@ -560,11 +560,32 @@ static VOID WriteSnapshot()
 {
     if (timeNow == lastSnapshot) return;
     lastSnapshot = timeNow;
-    timelineFile << timeNow << "," << MainInterval() << ",-1," << footprint.bytes << "," << footprint.Unique() << ","
-                 << observations << "," << footprint.freed << "\n";
+    // Hand-rolled formatting: streams and snprintf in Pin's C runtime cost
+    // 10-30 us per row, which dominated runs with frequent snapshots.
+    string text;
+    text.reserve((bins.size() + 1) * 64);
+    auto num = [&](UINT64 v) {
+        char digits[24];
+        int n = 0;
+        do
+        {
+            digits[n++] = char('0' + v % 10);
+            v /= 10;
+        } while (v);
+        while (n) text += digits[--n];
+    };
+    auto add = [&](UINT64 interval, INT64 bin, UINT64 bytes, UINT64 unique, UINT64 count, UINT64 freed) {
+        num(timeNow), text += ',', num(interval), text += ',';
+        if (bin < 0)
+            text += "-1";
+        else
+            num((UINT64)bin);
+        text += ',', num(bytes), text += ',', num(unique), text += ',', num(count), text += ',', num(freed), text += '\n';
+    };
+    add(MainInterval(), -1, footprint.bytes, footprint.Unique(), observations, footprint.freed);
     for (UINT32 m = 0; m < bins.size(); m++)
-        timelineFile << timeNow << "," << BinInterval(m) << "," << m % numBins << "," << bins[m].bytes << ","
-                     << bins[m].Unique() << "," << binObservations[m] << "," << bins[m].freed << "\n";
+        add(BinInterval(m), m % numBins, bins[m].bytes, bins[m].Unique(), binObservations[m], bins[m].freed);
+    timelineFile.write(text.data(), text.size());
 }
 
 static VOID WriteOutputs();

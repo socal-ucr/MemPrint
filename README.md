@@ -153,6 +153,9 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
   - `free` is handled at its entry, because glibc's `free` exits through a tail jump. The 16 bytes of tcache links that free writes into a small block are counted again.
   - Not tracked: `mremap`, `brk`, and stack frames. Ordering across threads is the order in which their buffers are processed.
   - The page index this needs roughly doubles the tool's memory use. miniVite 8192 uses about 14 GB.
+- **Overhead** on 2mm SMALL:
+  - splitter: 1.47 s plain, 1.57 s with `-snapshot 32000` (200 snapshots), 1.77 s adding `-track_frees`;
+  - sampler: 1.45 s plain, 1.61 s with both.
 - **`-stop N`:** write all outputs after N references and detach, which gives a partial trace.
 - `tests/pintool/run_tests.sh` checks the live footprint over time for malloc/free, posix_memalign, realloc (shrink in place and move), calloc and new/delete, mmap with partial munmap, cross-thread frees, and `-stop`.
 
