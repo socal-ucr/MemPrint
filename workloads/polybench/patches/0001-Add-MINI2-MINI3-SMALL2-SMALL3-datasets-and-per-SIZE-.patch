@@ -1,0 +1,1481 @@
+From e436c730dfc804e1c512bf672772e4f6241c3cbf Mon Sep 17 00:00:00 2001
+From: nmustakin <nmust004@ucr.edu>
+Date: Mon, 5 Oct 2026 13:26:52 -0700
+Subject: [PATCH] Add MINI2/MINI3/SMALL2/SMALL3 datasets and per-SIZE binaries
+
+- Every kernel header gains MINI2, MINI3, SMALL2 and SMALL3 dataset sizes
+  between the stock MINI, SMALL and MEDIUM sizes.
+- makefile-gen.pl: generated Makefiles take SIZE (default MEDIUM) and build
+  <kernel>-<SIZE> with -D<SIZE>_DATASET; link deriche with -lm.
+- run-all.pl: run the <kernel>-<SIZE> binaries.
+---
+ datamining/correlation/correlation.h          | 22 +++++++++++-
+ datamining/covariance/covariance.h            | 22 +++++++++++-
+ linear-algebra/blas/gemm/gemm.h               | 26 +++++++++++++-
+ linear-algebra/blas/gemver/gemver.h           | 18 +++++++++-
+ linear-algebra/blas/gesummv/gesummv.h         | 18 +++++++++-
+ linear-algebra/blas/symm/symm.h               | 22 +++++++++++-
+ linear-algebra/blas/syr2k/syr2k.h             | 22 +++++++++++-
+ linear-algebra/blas/syrk/syrk.h               | 22 +++++++++++-
+ linear-algebra/blas/trmm/trmm.h               | 22 +++++++++++-
+ linear-algebra/kernels/2mm/2mm.h              | 30 +++++++++++++++-
+ linear-algebra/kernels/3mm/3mm.h              | 34 ++++++++++++++++++-
+ linear-algebra/kernels/atax/atax.h            | 22 +++++++++++-
+ linear-algebra/kernels/bicg/bicg.h            | 22 +++++++++++-
+ linear-algebra/kernels/doitgen/doitgen.h      | 26 +++++++++++++-
+ linear-algebra/kernels/mvt/mvt.h              | 18 +++++++++-
+ linear-algebra/solvers/cholesky/cholesky.h    | 18 +++++++++-
+ linear-algebra/solvers/durbin/durbin.h        | 18 +++++++++-
+ .../solvers/gramschmidt/gramschmidt.h         | 22 +++++++++++-
+ linear-algebra/solvers/lu/lu.h                | 18 +++++++++-
+ linear-algebra/solvers/ludcmp/ludcmp.h        | 18 +++++++++-
+ linear-algebra/solvers/trisolv/trisolv.h      | 18 +++++++++-
+ medley/deriche/deriche.h                      | 22 +++++++++++-
+ medley/floyd-warshall/floyd-warshall.h        | 18 +++++++++-
+ medley/nussinov/nussinov.h                    | 18 +++++++++-
+ stencils/adi/adi.h                            | 22 +++++++++++-
+ stencils/fdtd-2d/fdtd-2d.h                    | 26 +++++++++++++-
+ stencils/heat-3d/heat-3d.h                    | 22 +++++++++++-
+ stencils/jacobi-1d/jacobi-1d.h                | 22 +++++++++++-
+ stencils/jacobi-2d/jacobi-2d.h                | 22 +++++++++++-
+ stencils/seidel-2d/seidel-2d.h                | 22 +++++++++++-
+ utilities/makefile-gen.pl                     | 22 ++++++------
+ utilities/run-all.pl                          |  2 +-
+ 32 files changed, 633 insertions(+), 43 deletions(-)
+
+diff --git a/datamining/correlation/correlation.h b/datamining/correlation/correlation.h
+index f2660e2..7aa0ca6 100644
+--- a/datamining/correlation/correlation.h
++++ b/datamining/correlation/correlation.h
+@@ -11,7 +11,7 @@
+ # define _CORRELATION_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 32
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 40
++#   define N 50
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 60
++#   define N 75
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 80
+ #   define N 100
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 120
++#   define N 140
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 180
++#   define N 200
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 240
+ #   define N 260
+diff --git a/datamining/covariance/covariance.h b/datamining/covariance/covariance.h
+index e35f895..f0eea31 100644
+--- a/datamining/covariance/covariance.h
++++ b/datamining/covariance/covariance.h
+@@ -11,7 +11,7 @@
+ # define _COVARIANCE_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 32
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 40
++#   define N 50
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 60
++#   define N 75
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 80
+ #   define N 100
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 120
++#   define N 140
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 180
++#   define N 200
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 240
+ #   define N 260
+diff --git a/linear-algebra/blas/gemm/gemm.h b/linear-algebra/blas/gemm/gemm.h
+index 0d18a0b..d96db42 100644
+--- a/linear-algebra/blas/gemm/gemm.h
++++ b/linear-algebra/blas/gemm/gemm.h
+@@ -11,7 +11,7 @@
+ # define _GEMM_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -23,12 +23,36 @@
+ #   define NK 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define NI 30
++#   define NJ 35
++#   define NK 40
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define NI 45
++#   define NJ 50
++#   define NK 55
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define NI 60
+ #   define NJ 70
+ #   define NK 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define NI 100
++#   define NJ 120
++#   define NK 140
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define NI 160
++#   define NJ 180
++#   define NK 200
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define NI 200
+ #   define NJ 220
+diff --git a/linear-algebra/blas/gemver/gemver.h b/linear-algebra/blas/gemver/gemver.h
+index a0abdd0..fb1ed34 100644
+--- a/linear-algebra/blas/gemver/gemver.h
++++ b/linear-algebra/blas/gemver/gemver.h
+@@ -11,7 +11,7 @@
+ # define _GEMVER_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 65
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 90
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 200
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 320
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/linear-algebra/blas/gesummv/gesummv.h b/linear-algebra/blas/gesummv/gesummv.h
+index 64285d8..59d355b 100644
+--- a/linear-algebra/blas/gesummv/gesummv.h
++++ b/linear-algebra/blas/gesummv/gesummv.h
+@@ -11,7 +11,7 @@
+ # define _GESUMMV_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 45
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 70
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 90
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 250
+ #  endif
+diff --git a/linear-algebra/blas/symm/symm.h b/linear-algebra/blas/symm/symm.h
+index 8848b3d..f3845b1 100644
+--- a/linear-algebra/blas/symm/symm.h
++++ b/linear-algebra/blas/symm/symm.h
+@@ -11,7 +11,7 @@
+ # define _SYMM_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 30
++#   define N 45
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 40
++#   define N 50
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 60
+ #   define N 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 90
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 150
++#   define N 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 200
+ #   define N 240
+diff --git a/linear-algebra/blas/syr2k/syr2k.h b/linear-algebra/blas/syr2k/syr2k.h
+index 7861bcd..0026d4f 100644
+--- a/linear-algebra/blas/syr2k/syr2k.h
++++ b/linear-algebra/blas/syr2k/syr2k.h
+@@ -11,7 +11,7 @@
+ # define _SYR2K_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 30
++#   define N 45
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 40
++#   define N 60
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 60
+ #   define N 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 90
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 150
++#   define N 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 200
+ #   define N 240
+diff --git a/linear-algebra/blas/syrk/syrk.h b/linear-algebra/blas/syrk/syrk.h
+index 648fab3..0c3dff2 100644
+--- a/linear-algebra/blas/syrk/syrk.h
++++ b/linear-algebra/blas/syrk/syrk.h
+@@ -11,7 +11,7 @@
+ # define _SYRK_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 30
++#   define N 40
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 40
++#   define N 60
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 60
+ #   define N 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 90
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 150
++#   define N 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 200
+ #   define N 240
+diff --git a/linear-algebra/blas/trmm/trmm.h b/linear-algebra/blas/trmm/trmm.h
+index b1eaea1..e2755c4 100644
+--- a/linear-algebra/blas/trmm/trmm.h
++++ b/linear-algebra/blas/trmm/trmm.h
+@@ -11,7 +11,7 @@
+ # define _TRMM_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 30
++#   define N 40
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 40
++#   define N 60
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 60
+ #   define N 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 90
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 150
++#   define N 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 200
+ #   define N 240
+diff --git a/linear-algebra/kernels/2mm/2mm.h b/linear-algebra/kernels/2mm/2mm.h
+index 1b0b3d5..c03332f 100644
+--- a/linear-algebra/kernels/2mm/2mm.h
++++ b/linear-algebra/kernels/2mm/2mm.h
+@@ -11,7 +11,7 @@
+ # define _2MM_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -24,6 +24,20 @@
+ #   define NL 24
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define NI 24
++#   define NJ 26
++#   define NK 28
++#   define NL 30
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define NI 32
++#   define NJ 35
++#   define NK 38
++#   define NL 40
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define NI 40
+ #   define NJ 50
+@@ -31,6 +45,20 @@
+ #   define NL 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define NI 80
++#   define NJ 90
++#   define NK 100
++#   define NL 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define NI 120
++#   define NJ 140
++#   define NK 160
++#   define NL 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define NI 180
+ #   define NJ 190
+diff --git a/linear-algebra/kernels/3mm/3mm.h b/linear-algebra/kernels/3mm/3mm.h
+index 8cc464e..da97256 100644
+--- a/linear-algebra/kernels/3mm/3mm.h
++++ b/linear-algebra/kernels/3mm/3mm.h
+@@ -11,7 +11,7 @@
+ # define _3MM_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -25,6 +25,22 @@
+ #   define NM 24
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define NI 24
++#   define NJ 26
++#   define NK 28
++#   define NL 30
++#   define NM 32
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define NI 32
++#   define NJ 34
++#   define NK 36
++#   define NL 38
++#   define NM 40
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define NI 40
+ #   define NJ 50
+@@ -33,6 +49,22 @@
+ #   define NM 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define NI 80
++#   define NJ 90
++#   define NK 100
++#   define NL 110
++#   define NM 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define NI 120
++#   define NJ 135
++#   define NK 150
++#   define NL 165
++#   define NM 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define NI 180
+ #   define NJ 190
+diff --git a/linear-algebra/kernels/atax/atax.h b/linear-algebra/kernels/atax/atax.h
+index 21e12b2..9efec7d 100644
+--- a/linear-algebra/kernels/atax/atax.h
++++ b/linear-algebra/kernels/atax/atax.h
+@@ -11,7 +11,7 @@
+ # define _ATAX_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 42
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 50
++#   define N 56
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 80
++#   define N 88
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 116
+ #   define N 124
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 140
++#   define N 150
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 200
++#   define N 212
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 390
+ #   define N 410
+diff --git a/linear-algebra/kernels/bicg/bicg.h b/linear-algebra/kernels/bicg/bicg.h
+index 984e955..d08ce2e 100644
+--- a/linear-algebra/kernels/bicg/bicg.h
++++ b/linear-algebra/kernels/bicg/bicg.h
+@@ -11,7 +11,7 @@
+ # define _BICG_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 42
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 50
++#   define N 56
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 80
++#   define N 88
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 116
+ #   define N 124
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 140
++#   define N 150
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 200
++#   define N 212
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 390
+ #   define N 410
+diff --git a/linear-algebra/kernels/doitgen/doitgen.h b/linear-algebra/kernels/doitgen/doitgen.h
+index 197abef..4891509 100644
+--- a/linear-algebra/kernels/doitgen/doitgen.h
++++ b/linear-algebra/kernels/doitgen/doitgen.h
+@@ -11,7 +11,7 @@
+ # define _DOITGEN_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -23,12 +23,36 @@
+ #   define NP 12
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define NQ 12
++#   define NR 14
++#   define NP 16
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define NQ 16
++#   define NR 18
++#   define NP 20
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define NQ 20
+ #   define NR 25
+ #   define NP 30
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define NQ 25
++#   define NR 30
++#   define NP 35
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define NQ 30
++#   define NR 35
++#   define NP 40
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define NQ 40
+ #   define NR 50
+diff --git a/linear-algebra/kernels/mvt/mvt.h b/linear-algebra/kernels/mvt/mvt.h
+index c41323b..9120642 100644
+--- a/linear-algebra/kernels/mvt/mvt.h
++++ b/linear-algebra/kernels/mvt/mvt.h
+@@ -11,7 +11,7 @@
+ # define _MVT_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 80
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/linear-algebra/solvers/cholesky/cholesky.h b/linear-algebra/solvers/cholesky/cholesky.h
+index 81b277d..ba17f84 100644
+--- a/linear-algebra/solvers/cholesky/cholesky.h
++++ b/linear-algebra/solvers/cholesky/cholesky.h
+@@ -11,7 +11,7 @@
+ # define _CHOLESKY_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 80
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/linear-algebra/solvers/durbin/durbin.h b/linear-algebra/solvers/durbin/durbin.h
+index dfa1a84..870bc15 100644
+--- a/linear-algebra/solvers/durbin/durbin.h
++++ b/linear-algebra/solvers/durbin/durbin.h
+@@ -11,7 +11,7 @@
+ # define _DURBIN_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 80
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/linear-algebra/solvers/gramschmidt/gramschmidt.h b/linear-algebra/solvers/gramschmidt/gramschmidt.h
+index e20ddb2..56c3b08 100644
+--- a/linear-algebra/solvers/gramschmidt/gramschmidt.h
++++ b/linear-algebra/solvers/gramschmidt/gramschmidt.h
+@@ -11,7 +11,7 @@
+ # define _GRAMSCHMIDT_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define M 30
++#   define N 40
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define M 40
++#   define N 50
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define M 60
+ #   define N 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define M 100
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define M 150
++#   define N 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define M 200
+ #   define N 240
+diff --git a/linear-algebra/solvers/lu/lu.h b/linear-algebra/solvers/lu/lu.h
+index 3899acc..de097b0 100644
+--- a/linear-algebra/solvers/lu/lu.h
++++ b/linear-algebra/solvers/lu/lu.h
+@@ -11,7 +11,7 @@
+ # define _LU_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 80
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/linear-algebra/solvers/ludcmp/ludcmp.h b/linear-algebra/solvers/ludcmp/ludcmp.h
+index 01c4f13..a9782e5 100644
+--- a/linear-algebra/solvers/ludcmp/ludcmp.h
++++ b/linear-algebra/solvers/ludcmp/ludcmp.h
+@@ -11,7 +11,7 @@
+ # define _LUDCMP_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 80
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/linear-algebra/solvers/trisolv/trisolv.h b/linear-algebra/solvers/trisolv/trisolv.h
+index 37b983e..7b42d76 100644
+--- a/linear-algebra/solvers/trisolv/trisolv.h
++++ b/linear-algebra/solvers/trisolv/trisolv.h
+@@ -11,7 +11,7 @@
+ # define _TRISOLV_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 80
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 400
+ #  endif
+diff --git a/medley/deriche/deriche.h b/medley/deriche/deriche.h
+index 260757b..df19311 100644
+--- a/medley/deriche/deriche.h
++++ b/medley/deriche/deriche.h
+@@ -11,7 +11,7 @@
+ # define _DERICHE_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define H 64
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define W 80
++#   define H 80
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define W 128
++#   define H 100
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define W 192
+ #   define H 128
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define W 240
++#   define H 160
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define W 320
++#   define H 256
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define W 720
+ #   define H 480
+diff --git a/medley/floyd-warshall/floyd-warshall.h b/medley/floyd-warshall/floyd-warshall.h
+index 800f42c..02845c9 100644
+--- a/medley/floyd-warshall/floyd-warshall.h
++++ b/medley/floyd-warshall/floyd-warshall.h
+@@ -11,7 +11,7 @@
+ # define _FLOYD_WARSHALL_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 60
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 90
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 120
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 180
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 240
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 320
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 500
+ #  endif
+diff --git a/medley/nussinov/nussinov.h b/medley/nussinov/nussinov.h
+index 50aea1f..053b13e 100644
+--- a/medley/nussinov/nussinov.h
++++ b/medley/nussinov/nussinov.h
+@@ -11,7 +11,7 @@
+ # define _NUSSINOV_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -21,10 +21,26 @@
+ #   define N 60
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define N 90
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define N 120
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define N 180
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define N 240
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define N 320
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define N 500
+ #  endif
+diff --git a/stencils/adi/adi.h b/stencils/adi/adi.h
+index 24fbabc..fbbb364 100644
+--- a/stencils/adi/adi.h
++++ b/stencils/adi/adi.h
+@@ -11,7 +11,7 @@
+ # define _ADI_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 20
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define TSTEPS 20
++#   define N 30
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define TSTEPS 30
++#   define N 40
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define TSTEPS 40
+ #   define N 60
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define TSTEPS 60
++#   define N 80
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define TSTEPS 80
++#   define N 120
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define TSTEPS 100
+ #   define N 200
+diff --git a/stencils/fdtd-2d/fdtd-2d.h b/stencils/fdtd-2d/fdtd-2d.h
+index 4ffadd5..79a2dc0 100644
+--- a/stencils/fdtd-2d/fdtd-2d.h
++++ b/stencils/fdtd-2d/fdtd-2d.h
+@@ -11,7 +11,7 @@
+ # define _FDTD_2D_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -23,12 +23,36 @@
+ #   define NY 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define TMAX 20
++#   define NX 30
++#   define NY 40
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define TMAX 30
++#   define NX 40
++#   define NY 60
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define TMAX 40
+ #   define NX 60
+ #   define NY 80
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define TMAX 60
++#   define NX 90
++#   define NY 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define TMAX 80
++#   define NX 150
++#   define NY 180
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define TMAX 100
+ #   define NX 200
+diff --git a/stencils/heat-3d/heat-3d.h b/stencils/heat-3d/heat-3d.h
+index 37fb9fd..3a1f948 100644
+--- a/stencils/heat-3d/heat-3d.h
++++ b/stencils/heat-3d/heat-3d.h
+@@ -11,7 +11,7 @@
+ # define _HEAT_3D_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 10
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define TSTEPS 24
++#   define N 12
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define TSTEPS 30
++#   define N 15
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define TSTEPS 40
+ #   define N 20
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define TSTEPS 50
++#   define N 25
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define TSTEPS 60
++#   define N 30
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define TSTEPS 100
+ #   define N 40
+diff --git a/stencils/jacobi-1d/jacobi-1d.h b/stencils/jacobi-1d/jacobi-1d.h
+index febdfcb..92f76aa 100644
+--- a/stencils/jacobi-1d/jacobi-1d.h
++++ b/stencils/jacobi-1d/jacobi-1d.h
+@@ -11,7 +11,7 @@
+ # define _JACOBI_1D_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define TSTEPS 25
++#   define N 60
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define TSTEPS 30
++#   define N 90
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define TSTEPS 40
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define TSTEPS 60
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define TSTEPS 80
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define TSTEPS 100
+ #   define N 400
+diff --git a/stencils/jacobi-2d/jacobi-2d.h b/stencils/jacobi-2d/jacobi-2d.h
+index ca0d4d3..a52f0de 100644
+--- a/stencils/jacobi-2d/jacobi-2d.h
++++ b/stencils/jacobi-2d/jacobi-2d.h
+@@ -11,7 +11,7 @@
+ # define _JACOBI_2D_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 30
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define TSTEPS 25
++#   define N 50
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define TSTEPS 30
++#   define N 60
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define TSTEPS 40
+ #   define N 90
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define TSTEPS 50
++#   define N 120
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define TSTEPS 70
++#   define N 160
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define TSTEPS 100
+ #   define N 250
+diff --git a/stencils/seidel-2d/seidel-2d.h b/stencils/seidel-2d/seidel-2d.h
+index e7761b0..7e38e8e 100644
+--- a/stencils/seidel-2d/seidel-2d.h
++++ b/stencils/seidel-2d/seidel-2d.h
+@@ -11,7 +11,7 @@
+ # define _SEIDEL_2D_H
+ 
+ /* Default to LARGE_DATASET. */
+-# if !defined(MINI_DATASET) && !defined(SMALL_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
++# if !defined(MINI_DATASET) && !defined(MINI2_DATASET) && !defined(MINI3_DATASET) && !defined(SMALL_DATASET) && !defined(SMALL2_DATASET) && !defined(SMALL3_DATASET) && !defined(MEDIUM_DATASET) && !defined(LARGE_DATASET) && !defined(EXTRALARGE_DATASET)
+ #  define LARGE_DATASET
+ # endif
+ 
+@@ -22,11 +22,31 @@
+ #   define N 40
+ #  endif
+ 
++#  ifdef MINI2_DATASET
++#   define TSTEPS 20
++#   define N 40
++#  endif
++
++#  ifdef MINI3_DATASET
++#   define TSTEPS 30
++#   define N 100
++#  endif
++
+ #  ifdef SMALL_DATASET
+ #   define TSTEPS 40
+ #   define N 120
+ #  endif
+ 
++#  ifdef SMALL2_DATASET
++#   define TSTEPS 60
++#   define N 180
++#  endif
++
++#  ifdef SMALL3_DATASET
++#   define TSTEPS 80
++#   define N 240
++#  endif
++
+ #  ifdef MEDIUM_DATASET
+ #   define TSTEPS 100
+ #   define N 400
+diff --git a/utilities/makefile-gen.pl b/utilities/makefile-gen.pl
+index 00aaa45..c719332 100644
+--- a/utilities/makefile-gen.pl
++++ b/utilities/makefile-gen.pl
+@@ -9,14 +9,12 @@
+ my $GEN_CONFIG = 0;
+ my $TARGET_DIR = ".";
+ 
+-if ($#ARGV !=0 && $#ARGV != 1) {
++if ($#ARGV != 0 && $#ARGV != 1) {
+    printf("usage perl makefile-gen.pl output-dir [-cfg]\n");
+    printf("  -cfg option generates config.mk in the output-dir.\n");
+    exit(1);
+ }
+ 
+-
+-
+ foreach my $arg (@ARGV) {
+    if ($arg =~ /-cfg/) {
+       $GEN_CONFIG = 1;
+@@ -25,7 +23,6 @@ foreach my $arg (@ARGV) {
+    }
+ }
+ 
+-
+ my %categories = (
+    'linear-algebra/blas' => 3,
+    'linear-algebra/kernels' => 3,
+@@ -38,19 +35,20 @@ my %categories = (
+ my %extra_flags = (
+    'cholesky' => '-lm',
+    'gramschmidt' => '-lm',
+-   'correlation' => '-lm'
++   'correlation' => '-lm',
++   'deriche' => '-lm'
+ );
+ 
+-foreach $key (keys %categories) {
++foreach my $key (keys %categories) {
+    my $target = $TARGET_DIR.'/'.$key;
+    opendir DIR, $target or die "directory $target not found.\n";
+    while (my $dir = readdir DIR) {
+-        next if ($dir=~'^\..*');
++        next if ($dir =~ '^\..*');
+         next if (!(-d $target.'/'.$dir));
+ 
+ 	my $kernel = $dir;
+         my $file = $target.'/'.$dir.'/Makefile';
+-        my $polybenchRoot = '../'x$categories{$key};
++        my $polybenchRoot = '../' x $categories{$key};
+         my $configFile = $polybenchRoot.'config.mk';
+         my $utilityDir = $polybenchRoot.'utilities';
+ 
+@@ -61,18 +59,19 @@ include $configFile
+ 
+ EXTRA_FLAGS=$extra_flags{$kernel}
+ 
++SIZE ?= MEDIUM
++
+ $kernel: $kernel.c $kernel.h
+-	\${VERBOSE} \${CC} -o $kernel $kernel.c \${CFLAGS} -I. -I$utilityDir $utilityDir/polybench.c \${EXTRA_FLAGS}
++	\${VERBOSE} \${CC} -o $kernel-\${SIZE} $kernel.c \${CFLAGS} -I. -I$utilityDir $utilityDir/polybench.c \${EXTRA_FLAGS} -D\${SIZE}_DATASET
+ 
+ clean:
+-	@ rm -f $kernel
++	@ rm -f $kernel-*
+ 
+ EOF
+ 
+         close FILE;
+    }
+ 
+-
+    closedir DIR;
+ }
+ 
+@@ -87,4 +86,3 @@ EOF
+ close FILE;
+ 
+ }
+-
+diff --git a/utilities/run-all.pl b/utilities/run-all.pl
+index 6b6674d..b994e4f 100644
+--- a/utilities/run-all.pl
++++ b/utilities/run-all.pl
+@@ -42,7 +42,7 @@ foreach $cat (@categories) {
+ 
+         my $kernel = $dir;
+         my $targetDir = $target.'/'.$dir;
+-        my $command = "cd $targetDir; make clean; make; ./$kernel";
++        my $command = "cd $targetDir; make clean; make; ./$kernel-*";
+ 	$command .= " 2>> $OUTFILE" if ($OUTFILE ne '');
+         print($command."\n");
+         system($command);
+-- 
+2.43.7
+

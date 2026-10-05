@@ -1,0 +1,53 @@
+From ae9a24c9aacf0a68a8901cc196dcf14347c25da8 Mon Sep 17 00:00:00 2001
+From: nmustakin <nmust004@ucr.edu>
+Date: Mon, 5 Oct 2026 13:27:05 -0700
+Subject: [PATCH] Build with mpicxx and DWARF-4 debug info
+
+Use the mpicxx wrapper instead of the Cray CC wrapper, add -gdwarf-4 (for
+Pin/Valgrind symbol lookup), link libstdc++ explicitly, and allow extra
+include directories through INCLUDE_FLAGS.
+---
+ Makefile | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 84d0227..74d8543 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,5 +1,4 @@
+-
+-CXX = CC
++CXX = mpicxx
+ 
+ USE_TAUPROF=0
+ ifeq ($(USE_TAUPROF),1)
+@@ -7,12 +6,15 @@ TAU=/soft/perftools/tau/tau-2.29/craycnl/lib
+ CXX = tau_cxx.sh -tau_makefile=$(TAU)/Makefile.tau-intel-papi-mpi-pdt 
+ endif
+ # use -xmic-avx512 instead of -xHost for Intel Xeon Phi platforms
+-OPTFLAGS = -O3 -fopenmp -DPRINT_DIST_STATS #-DPRINT_EXTRA_NEDGES #-DUSE_MPI_RMA -DUSE_MPI_ACCUMULATE #-DUSE_32_BIT_GRAPH #-DDEBUG_PRINTF #-DUSE_MPI_RMA #-DPRINT_LCG_DOUBLE_LOHI_RANDOM_NUMBERS#-DUSE_MPI_RMA #-DPRINT_LCG_DOUBLE_RANDOM_NUMBERS #-DPRINT_RANDOM_XY_COORD
++OPTFLAGS = -O3 -fopenmp -DPRINT_DIST_STATS -gdwarf-4 #-DPRINT_EXTRA_NEDGES #-DUSE_MPI_RMA -DUSE_MPI_ACCUMULATE #-DUSE_32_BIT_GRAPH #-DDEBUG_PRINTF #-DUSE_MPI_RMA #-DPRINT_LCG_DOUBLE_LOHI_RANDOM_NUMBERS#-DUSE_MPI_RMA #-DPRINT_LCG_DOUBLE_RANDOM_NUMBERS #-DPRINT_RANDOM_XY_COORD
+ #-DUSE_MPI_SENDRECV
+ #-DUSE_MPI_COLLECTIVES
+ # use export ASAN_OPTIONS=verbosity=1 to check ASAN output
+ SNTFLAGS = -std=c++11 -fopenmp -fsanitize=address -O1 -fno-omit-frame-pointer
+-CXXFLAGS = -std=c++11 -g $(OPTFLAGS)
++# Extra include directories, e.g. when mpicxx wraps a different compiler
++INCLUDE_FLAGS ?=
++LDFLAGS += -lstdc++
++CXXFLAGS = -std=c++11 -g $(OPTFLAGS) $(INCLUDE_FLAGS)
+ 
+ OBJ = main.o
+ TARGET = miniVite
+@@ -23,7 +25,7 @@ all: $(TARGET)
+ 	$(CXX) $(CXXFLAGS) -c -o $@ $^
+ 
+ $(TARGET):  $(OBJ)
+-	$(CXX) $^ $(OPTFLAGS) -o $@
++	$(CXX) $^ $(OPTFLAGS) $(LDFLAGS) -o $@
+ 
+ .PHONY: clean
+ 
+-- 
+2.43.7
+
