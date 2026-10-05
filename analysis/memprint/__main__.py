@@ -179,9 +179,10 @@ def summarize_timeline(recon, fcast):
     print("\nReconstruction MAPE (%) over snapshots, held-out config, interval with min training MAPE:")
     print(recon.pivot_table(index=["workload", "split"], columns=["subset", "variant"],
                             values=["splitter_mape", "sampler_mape"], aggfunc="first").round(2).to_string())
-    print("\nMean over workloads:")
+    print("\nMean absolute value over workloads:")
     print(recon.groupby(["split", "subset", "variant"])[["splitter_mape", "splitter_peak_error", "sampler_mape",
-                                                         "sampler_peak_error"]].mean().round(2).to_string())
+                                                         "sampler_peak_error", "sampler_length_error"]]
+          .agg(lambda x: np.mean(np.abs(x))).round(2).to_string())
     print("\nForecast from the true prefix (mean absolute % error over workloads):")
     print(fcast.groupby(["split", "prefix"])[["rest_mape", "peak_error", "end_error"]]
           .agg(lambda x: np.mean(np.abs(x))).round(2).to_string())

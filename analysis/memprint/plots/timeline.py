@@ -1,5 +1,6 @@
 """Footprint over time for the held-out configs: truth, reconstruction from
-splitter bins and from a sampler run, and the forecast from half the run."""
+splitter bins and from a sampler run, and the forecast from half the run.
+Sampler curves are drawn on the splitter run's time scale (fraction of the run)."""
 
 import matplotlib.pyplot as plt
 
@@ -18,11 +19,13 @@ def plot_timeline(workload, timeline, curves, out_dir, subset="L2O", variant="ba
         config = rows["config"].iloc[0]
         truth = truths[config]
         ax.plot(truth["Time"], truth["Truth"] / MB, color="black", linewidth=2.5, label="True (splitter)")
+        available = set(rows.loc[rows["source"] != "forecast", "subset"])
+        use = subset if subset in available else "NZ"
         for source, style in [("splitter bins", dict(color="C0", linestyle="--")), ("sampler", dict(color="C1"))]:
-            curve = rows[(rows["source"] == source) & (rows["subset"] == subset) & (rows["variant"] == variant)]
+            curve = rows[(rows["source"] == source) & (rows["subset"] == use) & (rows["variant"] == variant)]
             if len(curve):
                 ax.plot(curve["Time"], curve["Estimate"] / MB, marker=".", markersize=3, linewidth=1.5,
-                        label=f"Reconstructed from {source}", **style)
+                        label=f"Reconstructed from {source} ({use})", **style)
         forecast = rows[(rows["source"] == "forecast") & (rows["variant"] == f"prefix {prefix:g}")]
         if len(forecast):
             t0 = prefix * truth["Time"].max()

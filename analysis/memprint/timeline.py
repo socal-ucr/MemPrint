@@ -103,10 +103,17 @@ def estimate_curve(bins, model):
     return predicted[["Time", "SamplingInterval", "MemUsageObs", "SD_MemUsage", "Estimate"]]
 
 
-def curve_error(curve, truth, value="Estimate"):
+def curve_error(curve, truth, value="Estimate", run_end=None):
     """MAPE (%) of a curve against the truth (interpolated at the curve's
-    times), and the relative error (%) of its peak."""
-    true_at = np.interp(curve["Time"], truth["Time"], truth["Truth"])
+    times), and the relative error (%) of its peak.
+
+    run_end: length of the run the curve comes from, if it is not the run the
+    truth comes from. Times are then compared as fractions of each run: the
+    number of references a multithreaded program executes varies between runs
+    (threads spin while they wait), so absolute times do not line up.
+    """
+    times = curve["Time"] if run_end is None else curve["Time"] / run_end * truth["Time"].max()
+    true_at = np.interp(times, truth["Time"], truth["Truth"])
     ok = true_at > 0
     mape = float(np.mean(np.abs(curve[value][ok] - true_at[ok]) / true_at[ok]) * 100) if ok.any() else np.nan
     peak = (curve[value].max() - truth["Truth"].max()) / truth["Truth"].max() * 100 if len(curve) else np.nan
@@ -298,7 +305,10 @@ def evaluate(workload, timeline):
                     pid = samplers[sampler_si]["PID"].iloc[0]
                     run = samplers[sampler_si][samplers[sampler_si]["PID"] == pid]
                     curve = estimate_curve(run, model)
-                    row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth)
+                    run_end = float(run["Time"].max())
+                    row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+                    row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
+                    curve = curve.assign(Time=curve["Time"] / run_end * truth["Time"].max())
                     row["sampler_coverage"] = len(curve) / max(run["Time"].nunique(), 1)
                     curves.append(curve.assign(workload=workload, split=split, config=test_config, subset=subset,
                                                variant=variant, source="sampler"))

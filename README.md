@@ -163,9 +163,13 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
 - **Reconstruction:** the paper's α model applied at every snapshot, fitted on all snapshots of the training configs, to both the held-out config's splitter bins and a real sampler run.
 - **Forecasting:** from 10–75% prefixes of the run, by fitting scaled versions of the training configs' curves.
 
-**Current results:** on 2mm, gemm, jacobi-2d and atax, the per-snapshot reconstruction error is around 30–45% MAPE. Forecasts of run length and peak are unreliable for extrapolation.
+**Current results** (2mm, gemm, jacobi-2d, atax, all 7 sizes; miniVite 1024–8192; sampler `-s 20 -r 20`):
+- **PolyBench:** reconstructing the held-out config's curve gives about 25–55% MAPE over snapshots, from splitter bins and from a sampler run alike. Adding log time or the reuse feature does not help.
+- **miniVite:** 8% from splitter bins and 31–35% from the sampler. This build's curve is a flat ~168 MB for both 4096 and 8192 vertices, so it is dominated by runtime memory (OpenMP threads, OpenMPI), unlike the 7–14 MB in the paper's runs. Pin these with `OMP_NUM_THREADS` before drawing conclusions.
+- **Forecasting** from the first 10–50% of a run: peak within about 10–20% for interpolation, but unreliable for extrapolation (peak and run length are off by far more than 100%).
+- **Time axis:** the sampler's estimated time is within 0.5% of the true reference count for single-threaded programs. miniVite's runs differ by up to ±50% in references executed, because OpenMP threads spin while waiting and Pin slows the splitter far more than the sampler. Sampler curves are therefore compared to the truth on the fraction of their own run.
 
-The cause is fundamental, not a tuning problem. A single bin is so sparse (0.1–10% of the footprint) that it almost never samples an address twice, so it can't tell new memory from re-touched memory. Once the true footprint plateaus, the observed footprint keeps rising. Neither the paper's features nor a time or reuse feature fix this. A per-snapshot occupancy (Poisson) estimate gives about −95% error for the same reason.
+The cause is fundamental, not a tuning problem. A single bin is so sparse (0.1–10% of the footprint) that it almost never samples an address twice, so it can't tell new memory from re-touched memory. Once the true footprint plateaus, the observed footprint keeps rising. A per-snapshot occupancy (Poisson) estimate gives about −95% error for the same reason.
 
 The evidence that is still available is across bins: how many addresses were seen in exactly one, two, … bins. It would support capture–recapture estimators such as Chao1. The tool does not output it yet.
 
