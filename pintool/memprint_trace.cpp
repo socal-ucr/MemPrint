@@ -388,11 +388,11 @@ static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
     RememberAllocation(ptr, threads[tid].allocSize);
 }
 
-// free(ptr): the block is released when free returns (free itself writes to it).
-static VOID FreeExit(THREADID tid, CONTEXT* ctxt)
+// free(ptr): released at entry, because glibc's free leaves through a tail
+// jump that Pin cannot see. Free's own bookkeeping writes into small blocks
+// (16 bytes of tcache links) are therefore counted again.
+static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
 {
-    if (!AllocLeave(tid)) return;
-    ADDRINT ptr  = threads[tid].allocPtr;
     ADDRINT size = ForgetAllocation(ptr);
     QueueRelease(tid, ctxt, ptr, ptr + size);
 }
@@ -462,7 +462,6 @@ VOID ImageLoad(IMG img, VOID* v)
 {
     IARGLIST ret = Args({{IARG_FUNCRET_EXITPOINT_VALUE, 0}});
     IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
-    IARGLIST ctxt = Args({{IARG_CONTEXT, 0}});
 
     InstrumentAllocator(img, "malloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "valloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
@@ -473,7 +472,15 @@ VOID ImageLoad(IMG img, VOID* v)
                         ret);
     InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
     InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
-    InstrumentAllocator(img, "free", AFUNPTR(AllocEnter), EnterArgs(-1, 0, -1), AFUNPTR(FreeExit), ctxt);
+
+    RTN free = RTN_FindByName(img, "free");
+    if (RTN_Valid(free) && SEC_Name(RTN_Sec(free)).find(".plt") != 0)
+    {
+        RTN_Open(free);
+        RTN_InsertCall(free, IPOINT_BEFORE, AFUNPTR(FreeEnter), IARG_THREAD_ID, IARG_CONTEXT, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                       IARG_END);
+        RTN_Close(free);
+    }
 }
 
 // munmap(addr, len) is caught at the system call, whoever makes it.

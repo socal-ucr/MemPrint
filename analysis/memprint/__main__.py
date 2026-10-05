@@ -13,9 +13,10 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from . import build, predict, traces, transform
+from . import build, predict, timeline, traces, transform
 from .model import COEF_COLS
 
 WORKLOAD_LIST = Path(__file__).resolve().parent.parent / "workloads.txt"
@@ -54,6 +55,12 @@ class Paths:
 
     def errors(self, split):
         return self.data / f"{'extrapolation' if split == 'EXTRA' else 'interpolation'}_errors.csv"
+
+    def timeline(self, workload):
+        return self.data / f"{workload}_timeline.csv"
+
+    def read_timeline(self, workload):
+        return pd.read_csv(self.timeline(workload), dtype={"Config": str, "PID": str})
 
     def split_models(self, split):
         return self.data / f"{'extrapolation' if split == 'EXTRA' else 'interpolation'}_models.csv"
@@ -116,6 +123,70 @@ def cmd_transform(args, paths):
     plot_transformation(result.transformation, paths.figures, exclude=args.exclude)
 
 
+def cmd_timeline(args, paths):
+    workloads = args.workloads or default_workloads()
+    if args.action == "preprocess":
+        for w in workloads:
+            write(traces.load_timelines(paths.traces / w), paths.timeline(w), index=False)
+        return
+
+    if args.action == "build":
+        recon, fcast, curves, models = [], [], [], []
+        for w in workloads:
+            print(f"evaluating {w}")
+            tl = paths.read_timeline(w)
+            r, f, c = timeline.evaluate(w, tl)
+            recon.append(r)
+            fcast.append(f)
+            curves.append(c)
+            model, si, subset = timeline.fit_final_model(tl, subset=args.subset, variant=args.variant)
+            models.append([w, subset, args.variant, si, model.intercept] + list(model.coef))
+        recon, fcast = pd.concat(recon), pd.concat(fcast)
+        write(recon, paths.data / "timeline_reconstruction.csv", index=False)
+        write(fcast, paths.data / "timeline_forecast.csv", index=False)
+        write(pd.concat(curves), paths.data / "timeline_curves.csv", index=False)
+        extra = [f"b{i}" for i in range(8, 8 + len(timeline.VARIANTS[args.variant]))]
+        write(pd.DataFrame(models, columns=["workload", "subset", "variant", "sample_rate"] + COEF_COLS + extra),
+              paths.data / "timeline_models.csv", index=False)
+        summarize_timeline(recon, fcast)
+        return
+
+    # estimate / forecast a single sampler run
+    models = pd.read_csv(paths.data / "timeline_models.csv").set_index("workload")
+    for w in workloads:
+        row = models.loc[w]
+        coef_cols = [c for c in models.columns if c.startswith("b")]
+        model = timeline.Model(float(row["intercept"]), row[coef_cols].dropna().to_numpy(float),
+                               timeline.VARIANTS[row["variant"]])
+        runs = traces.load_timelines(Path(args.run) if args.run else paths.traces / w, prefixes=("Sampled",))
+        bins = timeline.bin_rows(runs, "sampler")
+        for (config, pid), run in bins.groupby(["Config", "PID"]):
+            si = timeline.closest(sorted(run["SamplingInterval"].unique()), row["sample_rate"])
+            curve = timeline.estimate_curve(run[run["SamplingInterval"] == si], model)
+            if args.action == "forecast":
+                prefix = curve[curve["Time"] <= args.upto].rename(columns={"Estimate": "Truth"})
+                templates = [t for _, t in timeline.truth_curves(paths.read_timeline(w)).groupby("Config")]
+                fc = timeline.forecast(prefix, templates)
+                curve = pd.concat([curve.assign(Kind="estimate"),
+                                   fc.curve.rename(columns={"Forecast": "Estimate"}).assign(Kind="forecast")])
+                print(f"{w} {config}: forecast end at {fc.end_time:.4g} references, final {fc.final:.4g} B, "
+                      f"peak {fc.peak:.4g} B")
+            write(curve, paths.data / f"{w}-{config}_{pid}_{args.action}.csv", index=False)
+
+
+def summarize_timeline(recon, fcast):
+    pd.set_option("display.width", 200)
+    print("\nReconstruction MAPE (%) over snapshots, held-out config, interval with min training MAPE:")
+    print(recon.pivot_table(index=["workload", "split"], columns=["subset", "variant"],
+                            values=["splitter_mape", "sampler_mape"], aggfunc="first").round(2).to_string())
+    print("\nMean over workloads:")
+    print(recon.groupby(["split", "subset", "variant"])[["splitter_mape", "splitter_peak_error", "sampler_mape",
+                                                         "sampler_peak_error"]].mean().round(2).to_string())
+    print("\nForecast from the true prefix (mean absolute % error over workloads):")
+    print(fcast.groupby(["split", "prefix"])[["rest_mape", "peak_error", "end_error"]]
+          .agg(lambda x: np.mean(np.abs(x))).round(2).to_string())
+
+
 def cmd_plot(args, paths):
     from .plots import alpha, heatmaps, massif, paper, sd_config
 
@@ -137,6 +208,12 @@ def cmd_plot(args, paths):
         for split, name in [("EXTRA", "extrapolate"), ("INTER", "interpolate")]:
             heatmaps.plot_error_matrix(predict.read_matrix(paths.errors(split)), name, out,
                                        exclude=args.exclude or ERROR_MATRIX_EXCLUDE)
+    elif args.figure == "timeline":
+        from .plots import timeline as timeline_plot
+
+        curves = pd.read_csv(paths.data / "timeline_curves.csv", dtype={"config": str})
+        for w in args.workloads:
+            timeline_plot.plot_timeline(w, paths.read_timeline(w), curves[curves["workload"] == w], out)
     elif args.figure == "paper":
         for name in args.workloads or list(paper.FIGURES):
             paper.FIGURES[name](out)
@@ -187,7 +264,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_transform)
 
     p = sub.add_parser("plot", help="one kind of figure")
-    p.add_argument("figure", choices=["sd-config", "alpha", "massif", "heatmaps", "paper"])
+    p.add_argument("figure", choices=["sd-config", "alpha", "massif", "heatmaps", "timeline", "paper"])
     p.add_argument("workloads", nargs="*", help="workloads (for paper: figure names, default all)")
     p.add_argument("--highlight", choices=["none", "best", "mt"], default="none", help="sd-config")
     p.add_argument("--x", choices=["config", "rate"], default="config", help="alpha")
@@ -195,6 +272,19 @@ def main(argv=None):
     p.add_argument("--exclude", nargs="*", help="heatmaps: workloads to leave out")
     p.add_argument("--out", help="output directory (default figures/)")
     p.set_defaults(func=cmd_plot)
+
+    p = sub.add_parser("timeline", help="footprint over time (-snapshot traces)")
+    p.add_argument("action", choices=["preprocess", "build", "estimate", "forecast"],
+                   help="preprocess: traces/<wl>/*_timeline.csv -> data/<wl>_timeline.csv; "
+                        "build: evaluate and fit models -> data/timeline_*.csv; "
+                        "estimate/forecast: apply the model to sampler runs")
+    p.add_argument("workloads", nargs="*")
+    p.add_argument("--subset", choices=["NZ", "MT", "L2O"], default="L2O", help="build: training subset of the final model")
+    p.add_argument("--variant", choices=list(timeline.VARIANTS), default="base",
+                   help="build: model features (time adds log Time)")
+    p.add_argument("--run", help="estimate/forecast: directory with the sampler timelines (default traces/<wl>)")
+    p.add_argument("--upto", type=float, help="forecast: use the run up to this many memory references")
+    p.set_defaults(func=cmd_timeline)
 
     p = sub.add_parser("paper-figures", help="regenerate the paper's data figures into figures/paper/")
     p.add_argument("--massif-csv", help="CSV path, may contain {workload} (default results/<wl>/massif.csv)")

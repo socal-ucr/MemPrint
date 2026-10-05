@@ -3,6 +3,7 @@
 Trace file names (see pintool/memprint_trace.cpp):
 
     <Prefix>_<name>_<interval>_<pid>[_<args>][_SubSample_<binInterval>_bin_<bin>].csv
+    <Prefix>_<name>_<interval>_<pid>[_<args>]_timeline.csv     (-snapshot)
 
 Prefix is Buffered (splitter) or Sampled (sampler). <name> is
 "<workload>-<config>" (set with -name), or, for traces recorded without -name,
@@ -15,6 +16,7 @@ import re
 import pandas as pd
 
 TRACE_NAME = re.compile(r"^(?P<prefix>Buffered|Sampled)_(?P<name>.+?)_(?P<interval>\d+)_(?P<pid>\d+)(?P<args>_.*)?$")
+TIMELINE_SUFFIX = "_timeline"
 BIN_SUFFIX = re.compile(r"_SubSample_(?P<bin_interval>\d+)_bin_(?P<bin>\d+)$")
 
 
@@ -24,6 +26,8 @@ def parse_trace_name(filename):
     if not filename.endswith(".csv"):
         return None
     stem = filename[: -len(".csv")]
+    if stem.endswith(TIMELINE_SUFFIX):
+        stem = stem[: -len(TIMELINE_SUFFIX)]
     bin_match = BIN_SUFFIX.search(stem)
     if bin_match:
         stem = stem[: bin_match.start()]
@@ -42,6 +46,10 @@ def parse_trace_name(filename):
     return workload, config, int(info["interval"]), info["pid"]
 
 
+def is_timeline(filename):
+    return filename.endswith(TIMELINE_SUFFIX + ".csv")
+
+
 def load_traces(directory, prefix="Buffered"):
     """Read every <prefix>_* trace CSV in a directory.
 
@@ -50,7 +58,7 @@ def load_traces(directory, prefix="Buffered"):
     """
     frames = []
     for filename in sorted(os.listdir(directory)):
-        if not filename.startswith(prefix + "_"):
+        if not filename.startswith(prefix + "_") or is_timeline(filename):
             continue
         parsed = parse_trace_name(filename)
         if parsed is None:
@@ -81,3 +89,27 @@ def add_sample_spread(traces):
     )
     merged = traces.merge(spread, on=keys, how="left")
     return merged.sort_values(keys, kind="stable").reset_index(drop=True)
+
+
+def load_timelines(directory, prefixes=("Buffered", "Sampled")):
+    """Read every timeline CSV in a directory into one long table.
+
+    Adds Kind (splitter or sampler), Config, PID and RunInterval (the run's
+    main sampling interval: 1 for the splitter, -i for the sampler).
+    """
+    kinds = {"Buffered": "splitter", "Sampled": "sampler"}
+    frames = []
+    for filename in sorted(os.listdir(directory)):
+        prefix = filename.split("_", 1)[0]
+        if prefix not in prefixes or not is_timeline(filename):
+            continue
+        _, config, interval, pid = parse_trace_name(filename)
+        frame = pd.read_csv(os.path.join(directory, filename))
+        frame.insert(0, "Kind", kinds[prefix])
+        frame.insert(1, "Config", config)
+        frame.insert(2, "PID", pid)
+        frame.insert(3, "RunInterval", interval)
+        frames.append(frame)
+    if not frames:
+        raise FileNotFoundError(f"no *_timeline.csv traces in {directory}")
+    return pd.concat(frames, ignore_index=True)

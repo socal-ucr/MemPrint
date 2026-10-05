@@ -14,11 +14,12 @@ from sklearn.linear_model import LinearRegression
 COEF_COLS = ["intercept", "b1", "b2", "b3", "b4", "b5", "b6", "b7"]
 
 
-def features(data, sd_col="SD_MemUsage"):
+def features(data, sd_col="SD_MemUsage", extra=()):
+    """The seven model features, plus log(column) for each column in `extra`."""
     log_sd = np.log(data[sd_col].astype(float))
     log_si = np.log(data["SamplingInterval"].astype(float))
     log_mem = np.log(data["MemUsageObs"].astype(float))
-    return pd.DataFrame(
+    columns = pd.DataFrame(
         {
             f"log_{sd_col}": log_sd,
             "log_SamplingInterval": log_si,
@@ -30,18 +31,22 @@ def features(data, sd_col="SD_MemUsage"):
         },
         index=data.index,
     )
+    for col in extra:
+        columns[f"log_{col}"] = np.log(data[col].astype(float))
+    return columns
 
 
 @dataclass
 class Model:
     intercept: float
     coef: np.ndarray
+    extra: tuple = ()  # additional log features (column names), after the seven standard ones
 
     @classmethod
-    def fit(cls, data, sd_col="SD_MemUsage"):
+    def fit(cls, data, sd_col="SD_MemUsage", extra=()):
         reg = LinearRegression(fit_intercept=True)
-        reg.fit(features(data, sd_col), np.log(data["Alpha"].astype(float)))
-        return cls(reg.intercept_, reg.coef_)
+        reg.fit(features(data, sd_col, extra), np.log(data["Alpha"].astype(float)))
+        return cls(reg.intercept_, reg.coef_, tuple(extra))
 
     @classmethod
     def from_row(cls, row):
@@ -52,11 +57,12 @@ class Model:
         return [self.intercept] + list(self.coef)
 
     def predict(self, data, sd_col="SD_MemUsage"):
-        """Return a copy of data with Predicted_Alpha and ErrorRate (%) columns."""
+        """Return a copy of data with Predicted_Alpha and, if Alpha is known, ErrorRate (%)."""
         data = data.copy()
-        log_alpha = features(data, sd_col).to_numpy() @ self.coef + self.intercept
+        log_alpha = features(data, sd_col, self.extra).to_numpy() @ self.coef + self.intercept
         data["Predicted_Alpha"] = np.exp(log_alpha)
-        data["ErrorRate"] = (data["Predicted_Alpha"] - data["Alpha"]) / data["Alpha"] * 100
+        if "Alpha" in data:
+            data["ErrorRate"] = (data["Predicted_Alpha"] - data["Alpha"]) / data["Alpha"] * 100
         return data
 
 

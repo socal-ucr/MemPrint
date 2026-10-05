@@ -132,6 +132,40 @@ Put changes against the upstream sources in `patches/*.patch`. `scripts/setup.sh
 
 When run on the original traces and data, all 16 figures come out pixel-identical to the published ones, and `build --latex` reproduces every cell of the training and test accuracy tables.
 
+## Footprint over time (experimental)
+
+The Pin tool can also record how the footprint evolves:
+
+```bash
+scripts/run.sh polybench --bench 2mm --mode splitter --snapshot 100000 --track-frees
+scripts/run.sh polybench --bench 2mm --mode sampler -i 50 -s 20 -r 20 --snapshot 100000 --track-frees
+python -m memprint timeline preprocess 2mm     # traces/2mm/*_timeline.csv -> data/2mm_timeline.csv
+python -m memprint timeline build 2mm          # evaluation + data/timeline_models.csv
+python -m memprint plot timeline 2mm
+python -m memprint timeline estimate 2mm --run <dir with Sampled_*_timeline.csv>
+python -m memprint timeline forecast 2mm --run <dir> --upto <references>
+```
+
+- **`-snapshot N`:** every N memory references, the tool appends the exact (splitter) or union (sampler) footprint, and every bin's footprint, to `*_timeline.csv`.
+  - Time counts memory references executed. The sampler estimates it as sampled references × `-i`, which comes within 0.4% of the true count on jacobi-2d SMALL.
+- **`-track_frees 1`:** `free`, `realloc` (the moved block or the shrunk tail) and `munmap` remove the released range from every footprint, so the footprint is live memory.
+  - Releases are applied in program order relative to the buffered accesses of the same thread.
+  - `free` is handled at its entry, because glibc's `free` exits through a tail jump. The 16 bytes of tcache links that free writes into a small block are counted again.
+  - Not tracked: `mremap`, `brk`, and stack frames. Ordering across threads is the order in which their buffers are processed.
+  - The page index this needs roughly doubles the tool's memory use. miniVite 8192 uses about 14 GB.
+- **`-stop N`:** write all outputs after N references and detach, which gives a partial trace.
+- `tests/pintool/run_tests.sh` checks the live footprint over time for malloc/free, posix_memalign, realloc (shrink in place and move), calloc and new/delete, mmap with partial munmap, cross-thread frees, and `-stop`.
+
+`timeline build` holds out the largest and the middle config, as `build` does. It evaluates two things:
+- **Reconstruction:** the paper's α model applied at every snapshot, fitted on all snapshots of the training configs, to both the held-out config's splitter bins and a real sampler run.
+- **Forecasting:** from 10–75% prefixes of the run, by fitting scaled versions of the training configs' curves.
+
+**Current results:** on 2mm, gemm, jacobi-2d and atax, the per-snapshot reconstruction error is around 30–45% MAPE. Forecasts of run length and peak are unreliable for extrapolation.
+
+The cause is fundamental, not a tuning problem. A single bin is so sparse (0.1–10% of the footprint) that it almost never samples an address twice, so it can't tell new memory from re-touched memory. Once the true footprint plateaus, the observed footprint keeps rising. Neither the paper's features nor a time or reuse feature fix this. A per-snapshot occupancy (Poisson) estimate gives about −95% error for the same reason.
+
+The evidence that is still available is across bins: how many addresses were seen in exactly one, two, … bins. It would support capture–recapture estimators such as Chao1. The tool does not output it yet.
+
 ## Differences from the original tooling
 
 This repository replaces the scripts in `memory_estimator` (Pin `ManualExamples/buffer_memtrace_*`, `workloads/*/run*.sh`, `tools/*.py`). Before the fixes below were applied, the refactored code was checked against the original on the same inputs: Pin outputs were byte-identical with a fixed seed, and all analysis outputs matched. The fixes change results:
