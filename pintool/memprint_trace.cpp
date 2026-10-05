@@ -7,9 +7,9 @@
  * MemPrint memory-footprint tracer.
  *
  * Records every memory operand (address, size) into a Pin trace buffer and,
- * when the buffer fills, folds the references into per-thread maps of
- * address -> largest access size.  The footprint of a set of references is
- * the sum of the largest size seen at each unique address.
+ * when the buffer fills, folds the references into maps of address -> largest
+ * access size.  The footprint of a set of references is the sum of the
+ * largest size seen at each unique address.
  *
  * Two modes:
  *
@@ -24,11 +24,25 @@
  *             1-in-(i*r) subsample (exactly i / (E[min(Poisson(lambda), s)] / s)).
  *             Writes the union of the bins plus one CSV per bin.
  *
+ * Optional:
+ *
+ *   -track_frees 1  free/realloc/munmap remove the released address range
+ *                   from every footprint, so footprints are live memory.
+ *   -snapshot N     every N memory references (time), append the current
+ *                   footprints to a timeline CSV.
+ *   -stop N         after N references, write all outputs and detach.
+ *
+ * Time counts memory references executed: one per reference in the
+ * splitter, i per sampled reference in the sampler (an estimate).
+ *
  * Output (in -outdir, which is created if missing):
  *   <Prefix>_<name>_<interval>_<pid>[_<args>].csv
  *   <Prefix>_<name>_<interval>_<pid>[_<args>]_SubSample_<binInterval>_bin_<j>.csv
- * with Prefix = Buffered (splitter) or Sampled (sampler) and the columns
- *   FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval
+ *   <Prefix>_<name>_<interval>_<pid>[_<args>]_timeline.csv        (-snapshot)
+ * with Prefix = Buffered (splitter) or Sampled (sampler). Summary files have
+ * the columns FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval;
+ * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes
+ * (Bin -1 is the exact footprint in the splitter, the union of bins in the sampler).
  */
 
 #include <cmath>
@@ -38,6 +52,8 @@
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
+#include <sys/syscall.h>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include "pin.H"
@@ -53,8 +69,7 @@ using std::vector;
 
 #define MAX_THREADS 64
 #define NUM_BUF_PAGES 1024
-
-typedef unordered_map< ADDRINT, UINT32 > FootprintMap; // address -> largest access size
+#define PAGE_BITS 12
 
 /* ===================================================================== */
 /* Knobs                                                                 */
@@ -72,6 +87,91 @@ KNOB< string > KnobOutDir(KNOB_MODE_WRITEONCE, "pintool", "outdir", "traces", "o
 KNOB< string > KnobName(KNOB_MODE_WRITEONCE, "pintool", "name", "",
                         "trace name, e.g. 2mm-MEDIUM (default: binary name, with the args appended after the pid)");
 KNOB< string > KnobSeed(KNOB_MODE_WRITEONCE, "pintool", "seed", "", "RNG seed base (default: process id)");
+KNOB< BOOL > KnobTrackFrees(KNOB_MODE_WRITEONCE, "pintool", "track_frees", "0",
+                            "remove freed (free/realloc/munmap) address ranges from the footprints");
+KNOB< UINT64 > KnobSnapshot(KNOB_MODE_WRITEONCE, "pintool", "snapshot", "0",
+                            "write a timeline snapshot every N memory references (0: off)");
+KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
+                        "after N memory references, write the outputs and detach (0: run to the end)");
+
+/* ===================================================================== */
+/* Footprint                                                             */
+/* ===================================================================== */
+
+// Largest access size per address, with a running byte total. When indexed,
+// addresses are also grouped by page so that a freed range can be erased.
+class Footprint
+{
+  public:
+    UINT64 bytes = 0; // sum of the largest access size per address
+    UINT64 freed = 0; // bytes removed by Erase
+
+    VOID SetIndexed(BOOL on) { indexed = on; }
+    size_t Unique() const { return sizes.size(); }
+
+    VOID Record(ADDRINT address, UINT32 size)
+    {
+        UINT32& largest = sizes[address];
+        if (largest < size)
+        {
+            if (largest == 0 && indexed) pages[address >> PAGE_BITS].push_back(address);
+            bytes += size - largest;
+            largest = size;
+        }
+    }
+
+    // Remove every address in [lo, hi).
+    VOID Erase(ADDRINT lo, ADDRINT hi)
+    {
+        if (hi <= lo || pages.empty()) return;
+        ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
+        if (last - first + 1 < pages.size())
+        {
+            for (ADDRINT page = first; page <= last; page++)
+            {
+                auto it = pages.find(page);
+                if (it != pages.end()) ErasePage(it, lo, hi);
+            }
+        }
+        else
+        {
+            for (auto it = pages.begin(); it != pages.end();)
+            {
+                auto next = std::next(it);
+                if (it->first >= first && it->first <= last) ErasePage(it, lo, hi);
+                it = next;
+            }
+        }
+    }
+
+  private:
+    typedef unordered_map< ADDRINT, vector< ADDRINT > > PageIndex;
+
+    unordered_map< ADDRINT, UINT32 > sizes;
+    PageIndex pages; // page -> addresses recorded in it (when indexed)
+    BOOL indexed = FALSE;
+
+    VOID ErasePage(PageIndex::iterator page, ADDRINT lo, ADDRINT hi)
+    {
+        vector< ADDRINT >& addresses = page->second;
+        size_t keep = 0;
+        for (ADDRINT address : addresses)
+        {
+            if (address < lo || address >= hi)
+            {
+                addresses[keep++] = address;
+                continue;
+            }
+            auto it = sizes.find(address);
+            if (it == sizes.end()) continue;
+            bytes -= it->second;
+            freed += it->second;
+            sizes.erase(it);
+        }
+        addresses.resize(keep);
+        if (keep == 0) pages.erase(page);
+    }
+};
 
 /* ===================================================================== */
 /* Global state                                                          */
@@ -90,28 +190,54 @@ struct MEMREF
     BOOL read;
 };
 
-// Per-thread state; each thread only touches its own slot.
+// A released address range, applied once the thread's buffer has been
+// processed up to `position` (the fill pointer when the release happened).
+struct Release
+{
+    VOID* position;
+    ADDRINT lo, hi;
+};
+
+// Per-thread state; each slot is only touched by its own thread.
 struct ThreadData
 {
-    UINT64 observations = 0;     // references seen by BufferFull
-    FootprintMap footprint;      // splitter: exact footprint
-    vector< FootprintMap > bins; // splitter: [interval * numBins + bin]; sampler: [bin]
-    vector< UINT64 > binObservations;
+    UINT32 seed = 0;           // 32-bit LCG state
+    vector< Release > pending; // releases not yet applied
+    // Allocator call in progress (outermost call only)
+    UINT32 allocDepth = 0;
+    ADDRINT allocSp = 0; // stack pointer at the outermost call
+    ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0;
+    ADDRINT munmapLo = 0, munmapHi = 0;
 };
-ThreadData* threadData[MAX_THREADS];
+ThreadData threads[MAX_THREADS];
 
-static UINT32 seed[MAX_THREADS]; // 32-bit LCG state per thread
+// Footprints shared by all threads; guarded by stateLock.
+PIN_LOCK stateLock;
+Footprint footprint;     // splitter: exact footprint; sampler: union of the bins
+vector< Footprint > bins; // splitter: [interval * numBins + bin]; sampler: [bin]
+vector< UINT64 > binObservations;
+UINT64 observations = 0; // references processed
+UINT64 timeNow = 0;      // memory references executed (estimated in the sampler)
+UINT64 nextSnapshot = 0;
+UINT64 lastSnapshot = ~(UINT64)0; // time of the last snapshot written
+BOOL finished = FALSE;   // outputs written (end of run or -stop)
+
+// Live heap blocks (address -> size), for -track_frees.
+PIN_LOCK allocLock;
+unordered_map< ADDRINT, ADDRINT > allocations;
 
 vector< UINT32 > intervals;          // splitter
 vector< UINT64 > intervalThresholds; // splitter: accept a reference into interval k iff lcg < threshold[k]
-UINT32 numBins;             // bins per interval (splitter) or bootstrap bins (sampler)
-double lambda;              // sampler
-UINT64 sampledBinInterval;  // sampler: effective sampling interval of one bootstrap bin
+UINT32 numBins;                      // bins per interval (splitter) or bootstrap bins (sampler)
+double lambda;                       // sampler
+UINT64 sampledBinInterval;           // sampler: effective sampling interval of one bootstrap bin
 
 string outputFileNamePrefix;
 ofstream outputFile;
+ofstream timelineFile;
 
-static const char* CSV_HEADER = "FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval";
+static const char* CSV_HEADER      = "FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval";
+static const char* TIMELINE_HEADER = "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes";
 
 /* ===================================================================== */
 /* Random numbers                                                        */
@@ -130,13 +256,13 @@ static inline UINT32 PIN_FAST_ANALYSIS_CALL lcg_step(UINT32& s)
 // Knuth's Poisson sampler on the thread's LCG stream.
 UINT32 sample_poisson(double lambda, THREADID tid)
 {
-    UINT32 k   = 0;
-    double p   = 1.0;
-    double L   = exp(-lambda);
+    UINT32 k = 0;
+    double p = 1.0;
+    double L = exp(-lambda);
     do
     {
         ++k;
-        double u = (lcg_step(seed[tid]) & 0x7FFFFFFF) / static_cast< double >(0x80000000);
+        double u = (lcg_step(threads[tid].seed) & 0x7FFFFFFF) / static_cast< double >(0x80000000);
         p *= u;
     } while (p > L);
     return k - 1;
@@ -144,7 +270,7 @@ UINT32 sample_poisson(double lambda, THREADID tid)
 
 static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 rate)
 {
-    return ((lcg_step(seed[tid]) % rate) == 0) ? 1 : 0;
+    return ((lcg_step(threads[tid].seed) % rate) == 0) ? 1 : 0;
 }
 
 /* ===================================================================== */
@@ -190,70 +316,299 @@ VOID Trace(TRACE trace, VOID* v)
 }
 
 /* ===================================================================== */
+/* Deallocation tracking (-track_frees)                                  */
+/* ===================================================================== */
+
+// Queue the release of [lo, hi) at the thread's current buffer position.
+static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
+{
+    if (hi > lo) threads[tid].pending.push_back({PIN_GetBufferPointer(ctxt, bufId), lo, hi});
+}
+
+static ADDRINT ForgetAllocation(ADDRINT ptr)
+{
+    PIN_GetLock(&allocLock, 1);
+    ADDRINT size = 0;
+    auto it      = allocations.find(ptr);
+    if (it != allocations.end())
+    {
+        size = it->second;
+        allocations.erase(it);
+    }
+    PIN_ReleaseLock(&allocLock);
+    return size;
+}
+
+static VOID RememberAllocation(ADDRINT ptr, ADDRINT size)
+{
+    if (ptr == 0) return;
+    PIN_GetLock(&allocLock, 1);
+    allocations[ptr] = size;
+    PIN_ReleaseLock(&allocLock);
+}
+
+// Entry analysis: only the outermost allocator call of a thread is tracked,
+// so allocator functions calling each other are not counted twice. A nested
+// call has a lower stack pointer than the outermost one; an entry at the same
+// or a higher one is a new outermost call (the previous one jumped back to
+// its entry, or returned without its exit being seen).
+static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT size, ADDRINT ptr, ADDRINT out)
+{
+    ThreadData& t = threads[tid];
+    if (t.allocDepth > 0 && sp >= t.allocSp) t.allocDepth = 0;
+    if (t.allocDepth++ > 0) return;
+    t.allocSp   = sp;
+    t.allocSize = size;
+    t.allocPtr  = ptr;
+    t.allocOut  = out;
+}
+
+static BOOL AllocLeave(THREADID tid)
+{
+    ThreadData& t = threads[tid];
+    if (t.allocDepth == 0) return FALSE;
+    return --t.allocDepth == 0;
+}
+
+// malloc(size), memalign(align, size), aligned_alloc(align, size), valloc(size)
+static VOID MallocExit(THREADID tid, ADDRINT ret)
+{
+    if (AllocLeave(tid)) RememberAllocation(ret, threads[tid].allocSize);
+}
+
+// calloc(n, size)
+static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT n, ADDRINT size) { AllocEnter(tid, sp, n * size, 0, 0); }
+
+// posix_memalign(&out, align, size)
+static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
+{
+    if (!AllocLeave(tid) || ret != 0) return;
+    ADDRINT ptr = 0;
+    PIN_SafeCopy(&ptr, (VOID*)threads[tid].allocOut, sizeof(ptr));
+    RememberAllocation(ptr, threads[tid].allocSize);
+}
+
+// free(ptr): the block is released when free returns (free itself writes to it).
+static VOID FreeExit(THREADID tid, CONTEXT* ctxt)
+{
+    if (!AllocLeave(tid)) return;
+    ADDRINT ptr  = threads[tid].allocPtr;
+    ADDRINT size = ForgetAllocation(ptr);
+    QueueRelease(tid, ctxt, ptr, ptr + size);
+}
+
+// realloc(ptr, size): releases the old block if it moved, else the tail it shrank by.
+static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
+{
+    if (!AllocLeave(tid)) return;
+    ADDRINT ptr = threads[tid].allocPtr, size = threads[tid].allocSize;
+    if (ptr == 0)
+    {
+        RememberAllocation(ret, size);
+        return;
+    }
+    if (ret == 0 && size != 0) return; // failed: the old block is untouched
+    ADDRINT oldSize = ForgetAllocation(ptr);
+    if (ret == ptr)
+        QueueRelease(tid, ctxt, ptr + size, ptr + oldSize);
+    else
+        QueueRelease(tid, ctxt, ptr, ptr + oldSize);
+    RememberAllocation(ret, size);
+}
+
+static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLIST enterArgs, AFUNPTR exit,
+                                IARGLIST exitArgs)
+{
+    static std::set< ADDRINT > instrumented; // aliases (e.g. memalign, aligned_alloc) share an address
+    RTN rtn = RTN_FindByName(img, name);
+    // Skip PLT stubs: they jump to the real function and never return.
+    if (!RTN_Valid(rtn) || SEC_Name(RTN_Sec(rtn)).find(".plt") == 0) return;
+    if (!instrumented.insert(RTN_Address(rtn)).second) return;
+    RTN_Open(rtn);
+    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_IARGLIST, enterArgs,
+                   IARG_END);
+    RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+    RTN_Close(rtn);
+}
+
+static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args)
+{
+    IARGLIST list = IARGLIST_Alloc();
+    for (const auto& arg : args)
+    {
+        if (arg.first == IARG_FUNCARG_ENTRYPOINT_VALUE)
+            IARGLIST_AddArguments(list, IARG_FUNCARG_ENTRYPOINT_VALUE, arg.second, IARG_END);
+        else
+            IARGLIST_AddArguments(list, arg.first, IARG_END);
+    }
+    return list;
+}
+
+// Constant arguments for AllocEnter: (size arg, ptr arg, out arg) with -1 meaning "pass 0".
+static IARGLIST EnterArgs(INT32 sizeArg, INT32 ptrArg, INT32 outArg)
+{
+    IARGLIST list = IARGLIST_Alloc();
+    for (INT32 arg : {sizeArg, ptrArg, outArg})
+    {
+        if (arg < 0)
+            IARGLIST_AddArguments(list, IARG_ADDRINT, (ADDRINT)0, IARG_END);
+        else
+            IARGLIST_AddArguments(list, IARG_FUNCARG_ENTRYPOINT_VALUE, (UINT32)arg, IARG_END);
+    }
+    return list;
+}
+
+VOID ImageLoad(IMG img, VOID* v)
+{
+    IARGLIST ret = Args({{IARG_FUNCRET_EXITPOINT_VALUE, 0}});
+    IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
+    IARGLIST ctxt = Args({{IARG_CONTEXT, 0}});
+
+    InstrumentAllocator(img, "malloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
+    InstrumentAllocator(img, "valloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
+    InstrumentAllocator(img, "memalign", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
+    InstrumentAllocator(img, "aligned_alloc", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
+    InstrumentAllocator(img, "calloc", AFUNPTR(CallocEnter),
+                        Args({{IARG_FUNCARG_ENTRYPOINT_VALUE, 0}, {IARG_FUNCARG_ENTRYPOINT_VALUE, 1}}), AFUNPTR(MallocExit),
+                        ret);
+    InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
+    InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
+    InstrumentAllocator(img, "free", AFUNPTR(AllocEnter), EnterArgs(-1, 0, -1), AFUNPTR(FreeExit), ctxt);
+}
+
+// munmap(addr, len) is caught at the system call, whoever makes it.
+VOID SyscallEntry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
+{
+    ThreadData& t = threads[tid];
+    t.munmapLo = t.munmapHi = 0;
+    if (PIN_GetSyscallNumber(ctxt, std) != SYS_munmap) return;
+    ADDRINT lo  = PIN_GetSyscallArgument(ctxt, std, 0);
+    ADDRINT len = PIN_GetSyscallArgument(ctxt, std, 1);
+    t.munmapLo  = lo;
+    t.munmapHi  = (lo + len + 4095) & ~(ADDRINT)4095; // whole pages are unmapped
+}
+
+VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
+{
+    ThreadData& t = threads[tid];
+    if (t.munmapHi > t.munmapLo && PIN_GetSyscallReturn(ctxt, std) == 0) QueueRelease(tid, ctxt, t.munmapLo, t.munmapHi);
+    t.munmapLo = t.munmapHi = 0;
+}
+
+/* ===================================================================== */
 /* Analysis                                                              */
 /* ===================================================================== */
 
-static inline VOID Record(FootprintMap& map, ADDRINT address, UINT32 size)
+static VOID SplitReference(THREADID tid, ADDRINT address, UINT32 size)
 {
-    UINT32& largest = map[address];
-    if (largest < size) largest = size;
-}
-
-static VOID SplitReference(ThreadData* td, THREADID tid, ADDRINT address, UINT32 size)
-{
-    Record(td->footprint, address, size);
+    footprint.Record(address, size);
 
     // Keep the reference with probability bins/interval and put it in a uniform bin,
     // so every bin is a 1-in-interval subsample.
+    UINT32& seed = threads[tid].seed;
     for (UINT32 k = 0; k < intervals.size(); k++)
     {
-        if (lcg_step(seed[tid]) < intervalThresholds[k])
+        if (lcg_step(seed) < intervalThresholds[k])
         {
-            UINT32 bin = (lcg_step(seed[tid]) / 256) % numBins;
-            Record(td->bins[k * numBins + bin], address, size);
-            ++td->binObservations[k * numBins + bin];
+            UINT32 bin = (lcg_step(seed) / 256) % numBins;
+            bins[k * numBins + bin].Record(address, size);
+            ++binObservations[k * numBins + bin];
         }
     }
 }
 
-static VOID BootstrapReference(ThreadData* td, THREADID tid, ADDRINT address, UINT32 size)
+static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
 {
     UINT32 times = sample_poisson(lambda, tid);
     if (times == 0) return;
     if (times > numBins) times = numBins; // cannot place in more distinct bins than exist
+    footprint.Record(address, size);
 
     // Place the reference in `times` distinct bins.
     vector< bool > used(numBins, false);
     UINT32 count = 0;
     while (count < times)
     {
-        UINT32 bin = lcg_step(seed[tid]) % numBins;
+        UINT32 bin = lcg_step(threads[tid].seed) % numBins;
         if (used[bin]) continue;
         used[bin] = true;
         count++;
-        Record(td->bins[bin], address, size);
-        ++td->binObservations[bin];
+        bins[bin].Record(address, size);
+        ++binObservations[bin];
     }
+}
+
+static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
+{
+    footprint.Erase(lo, hi);
+    for (Footprint& bin : bins)
+        bin.Erase(lo, hi);
+}
+
+static UINT64 MainInterval() { return (mode == SPLITTER) ? 1 : KnobSamplingInterval.Value(); }
+
+static UINT64 BinInterval(UINT32 mapIndex) { return (mode == SPLITTER) ? intervals[mapIndex / numBins] : sampledBinInterval; }
+
+static VOID WriteSnapshot()
+{
+    if (timeNow == lastSnapshot) return;
+    lastSnapshot = timeNow;
+    timelineFile << timeNow << "," << MainInterval() << ",-1," << footprint.bytes << "," << footprint.Unique() << ","
+                 << observations << "," << footprint.freed << "\n";
+    for (UINT32 m = 0; m < bins.size(); m++)
+        timelineFile << timeNow << "," << BinInterval(m) << "," << m % numBins << "," << bins[m].bytes << ","
+                     << bins[m].Unique() << "," << binObservations[m] << "," << bins[m].freed << "\n";
+}
+
+static VOID WriteOutputs();
+
+// Advance time by one processed reference; returns FALSE once -stop is reached.
+static BOOL Tick()
+{
+    timeNow += MainInterval();
+    if (KnobSnapshot.Value() && timeNow >= nextSnapshot)
+    {
+        WriteSnapshot();
+        while (nextSnapshot <= timeNow)
+            nextSnapshot += KnobSnapshot.Value();
+    }
+    if (KnobStop.Value() && timeNow >= KnobStop.Value())
+    {
+        WriteOutputs();
+        PIN_Detach();
+        return FALSE;
+    }
+    return TRUE;
 }
 
 VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UINT64 numElements, VOID* v)
 {
     if (!buf) return buf;
-    ThreadData* td = threadData[tid];
+    vector< Release >& pending = threads[tid].pending;
+    size_t nextRelease         = 0;
 
+    PIN_GetLock(&stateLock, tid + 1);
     struct MEMREF* reference = (struct MEMREF*)buf;
-    for (UINT64 i = 0; i < numElements; i++, reference++)
+    for (UINT64 i = 0; i < numElements && !finished; i++, reference++)
     {
+        for (; nextRelease < pending.size() && pending[nextRelease].position <= (VOID*)reference; nextRelease++)
+            ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
+
         ADDRINT address = reference->ea;
         UINT32 size     = reference->size;
         if (address == 0) continue;
 
-        ++td->observations;
+        ++observations;
         if (mode == SPLITTER)
-            SplitReference(td, tid, address, size);
+            SplitReference(tid, address, size);
         else
-            BootstrapReference(td, tid, address, size);
+            BootstrapReference(tid, address, size);
+        if (!Tick()) break;
     }
+    for (; nextRelease < pending.size() && !finished; nextRelease++)
+        ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
+    pending.clear();
+    PIN_ReleaseLock(&stateLock);
     return buf;
 }
 
@@ -264,62 +619,17 @@ VOID ThreadStart(THREADID tid, CONTEXT* ctxt, INT32 flags, VOID* v)
         cerr << "memprint_trace: thread id " << tid << " exceeds MAX_THREADS (" << MAX_THREADS << ")" << endl;
         PIN_ExitProcess(1);
     }
-    UINT32 base = KnobSeed.Value().empty() ? PIN_GetPid() : (UINT32)strtoul(KnobSeed.Value().c_str(), NULL, 10);
-    seed[tid]   = base * 31 + tid * 19;
-
-    ThreadData* td      = new ThreadData;
-    size_t numMaps      = (mode == SPLITTER) ? intervals.size() * numBins : numBins;
-    td->bins.resize(numMaps);
-    td->binObservations.assign(numMaps, 0);
-    threadData[tid] = td;
+    UINT32 base       = KnobSeed.Value().empty() ? PIN_GetPid() : (UINT32)strtoul(KnobSeed.Value().c_str(), NULL, 10);
+    threads[tid].seed = base * 31 + tid * 19;
 }
 
 /* ===================================================================== */
 /* Output                                                                */
 /* ===================================================================== */
 
-// Footprint accumulated across threads.
-struct Footprint
-{
-    FootprintMap map;
-    UINT64 bytes = 0;
-
-    VOID Merge(const FootprintMap& other)
-    {
-        for (const auto& entry : other)
-        {
-            UINT32& largest = map[entry.first];
-            if (largest < entry.second)
-            {
-                bytes += entry.second - largest;
-                largest = entry.second;
-            }
-        }
-    }
-};
-
 static VOID WriteTotal(ofstream& out, UINT64 bytes, size_t uniqueAddresses, UINT64 observations, UINT64 interval)
 {
     out << "Total," << bytes << "," << uniqueAddresses << "," << observations << "," << interval << endl;
-}
-
-static VOID WriteBin(UINT64 binInterval, UINT32 bin, UINT32 mapIndex, Footprint* total)
-{
-    ostringstream name;
-    name << outputFileNamePrefix << "_SubSample_" << binInterval << "_bin_" << bin << ".csv";
-    ofstream out(name.str());
-    out << CSV_HEADER << endl;
-
-    Footprint binFootprint;
-    UINT64 binObservations = 0;
-    for (UINT32 t = 0; t < MAX_THREADS; t++)
-    {
-        if (!threadData[t]) continue;
-        if (total) total->Merge(threadData[t]->bins[mapIndex]);
-        binFootprint.Merge(threadData[t]->bins[mapIndex]);
-        binObservations += threadData[t]->binObservations[mapIndex];
-    }
-    WriteTotal(out, binFootprint.bytes, binFootprint.map.size(), binObservations, binInterval);
 }
 
 // Default trace name: binary basename, with its arguments (joined by '_') as suffix.
@@ -338,12 +648,18 @@ static VOID DefaultName(string& binaryName, string& argSuffix)
     if (lastSlash != string::npos) binaryName = binaryName.substr(lastSlash + 1);
 }
 
-static UINT32 MainInterval() { return (mode == SPLITTER) ? 1 : KnobSamplingInterval.Value(); }
+// mkdir -p
+static VOID MakeDirs(const string& path)
+{
+    for (size_t slash = path.find('/', 1); slash != string::npos; slash = path.find('/', slash + 1))
+        mkdir(path.substr(0, slash).c_str(), 0775);
+    mkdir(path.c_str(), 0775);
+}
 
-VOID InitOutputFile()
+BOOL InitOutputFiles()
 {
     string outDir = KnobOutDir.Value();
-    mkdir(outDir.c_str(), 0775);
+    MakeDirs(outDir);
 
     string name = KnobName.Value(), argSuffix;
     if (name.empty()) DefaultName(name, argSuffix);
@@ -356,37 +672,56 @@ VOID InitOutputFile()
     outputFile.open(filename);
     if (!outputFile.is_open())
     {
-        cerr << "Error: Could not open file " << filename << endl;
-        PIN_ExitApplication(1);
+        cerr << "memprint_trace: cannot write " << filename << endl;
+        return FALSE;
     }
     outputFile << CSV_HEADER << endl;
+
+    if (KnobSnapshot.Value())
+    {
+        timelineFile.open(outputFileNamePrefix + "_timeline.csv");
+        timelineFile << TIMELINE_HEADER << "\n";
+        nextSnapshot = KnobSnapshot.Value();
+    }
+    return TRUE;
+}
+
+// Write the summary files (and the last snapshot). Called with stateLock held
+// or after all threads have finished.
+static VOID WriteOutputs()
+{
+    if (finished) return;
+    finished = TRUE;
+
+    for (UINT32 m = 0; m < bins.size(); m++)
+    {
+        ostringstream name;
+        name << outputFileNamePrefix << "_SubSample_" << BinInterval(m) << "_bin_" << m % numBins << ".csv";
+        ofstream out(name.str());
+        out << CSV_HEADER << endl;
+        WriteTotal(out, bins[m].bytes, bins[m].Unique(), binObservations[m], BinInterval(m));
+    }
+    WriteTotal(outputFile, footprint.bytes, footprint.Unique(), observations, MainInterval());
+    outputFile.close();
+
+    if (timelineFile.is_open())
+    {
+        WriteSnapshot();
+        timelineFile.close();
+    }
 }
 
 VOID Fini(INT32 code, VOID* v)
 {
-    Footprint total;
-    UINT64 observations = 0;
-
-    if (mode == SPLITTER)
+    PIN_GetLock(&stateLock, 0);
+    for (ThreadData& t : threads)
     {
-        for (UINT32 k = 0; k < intervals.size(); k++)
-            for (UINT32 j = 0; j < numBins; j++)
-                WriteBin(intervals[k], j, k * numBins + j, NULL);
-
-        for (UINT32 t = 0; t < MAX_THREADS; t++)
-            if (threadData[t]) total.Merge(threadData[t]->footprint);
+        for (const Release& r : t.pending)
+            ApplyRelease(r.lo, r.hi);
+        t.pending.clear();
     }
-    else
-    {
-        for (UINT32 j = 0; j < numBins; j++)
-            WriteBin(sampledBinInterval, j, j, &total);
-    }
-
-    for (UINT32 t = 0; t < MAX_THREADS; t++)
-        if (threadData[t]) observations += threadData[t]->observations;
-
-    WriteTotal(outputFile, total.bytes, total.map.size(), observations, MainInterval());
-    outputFile.close();
+    WriteOutputs();
+    PIN_ReleaseLock(&stateLock);
 }
 
 /* ===================================================================== */
@@ -432,6 +767,7 @@ static BOOL ParseIntervals(const string& list)
 
 int main(int argc, char* argv[])
 {
+    PIN_InitSymbols();
     if (PIN_Init(argc, argv)) return Usage();
 
     if (KnobMode.Value() == "splitter")
@@ -445,6 +781,7 @@ int main(int argc, char* argv[])
             if (interval < numBins) return Usage("every interval must be >= -bins");
             intervalThresholds.push_back(((UINT64)numBins << 32) / interval);
         }
+        bins.resize(intervals.size() * numBins);
     }
     else if (KnobMode.Value() == "sampler")
     {
@@ -454,9 +791,23 @@ int main(int argc, char* argv[])
             return Usage("-i, -s and -r must be positive");
         lambda             = static_cast< double >(numBins) / KnobSampleReplication.Value();
         sampledBinInterval = BootstrapBinInterval(KnobSamplingInterval.Value(), numBins, lambda);
+        bins.resize(numBins);
     }
     else
         return Usage("unknown -mode " + KnobMode.Value());
+    binObservations.assign(bins.size(), 0);
+
+    PIN_InitLock(&stateLock);
+    PIN_InitLock(&allocLock);
+    if (KnobTrackFrees.Value())
+    {
+        footprint.SetIndexed(TRUE);
+        for (Footprint& bin : bins)
+            bin.SetIndexed(TRUE);
+        IMG_AddInstrumentFunction(ImageLoad, 0);
+        PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+        PIN_AddSyscallExitFunction(SyscallExit, 0);
+    }
 
     bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), NUM_BUF_PAGES, BufferFull, 0);
     if (bufId == BUFFER_ID_INVALID)
@@ -465,7 +816,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    InitOutputFile();
+    if (!InitOutputFiles()) PIN_ExitProcess(1);
 
     TRACE_AddInstrumentFunction(Trace, 0);
     PIN_AddThreadStartFunction(ThreadStart, 0);

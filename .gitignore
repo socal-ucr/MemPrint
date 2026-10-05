@@ -18,3 +18,7 @@ figures/
 __pycache__/
 *.pyc
 .venv/
+
+# Pin logs
+pin.log
+pintool.log

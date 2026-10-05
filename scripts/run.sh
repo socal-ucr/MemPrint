@@ -19,9 +19,12 @@
 #   -i N -s N -r N          sampler knobs (default 1000, 100, 10)
 #   --intervals LIST        splitter sampling intervals (comma-separated)
 #   --bins N                splitter bins per interval
+#   --snapshot N            also write a footprint timeline every N memory references
+#   --track-frees           remove freed (free/realloc/munmap) memory from the footprints
+#   --stop N                stop tracing after N memory references (partial trace)
 #
 # Outputs:
-#   $TRACE_DIR/<bench>/              trace CSVs written by the Pin tool
+#   $TRACE_DIR/<bench>/              trace CSVs (and *_timeline.csv) written by the Pin tool
 #   $RESULTS_DIR/<bench>/overhead_<mode>.csv
 #   $RESULTS_DIR/<bench>/massif.csv  (with --massif)
 
@@ -33,7 +36,7 @@ usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 load_workload "$1"; shift
 
 MODE= BENCHES= CONFIGS= RUNS=5 PIN_RUNS= MASSIF=0
-INTERVAL=1000 SPLITS=100 REPS=10 SPLIT_KNOBS=()
+INTERVAL=1000 SPLITS=100 REPS=10 SPLIT_KNOBS=() EXTRA_KNOBS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
         --mode) MODE=$2; shift ;;
@@ -47,6 +50,9 @@ while [[ $# -gt 0 ]]; do
         -r) REPS=$2; shift ;;
         --intervals) SPLIT_KNOBS+=(-intervals "$2"); shift ;;
         --bins) SPLIT_KNOBS+=(-bins "$2"); shift ;;
+        --snapshot) EXTRA_KNOBS+=(-snapshot "$2"); shift ;;
+        --track-frees) EXTRA_KNOBS+=(-track_frees 1) ;;
+        --stop) EXTRA_KNOBS+=(-stop "$2"); shift ;;
         -h|--help) usage ;;
         *) die "unknown option $1" ;;
     esac
@@ -103,7 +109,7 @@ for bench in $BENCHES; do
         done
         for ((run = 1; run <= PIN_RUNS; run++)); do
             log "$bench $config: $MODE run $run/$PIN_RUNS"
-            pin+=("$(time_cmd "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" "${PIN_KNOBS[@]}" -outdir "$traces" -name "$name" -- "$binary" "${args[@]}")")
+            pin+=("$(time_cmd "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" "${PIN_KNOBS[@]}" "${EXTRA_KNOBS[@]}" -outdir "$traces" -name "$name" -- "$binary" "${args[@]}")")
         done
 
         native_s=$(mean "${native[@]}")
