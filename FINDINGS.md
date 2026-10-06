@@ -57,6 +57,27 @@ jacobi-2d's error at peak stays at −15% to −25% at every density, because it
 
 **Correction to earlier numbers:** a sampler's union holds only the sampled references that land in at least one bin, a fraction 1 − e^−λ of them, so its rate is (1 − e^−λ)/i, not 1/i. The first known-rate sampler numbers on this branch used 1/i, which overstated the sampled fraction 1.6×. They were 17% / 20% MAPE and are now 12% / 7%. `timeline.union_rate` recovers λ from the bin rows. Splitter unions were not affected.
 
+## Improving the hybrid at `-i 25`
+
+The steps were tested in the order below. All numbers are mean absolute error over the four kernels at `-i 25`, extrapolation / interpolation, in %.
+
+| Step | MAPE | Error of peak | Error at peak |
+|---|---|---|---|
+| Before: correction trained on the splitter union with the nearest rate (1/37 for a 1/40 sampler) | 22.7 / 11.8 | 20.8 / 23.7 | 34.9 / 20.1 |
+| 2. Correction trained at exactly the sampler's rate (splitter `-intervals 95,253,791,1582,3164,7910`) | 24.7 / 11.9 | 25.2 / 23.6 | 36.7 / 18.2 |
+| 2 + 1. Estimate made non-decreasing between frees (isotonic per segment) | 23.8 / 10.1 | 19.8 / 15.7 | 37.9 / 19.0 |
+| 2 + 3. One reuse shape per run, fitted on the run's data-rich snapshots | 24.2 / 11.7 | 30.5 / 20.6 | 46.3 / 18.7 |
+| 2 + 1 on fresh runs (baseline for step 4) | 23.8 / 10.0 | 22.9 / 13.8 | 43.4 / 24.6 |
+| 2 + 1 + 4. Feature: share of new addresses among the last 5 snapshots' samples (new `Discovered` counter) | 24.3 / 8.7 | 21.0 / 12.2 | 38.3 / 24.0 |
+
+- **Step 2** matters when the old rate mismatch was large. At `-i 50` (1.6× off before), extrapolation MAPE drops from 61% to 28–36%. At `-i 25`, where the mismatch was 8%, it changes nothing.
+- **Step 1** reliably lowers the error of the peak, and is best at dense rates. At `-i 3` it gives 3.8–5.3% / 3.9–4.2% MAPE and 2.5–7% error of peak.
+- **Step 3** does not help: the per-snapshot shape is no worse once the correction is applied.
+- **Step 4** helps interpolation (MAPE 10.0 → 8.7) and the error at peak, but not extrapolation MAPE.
+- **What remains is a size bias.** At `-i 25` the largest size is underestimated by 13–47% (2mm −11% to −36%, gemm −10% to −15%, jacobi-2d −28% to −47%, atax −27% to +11%), mostly in the first half of the run. Interpolation is almost unbiased.
+  - The correction is learned on the smaller sizes, and at the same rate and phase the largest size's sample statistics fall outside that range.
+  - None of the four steps addresses that. Options: features that are invariant to size (e.g. normalised by the run's reference count so far), training on more sizes (the smallest ones may hurt more than help), or a correction model that extrapolates monotonically.
+
 ## What we learned
 
 1. **A single bin cannot see reuse.** Each bin holds 0.1–10% of the footprint and almost never samples an address twice. So a model working from one bin, like the α model, can't tell new memory from memory being touched again: on a plateau its estimate keeps rising.

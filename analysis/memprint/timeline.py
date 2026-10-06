@@ -25,7 +25,7 @@ from .dataset import EXCLUDED_INTERVALS, prepare
 from sklearn.linear_model import Ridge
 
 from .model import Model, mape_by_interval
-from .richness import known_rate_bytes
+from .richness import known_rate_bytes, known_rate_bytes_pooled
 
 SUBSETS = ("NZ", "MT", "L2O")
 # Extra log features of the model. ReuseObs (sampled references per observed
@@ -188,6 +188,8 @@ def union_rows(timeline, kind):
         rows = timeline[(timeline["Kind"] == "sampler") & (timeline["Bin"] == -1)]
     rows = rows[rows["UniqueAddresses"] > 0].copy()
     rows["Rate"] = union_rate(timeline, rows, kind)
+    if "Discovered" in rows:
+        rows["RecentNew"] = recent_new_share(rows)
     seen, f1, f2 = rows["UniqueAddresses"], rows["Singletons"], rows["Doubletons"]
     chao = seen + f1 * (f1 - 1) / (2 * (f2 + 1))
     per_address = rows["MemUsageObs"] / seen
@@ -204,6 +206,20 @@ def add_known_rate(rows):
         rows = rows.copy()
         rows["KnownRate"] = known_rate_bytes(rows)
     return rows
+
+
+def recent_new_share(rows, window=5):
+    """Share of the union's samples over the last `window` snapshots that
+    were addresses entering the sample (Discovered): close to 1 while the
+    footprint grows into new memory, low on a plateau."""
+    rows = rows.sort_values("Time")
+    samples = rows["Rate"] * rows["Time"]
+    keys = [rows["Config"], rows["PID"], rows["SamplingInterval"]]
+    new = rows["Discovered"].groupby(keys).diff(window)
+    drawn = samples.groupby(keys).diff(window)
+    first = rows.groupby(keys).cumcount() < window  # not enough history: use the cumulative share
+    share = np.where(first, rows["Discovered"] / samples, new / drawn)
+    return pd.Series(np.clip(share, 1e-3, 1), index=rows.index)
 
 
 def union_rate(timeline, rows, kind):
@@ -256,13 +272,47 @@ def hybrid_features(rows, spread, bin_interval):
     rows["x_sd"] = np.log(rows["BinSD"].clip(lower=1))
     rows["x_binobs"] = np.log(rows["BinMean"].clip(lower=1))
     rows["x_binsi"] = np.log(bin_interval)
-    return rows.replace([np.inf, -np.inf], np.nan).dropna(subset=list(HYBRID_FEATURES) + ["KnownRate"])
+    features = hybrid_feature_names(rows)
+    if "x_recent_new" in features:
+        rows["x_recent_new"] = np.log(rows["RecentNew"])
+    return rows.replace([np.inf, -np.inf], np.nan).dropna(subset=features + ["KnownRate"])
+
+
+def hybrid_feature_names(rows):
+    """Hybrid features; with Discovered counts also the recent share of new addresses."""
+    return list(HYBRID_FEATURES) + (["x_recent_new"] if "RecentNew" in rows else [])
+
+
+def smooth_between_frees(curve, threshold=0.01):
+    """Make an estimated curve non-decreasing except where memory was freed.
+
+    Live memory only shrinks when something is released, and the sample
+    records released bytes (FreedBytes) exactly. The curve is split where
+    FreedBytes grows by more than `threshold` of the observed footprint and
+    each segment is replaced by its isotonic (non-decreasing) fit.
+    """
+    from sklearn.isotonic import IsotonicRegression
+
+    curve = curve.sort_values("Time")
+    freed, observed = curve["FreedBytes"].to_numpy(float), curve["MemUsageObs"].to_numpy(float)
+    released = np.diff(freed, prepend=freed[0]) > threshold * np.maximum(observed, 1)
+    segments = np.cumsum(released)
+    estimate = curve["Estimate"].to_numpy(float).copy()
+    for seg in np.unique(segments):
+        idx = np.where(segments == seg)[0]
+        if len(idx) > 1:
+            estimate[idx] = IsotonicRegression(increasing=True).fit_transform(np.arange(len(idx)), estimate[idx])
+    return curve.assign(Estimate=estimate)
+
+
+KNOWN_RATE_METHODS = {"snapshot": known_rate_bytes, "run": known_rate_bytes_pooled}
 
 
 def evaluate_hybrid(timeline, truths, train_configs, test_config, workload, split):
     """Hybrid reconstruction of the held-out config's sampler runs: for each
     run, train the correction on the training sizes' splitter unions with the
-    closest sampling rate."""
+    closest sampling rate. Variants: the known-rate estimate per snapshot or
+    with one reuse shape per run, each with and without smoothing between frees."""
     unions = union_rows(timeline, "splitter").merge(truth_frame(truths), on=["Config", "Time"])
     unions = unions[unions["Truth"] > 0]
     split_spread, sampler_spread = bin_spread(timeline, "splitter"), bin_spread(timeline, "sampler")
@@ -273,28 +323,34 @@ def evaluate_hybrid(timeline, truths, train_configs, test_config, workload, spli
     rows, curves = [], []
     for run_interval in sorted(samplers["RunInterval"].unique()):
         run = samplers[samplers["RunInterval"] == run_interval]
-        run = add_known_rate(run[run["PID"] == run["PID"].iloc[0]])
+        run = run[run["PID"] == run["PID"].iloc[0]]
         rate = float(np.median(run["Rate"]))
         # the splitter union of interval k is a 1-in-(k / bins) sample, labelled k // bins
         union_label = min(unions["SamplingInterval"].unique(), key=lambda u: abs(np.log(u * rate)))
         bin_interval = next(k for k in bin_intervals if k // 20 == union_label)
-        train = unions[unions["Config"].isin(train_configs) & (unions["SamplingInterval"] == union_label)]
-        train = add_known_rate(train[train.groupby("Config").cumcount() % 3 == 0])
-        train = hybrid_features(train, split_spread, bin_interval)
-        model = Ridge(alpha=1.0).fit(train[list(HYBRID_FEATURES)], np.log(train["Truth"] / train["KnownRate"]))
-
+        train_rows = unions[unions["Config"].isin(train_configs) & (unions["SamplingInterval"] == union_label)]
+        train_rows = train_rows[train_rows.groupby("Config").cumcount() % 3 == 0]
         run_bins = sampler_spread[sampler_spread["PID"] == run["PID"].iloc[0]]["SamplingInterval"].iloc[0]
-        test = hybrid_features(run, sampler_spread, run_bins)
-        curve = test[["Time", "SamplingInterval"]].copy()
-        curve["Estimate"] = test["KnownRate"] * np.exp(model.predict(test[list(HYBRID_FEATURES)]))
         run_end = float(run["Time"].max())
-        labels = dict(workload=workload, split=split, config=test_config, subset="Hybrid", variant=f"i={run_interval}")
-        row = {**labels, "train_si": int(union_label), "sampler_si": int(run_interval)}
-        row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
-        row["sampler_error_at_peak"] = error_at_peak(curve, truth, run_end=run_end)
-        row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
-        rows.append(row)
-        curves.append(curve.assign(Time=curve["Time"] / run_end * truth["Time"].max(), source="sampler", **labels))
+
+        for method, known_rate in KNOWN_RATE_METHODS.items():
+            train = hybrid_features(train_rows.assign(KnownRate=known_rate(train_rows)), split_spread, bin_interval)
+            features = hybrid_feature_names(train)
+            model = Ridge(alpha=1.0).fit(train[features], np.log(train["Truth"] / train["KnownRate"]))
+            test = hybrid_features(run.assign(KnownRate=known_rate(run)), sampler_spread, run_bins)
+            raw = test[["Time", "SamplingInterval", "FreedBytes", "MemUsageObs"]].copy()
+            raw["Estimate"] = test["KnownRate"].to_numpy() * np.exp(model.predict(test[features]))
+            for smooth in (False, True):
+                curve = smooth_between_frees(raw) if smooth else raw
+                variant = f"i={run_interval} {method}" + (" smooth" if smooth else "")
+                labels = dict(workload=workload, split=split, config=test_config, subset="Hybrid", variant=variant)
+                row = {**labels, "train_si": int(union_label), "sampler_si": int(run_interval)}
+                row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+                row["sampler_error_at_peak"] = error_at_peak(curve, truth, run_end=run_end)
+                row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
+                rows.append(row)
+                curves.append(curve[["Time", "SamplingInterval", "Estimate"]].assign(
+                    Time=curve["Time"] / run_end * truth["Time"].max(), source="sampler", **labels))
     return rows, curves
 
 
