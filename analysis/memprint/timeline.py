@@ -363,6 +363,46 @@ def evaluate_hybrid(timeline, truths, train_configs, test_config, workload, spli
     return rows, curves
 
 
+# ---------------------------------------------------------------- spatial
+
+
+def spatial_curve(timeline, pid):
+    """Footprint estimate of a spatial run (memprint_trace -mode spatial):
+    the selected addresses' footprint x i at every snapshot, with a standard
+    error from the hash buckets (each bucket x i x buckets is an independent
+    estimate)."""
+    run = timeline[(timeline["Kind"] == "spatial") & (timeline["PID"] == pid)]
+    i = float(run["RunInterval"].iloc[0])
+    main = run[run["Bin"] == -1].set_index("Time")
+    buckets = run[run["Bin"] >= 0]
+    k = buckets["Bin"].nunique()
+    per_bucket = (buckets["MemUsageObs"] * i * k).groupby(buckets["Time"])
+    curve = pd.DataFrame({"Estimate": main["MemUsageObs"] * i,
+                          "StdError": per_bucket.std() / np.sqrt(k)}).reset_index()
+    return curve.assign(SamplingInterval=int(i))
+
+
+def evaluate_spatial(timeline, truths, test_config, workload, split):
+    """Error of every spatial run of the held-out config. No training."""
+    runs = timeline[(timeline["Kind"] == "spatial") & (timeline["Config"] == test_config)]
+    truth = truths[test_config]
+    rows, curves = [], []
+    for (interval, pid), _ in runs.groupby(["RunInterval", "PID"]):
+        curve = spatial_curve(timeline, pid)
+        run_end = float(curve["Time"].max())
+        labels = dict(workload=workload, split=split, config=test_config, subset="Spatial", variant=f"1/{interval}")
+        row = {**labels, "sampler_si": int(interval)}
+        row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+        row["sampler_error_at_peak"] = error_at_peak(curve, truth, run_end=run_end)
+        row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
+        true_at = np.interp(curve["Time"] / run_end * truth["Time"].max(), truth["Time"], truth["Truth"])
+        ok = (true_at > 0) & curve["StdError"].notna()
+        row["within_2se"] = float(np.mean(np.abs(curve["Estimate"][ok] - true_at[ok]) <= 2 * curve["StdError"][ok]))
+        rows.append(row)
+        curves.append(curve.assign(Time=curve["Time"] / run_end * truth["Time"].max(), source="spatial", **labels))
+    return rows, curves
+
+
 def truth_frame(truths):
     """{config: truth curve} -> one table (Config, Time, Truth)."""
     return pd.concat([t.assign(Config=c) for c, t in truths.items()])[["Config", "Time", "Truth"]]
@@ -591,6 +631,10 @@ def evaluate(workload, timeline):
             hybrid_rows, hybrid_curves = evaluate_hybrid(timeline, truths, train_configs, test_config, workload, split)
             recon_rows += hybrid_rows
             curves += hybrid_curves
+        if (timeline["Kind"] == "spatial").any():
+            spatial_rows, spatial_curves = evaluate_spatial(timeline, truths, test_config, workload, split)
+            recon_rows += spatial_rows
+            curves += spatial_curves
 
         templates = [truths[c] for c in train_configs]
         for fraction in PREFIXES:

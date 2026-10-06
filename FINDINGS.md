@@ -1,8 +1,39 @@
 # Findings: footprint over time (branch `timeline-chao`)
 
+Summary: sampling *addresses* instead of references (`-mode spatial`) estimates the live footprint over time within 1–5% at 1-in-100 to 1-in-250 addresses, with no training, at near the instrumentation-only cost. Everything after "Data" documents the reference-sampling route that led there.
+
 Goal: reconstruct a program's live memory footprint over time from a sparse Pin trace. The data is the timelines written with `-snapshot`/`-track_frees` (see README).
 
 On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This branch adds per-address sample counts to the Pin tool and tries estimators of the memory that was never sampled.
+
+## Headline: spatial (address) sampling
+
+`-mode spatial -i R -s 20` selects 1-in-R *addresses* with a salted hash and records every access to them. An address is then in the sample with probability 1/R whatever its access pattern, so the footprint estimate is simply the selected footprint × R, with no model and no training. The 20 hash buckets give each snapshot a standard error.
+
+This removes the core difficulty of all the reference-sampling estimators below. With reference sampling, an address accessed r times is seen with probability 1 − (1 − p)^r, and r is unknown and grows with input size.
+
+Held-out runs (largest and middle size of 2mm, gemm, jacobi-2d, atax; truth from the splitter); mean absolute error, extrapolation / interpolation, %:
+
+| Method | MAPE | Error of peak | Error at peak | Runtime, MEDIUM (2mm / gemm / jacobi-2d) |
+|---|---|---|---|---|
+| Spatial 1/25 addresses | 0.8 / 3.1 | 0.7 / 3.0 | 0.7 / 3.0 | 4.1 / 3.7 / 3.9 s |
+| Spatial 1/100 | 2.6 / 3.8 | 2.5 / 3.3 | 2.5 / 15.0 | 3.7 / 3.4 / 3.4 s |
+| Spatial 1/250 | 5.1 / 10.3 | 5.2 / 7.4 | 5.2 / 15.5 | 3.7 / 3.4 / 3.3 s |
+| Spatial 1/1000 | 3.8 / 28.1 | 3.2 / 13.3 | 3.4 / 13.6 | 3.6 / 3.4 / 3.2 s |
+| Best reference-sampling hybrid, `-i 25` | 24.3 / 8.7 | 21.0 / 12.2 | 38.3 / 24.0 | 7.6 / 6.5 / 8.2 s |
+| Best reference-sampling hybrid, `-i 3` | 4.8 / 4.2 | 6.2 / 6.4 | 9.1 / 9.4 | ~25 / 20 / 32 s |
+| Splitter (full trace) | — | — | — | 41.3 / 31.8 / 47.9 s |
+
+- **Accuracy follows the binomial prediction,** relative error ≈ 1/√(addresses / R).
+  - The largest sizes (1–1.6 MB, about 130–200k addresses) stay within 1–5% down to 1/1000.
+  - The middle sizes (about 0.22 MB, about 28k addresses) need 1/100 or denser. At 1/1000 only about 28 addresses are selected.
+  - The error is largest early in a run, when the footprint is still tiny.
+- **The bucket error bar is honest at dense rates.** The truth lies within ±2 standard errors in 100% of snapshots at 1/25 and 87–92% at sparser rates (nominal 95%; a 20-bucket standard error is itself noisy).
+- **Cost:** cheaper than reference sampling at the same rate, and close to the instrumentation-only floor. Only selected addresses are analysed, and the hash check is inlined.
+- **Time:** every reference is counted in the inlined check, so run lengths are exact. A recorded access is timed by interpolating between buffer flushes, using a 1-page buffer of about 170 records, so the time resolution is about 170 × R references.
+  - The first version used 16 pages. Over atax SMALL's growth phase that misplaced accesses in time, giving 19–34% MAPE instead of 2–6%.
+  - At 1/1000 on runs of under a million references the timing is still coarse (visible in atax SMALL).
+- **Caveats:** small structures are sampled at R too, so a single small buffer is either missed or over-weighted, and there is no per-object breakdown at sparse rates. Hashing start addresses mirrors the paper's footprint definition (largest access size per start address).
 
 ## Data
 

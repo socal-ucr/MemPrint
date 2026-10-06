@@ -5,7 +5,7 @@ Trace file names (see pintool/memprint_trace.cpp):
     <Prefix>_<name>_<interval>_<pid>[_<args>][_SubSample_<binInterval>_bin_<bin>].csv
     <Prefix>_<name>_<interval>_<pid>[_<args>]_timeline.csv     (-snapshot)
 
-Prefix is Buffered (splitter) or Sampled (sampler). <name> is
+Prefix is Buffered (splitter), Sampled (sampler) or Spatial (spatial). <name> is
 "<workload>-<config>" (set with -name), or, for traces recorded without -name,
 the binary name with the program arguments in <args> (e.g. "_-n_1024").
 """
@@ -15,7 +15,7 @@ import re
 
 import pandas as pd
 
-TRACE_NAME = re.compile(r"^(?P<prefix>Buffered|Sampled)_(?P<name>.+?)_(?P<interval>\d+)_(?P<pid>\d+)(?P<args>_.*)?$")
+TRACE_NAME = re.compile(r"^(?P<prefix>Buffered|Sampled|Spatial)_(?P<name>.+?)_(?P<interval>\d+)_(?P<pid>\d+)(?P<args>_.*)?$")
 TIMELINE_SUFFIX = "_timeline"
 BIN_SUFFIX = re.compile(r"_SubSample_(?P<bin_interval>\d+)_bin_(?P<bin>\d+)$")
 
@@ -91,13 +91,13 @@ def add_sample_spread(traces):
     return merged.sort_values(keys, kind="stable").reset_index(drop=True)
 
 
-def load_timelines(directory, prefixes=("Buffered", "Sampled")):
+def load_timelines(directory, prefixes=("Buffered", "Sampled", "Spatial")):
     """Read every timeline CSV in a directory into one long table.
 
-    Adds Kind (splitter or sampler), Config, PID and RunInterval (the run's
-    main sampling interval: 1 for the splitter, -i for the sampler).
+    Adds Kind (splitter, sampler or spatial), Config, PID and RunInterval (the
+    run's main sampling interval: 1 for the splitter, -i otherwise).
     """
-    kinds = {"Buffered": "splitter", "Sampled": "sampler"}
+    kinds = {"Buffered": "splitter", "Sampled": "sampler", "Spatial": "spatial"}
     frames = []
     for filename in sorted(os.listdir(directory)):
         prefix = filename.split("_", 1)[0]

@@ -966,7 +966,7 @@ int main(int argc, char* argv[])
     }
 
     // spatial records are timed by interpolation between flushes: a smaller buffer keeps that fine-grained
-    bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), mode == SPATIAL ? 16 : NUM_BUF_PAGES, BufferFull, 0);
+    bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), mode == SPATIAL ? 1 : NUM_BUF_PAGES, BufferFull, 0);
     if (bufId == BUFFER_ID_INVALID)
     {
         cerr << "Error: could not allocate initial buffer" << endl;
