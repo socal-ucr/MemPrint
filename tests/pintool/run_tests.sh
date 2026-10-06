@@ -16,6 +16,7 @@ c++ -O1 -o "$WORK/calloc_new" "$HERE/calloc_new.cpp"
 cc -O1 -o "$WORK/mmap" "$HERE/mmap.c"
 cc -O1 -pthread -o "$WORK/threads" "$HERE/threads.c"
 cc -O1 -o "$WORK/small_blocks" "$HERE/small_blocks.c"
+cc -O1 -o "$WORK/reuse" "$HERE/reuse.c"
 
 failed=0
 # run <test name> <program> <pin knobs> -- <check.py arguments>
@@ -38,6 +39,8 @@ run calloc-new calloc_new -track_frees 1 -- --peak 1.5 --freed 1.5 --slack 0.75 
 run mmap mmap -track_frees 1 -- --peak 4 --freed 4
 run threads threads -track_frees 1 -- --peak 2 --freed 2
 run small-blocks small_blocks -track_frees 1 -- --peak 0.125 --freed 2
+# Chao1 is checked before the final free (footprint 0 at exit), so run without -track_frees
+run chao reuse -track_frees 0 -- --peak 4 --final-max 4.5 --chao 50
 
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"

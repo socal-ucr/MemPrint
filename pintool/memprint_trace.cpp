@@ -41,8 +41,11 @@
  *   <Prefix>_<name>_<interval>_<pid>[_<args>]_timeline.csv        (-snapshot)
  * with Prefix = Buffered (splitter) or Sampled (sampler). Summary files have
  * the columns FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval;
- * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes
- * (Bin -1 is the exact footprint in the splitter, the union of bins in the sampler).
+ * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,
+ * Singletons,Doubletons. Bin -1 is the exact footprint in the splitter and the union of the
+ * bins in the sampler; Bin -2 (splitter) is the union of one interval's bins, a
+ * 1-in-(interval/bins) sample. Singletons/Doubletons count the addresses sampled
+ * exactly once/twice, from which Chao1 estimates the addresses never sampled.
  */
 
 #include <cmath>
@@ -98,25 +101,32 @@ KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
 /* Footprint                                                             */
 /* ===================================================================== */
 
-// Largest access size per address, with a running byte total. When indexed,
-// addresses are also grouped by page so that a freed range can be erased.
+// Largest access size and number of samples per address, with running
+// totals: bytes, and the number of addresses sampled exactly once (singletons)
+// and twice (doubletons), which estimate how many addresses were never sampled
+// (Chao1). When indexed, addresses are also grouped by page so that a freed
+// range can be erased.
 class Footprint
 {
   public:
-    UINT64 bytes = 0; // sum of the largest access size per address
-    UINT64 freed = 0; // bytes removed by Erase
+    UINT64 bytes = 0;      // sum of the largest access size per address
+    UINT64 freed = 0;      // bytes removed by Erase
+    UINT64 singletons = 0; // addresses sampled exactly once
+    UINT64 doubletons = 0; // addresses sampled exactly twice
 
     VOID SetIndexed(BOOL on) { indexed = on; }
-    size_t Unique() const { return sizes.size(); }
+    size_t Unique() const { return entries.size(); }
 
     VOID Record(ADDRINT address, UINT32 size)
     {
-        UINT32& largest = sizes[address];
-        if (largest < size)
+        Entry& e = entries[address];
+        if (e.count == 0 && indexed) pages[address >> PAGE_BITS].push_back(address);
+        Count(e.count, -1);
+        Count(++e.count, +1);
+        if (e.size < size)
         {
-            if (largest == 0 && indexed) pages[address >> PAGE_BITS].push_back(address);
-            bytes += size - largest;
-            largest = size;
+            bytes += size - e.size;
+            e.size = size;
         }
     }
 
@@ -145,11 +155,22 @@ class Footprint
     }
 
   private:
+    struct Entry
+    {
+        UINT32 size  = 0; // largest access size
+        UINT32 count = 0; // times sampled
+    };
     typedef unordered_map< ADDRINT, vector< ADDRINT > > PageIndex;
 
-    unordered_map< ADDRINT, UINT32 > sizes;
+    unordered_map< ADDRINT, Entry > entries;
     PageIndex pages; // page -> addresses recorded in it (when indexed)
     BOOL indexed = FALSE;
+
+    VOID Count(UINT32 count, INT32 delta)
+    {
+        if (count == 1) singletons += delta;
+        if (count == 2) doubletons += delta;
+    }
 
     VOID ErasePage(PageIndex::iterator page, ADDRINT lo, ADDRINT hi)
     {
@@ -162,11 +183,12 @@ class Footprint
                 addresses[keep++] = address;
                 continue;
             }
-            auto it = sizes.find(address);
-            if (it == sizes.end()) continue;
-            bytes -= it->second;
-            freed += it->second;
-            sizes.erase(it);
+            auto it = entries.find(address);
+            if (it == entries.end()) continue;
+            bytes -= it->second.size;
+            freed += it->second.size;
+            Count(it->second.count, -1);
+            entries.erase(it);
         }
         addresses.resize(keep);
         if (keep == 0) pages.erase(page);
@@ -215,6 +237,7 @@ ThreadData threads[MAX_THREADS];
 PIN_LOCK stateLock;
 Footprint footprint;     // splitter: exact footprint; sampler: union of the bins
 vector< Footprint > bins; // splitter: [interval * numBins + bin]; sampler: [bin]
+vector< Footprint > unions; // splitter with -snapshot: union of each interval's bins
 vector< UINT64 > binObservations;
 UINT64 observations = 0; // references processed
 UINT64 timeNow = 0;      // memory references executed (estimated in the sampler)
@@ -237,7 +260,8 @@ ofstream outputFile;
 ofstream timelineFile;
 
 static const char* CSV_HEADER      = "FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval";
-static const char* TIMELINE_HEADER = "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes";
+static const char* TIMELINE_HEADER =
+    "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,Singletons,Doubletons";
 
 /* ===================================================================== */
 /* Random numbers                                                        */
@@ -520,6 +544,7 @@ static VOID SplitReference(THREADID tid, ADDRINT address, UINT32 size)
             UINT32 bin = (lcg_step(seed) / 256) % numBins;
             bins[k * numBins + bin].Record(address, size);
             ++binObservations[k * numBins + bin];
+            if (!unions.empty()) unions[k].Record(address, size);
         }
     }
 }
@@ -550,6 +575,8 @@ static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
     footprint.Erase(lo, hi);
     for (Footprint& bin : bins)
         bin.Erase(lo, hi);
+    for (Footprint& u : unions)
+        u.Erase(lo, hi);
 }
 
 static UINT64 MainInterval() { return (mode == SPLITTER) ? 1 : KnobSamplingInterval.Value(); }
@@ -574,17 +601,25 @@ static VOID WriteSnapshot()
         } while (v);
         while (n) text += digits[--n];
     };
-    auto add = [&](UINT64 interval, INT64 bin, UINT64 bytes, UINT64 unique, UINT64 count, UINT64 freed) {
+    auto add = [&](UINT64 interval, INT64 bin, const Footprint& f, UINT64 count) {
         num(timeNow), text += ',', num(interval), text += ',';
         if (bin < 0)
-            text += "-1";
+            text += '-', num((UINT64)-bin);
         else
             num((UINT64)bin);
-        text += ',', num(bytes), text += ',', num(unique), text += ',', num(count), text += ',', num(freed), text += '\n';
+        text += ',', num(f.bytes), text += ',', num(f.Unique()), text += ',', num(count), text += ',', num(f.freed);
+        text += ',', num(f.singletons), text += ',', num(f.doubletons), text += '\n';
     };
-    add(MainInterval(), -1, footprint.bytes, footprint.Unique(), observations, footprint.freed);
+    add(MainInterval(), -1, footprint, observations);
+    for (UINT32 k = 0; k < unions.size(); k++)
+    {
+        UINT64 count = 0;
+        for (UINT32 j = 0; j < numBins; j++)
+            count += binObservations[k * numBins + j];
+        add(intervals[k] / numBins, -2, unions[k], count);
+    }
     for (UINT32 m = 0; m < bins.size(); m++)
-        add(BinInterval(m), m % numBins, bins[m].bytes, bins[m].Unique(), binObservations[m], bins[m].freed);
+        add(BinInterval(m), m % numBins, bins[m], binObservations[m]);
     timelineFile.write(text.data(), text.size());
 }
 
@@ -810,6 +845,7 @@ int main(int argc, char* argv[])
             intervalThresholds.push_back(((UINT64)numBins << 32) / interval);
         }
         bins.resize(intervals.size() * numBins);
+        if (KnobSnapshot.Value()) unions.resize(intervals.size());
     }
     else if (KnobMode.Value() == "sampler")
     {
@@ -832,6 +868,8 @@ int main(int argc, char* argv[])
         footprint.SetIndexed(TRUE);
         for (Footprint& bin : bins)
             bin.SetIndexed(TRUE);
+        for (Footprint& u : unions)
+            u.SetIndexed(TRUE);
         IMG_AddInstrumentFunction(ImageLoad, 0);
         PIN_AddSyscallEntryFunction(SyscallEntry, 0);
         PIN_AddSyscallExitFunction(SyscallExit, 0);

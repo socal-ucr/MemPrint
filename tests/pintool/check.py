@@ -22,9 +22,14 @@ parser.add_argument("--freed", type=float, default=0)
 parser.add_argument("--final-max", type=float)
 parser.add_argument("--slack", type=float, default=0.5)
 parser.add_argument("--tolerance", type=float, default=0.05)
+parser.add_argument("--chao", type=int, metavar="INTERVAL",
+                    help="also check that Chao1 on the union row of this interval (Bin -2) "
+                         "estimates the final unique addresses within --chao-error")
+parser.add_argument("--chao-error", type=float, default=0.15)
 args = parser.parse_args()
 
-rows = [r for r in csv.DictReader(open(args.timeline)) if r["Bin"] == "-1"]
+all_rows = list(csv.DictReader(open(args.timeline)))
+rows = [r for r in all_rows if r["Bin"] == "-1"]
 footprint = [int(r["MemUsageObs"]) for r in rows]
 peak, final, freed = max(footprint), footprint[-1], int(rows[-1]["FreedBytes"])
 final_max = args.slack if args.final_max is None else args.final_max
@@ -36,6 +41,14 @@ checks = [
     (f"final {final / MB:.3f} MB <= {final_max}", final <= final_max * MB),
     (f"{len(rows)} snapshots", len(rows) >= 3),
 ]
+if args.chao:
+    last = rows[-1]["Time"]
+    union = next(r for r in all_rows if r["Time"] == last and r["Bin"] == "-2" and r["SamplingInterval"] == str(args.chao))
+    seen, f1, f2 = int(union["UniqueAddresses"]), int(union["Singletons"]), int(union["Doubletons"])
+    chao = seen + f1 * (f1 - 1) / (2 * (f2 + 1))
+    true = int(rows[-1]["UniqueAddresses"])
+    checks.append((f"Chao1 {chao:.0f} vs {true} unique addresses ({seen / true:.1%} seen at 1-in-{args.chao})",
+                   abs(chao - true) <= args.chao_error * true))
 for text, ok in checks:
     print(f"    {'ok  ' if ok else 'FAIL'} {text}")
 sys.exit(0 if all(ok for _, ok in checks) else 1)
