@@ -42,10 +42,11 @@
  * with Prefix = Buffered (splitter) or Sampled (sampler). Summary files have
  * the columns FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval;
  * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,
- * Singletons,Doubletons. Bin -1 is the exact footprint in the splitter and the union of the
+ * Singletons,Doubletons,Tripletons,Quadrupletons. Bin -1 is the exact footprint in the splitter and the union of the
  * bins in the sampler; Bin -2 (splitter) is the union of one interval's bins, a
- * 1-in-(interval/bins) sample. Singletons/Doubletons count the addresses sampled
- * exactly once/twice, from which Chao1 estimates the addresses never sampled.
+ * 1-in-(interval/bins) sample. Singletons..Quadrupletons count the addresses
+ * sampled exactly 1..4 times, from which Chao1/iChao1 estimate the addresses
+ * never sampled.
  */
 
 #include <cmath>
@@ -102,17 +103,16 @@ KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
 /* ===================================================================== */
 
 // Largest access size and number of samples per address, with running
-// totals: bytes, and the number of addresses sampled exactly once (singletons)
-// and twice (doubletons), which estimate how many addresses were never sampled
-// (Chao1). When indexed, addresses are also grouped by page so that a freed
+// totals: bytes, and the number of addresses sampled exactly 1, 2, 3 and 4
+// times, from which Chao1/iChao1 estimate how many addresses were never
+// sampled. When indexed, addresses are also grouped by page so that a freed
 // range can be erased.
 class Footprint
 {
   public:
     UINT64 bytes = 0;      // sum of the largest access size per address
     UINT64 freed = 0;      // bytes removed by Erase
-    UINT64 singletons = 0; // addresses sampled exactly once
-    UINT64 doubletons = 0; // addresses sampled exactly twice
+    UINT64 sampled[5] = {0}; // sampled[k]: addresses sampled exactly k times (k = 1..4)
 
     VOID SetIndexed(BOOL on) { indexed = on; }
     size_t Unique() const { return entries.size(); }
@@ -168,8 +168,7 @@ class Footprint
 
     VOID Count(UINT32 count, INT32 delta)
     {
-        if (count == 1) singletons += delta;
-        if (count == 2) doubletons += delta;
+        if (count >= 1 && count <= 4) sampled[count] += delta;
     }
 
     VOID ErasePage(PageIndex::iterator page, ADDRINT lo, ADDRINT hi)
@@ -261,7 +260,8 @@ ofstream timelineFile;
 
 static const char* CSV_HEADER      = "FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval";
 static const char* TIMELINE_HEADER =
-    "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,Singletons,Doubletons";
+    "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,Singletons,Doubletons,Tripletons,"
+    "Quadrupletons";
 
 /* ===================================================================== */
 /* Random numbers                                                        */
@@ -608,7 +608,9 @@ static VOID WriteSnapshot()
         else
             num((UINT64)bin);
         text += ',', num(f.bytes), text += ',', num(f.Unique()), text += ',', num(count), text += ',', num(f.freed);
-        text += ',', num(f.singletons), text += ',', num(f.doubletons), text += '\n';
+        for (int k = 1; k <= 4; k++)
+            text += ',', num(f.sampled[k]);
+        text += '\n';
     };
     add(MainInterval(), -1, footprint, observations);
     for (UINT32 k = 0; k < unions.size(); k++)
