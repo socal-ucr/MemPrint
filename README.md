@@ -163,15 +163,24 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
 - **Reconstruction:** the paper's α model applied at every snapshot, fitted on all snapshots of the training configs, to both the held-out config's splitter bins and a real sampler run.
 - **Forecasting:** from 10–75% prefixes of the run, by fitting scaled versions of the training configs' curves.
 
-**Current results** (2mm, gemm, jacobi-2d, atax, all 7 sizes; miniVite 1024–8192; sampler `-s 20 -r 20`):
-- **PolyBench:** reconstructing the held-out config's curve gives about 25–55% MAPE over snapshots, from splitter bins and from a sampler run alike. Adding log time or the reuse feature does not help.
-- **miniVite:** 8% from splitter bins and 31–35% from the sampler. This build's curve is a flat ~168 MB for both 4096 and 8192 vertices, so it is dominated by runtime memory (OpenMP threads, OpenMPI), unlike the 7–14 MB in the paper's runs. Pin these with `OMP_NUM_THREADS` before drawing conclusions.
-- **Forecasting** from the first 10–50% of a run: peak within about 10–20% for interpolation, but unreliable for extrapolation (peak and run length are off by far more than 100%).
-- **Time axis:** the sampler's estimated time is within 0.5% of the true reference count for single-threaded programs. miniVite's runs differ by up to ±50% in references executed, because OpenMP threads spin while waiting and Pin slows the splitter far more than the sampler. Sampler curves are therefore compared to the truth on the fraction of their own run.
+**Current results** (2mm, gemm, jacobi-2d, atax at all 7 sizes; sampler `-s 20 -r 20`; mean absolute % error over workloads):
 
-The cause is fundamental, not a tuning problem. A single bin is so sparse (0.1–10% of the footprint) that it almost never samples an address twice, so it can't tell new memory from re-touched memory. Once the true footprint plateaus, the observed footprint keeps rising. A per-snapshot occupancy (Poisson) estimate gives about −95% error for the same reason.
+| Estimator | Extrapolation: sampler MAPE / peak error | Interpolation: sampler MAPE / peak error | Extrapolation: splitter-union MAPE |
+|---|---|---|---|
+| α model per snapshot (NZ) | 41 / 25 | 37 / 75 | 42 |
+| Chao1 on the bin union | 28 / 9 | 57 / 39 | 38 |
+| iChao1 on the bin union | 27 / 11 | 55 / 36 | 40 |
 
-The evidence that is still available is across bins: how many addresses were seen in exactly one, two, … bins. It would support capture–recapture estimators such as Chao1. The tool does not output it yet.
+- **Why the α model plateaus wrong:** a single bin is so sparse (0.1–10% of the footprint) that it almost never samples an address twice, so it can't tell new memory from re-touched memory. On a plateau, the α model's estimate keeps rising.
+- **What the counts add:** the tool now counts, per address, how often it was sampled, in the union of each interval's 20 bins (splitter `Bin -2` rows) and in the sampler's union. It outputs f1..f4, the number of addresses sampled exactly 1..4 times. The species-richness estimators Chao1 and iChao1 use them to estimate the addresses never sampled.
+- **Where it works:** they track plateaus. jacobi-2d extrapolation drops from 42–52% to 4% (splitter union) and 9% (sampler).
+- **Where it doesn't:**
+  - Kernels with many addresses touched only once or a few times (initialisation) are underestimated by 30–60% at moderate sampling density, because Chao is a lower bound under uneven reuse.
+  - At the densest union (1 in 5), Chao overshoots by 50–200% when f2 is much smaller than f1.
+  - Sampler runs give the same bias as splitter unions of the same density, so the sampler is not the issue.
+- **Likely next step:** estimators that use the *known* sampling rate p. f1..f4 then constrain the access-count distribution directly, and S + f1·(1−p)/p gives an upper bound to pair with Chao's lower bound.
+- **miniVite** (OMP_NUM_THREADS=4, OMP_WAIT_POLICY=passive) is being re-measured. With unpinned threads its footprint was dominated by runtime memory, and its reference counts varied by up to ±50% between runs because OpenMP threads spin. Sampler curves are therefore compared to the truth on the fraction of their own run.
+- **Forecasting** from the first 10–50% of a run: peak within about 10–20% for interpolation, unreliable for extrapolation.
 
 ## Differences from the original tooling
 

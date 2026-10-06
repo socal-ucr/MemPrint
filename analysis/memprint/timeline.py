@@ -6,7 +6,9 @@ subsample bin. From them:
 
 - reconstruct: estimate the true footprint at every snapshot of a sparse run
   with the MemPrint model, alpha(sigma across bins, mean observed footprint,
-  sampling interval [, time]) x mean observed footprint (Eq. 8 per snapshot);
+  sampling interval [, time]) x mean observed footprint (Eq. 8 per snapshot),
+  or with Chao1/iChao1 on the union of the bins: the addresses sampled
+  exactly once, twice, ... estimate how many were never sampled;
 - forecast: from the beginning of a run, predict the rest of its footprint
   curve by fitting time- and magnitude-scaled versions of the training
   configs' curves.
@@ -147,6 +149,84 @@ def fit_reconstruction(rows, train_configs, intervals, variant):
     model = Model.fit(train, extra=VARIANTS[variant])
     by_si = mape_by_interval(model.predict(train))
     return model, int(by_si.idxmin()), float(by_si.min())
+
+
+# ------------------------------------------------------------------ Chao1
+
+ESTIMATORS = ("Chao1", "iChao1")
+
+
+def union_rows(timeline, kind):
+    """Union-of-bins rows with species-richness estimates of the number of
+    addresses: the splitter's per-interval unions (Bin -2) or the sampler's
+    union (Bin -1). f_k = addresses sampled exactly k times.
+
+    Chao1 (bias-corrected):  S + f1 (f1 - 1) / (2 (f2 + 1))
+    iChao1 (Chiu et al. 2014): Chao1 + f3 / (4 f4) * max(f1 - f2 f3 / (2 f4), 0)
+    iChao1 also uses f3, f4 and corrects Chao1's underestimate when reuse
+    differs across addresses. Both are converted to bytes with the union's
+    bytes per address.
+    """
+    if kind == "splitter":
+        rows = timeline[(timeline["Kind"] == "splitter") & (timeline["Bin"] == -2)]
+    else:
+        rows = timeline[(timeline["Kind"] == "sampler") & (timeline["Bin"] == -1)]
+    rows = rows[rows["UniqueAddresses"] > 0].copy()
+    seen, f1, f2 = rows["UniqueAddresses"], rows["Singletons"], rows["Doubletons"]
+    chao = seen + f1 * (f1 - 1) / (2 * (f2 + 1))
+    per_address = rows["MemUsageObs"] / seen
+    rows["Chao1"] = chao * per_address
+    if "Quadrupletons" in rows:
+        f3, f4 = rows["Tripletons"], rows["Quadrupletons"].clip(lower=1)
+        rows["iChao1"] = (chao + f3 / (4 * f4) * np.maximum(f1 - f2 * f3 / (2 * f4), 0)) * per_address
+    return rows
+
+
+def chao_curve(rows, estimator):
+    curve = rows[["Time", "SamplingInterval"]].copy()
+    curve["Estimate"] = rows[estimator]
+    return curve
+
+
+def truth_frame(truths):
+    """{config: truth curve} -> one table (Config, Time, Truth)."""
+    return pd.concat([t.assign(Config=c) for c, t in truths.items()])[["Config", "Time", "Truth"]]
+
+
+def evaluate_chao(timeline, truths, train_configs, test_config, workload, split):
+    """Chao1/iChao1 reconstruction of the held-out config, from the
+    splitter's union rows (interval with the lowest MAPE on the training
+    configs) and from the sampler run with the closest sampling interval."""
+    unions = union_rows(timeline, "splitter").merge(truth_frame(truths), on=["Config", "Time"])
+    unions = unions[unions["Truth"] > 0]
+    train = unions[unions["Config"].isin(train_configs)]
+    samplers = union_rows(timeline, "sampler")
+    samplers = samplers[samplers["Config"] == test_config]
+    truth = truths[test_config]
+    rows, curves = [], []
+    for estimator in [e for e in ESTIMATORS if e in unions]:
+        labels = dict(workload=workload, split=split, config=test_config, subset=estimator, variant="raw")
+        per_si = (np.abs(train[estimator] - train["Truth"]) / train["Truth"]).groupby(train["SamplingInterval"]).mean() * 100
+        si = int(per_si.idxmin())
+        row = {**{k: labels[k] for k in ("workload", "split", "config", "subset", "variant")},
+               "train_si": si, "train_mape": float(per_si.min())}
+        curve = chao_curve(unions[(unions["Config"] == test_config) & (unions["SamplingInterval"] == si)], estimator)
+        row["splitter_mape"], row["splitter_peak_error"] = curve_error(curve, truth)
+        curves.append(curve.assign(source="splitter bins", **labels))
+        if len(samplers):
+            # union of a sampler run: a 1-in-(i / (1 - e^-lambda)) sample; take the run closest to si
+            run_si = closest(sorted(samplers["RunInterval"].unique()), si)
+            run = samplers[samplers["RunInterval"] == run_si]
+            run = run[run["PID"] == run["PID"].iloc[0]]
+            run_end = float(run["Time"].max())
+            curve = chao_curve(run, estimator)
+            row["sampler_si"] = run_si
+            row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+            row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
+            row["sampler_coverage"] = 1.0
+            curves.append(curve.assign(Time=curve["Time"] / run_end * truth["Time"].max(), source="sampler", **labels))
+        rows.append(row)
+    return rows, curves
 
 
 # --------------------------------------------------------------- forecast
@@ -315,6 +395,10 @@ def evaluate(workload, timeline):
                 recon_rows.append(row)
                 if variant == "base" and (best is None or train_mape < best[0]):
                     best = (train_mape, subset)
+
+        chao_rows, chao_curves = evaluate_chao(timeline, truths, train_configs, test_config, workload, split)
+        recon_rows += chao_rows
+        curves += chao_curves
 
         templates = [truths[c] for c in train_configs]
         for fraction in PREFIXES:
