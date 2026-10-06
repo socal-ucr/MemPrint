@@ -248,7 +248,14 @@ def chao_curve(rows, estimator):
 
 # Known-rate estimate corrected by a regression on the sample's structure and
 # the bins' spread (log(true / known-rate) ~ these, fitted on the training sizes).
-HYBRID_FEATURES = ("x_extrap", "x_f2f1", "x_new", "x_f1", "x_rate", "x_sd", "x_binobs", "x_binsi")
+# "sized" uses the bins' spread and mean in bytes, which grow with the input
+# and fall outside the training range when extrapolating; "invariant" uses
+# only ratios (relative spread, bin vs union footprint).
+HYBRID_FEATURE_SETS = {
+    "sized": ("x_extrap", "x_f2f1", "x_new", "x_f1", "x_rate", "x_sd", "x_binobs", "x_binsi"),
+    "invariant": ("x_extrap", "x_f2f1", "x_new", "x_f1", "x_rate", "x_cv", "x_binshare"),
+}
+HYBRID_FEATURES = HYBRID_FEATURE_SETS["sized"]
 
 
 def bin_spread(timeline, kind):
@@ -272,6 +279,8 @@ def hybrid_features(rows, spread, bin_interval):
     rows["x_sd"] = np.log(rows["BinSD"].clip(lower=1))
     rows["x_binobs"] = np.log(rows["BinMean"].clip(lower=1))
     rows["x_binsi"] = np.log(bin_interval)
+    rows["x_cv"] = np.log((rows["BinSD"] / rows["BinMean"]).clip(lower=1e-6))  # relative spread across bins
+    rows["x_binshare"] = np.log((rows["BinMean"] / rows["MemUsageObs"]).clip(lower=1e-6))  # one bin vs the union
     features = hybrid_feature_names(rows)
     if "x_recent_new" in features:
         rows["x_recent_new"] = np.log(rows["RecentNew"])

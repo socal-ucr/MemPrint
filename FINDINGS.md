@@ -76,7 +76,19 @@ The steps were tested in the order below. All numbers are mean absolute error ov
 - **Step 4** helps interpolation (MAPE 10.0 → 8.7) and the error at peak, but not extrapolation MAPE.
 - **What remains is a size bias.** At `-i 25` the largest size is underestimated by 13–47% (2mm −11% to −36%, gemm −10% to −15%, jacobi-2d −28% to −47%, atax −27% to +11%), mostly in the first half of the run. Interpolation is almost unbiased.
   - The correction is learned on the smaller sizes, and at the same rate and phase the largest size's sample statistics fall outside that range.
-  - None of the four steps addresses that. Options: features that are invariant to size (e.g. normalised by the run's reference count so far), training on more sizes (the smallest ones may hurt more than help), or a correction model that extrapolates monotonically.
+  - None of the four steps addresses that.
+- **Size-invariant features do not fix it either.** The bins' σ and mean (bytes) were replaced by the relative spread σ/mean and the bin/union footprint ratio, with smoothing and the discovery feature on, at `-i 25`:
+
+  | Feature set | MAPE | Error of peak | Error at peak |
+  |---|---|---|---|
+  | Original (σ and bin mean in bytes) | 24.3 / 8.7 | 21.0 / 12.2 | 38.3 / 24.0 |
+  | Size-invariant (ratios only) | 24.0 / 15.4 | 21.9 / 16.5 | 31.1 / 24.1 |
+
+  - Per kernel, extrapolation MAPE improves for jacobi-2d (37.5 → 27.7) and atax (24.7 → 21.0) but worsens for 2mm (18.5 → 24.3) and gemm (16.3 → 23.1).
+  - Interpolation gets worse, and at `-i 50`..`-i 250` it is unstable (43–72% interpolation MAPE, against 13–17%).
+  - So the byte features carry useful information inside the training range and are not what causes the bias. The original set stays the default; the invariant one is `HYBRID_FEATURE_SETS["invariant"]`.
+  - The bias more likely sits in the sample statistics themselves. In 2mm and gemm each element is reused about N times, so a larger input means more reuse per address. At the same sampling rate the largest size then shows more repeats than any training size did, whatever units the features use.
+- **Remaining options:** train the correction on the larger sizes only (the tiniest ones may mislead it), constrain it to extrapolate monotonically in the size-related features, or add a feature for reuse per address relative to the known rate (e.g. the expected samples per address implied by the known-rate fit).
 
 ## What we learned
 
