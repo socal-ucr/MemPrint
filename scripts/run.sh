@@ -7,6 +7,7 @@
 # Modes:
 #   splitter  full trace with memprint_trace -mode splitter (training traces)
 #   sampler   memprint_trace -mode sampler -i/-s/-r (prediction traces)
+#   spatial   memprint_trace -mode spatial -i/-s: every access to 1-in-i addresses
 #   instr     instrumentation only (sampler that never samples), for overhead
 #   native    no Pin, timing only
 #
@@ -16,7 +17,7 @@
 #   --runs N                native (and massif) repetitions per config (default 5)
 #   --pin-runs N            Pin repetitions per config (default 1 for splitter, else --runs)
 #   --massif                also run valgrind massif and record the peak heap
-#   -i N -s N -r N          sampler knobs (default 1000, 100, 10)
+#   -i N -s N -r N          sampler knobs (default 1000, 100, 10); spatial uses -i and -s
 #   --intervals LIST        splitter sampling intervals (comma-separated)
 #   --bins N                splitter bins per interval
 #   --snapshot N            also write a footprint timeline every N memory references
@@ -62,12 +63,13 @@ done
 case $MODE in
     splitter) PIN_KNOBS=(-mode splitter "${SPLIT_KNOBS[@]}"); INTERVAL=1 SPLITS= REPS=; : "${PIN_RUNS:=1}" ;;
     sampler)  PIN_KNOBS=(-mode sampler -i "$INTERVAL" -s "$SPLITS" -r "$REPS") ;;
+    spatial)  REPS= PIN_KNOBS=(-mode spatial -i "$INTERVAL" -s "$SPLITS") ;;
     # Largest -i: the sampling test effectively never fires, so only the
     # instrumentation cost is measured.
     instr)    INTERVAL=4294967295 SPLITS=1 REPS=1
               PIN_KNOBS=(-mode sampler -i "$INTERVAL" -s "$SPLITS" -r "$REPS") ;;
     native)   PIN_KNOBS=() INTERVAL= SPLITS= REPS=; PIN_RUNS=0 ;;
-    *) die "--mode must be splitter, sampler, instr or native" ;;
+    *) die "--mode must be splitter, sampler, spatial, instr or native" ;;
 esac
 : "${PIN_RUNS:=$RUNS}"
 [[ $MODE == native ]] || require_pin

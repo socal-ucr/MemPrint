@@ -42,6 +42,17 @@ run small-blocks small_blocks -track_frees 1 -- --peak 0.125 --freed 2
 # Chao1 is checked before the final free (footprint 0 at exit), so run without -track_frees
 run chao reuse -track_frees 0 -- --peak 4 --final-max 4.5 --chao 50
 
+# spatial: 1-in-100 addresses, footprint estimated as selected x 100 (binomial error ~2% for 2-4 MB)
+echo "spatial"
+for spec in "free 2 2.7" "reuse 4 3.6" "threads 2 1.8"; do  # freed: 90% of exact (estimates scatter both ways)
+    read -r program peak freed <<< "$spec"
+    "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 5000 -track_frees 1 \
+        -outdir "$WORK/out/spatial-$program" -name "spatial-$program" -- "$WORK/$program" > /dev/null 2>&1 || failed=1
+    echo "  $program"
+    python3 "$HERE/check.py" "$WORK/out/spatial-$program"/*_timeline.csv --scale --peak "$peak" --freed "$freed" \
+        --tolerance 0.15 --slack 0.6 --final-max 0.6 || failed=1
+done
+
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"
 "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode splitter -snapshot 20000 -stop 200000 -outdir "$WORK/out/stop" -name stop-test \

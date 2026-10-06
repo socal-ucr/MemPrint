@@ -24,6 +24,13 @@
  *             1-in-(i*r) subsample (exactly i / (E[min(Poisson(lambda), s)] / s)).
  *             Writes the union of the bins plus one CSV per bin.
  *
+ *   spatial   Selects 1-in-i *addresses* by a salted hash and records every
+ *             access to them. Each address is selected with probability 1/i
+ *             whatever its access pattern, so the footprint is estimated by
+ *             the selected footprint x i, with no model (binomial error
+ *             ~ 1/sqrt(addresses / i)). The selected addresses are also split
+ *             into -s hash buckets (1-in-i*s each) for an error bar.
+ *
  * Optional:
  *
  *   -track_frees 1  free/realloc/munmap remove the released address range
@@ -39,7 +46,7 @@
  *   <Prefix>_<name>_<interval>_<pid>[_<args>].csv
  *   <Prefix>_<name>_<interval>_<pid>[_<args>]_SubSample_<binInterval>_bin_<j>.csv
  *   <Prefix>_<name>_<interval>_<pid>[_<args>]_timeline.csv        (-snapshot)
- * with Prefix = Buffered (splitter) or Sampled (sampler). Summary files have
+ * with Prefix = Buffered (splitter), Sampled (sampler) or Spatial (spatial). Summary files have
  * the columns FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval;
  * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,
  * Singletons,Doubletons,Tripletons,Quadrupletons,Discovered. Bin -1 is the exact footprint in the splitter and the union of the
@@ -81,9 +88,11 @@ using std::vector;
 /* Knobs                                                                 */
 /* ===================================================================== */
 
-KNOB< string > KnobMode(KNOB_MODE_WRITEONCE, "pintool", "mode", "splitter", "splitter | sampler");
-KNOB< UINT32 > KnobSamplingInterval(KNOB_MODE_WRITEONCE, "pintool", "i", "100", "sampler: sample 1-in-i memory references");
-KNOB< UINT32 > KnobNumSplits(KNOB_MODE_WRITEONCE, "pintool", "s", "100", "sampler: number of bootstrap bins");
+KNOB< string > KnobMode(KNOB_MODE_WRITEONCE, "pintool", "mode", "splitter", "splitter | sampler | spatial");
+KNOB< UINT32 > KnobSamplingInterval(KNOB_MODE_WRITEONCE, "pintool", "i", "100",
+                                    "sampler: sample 1-in-i memory references; spatial: select 1-in-i addresses");
+KNOB< UINT32 > KnobNumSplits(KNOB_MODE_WRITEONCE, "pintool", "s", "100",
+                             "sampler: number of bootstrap bins; spatial: number of hash buckets");
 KNOB< UINT32 > KnobSampleReplication(KNOB_MODE_WRITEONCE, "pintool", "r", "10", "sampler: replication factor (lambda = s/r)");
 KNOB< string > KnobIntervals(KNOB_MODE_WRITEONCE, "pintool", "intervals",
                              "100,250,500,750,1000,2500,5000,7500,10000,25000,50000,75000,100000",
@@ -205,7 +214,7 @@ class Footprint
 /* Global state                                                          */
 /* ===================================================================== */
 
-enum Mode { SPLITTER, SAMPLER };
+enum Mode { SPLITTER, SAMPLER, SPATIAL };
 Mode mode;
 
 BUFFER_ID bufId;
@@ -230,6 +239,8 @@ struct Release
 struct ThreadData
 {
     UINT32 seed = 0;           // 32-bit LCG state
+    UINT64 refs = 0;           // spatial: memory references executed by this thread
+    UINT64 refsAtFlush = 0;    // spatial: refs when the thread's buffer was last processed
     vector< Release > pending; // releases not yet applied
     // Allocator call in progress (outermost call only)
     UINT32 allocDepth = 0;
@@ -259,6 +270,8 @@ vector< UINT32 > intervals;          // splitter
 vector< UINT64 > intervalThresholds; // splitter: accept a reference into interval k iff lcg < threshold[k]
 UINT32 numBins;                      // bins per interval (splitter) or bootstrap bins (sampler)
 double lambda;                       // sampler
+UINT64 salt;                         // spatial: per-run hash salt
+UINT64 spatialThreshold;             // spatial: an address is selected iff Mix(address ^ salt) < threshold
 UINT64 sampledBinInterval;           // sampler: effective sampling interval of one bootstrap bin
 
 string outputFileNamePrefix;
@@ -299,6 +312,22 @@ UINT32 sample_poisson(double lambda, THREADID tid)
     return k - 1;
 }
 
+// splitmix64 finaliser: scrambles the structure of addresses (strides,
+// alignment) so that selection is independent of how memory is laid out.
+static inline UINT64 Mix(UINT64 z)
+{
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+// spatial: count every reference, record those to selected addresses.
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectAddress(THREADID tid, ADDRINT ea)
+{
+    threads[tid].refs++;
+    return Mix(ea ^ salt) < spatialThreshold;
+}
+
 static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 rate)
 {
     return ((lcg_step(threads[tid].seed) % rate) == 0) ? 1 : 0;
@@ -310,7 +339,15 @@ static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 r
 
 static VOID InsertRecord(INS ins, UINT32 memOp, UINT32 refSize, BOOL isRead)
 {
-    if (mode == SAMPLER)
+    if (mode == SPATIAL)
+    {
+        INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectAddress), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID,
+                         IARG_MEMORYOP_EA, memOp, IARG_END);
+        INS_InsertFillBufferThen(ins, IPOINT_BEFORE, bufId, IARG_INST_PTR, offsetof(struct MEMREF, pc), IARG_MEMORYOP_EA, memOp,
+                                 offsetof(struct MEMREF, ea), IARG_UINT32, refSize, offsetof(struct MEMREF, size), IARG_BOOL,
+                                 isRead, offsetof(struct MEMREF, read), IARG_END);
+    }
+    else if (mode == SAMPLER)
     {
         INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(ShouldSample), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID, IARG_UINT32,
                          KnobSamplingInterval.Value(), IARG_END);
@@ -577,6 +614,15 @@ static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
     }
 }
 
+// spatial: every access to a selected address; its hash also picks the bucket.
+static VOID SpatialReference(ADDRINT address, UINT32 size)
+{
+    footprint.Record(address, size);
+    UINT32 bucket = Mix(address ^ salt) % numBins;
+    bins[bucket].Record(address, size);
+    ++binObservations[bucket];
+}
+
 static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
 {
     footprint.Erase(lo, hi);
@@ -588,7 +634,12 @@ static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
 
 static UINT64 MainInterval() { return (mode == SPLITTER) ? 1 : KnobSamplingInterval.Value(); }
 
-static UINT64 BinInterval(UINT32 mapIndex) { return (mode == SPLITTER) ? intervals[mapIndex / numBins] : sampledBinInterval; }
+static UINT64 BinInterval(UINT32 mapIndex)
+{
+    if (mode == SPLITTER) return intervals[mapIndex / numBins];
+    if (mode == SPATIAL) return (UINT64)KnobSamplingInterval.Value() * numBins; // each bucket selects 1-in-(i*s) addresses
+    return sampledBinInterval;
+}
 
 static VOID WriteSnapshot()
 {
@@ -634,10 +685,10 @@ static VOID WriteSnapshot()
 
 static VOID WriteOutputs();
 
-// Advance time by one processed reference; returns FALSE once -stop is reached.
-static BOOL Tick()
+// Advance time to `now` (memory references executed); returns FALSE once -stop is reached.
+static BOOL Tick(UINT64 now)
 {
-    timeNow += MainInterval();
+    if (now > timeNow) timeNow = now;
     if (KnobSnapshot.Value() && timeNow >= nextSnapshot)
     {
         WriteSnapshot();
@@ -660,6 +711,16 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
     size_t nextRelease         = 0;
 
     PIN_GetLock(&stateLock, tid + 1);
+    // spatial: the buffer only holds references to selected addresses, so the
+    // time of each is interpolated between this thread's reference counts at
+    // the previous and this flush (other threads' counts added as they are).
+    UINT64 others = 0, last = threads[tid].refsAtFlush, now = threads[tid].refs;
+    if (mode == SPATIAL)
+    {
+        for (UINT32 t = 0; t < MAX_THREADS; t++)
+            if (t != tid) others += threads[t].refs;
+        threads[tid].refsAtFlush = now;
+    }
     struct MEMREF* reference = (struct MEMREF*)buf;
     for (UINT64 i = 0; i < numElements && !finished; i++, reference++)
     {
@@ -673,9 +734,12 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
         ++observations;
         if (mode == SPLITTER)
             SplitReference(tid, address, size);
-        else
+        else if (mode == SAMPLER)
             BootstrapReference(tid, address, size);
-        if (!Tick()) break;
+        else
+            SpatialReference(address, size);
+        UINT64 at = (mode == SPATIAL) ? others + last + (now - last) * (i + 1) / numElements : timeNow + MainInterval();
+        if (!Tick(at)) break;
     }
     for (; nextRelease < pending.size() && !finished; nextRelease++)
         ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
@@ -736,7 +800,7 @@ BOOL InitOutputFiles()
     string name = KnobName.Value(), argSuffix;
     if (name.empty()) DefaultName(name, argSuffix);
     ostringstream prefix;
-    prefix << outDir << "/" << (mode == SPLITTER ? "Buffered_" : "Sampled_") << name << "_" << MainInterval() << "_"
+    prefix << outDir << "/" << (mode == SPLITTER ? "Buffered_" : mode == SAMPLER ? "Sampled_" : "Spatial_") << name << "_" << MainInterval() << "_"
            << PIN_GetPid() << argSuffix;
     outputFileNamePrefix = prefix.str();
 
@@ -786,6 +850,13 @@ static VOID WriteOutputs()
 VOID Fini(INT32 code, VOID* v)
 {
     PIN_GetLock(&stateLock, 0);
+    if (mode == SPATIAL)
+    {
+        UINT64 total = 0;
+        for (const ThreadData& t : threads)
+            total += t.refs;
+        if (total > timeNow) timeNow = total;
+    }
     for (ThreadData& t : threads)
     {
         for (const Release& r : t.pending)
@@ -866,6 +937,16 @@ int main(int argc, char* argv[])
         sampledBinInterval = BootstrapBinInterval(KnobSamplingInterval.Value(), numBins, lambda);
         bins.resize(numBins);
     }
+    else if (KnobMode.Value() == "spatial")
+    {
+        mode    = SPATIAL;
+        numBins = KnobNumSplits.Value();
+        if (KnobSamplingInterval.Value() == 0 || numBins == 0) return Usage("-i and -s must be positive");
+        spatialThreshold = ~(UINT64)0 / KnobSamplingInterval.Value();
+        UINT64 base      = KnobSeed.Value().empty() ? PIN_GetPid() : strtoull(KnobSeed.Value().c_str(), NULL, 10);
+        salt             = Mix(base + 0x9e3779b97f4a7c15ULL);
+        bins.resize(numBins);
+    }
     else
         return Usage("unknown -mode " + KnobMode.Value());
     binObservations.assign(bins.size(), 0);
@@ -884,7 +965,8 @@ int main(int argc, char* argv[])
         PIN_AddSyscallExitFunction(SyscallExit, 0);
     }
 
-    bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), NUM_BUF_PAGES, BufferFull, 0);
+    // spatial records are timed by interpolation between flushes: a smaller buffer keeps that fine-grained
+    bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), mode == SPATIAL ? 16 : NUM_BUF_PAGES, BufferFull, 0);
     if (bufId == BUFFER_ID_INVALID)
     {
         cerr << "Error: could not allocate initial buffer" << endl;
