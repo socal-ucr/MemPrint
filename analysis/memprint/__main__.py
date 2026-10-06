@@ -180,9 +180,10 @@ def summarize_timeline(recon, fcast):
     print(recon.pivot_table(index=["workload", "split"], columns=["subset", "variant"],
                             values=["splitter_mape", "sampler_mape"], aggfunc="first").round(2).to_string())
     print("\nMean absolute value over workloads:")
-    print(recon.groupby(["split", "subset", "variant"])[["splitter_mape", "splitter_peak_error", "sampler_mape",
-                                                         "sampler_peak_error", "sampler_length_error"]]
-          .agg(lambda x: np.mean(np.abs(x))).round(2).to_string())
+    columns = [c for c in ["splitter_mape", "splitter_peak_error", "splitter_error_at_peak", "sampler_mape",
+                           "sampler_peak_error", "sampler_error_at_peak", "sampler_length_error"] if c in recon]
+    print("(peak_error: error of the estimated peak; error_at_peak: error when the true footprint peaks)")
+    print(recon.groupby(["split", "subset", "variant"])[columns].agg(lambda x: np.mean(np.abs(x))).round(2).to_string())
     print("\nForecast from the true prefix (mean absolute % error over workloads):")
     print(fcast.groupby(["split", "prefix"])[["rest_mape", "peak_error", "end_error"]]
           .agg(lambda x: np.mean(np.abs(x))).round(2).to_string())

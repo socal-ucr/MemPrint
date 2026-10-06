@@ -22,6 +22,8 @@ import pandas as pd
 
 from .build import SPLITS
 from .dataset import EXCLUDED_INTERVALS, prepare
+from sklearn.linear_model import Ridge
+
 from .model import Model, mape_by_interval
 from .richness import known_rate_bytes
 
@@ -124,6 +126,17 @@ def curve_error(curve, truth, value="Estimate", run_end=None):
     return mape, float(peak)
 
 
+def error_at_peak(curve, truth, value="Estimate", run_end=None):
+    """Relative error (%) of the estimate at the moment the true footprint
+    peaks (as opposed to curve_error's error of the estimated peak)."""
+    if not len(curve):
+        return np.nan
+    times = curve["Time"] if run_end is None else curve["Time"] / run_end * truth["Time"].max()
+    i = int(np.argmax(truth["Truth"].to_numpy()))
+    peak = truth["Truth"].iloc[i]
+    return float((np.interp(truth["Time"].iloc[i], times, curve[value]) - peak) / peak * 100)
+
+
 def sampler_runs(sampler_bins, config):
     """{bin interval: bin rows} for the sampler runs of one config."""
     rows = sampler_bins[sampler_bins["Config"] == config]
@@ -174,6 +187,7 @@ def union_rows(timeline, kind):
     else:
         rows = timeline[(timeline["Kind"] == "sampler") & (timeline["Bin"] == -1)]
     rows = rows[rows["UniqueAddresses"] > 0].copy()
+    rows["Rate"] = union_rate(timeline, rows, kind)
     seen, f1, f2 = rows["UniqueAddresses"], rows["Singletons"], rows["Doubletons"]
     chao = seen + f1 * (f1 - 1) / (2 * (f2 + 1))
     per_address = rows["MemUsageObs"] / seen
@@ -192,10 +206,96 @@ def add_known_rate(rows):
     return rows
 
 
+def union_rate(timeline, rows, kind):
+    """Probability that a reference is in the union sample.
+
+    Splitter: union samples (CountObs) / references (Time). Sampler: CountObs
+    counts every sampled reference, but only those placed in at least one bin
+    (probability 1 - e^-lambda) enter the union, so the rate is
+    (1 - e^-lambda) / i, with lambda = s / r recovered from the bin rows: a
+    bin's interval is i * s / E[min(K, s)] ~ i * s / lambda.
+    """
+    if kind == "splitter":
+        return rows["CountObs"] / rows["Time"]
+    bins = timeline[(timeline["Kind"] == "sampler") & (timeline["Bin"] >= 0)]
+    per_run = bins.groupby("PID").agg(bins=("Bin", "nunique"), bin_interval=("SamplingInterval", "first"))
+    i = rows["RunInterval"].astype(float)
+    lam = i * rows["PID"].map(per_run["bins"]) / rows["PID"].map(per_run["bin_interval"])
+    return (1 - np.exp(-lam)) / i
+
+
 def chao_curve(rows, estimator):
     curve = rows[["Time", "SamplingInterval"]].copy()
     curve["Estimate"] = rows[estimator]
     return curve
+
+
+# Known-rate estimate corrected by a regression on the sample's structure and
+# the bins' spread (log(true / known-rate) ~ these, fitted on the training sizes).
+HYBRID_FEATURES = ("x_extrap", "x_f2f1", "x_new", "x_f1", "x_rate", "x_sd", "x_binobs", "x_binsi")
+
+
+def bin_spread(timeline, kind):
+    """Mean and spread (SD) of the bins' observed footprint per snapshot."""
+    bins = timeline[(timeline["Kind"] == kind) & (timeline["Bin"] >= 0)]
+    return (bins.groupby(["Config", "PID", "Time", "SamplingInterval"])["MemUsageObs"]
+            .agg(BinMean="mean", BinSD="std").reset_index())
+
+
+def hybrid_features(rows, spread, bin_interval):
+    """Features for union rows with KnownRate; spread: bin_spread() at the
+    interval of the bins that make up the union."""
+    s = spread[spread["SamplingInterval"] == bin_interval][["Config", "PID", "Time", "BinMean", "BinSD"]]
+    rows = rows.merge(s, on=["Config", "PID", "Time"], how="left")
+    seen, f1, f2 = rows["UniqueAddresses"], rows["Singletons"], rows["Doubletons"]
+    rows["x_extrap"] = np.log(rows["KnownRate"] / rows["MemUsageObs"])  # how far known-rate extrapolates
+    rows["x_f2f1"] = np.log((f2 + 1) / (f1 + 1))  # repeats among the samples
+    rows["x_new"] = np.log(seen / (rows["Rate"] * rows["Time"]))  # samples that were new addresses
+    rows["x_f1"] = np.log((f1 + 1) / seen)
+    rows["x_rate"] = np.log(rows["Rate"])
+    rows["x_sd"] = np.log(rows["BinSD"].clip(lower=1))
+    rows["x_binobs"] = np.log(rows["BinMean"].clip(lower=1))
+    rows["x_binsi"] = np.log(bin_interval)
+    return rows.replace([np.inf, -np.inf], np.nan).dropna(subset=list(HYBRID_FEATURES) + ["KnownRate"])
+
+
+def evaluate_hybrid(timeline, truths, train_configs, test_config, workload, split):
+    """Hybrid reconstruction of the held-out config's sampler runs: for each
+    run, train the correction on the training sizes' splitter unions with the
+    closest sampling rate."""
+    unions = union_rows(timeline, "splitter").merge(truth_frame(truths), on=["Config", "Time"])
+    unions = unions[unions["Truth"] > 0]
+    split_spread, sampler_spread = bin_spread(timeline, "splitter"), bin_spread(timeline, "sampler")
+    bin_intervals = sorted(split_spread["SamplingInterval"].unique())
+    samplers = union_rows(timeline, "sampler")
+    samplers = samplers[samplers["Config"] == test_config]
+    truth = truths[test_config]
+    rows, curves = [], []
+    for run_interval in sorted(samplers["RunInterval"].unique()):
+        run = samplers[samplers["RunInterval"] == run_interval]
+        run = add_known_rate(run[run["PID"] == run["PID"].iloc[0]])
+        rate = float(np.median(run["Rate"]))
+        # the splitter union of interval k is a 1-in-(k / bins) sample, labelled k // bins
+        union_label = min(unions["SamplingInterval"].unique(), key=lambda u: abs(np.log(u * rate)))
+        bin_interval = next(k for k in bin_intervals if k // 20 == union_label)
+        train = unions[unions["Config"].isin(train_configs) & (unions["SamplingInterval"] == union_label)]
+        train = add_known_rate(train[train.groupby("Config").cumcount() % 3 == 0])
+        train = hybrid_features(train, split_spread, bin_interval)
+        model = Ridge(alpha=1.0).fit(train[list(HYBRID_FEATURES)], np.log(train["Truth"] / train["KnownRate"]))
+
+        run_bins = sampler_spread[sampler_spread["PID"] == run["PID"].iloc[0]]["SamplingInterval"].iloc[0]
+        test = hybrid_features(run, sampler_spread, run_bins)
+        curve = test[["Time", "SamplingInterval"]].copy()
+        curve["Estimate"] = test["KnownRate"] * np.exp(model.predict(test[list(HYBRID_FEATURES)]))
+        run_end = float(run["Time"].max())
+        labels = dict(workload=workload, split=split, config=test_config, subset="Hybrid", variant=f"i={run_interval}")
+        row = {**labels, "train_si": int(union_label), "sampler_si": int(run_interval)}
+        row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+        row["sampler_error_at_peak"] = error_at_peak(curve, truth, run_end=run_end)
+        row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
+        rows.append(row)
+        curves.append(curve.assign(Time=curve["Time"] / run_end * truth["Time"].max(), source="sampler", **labels))
+    return rows, curves
 
 
 def truth_frame(truths):
@@ -229,6 +329,7 @@ def evaluate_chao(timeline, truths, train_configs, test_config, workload, split)
             test = add_known_rate(test.drop(columns="KnownRate"))
         curve = chao_curve(test, estimator)
         row["splitter_mape"], row["splitter_peak_error"] = curve_error(curve, truth)
+        row["splitter_error_at_peak"] = error_at_peak(curve, truth)
         curves.append(curve.assign(source="splitter bins", **labels))
         if len(samplers):
             # union of a sampler run: a 1-in-(i / (1 - e^-lambda)) sample; take the run closest to si
@@ -241,6 +342,7 @@ def evaluate_chao(timeline, truths, train_configs, test_config, workload, split)
             curve = chao_curve(run, estimator)
             row["sampler_si"] = run_si
             row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+            row["sampler_error_at_peak"] = error_at_peak(curve, truth, run_end=run_end)
             row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
             row["sampler_coverage"] = 1.0
             curves.append(curve.assign(Time=curve["Time"] / run_end * truth["Time"].max(), source="sampler", **labels))
@@ -395,6 +497,7 @@ def evaluate(workload, timeline):
 
                 curve = estimate_curve(splitter_bins[splitter_bins["SamplingInterval"] == si], model)
                 row["splitter_mape"], row["splitter_peak_error"] = curve_error(curve, truth)
+                row["splitter_error_at_peak"] = error_at_peak(curve, truth)
                 curves.append(curve.assign(workload=workload, split=split, config=test_config, subset=subset,
                                            variant=variant, source="splitter bins"))
 
@@ -406,6 +509,7 @@ def evaluate(workload, timeline):
                     curve = estimate_curve(run, model)
                     run_end = float(run["Time"].max())
                     row["sampler_mape"], row["sampler_peak_error"] = curve_error(curve, truth, run_end=run_end)
+                    row["sampler_error_at_peak"] = error_at_peak(curve, truth, run_end=run_end)
                     row["sampler_length_error"] = (run_end - truth["Time"].max()) / truth["Time"].max() * 100
                     curve = curve.assign(Time=curve["Time"] / run_end * truth["Time"].max())
                     row["sampler_coverage"] = len(curve) / max(run["Time"].nunique(), 1)
@@ -418,6 +522,10 @@ def evaluate(workload, timeline):
         chao_rows, chao_curves = evaluate_chao(timeline, truths, train_configs, test_config, workload, split)
         recon_rows += chao_rows
         curves += chao_curves
+        if "Quadrupletons" in timeline:
+            hybrid_rows, hybrid_curves = evaluate_hybrid(timeline, truths, train_configs, test_config, workload, split)
+            recon_rows += hybrid_rows
+            curves += hybrid_curves
 
         templates = [truths[c] for c in train_configs]
         for fraction in PREFIXES:

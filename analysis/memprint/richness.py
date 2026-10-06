@@ -58,10 +58,11 @@ def estimate_addresses(S, counts, T, p):
 
 
 def known_rate_bytes(rows):
-    """Known-rate footprint estimate (bytes) for union rows of a timeline."""
+    """Known-rate footprint estimate (bytes) for union rows of a timeline
+    (timeline.union_rows: needs the union's sampling Rate)."""
     estimates = [
         estimate_addresses(r.UniqueAddresses, (r.Singletons, r.Doubletons, r.Tripletons, r.Quadrupletons), r.Time,
-                           r.CountObs / r.Time) * r.MemUsageObs / r.UniqueAddresses
+                           r.Rate) * r.MemUsageObs / r.UniqueAddresses
         for r in rows.itertuples()
     ]
     return np.array(estimates, float)

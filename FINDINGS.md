@@ -22,28 +22,40 @@ Each footprint keeps, per address, how often it was sampled, and reports f1..f4:
 
 ## Results
 
-Mean absolute error over the four kernels, in %:
+Mean absolute error over the four kernels, in %. Metrics:
+- **MAPE** is over the snapshots of the held-out run.
+- **Error of peak** compares the estimated maximum with the true maximum, wherever each occurs.
+- **Error at peak** reads the estimate at the moment the true footprint peaks.
 
-| Estimator (on the union of bins) | Extrap. splitter MAPE | Extrap. sampler MAPE / peak | Interp. splitter MAPE | Interp. sampler MAPE / peak |
+| Estimator | Sampler run | Extrap. MAPE / error of peak / error at peak | Interp. MAPE / error of peak / error at peak |
+|---|---|---|---|
+| α model per snapshot (paper features, NZ) | `-i 25`/`-i 50` | 45 / 30 / 58 | 31 / 59 / 49 |
+| Chao1 | `-i 25` | 28 / 9 / 33 | 57 / 39 / 60 |
+| iChao1 (adds f3, f4) | `-i 25` | 27 / 11 / 33 | 55 / 36 / 58 |
+| Known-rate (`richness.py`) | `-i 3` | 12 / 26 / 17 | 7 / 23 / 10 |
+| **Hybrid** (known-rate × learned correction) | `-i 3` | **6 / 11 / 12** | **5 / 9 / 8** |
+| Hybrid | `-i 25` | 23 / 21 / 35 | 12 / 24 / 20 |
+| Hybrid | `-i 50` | 61 / 160 / 119 | 24 / 33 / 39 |
+
+From the splitter's own dense union (1 in 5), known-rate alone gives 12% (extrapolation) and 7% (interpolation) MAPE; the α model gives 42% and 31%, and Chao1/iChao1 38–40% and 29–30%.
+
+The **hybrid** regresses log(true / known-rate estimate) on the training sizes' splitter unions at the sampling rate closest to the run being predicted (Ridge, α = 1). Features:
+- how far the known-rate estimate extrapolates beyond the observed footprint;
+- log((f2+1)/(f1+1)), the fraction of samples that were new addresses, f1/seen, and the sampling rate;
+- the bins' spread σ, mean observed footprint and interval (the α model's inputs).
+
+Per kernel, hybrid, MAPE / error of peak:
+
+| Kernel | `-i 3` extrap. | `-i 3` interp. | `-i 25` extrap. | `-i 25` interp. |
 |---|---|---|---|---|
-| α model per snapshot (paper features, NZ) | 42 | 45 / 30 | 31 | 31 / 59 |
-| Chao1 | 38 | 28 / 9 | 30 | 57 / 39 |
-| iChao1 (adds f3, f4) | 40 | 27 / 11 | 29 | 55 / 36 |
-| **Known-rate** (`analysis/memprint/richness.py`) | **12** | **17 / 5** | **7** | **20 / 8** |
+| 2mm | 6 / +9 | 6 / +15 | 20 / +20 | 18 / +39 |
+| gemm | 3 / +9 | 5 / +9 | 16 / +3 | 8 / +16 |
+| jacobi-2d | 5 / +7 | 2 / +4 | 31 / −20 | 10 / +21 |
+| atax | 11 / +19 | 5 / +8 | 24 / +40 | 11 / +19 |
 
-How each sampler column was produced:
-- **Splitter MAPE:** each estimator uses the union interval with the lowest error on the training sizes, which is the densest union, 1 in 5, for all of them.
-- **Known-rate sampler columns:** the `-i 3` run (union ≈ 1 in 5).
-- **Chao1 / iChao1 sampler columns:** their closest sparse run (`-i 25`).
+jacobi-2d's error at peak stays at −15% to −25% at every density, because its true peak is in the very first snapshot.
 
-Per kernel, known-rate, sampler `-i 3`, MAPE / peak error:
-
-| Kernel | Extrapolation | Interpolation |
-|---|---|---|
-| 2mm | 18 / +1 | 19 / −5 |
-| gemm | 18 / −3 | 19 / −11 |
-| jacobi-2d | 5 / +15 | 12 / −7 |
-| atax | 27 / 0 | 28 / −11 |
+**Correction to earlier numbers:** a sampler's union holds only the sampled references that land in at least one bin, a fraction 1 − e^−λ of them, so its rate is (1 − e^−λ)/i, not 1/i. The first known-rate sampler numbers on this branch used 1/i, which overstated the sampled fraction 1.6×. They were 17% / 20% MAPE and are now 12% / 7%. `timeline.union_rate` recovers λ from the bin rows. Splitter unions were not affected.
 
 ## What we learned
 
@@ -60,6 +72,12 @@ Per kernel, known-rate, sampler `-i 3`, MAPE / peak error:
    - At 1 in 50 and sparser: −90% to +215%, because f2..f4 are too small to identify the reuse shape.
 4. **The reuse shape does not transfer between sizes.** Fixing the negative-binomial shape from the training sizes and solving only from S, T and p gives 40–150% error. The fitted shapes are tiny (0.02–0.08): real reuse is a mix of touched-once memory and heavily reused data, not one smooth distribution.
 5. **Cost.** A sampler run dense enough for the known-rate estimator (`-i 3`) takes about 40–55% of a splitter run, but about 5× a sparse `-i 50` run. MEDIUM timings: 2mm 24.7 s vs 58.3 s (splitter) vs 5.4 s (`-i 50`); gemm 19.8 vs 43.5 vs 4.8; jacobi-2d 31.9 vs 67.4 vs 5.3. These were measured with other runs in parallel, so they are rough. Unlike the α model, the estimator needs no training.
+6. **A learned correction makes known-rate usable at sparser rates.**
+   - The known-rate estimator's error is systematic: it underestimates while addresses have not yet been reused, which is exactly when f2/f1 is low. A regression on the training sizes learns this.
+   - With the dense sampler, the corrected estimate is within 2–11% MAPE on all eight held-out runs.
+   - With `-i 25` (about 1/5 of the cost) it gets 8–31%, against 35–102% raw.
+   - At `-i 50` it is unstable.
+7. **The error of the peak and the error at the peak are different questions.** The estimators get the maximum memory requirement right well before they get it right at the moment it happens. Example: raw known-rate on 2mm MEDIUM is +1% on the peak value but −19% at the peak time, because the estimate only catches up when the program starts re-reading its arrays halfway through.
 
 ## miniVite
 
@@ -73,7 +91,8 @@ Re-measured with `OMP_NUM_THREADS=4 OMP_WAIT_POLICY=passive`, using the f1/f2-on
 
 ## Open questions / next steps
 
-- **Cost vs density:** the known-rate estimator needs about 1-in-5 to 1-in-12 sampling of references. Measure where accuracy falls off (e.g. `-i 3, 5, 8`) and whether a hybrid helps: known-rate early in a run, when footprints grow and samples are dense relative to them, and α or Chao later.
+- **Cost vs density:** measure the hybrid between `-i 3` and `-i 25` (e.g. 5, 8, 12) to find where it falls off, and its overhead at each.
+- **Generalisation:** the correction is trained per workload on its smaller sizes, like the paper's α model. It has not been tested across workloads, or on miniVite.
 - **Reuse model:** a two-class mixture (touched-once plus reused) instead of one negative binomial might transfer between sizes and allow sparser sampling.
 - **miniVite:** build against spack openmpi-5.0.5 and re-measure with all three estimators.
 - **Forecasting** is unchanged from `main`: the peak is within about 10–20% for interpolation and unreliable for extrapolation.
