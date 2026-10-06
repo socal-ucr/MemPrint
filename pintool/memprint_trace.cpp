@@ -42,11 +42,13 @@
  * with Prefix = Buffered (splitter) or Sampled (sampler). Summary files have
  * the columns FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval;
  * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,
- * Singletons,Doubletons,Tripletons,Quadrupletons. Bin -1 is the exact footprint in the splitter and the union of the
+ * Singletons,Doubletons,Tripletons,Quadrupletons,Discovered. Bin -1 is the exact footprint in the splitter and the union of the
  * bins in the sampler; Bin -2 (splitter) is the union of one interval's bins, a
  * 1-in-(interval/bins) sample. Singletons..Quadrupletons count the addresses
  * sampled exactly 1..4 times, from which Chao1/iChao1 estimate the addresses
- * never sampled.
+ * never sampled. Discovered counts how often an address entered the sample
+ * (again after a free); its growth between snapshots, per new sample, tells
+ * a growing footprint (mostly new addresses) from a plateau (mostly repeats).
  */
 
 #include <cmath>
@@ -113,6 +115,7 @@ class Footprint
     UINT64 bytes = 0;      // sum of the largest access size per address
     UINT64 freed = 0;      // bytes removed by Erase
     UINT64 sampled[5] = {0}; // sampled[k]: addresses sampled exactly k times (k = 1..4)
+    UINT64 discovered = 0;   // times an address entered the sample (again after a free)
 
     VOID SetIndexed(BOOL on) { indexed = on; }
     size_t Unique() const { return entries.size(); }
@@ -120,7 +123,11 @@ class Footprint
     VOID Record(ADDRINT address, UINT32 size)
     {
         Entry& e = entries[address];
-        if (e.count == 0 && indexed) pages[address >> PAGE_BITS].push_back(address);
+        if (e.count == 0)
+        {
+            ++discovered;
+            if (indexed) pages[address >> PAGE_BITS].push_back(address);
+        }
         Count(e.count, -1);
         Count(++e.count, +1);
         if (e.size < size)
@@ -261,7 +268,7 @@ ofstream timelineFile;
 static const char* CSV_HEADER      = "FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval";
 static const char* TIMELINE_HEADER =
     "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,Singletons,Doubletons,Tripletons,"
-    "Quadrupletons";
+    "Quadrupletons,Discovered";
 
 /* ===================================================================== */
 /* Random numbers                                                        */
@@ -610,7 +617,7 @@ static VOID WriteSnapshot()
         text += ',', num(f.bytes), text += ',', num(f.Unique()), text += ',', num(count), text += ',', num(f.freed);
         for (int k = 1; k <= 4; k++)
             text += ',', num(f.sampled[k]);
-        text += '\n';
+        text += ',', num(f.discovered), text += '\n';
     };
     add(MainInterval(), -1, footprint, observations);
     for (UINT32 k = 0; k < unions.size(); k++)
