@@ -8,7 +8,8 @@ subsample bin. From them:
   with the MemPrint model, alpha(sigma across bins, mean observed footprint,
   sampling interval [, time]) x mean observed footprint (Eq. 8 per snapshot),
   or with Chao1/iChao1 on the union of the bins: the addresses sampled
-  exactly once, twice, ... estimate how many were never sampled;
+  exactly once, twice, ... estimate how many were never sampled; or with the
+  known-rate estimator (richness.py), which also uses the sampling rate;
 - forecast: from the beginning of a run, predict the rest of its footprint
   curve by fitting time- and magnitude-scaled versions of the training
   configs' curves.
@@ -22,6 +23,7 @@ import pandas as pd
 from .build import SPLITS
 from .dataset import EXCLUDED_INTERVALS, prepare
 from .model import Model, mape_by_interval
+from .richness import known_rate_bytes
 
 SUBSETS = ("NZ", "MT", "L2O")
 # Extra log features of the model. ReuseObs (sampled references per observed
@@ -153,7 +155,7 @@ def fit_reconstruction(rows, train_configs, intervals, variant):
 
 # ------------------------------------------------------------------ Chao1
 
-ESTIMATORS = ("Chao1", "iChao1")
+ESTIMATORS = ("Chao1", "iChao1", "KnownRate")
 
 
 def union_rows(timeline, kind):
@@ -182,6 +184,14 @@ def union_rows(timeline, kind):
     return rows
 
 
+def add_known_rate(rows):
+    """Known-rate estimates are expensive; compute them only for the rows used."""
+    if "Quadrupletons" in rows and "KnownRate" not in rows:
+        rows = rows.copy()
+        rows["KnownRate"] = known_rate_bytes(rows)
+    return rows
+
+
 def chao_curve(rows, estimator):
     curve = rows[["Time", "SamplingInterval"]].copy()
     curve["Estimate"] = rows[estimator]
@@ -200,17 +210,24 @@ def evaluate_chao(timeline, truths, train_configs, test_config, workload, split)
     unions = union_rows(timeline, "splitter").merge(truth_frame(truths), on=["Config", "Time"])
     unions = unions[unions["Truth"] > 0]
     train = unions[unions["Config"].isin(train_configs)]
+    # every 10th training snapshot is enough to pick the interval
+    train = add_known_rate(train[train.groupby(["Config", "SamplingInterval"]).cumcount() % 10 == 0])
     samplers = union_rows(timeline, "sampler")
     samplers = samplers[samplers["Config"] == test_config]
+    if "Quadrupletons" in unions:
+        unions["KnownRate"] = np.nan
     truth = truths[test_config]
     rows, curves = [], []
-    for estimator in [e for e in ESTIMATORS if e in unions]:
+    for estimator in [e for e in ESTIMATORS if e in train]:
         labels = dict(workload=workload, split=split, config=test_config, subset=estimator, variant="raw")
         per_si = (np.abs(train[estimator] - train["Truth"]) / train["Truth"]).groupby(train["SamplingInterval"]).mean() * 100
         si = int(per_si.idxmin())
         row = {**{k: labels[k] for k in ("workload", "split", "config", "subset", "variant")},
                "train_si": si, "train_mape": float(per_si.min())}
-        curve = chao_curve(unions[(unions["Config"] == test_config) & (unions["SamplingInterval"] == si)], estimator)
+        test = unions[(unions["Config"] == test_config) & (unions["SamplingInterval"] == si)]
+        if estimator == "KnownRate":
+            test = add_known_rate(test.drop(columns="KnownRate"))
+        curve = chao_curve(test, estimator)
         row["splitter_mape"], row["splitter_peak_error"] = curve_error(curve, truth)
         curves.append(curve.assign(source="splitter bins", **labels))
         if len(samplers):
@@ -218,6 +235,8 @@ def evaluate_chao(timeline, truths, train_configs, test_config, workload, split)
             run_si = closest(sorted(samplers["RunInterval"].unique()), si)
             run = samplers[samplers["RunInterval"] == run_si]
             run = run[run["PID"] == run["PID"].iloc[0]]
+            if estimator == "KnownRate":
+                run = add_known_rate(run)
             run_end = float(run["Time"].max())
             curve = chao_curve(run, estimator)
             row["sampler_si"] = run_si
