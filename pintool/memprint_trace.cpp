@@ -58,6 +58,7 @@
  * a growing footprint (mostly new addresses) from a plateau (mostly repeats).
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstddef>
@@ -106,6 +107,9 @@ KNOB< BOOL > KnobTrackFrees(KNOB_MODE_WRITEONCE, "pintool", "track_frees", "0",
                             "remove freed (free/realloc/munmap) address ranges from the footprints");
 KNOB< UINT64 > KnobSnapshot(KNOB_MODE_WRITEONCE, "pintool", "snapshot", "0",
                             "write a timeline snapshot every N memory references (0: off)");
+KNOB< UINT32 > KnobBufferPages(KNOB_MODE_WRITEONCE, "pintool", "buffer_pages", "0",
+                              "trace buffer pages per thread (0: 1024; 16 with -snapshot/-track_frees and 1 in spatial "
+                              "mode, so that threads' buffered accesses and frees interleave closely)");
 KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
                         "after N memory references, write the outputs and detach (0: run to the end)");
 
@@ -127,10 +131,13 @@ class Footprint
     UINT64 discovered = 0;   // times an address entered the sample (again after a free)
 
     VOID SetIndexed(BOOL on) { indexed = on; }
+    VOID SetTimed(BOOL on) { timed = on; } // remember who last touched each address, and when
     size_t Unique() const { return entries.size(); }
 
-    VOID Record(ADDRINT address, UINT32 size)
+    // tid, when: the touching thread and its reference count (timed footprints only)
+    VOID Record(ADDRINT address, UINT32 size, UINT32 tid = 0, UINT64 when = 0)
     {
+        if (timed) lastTouch[address] = {tid, when};
         Entry& e = entries[address];
         if (e.count == 0)
         {
@@ -146,9 +153,12 @@ class Footprint
         }
     }
 
-    // Remove every address in [lo, hi).
-    VOID Erase(ADDRINT lo, ADDRINT hi)
+    // Remove every address in [lo, hi). With a release clock (every thread's
+    // reference count when the release happened), addresses touched after the
+    // release are kept: the range may have been reused by then.
+    VOID Erase(ADDRINT lo, ADDRINT hi, const vector< UINT64 >* clock = NULL)
     {
+        releaseClock = (timed && clock && !clock->empty()) ? clock : NULL;
         if (hi <= lo || pages.empty()) return;
         ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
         if (last - first + 1 < pages.size())
@@ -181,6 +191,9 @@ class Footprint
     unordered_map< ADDRINT, Entry > entries;
     PageIndex pages; // page -> addresses recorded in it (when indexed)
     BOOL indexed = FALSE;
+    BOOL timed   = FALSE;
+    unordered_map< ADDRINT, std::pair< UINT32, UINT64 > > lastTouch; // address -> (thread, its reference count)
+    const vector< UINT64 >* releaseClock = NULL;                       // clock of the release being applied
 
     VOID Count(UINT32 count, INT32 delta)
     {
@@ -200,6 +213,16 @@ class Footprint
             }
             auto it = entries.find(address);
             if (it == entries.end()) continue;
+            if (releaseClock)
+            {
+                auto touch = lastTouch.find(address);
+                if (touch != lastTouch.end() && touch->second.second > (*releaseClock)[touch->second.first])
+                {
+                    addresses[keep++] = address; // touched again after the release
+                    continue;
+                }
+                lastTouch.erase(address);
+            }
             bytes -= it->second.size;
             freed += it->second.size;
             Count(it->second.count, -1);
@@ -233,6 +256,7 @@ struct Release
 {
     VOID* position;
     ADDRINT lo, hi;
+    vector< UINT64 > clock; // spatial: every thread's reference count when the release happened
 };
 
 // Per-thread state; each slot is only touched by its own thread.
@@ -241,6 +265,7 @@ struct ThreadData
     UINT32 seed = 0;           // 32-bit LCG state
     UINT64 refs = 0;           // spatial: memory references executed by this thread
     UINT64 refsAtFlush = 0;    // spatial: refs when the thread's buffer was last processed
+    UINT64 processedTime = 0;  // spatial: global time up to which this thread's buffer has been processed
     vector< Release > pending; // releases not yet applied
     // Allocator call in progress (outermost call only)
     UINT32 allocDepth = 0;
@@ -252,6 +277,20 @@ ThreadData threads[MAX_THREADS];
 
 // Footprints shared by all threads; guarded by stateLock.
 PIN_LOCK stateLock;
+
+// spatial: a release is held back until every thread has processed all the
+// accesses it made before the release (a thread's accesses wait in its buffer,
+// and in spatial mode a buffer spans ~170 x i references). The release records
+// all threads' reference counts when it happens (a vector clock); it is
+// applied once each thread's processed count has reached its entry.
+struct TimedRelease
+{
+    UINT64 time;
+    ADDRINT lo, hi;
+    vector< UINT64 > clock;
+};
+vector< TimedRelease > deferred;
+BOOL dirty = FALSE; // spatial: accesses processed since the last snapshot
 Footprint footprint;     // splitter: exact footprint; sampler: union of the bins
 vector< Footprint > bins; // splitter: [interval * numBins + bin]; sampler: [bin]
 vector< Footprint > unions; // splitter with -snapshot: union of each interval's bins
@@ -390,7 +429,15 @@ VOID Trace(TRACE trace, VOID* v)
 // Queue the release of [lo, hi) at the thread's current buffer position.
 static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
 {
-    if (hi > lo) threads[tid].pending.push_back({PIN_GetBufferPointer(ctxt, bufId), lo, hi});
+    if (hi <= lo) return;
+    Release r{PIN_GetBufferPointer(ctxt, bufId), lo, hi, {}};
+    if (mode == SPATIAL)
+    {
+        r.clock.resize(MAX_THREADS);
+        for (UINT32 t = 0; t < MAX_THREADS; t++)
+            r.clock[t] = threads[t].refs;
+    }
+    threads[tid].pending.push_back(r);
 }
 
 static ADDRINT ForgetAllocation(ADDRINT ptr)
@@ -615,19 +662,19 @@ static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
 }
 
 // spatial: every access to a selected address; its hash also picks the bucket.
-static VOID SpatialReference(ADDRINT address, UINT32 size)
+static VOID SpatialReference(ADDRINT address, UINT32 size, THREADID tid, UINT64 when)
 {
-    footprint.Record(address, size);
+    footprint.Record(address, size, tid, when);
     UINT32 bucket = Mix(address ^ salt) % numBins;
-    bins[bucket].Record(address, size);
+    bins[bucket].Record(address, size, tid, when);
     ++binObservations[bucket];
 }
 
-static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
+static VOID ApplyRelease(ADDRINT lo, ADDRINT hi, const vector< UINT64 >* clock = NULL)
 {
-    footprint.Erase(lo, hi);
+    footprint.Erase(lo, hi, clock);
     for (Footprint& bin : bins)
-        bin.Erase(lo, hi);
+        bin.Erase(lo, hi, clock);
     for (Footprint& u : unions)
         u.Erase(lo, hi);
 }
@@ -645,6 +692,7 @@ static VOID WriteSnapshot()
 {
     if (timeNow == lastSnapshot) return;
     lastSnapshot = timeNow;
+    dirty        = FALSE;
     // Hand-rolled formatting: streams and snprintf in Pin's C runtime cost
     // 10-30 us per row, which dominated runs with frequent snapshots.
     string text;
@@ -704,6 +752,40 @@ static BOOL Tick(UINT64 now)
     return TRUE;
 }
 
+// Apply the held-back releases whose earlier accesses every thread has processed.
+static VOID ApplyDueReleases(BOOL all = FALSE)
+{
+    std::stable_sort(deferred.begin(), deferred.end(),
+                     [](const TimedRelease& a, const TimedRelease& b) { return a.time < b.time; });
+    vector< TimedRelease > waiting;
+    BOOL snapshotted = FALSE;
+    for (const TimedRelease& r : deferred)
+    {
+        BOOL due = all;
+        if (!due)
+        {
+            due = TRUE;
+            for (UINT32 t = 0; t < MAX_THREADS && due; t++)
+                due = threads[t].refsAtFlush >= r.clock[t];
+        }
+        if (due)
+        {
+            // Releases wait for every thread's earlier accesses, so the state just
+            // before them is often the peak: snapshot it if it was not captured.
+            if (!snapshotted && dirty && timelineFile.is_open())
+            {
+                if (timeNow == lastSnapshot) timeNow++;
+                WriteSnapshot();
+                snapshotted = TRUE;
+            }
+            ApplyRelease(r.lo, r.hi, &r.clock);
+        }
+        else
+            waiting.push_back(r);
+    }
+    deferred.swap(waiting);
+}
+
 VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UINT64 numElements, VOID* v)
 {
     if (!buf) return buf;
@@ -721,11 +803,17 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
             if (t != tid) others += threads[t].refs;
         threads[tid].refsAtFlush = now;
     }
+    auto release = [&](const Release& r, UINT64 index) {
+        if (mode == SPATIAL)
+            deferred.push_back({others + last + (now - last) * index / std::max< UINT64 >(numElements, 1), r.lo, r.hi, r.clock});
+        else
+            ApplyRelease(r.lo, r.hi);
+    };
     struct MEMREF* reference = (struct MEMREF*)buf;
     for (UINT64 i = 0; i < numElements && !finished; i++, reference++)
     {
         for (; nextRelease < pending.size() && pending[nextRelease].position <= (VOID*)reference; nextRelease++)
-            ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
+            release(pending[nextRelease], i);
 
         ADDRINT address = reference->ea;
         UINT32 size     = reference->size;
@@ -737,13 +825,21 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
         else if (mode == SAMPLER)
             BootstrapReference(tid, address, size);
         else
-            SpatialReference(address, size);
+        {
+            SpatialReference(address, size, tid, last + (now - last) * (i + 1) / numElements);
+            dirty = TRUE;
+        }
         UINT64 at = (mode == SPATIAL) ? others + last + (now - last) * (i + 1) / numElements : timeNow + MainInterval();
         if (!Tick(at)) break;
     }
     for (; nextRelease < pending.size() && !finished; nextRelease++)
-        ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
+        release(pending[nextRelease], numElements);
     pending.clear();
+    if (mode == SPATIAL && !finished)
+    {
+        threads[tid].processedTime = others + now;
+        ApplyDueReleases();
+    }
     PIN_ReleaseLock(&stateLock);
     return buf;
 }
@@ -842,6 +938,8 @@ static VOID WriteOutputs()
 
     if (timelineFile.is_open())
     {
+        // the last snapshot must show the end state (e.g. releases applied in Fini)
+        if (timeNow == lastSnapshot) timeNow++;
         WriteSnapshot();
         timelineFile.close();
     }
@@ -863,6 +961,7 @@ VOID Fini(INT32 code, VOID* v)
             ApplyRelease(r.lo, r.hi);
         t.pending.clear();
     }
+    ApplyDueReleases(TRUE);
     WriteOutputs();
     PIN_ReleaseLock(&stateLock);
 }
@@ -956,8 +1055,12 @@ int main(int argc, char* argv[])
     if (KnobTrackFrees.Value())
     {
         footprint.SetIndexed(TRUE);
+        footprint.SetTimed(mode == SPATIAL);
         for (Footprint& bin : bins)
+        {
             bin.SetIndexed(TRUE);
+            bin.SetTimed(mode == SPATIAL);
+        }
         for (Footprint& u : unions)
             u.SetIndexed(TRUE);
         IMG_AddInstrumentFunction(ImageLoad, 0);
@@ -965,8 +1068,15 @@ int main(int argc, char* argv[])
         PIN_AddSyscallExitFunction(SyscallExit, 0);
     }
 
-    // spatial records are timed by interpolation between flushes: a smaller buffer keeps that fine-grained
-    bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), mode == SPATIAL ? 1 : NUM_BUF_PAGES, BufferFull, 0);
+    // Each thread's accesses wait in its own buffer until it fills, so across
+    // threads they are processed late by up to a buffer: a free in one thread
+    // can be applied before another thread's earlier accesses. Timelines and
+    // free tracking therefore use small buffers (and spatial records are timed
+    // by interpolation between flushes); without them the default is kept.
+    UINT32 pages = KnobBufferPages.Value();
+    if (pages == 0)
+        pages = (mode == SPATIAL) ? 1 : (KnobSnapshot.Value() || KnobTrackFrees.Value()) ? 16 : NUM_BUF_PAGES;
+    bufId = PIN_DefineTraceBuffer(sizeof(struct MEMREF), pages, BufferFull, 0);
     if (bufId == BUFFER_ID_INVALID)
     {
         cerr << "Error: could not allocate initial buffer" << endl;

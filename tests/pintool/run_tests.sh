@@ -17,6 +17,7 @@ cc -O1 -o "$WORK/mmap" "$HERE/mmap.c"
 cc -O1 -pthread -o "$WORK/threads" "$HERE/threads.c"
 cc -O1 -o "$WORK/small_blocks" "$HERE/small_blocks.c"
 cc -O1 -o "$WORK/reuse" "$HERE/reuse.c"
+cc -O1 -pthread -o "$WORK/parallel" "$HERE/parallel.c"
 
 failed=0
 # run <test name> <program> <pin knobs> -- <check.py arguments>
@@ -39,18 +40,20 @@ run calloc-new calloc_new -track_frees 1 -- --peak 1.5 --freed 1.5 --slack 0.75 
 run mmap mmap -track_frees 1 -- --peak 4 --freed 4
 run threads threads -track_frees 1 -- --peak 2 --freed 2
 run small-blocks small_blocks -track_frees 1 -- --peak 0.125 --freed 2
+run parallel parallel -track_frees 1 -- --peak 12 --freed 12 --slack 1
 # Chao1 is checked before the final free (footprint 0 at exit), so run without -track_frees
 run chao reuse -track_frees 0 -- --peak 4 --final-max 4.5 --chao 50
 
 # spatial: 1-in-100 addresses, footprint estimated as selected x 100 (binomial error ~2% for 2-4 MB)
 echo "spatial"
-for spec in "free 2 2.7" "reuse 4 3.6" "threads 2 1.8"; do  # freed: 90% of exact (estimates scatter both ways)
+for spec in "free 2 2.7" "reuse 4 3.6" "threads 2 1.8" "parallel 12 10.8"; do  # freed: 90% of exact (estimates scatter both ways)
     read -r program peak freed <<< "$spec"
     "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 5000 -track_frees 1 \
         -outdir "$WORK/out/spatial-$program" -name "spatial-$program" -- "$WORK/$program" > /dev/null 2>&1 || failed=1
     echo "  $program"
+    # tolerance: 5% of the peak (binomial error and snapshot granularity) + 0.1 MB
     python3 "$HERE/check.py" "$WORK/out/spatial-$program"/*_timeline.csv --scale --peak "$peak" --freed "$freed" \
-        --tolerance 0.15 --slack 0.6 --final-max 0.6 || failed=1
+        --tolerance "$(awk -v p="$peak" 'BEGIN { print 0.05 * p + 0.1 }')" --slack 0.6 --final-max 0.6 || failed=1
 done
 
 # -stop: outputs are written after 200000 references and the program finishes natively.
