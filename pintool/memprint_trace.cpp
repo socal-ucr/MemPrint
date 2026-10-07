@@ -39,9 +39,37 @@
  *   -snapshot N     every N memory references (time), append the current
  *                   footprints to a timeline CSV.
  *   -stop N         after N references, write all outputs and detach.
+ *   -window W -period P  (spatial) watch accesses only for W of every P
+ *                   memory references; between windows only a per-block
+ *                   reference count and the allocator run. Live allocations
+ *                   are tracked all the time and the windows measure how much
+ *                   of each one is touched; see "Windows" below.
  *
  * Time counts memory references executed: one per reference in the
- * splitter, i per sampled reference in the sampler (an estimate).
+ * splitter, i per sampled reference in the sampler (an estimate). With
+ * -window, references are counted per basic block (a REP string instruction
+ * counts once).
+ *
+ * Windows (-window): footprint ~ touched bytes of the live allocations (heap
+ * blocks and anonymous mmaps, always known exactly) + touched memory outside
+ * them (stack, globals). The selected addresses touched in any window so far
+ * are attributed to the block containing them. A block live for a whole
+ * window is "examined": its estimate is the selected bytes in it x i. A block
+ * not yet examined is estimated by the touched fraction of the examined
+ * blocks from the same allocation site (call site of malloc/new), or of all
+ * examined blocks for a new site, x its size. Memory outside blocks is the
+ * selected bytes there x i. A block whose pages were mapped for it (an
+ * anonymous mmap, or a malloc served by a new mmap) is "fresh": its pages are
+ * untouched when allocated, so its touched pages, read from
+ * /proc/self/pagemap at every snapshot, measure it exactly to the page
+ * between windows too (transparent huge pages are disabled for this). Each
+ * snapshot is a row of <prefix>_windowed.csv: Time, Watching (in a window),
+ * Windows (completed), AllocatedBytes and Blocks (live), FreshBytes,
+ * FreshResident (touched bytes of fresh blocks), FreshEst (their selected
+ * bytes x i, for comparison), ExaminedBytes/ExaminedEst and NewBytes/NewEst
+ * (other blocks, examined or not), OtherEst (outside blocks), Estimate
+ * (FreshResident + ExaminedEst + NewEst + OtherEst), Rho (touched fraction of
+ * all examined blocks), Window and Period.
  *
  * Output (in -outdir, which is created if missing):
  *   <Prefix>_<name>_<interval>_<pid>[_<args>].csv
@@ -68,7 +96,15 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <map>
 #include <set>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+#ifndef PR_SET_THP_DISABLE
+#define PR_SET_THP_DISABLE 41 // Linux 3.15
+#endif
+#include <fcntl.h>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 #include "pin.H"
@@ -111,6 +147,9 @@ KNOB< UINT64 > KnobSnapshot(KNOB_MODE_WRITEONCE, "pintool", "snapshot", "0",
 KNOB< UINT32 > KnobBufferPages(KNOB_MODE_WRITEONCE, "pintool", "buffer_pages", "0",
                               "trace buffer pages per thread (0: 1024, or 16 with -snapshot/-track_frees so that "
                               "threads' buffered accesses and frees interleave closely; unused in spatial mode)");
+KNOB< UINT64 > KnobWindow(KNOB_MODE_WRITEONCE, "pintool", "window", "0",
+                          "spatial: watch accesses for N memory references of every -period (0: always; implies -track_frees)");
+KNOB< UINT64 > KnobPeriod(KNOB_MODE_WRITEONCE, "pintool", "period", "0", "spatial with -window: window period in memory references");
 KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
                         "after N memory references, write the outputs and detach (0: run to the end)");
 
@@ -132,6 +171,11 @@ class Footprint
     UINT64 discovered = 0;   // times an address entered the sample (again after a free)
 
     VOID SetIndexed(BOOL on) { indexed = on; }
+    template < typename F > VOID ForEach(F f) const
+    {
+        for (const auto& e : entries)
+            f(e.first, e.second.size);
+    }
     size_t Unique() const { return entries.size(); }
 
     VOID Record(ADDRINT address, UINT32 size)
@@ -240,17 +284,22 @@ struct Release
     ADDRINT lo, hi;
 };
 
-// Per-thread state; each slot is only touched by its own thread.
-struct ThreadData
+// Per-thread state; each slot is only touched by its own thread (except refs, read by
+// TotalRefs).
+struct alignas(64) ThreadData // own cache lines: counters are written by their thread on every block
 {
     UINT32 seed = 0;           // 32-bit LCG state
     UINT64 refs = 0;           // spatial: memory references executed by this thread
+    UINT64 checkAt = 0;        // windowed: refs at which to next advance time
+    UINT32 epoch   = 0;        // windowed: window changes this thread's code has seen
     vector< Release > pending; // releases not yet applied
     // Allocator call in progress (outermost call only)
     UINT32 allocDepth = 0;
     ADDRINT allocSp = 0; // stack pointer at the outermost call
-    ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0;
+    ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0, allocSite = 0;
+    BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
+    ADDRINT mmapLen = 0, mmapSite = 0; // windowed: anonymous mmap in progress
 };
 ThreadData threads[MAX_THREADS];
 
@@ -270,6 +319,37 @@ BOOL finished = FALSE;   // outputs written (end of run or -stop)
 // Live heap blocks (address -> size), for -track_frees.
 PIN_LOCK allocLock;
 unordered_map< ADDRINT, ADDRINT > allocations;
+
+// Windows (-window): live allocations and how much of each has been touched.
+struct Block
+{
+    ADDRINT size;
+    ADDRINT site;      // return address of the allocator call (0: anonymous mmap)
+    UINT64 born;       // time allocated
+    UINT64 sampled;    // selected bytes touched in it (as of the last attribution)
+    BOOL examined;     // live for a whole window
+    BOOL mapped;       // an anonymous mmap (munmap can trim it)
+    BOOL fresh;        // its pages were new (mapped for it), so residency = touched pages
+};
+struct Site
+{
+    // Blocks that are not fresh. Examined blocks: live, and freed (with their
+    // sampled bytes when freed)
+    UINT64 liveSize = 0, liveSampled = 0, freedSize = 0, freedSampled = 0;
+    // blocks not yet examined
+    UINT64 newSize = 0, newSampled = 0;
+};
+BOOL windowed = FALSE;
+volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
+BOOL flushPending = FALSE;     // instrumentation must be redone for a window change
+UINT64 windowStart = 0, nextToggle = 0, windowsDone = 0, checkStep = 0;
+volatile UINT32 epoch = 0; // windowed: number of window changes
+std::map< ADDRINT, Block > blocks; // guarded by stateLock
+unordered_map< ADDRINT, Site > sites;
+UINT64 otherSampled = 0; // selected bytes touched outside every block
+ofstream windowedFile;
+int pagemapFd = -1;       // /proc/self/pagemap
+vector< UINT64 > pageBits; // buffer for pagemap entries
 
 vector< UINT32 > intervals;          // splitter
 vector< UINT64 > intervalThresholds; // splitter: accept a reference into interval k iff lcg < threshold[k]
@@ -370,8 +450,65 @@ static VOID InsertRecord(INS ins, UINT32 memOp, UINT32 refSize, BOOL isRead)
     }
 }
 
+// windowed: count a block's references; TRUE when time should advance
+static ADDRINT PIN_FAST_ANALYSIS_CALL CountRefs(THREADID tid, UINT32 n)
+{
+    ThreadData& t = threads[tid];
+    t.refs += n;
+    return t.refs >= t.checkAt;
+}
+
+static VOID CheckTime(THREADID tid, CONTEXT* ctxt);
+
+// windowed: select without counting (CountRefs counts)
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea) { return Mix(ea ^ salt) < spatialThreshold; }
+
+static UINT32 MemoryReferences(INS ins)
+{
+    if (!INS_IsStandardMemop(ins) && !INS_HasMemoryVector(ins)) return 0;
+    UINT32 n = 0;
+    for (UINT32 memOp = 0; memOp < INS_MemoryOperandCount(ins); memOp++)
+        n += INS_MemoryOperandIsRead(ins, memOp) + INS_MemoryOperandIsWritten(ins, memOp);
+    return n;
+}
+
+static VOID TraceWindowed(TRACE trace)
+{
+    BOOL watch = watching;
+    for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+    {
+        UINT32 n = 0;
+        for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+            n += MemoryReferences(ins);
+        if (n == 0) continue;
+        BBL_InsertIfCall(bbl, IPOINT_BEFORE, AFUNPTR(CountRefs), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID, IARG_UINT32, n, IARG_END);
+        BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_END);
+        if (!watch) continue;
+        for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+        {
+            if (MemoryReferences(ins) == 0) continue;
+            for (UINT32 memOp = 0; memOp < INS_MemoryOperandCount(ins); memOp++)
+            {
+                UINT32 refSize = INS_MemoryOperandSize(ins, memOp);
+                for (int k = INS_MemoryOperandIsRead(ins, memOp) + INS_MemoryOperandIsWritten(ins, memOp); k > 0; k--)
+                {
+                    INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectWatched), IARG_FAST_ANALYSIS_CALL, IARG_MEMORYOP_EA,
+                                     memOp, IARG_END);
+                    INS_InsertThenCall(ins, IPOINT_BEFORE, AFUNPTR(RecordSelected), IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp,
+                                       IARG_UINT32, refSize, IARG_END);
+                }
+            }
+        }
+    }
+}
+
 VOID Trace(TRACE trace, VOID* v)
 {
+    if (windowed)
+    {
+        TraceWindowed(trace);
+        return;
+    }
     for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
     {
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
@@ -410,6 +547,113 @@ static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
     threads[tid].pending.push_back({PIN_GetBufferPointer(ctxt, bufId), lo, hi});
 }
 
+/* Windows: live blocks (called with stateLock held) ---------------------- */
+
+// Add (+1) or remove (-1) a block's contribution to its site's statistics.
+static VOID Account(const Block& b, INT32 sign)
+{
+    if (b.fresh) return;
+    Site& s = sites[b.site];
+    if (b.examined)
+        s.liveSize += sign * b.size, s.liveSampled += sign * b.sampled;
+    else
+        s.newSize += sign * b.size, s.newSampled += sign * b.sampled;
+}
+
+static VOID DropBlock(std::map< ADDRINT, Block >::iterator it)
+{
+    const Block& b = it->second;
+    Account(b, -1);
+    if (b.examined && !b.fresh)
+    {
+        Site& s = sites[b.site];
+        s.freedSize += b.size, s.freedSampled += b.sampled;
+    }
+    blocks.erase(it);
+}
+
+static VOID AddBlock(ADDRINT ptr, ADDRINT size, ADDRINT site, BOOL mapped, BOOL fresh)
+{
+    if (ptr == 0 || size == 0) return;
+    auto old = blocks.find(ptr);
+    if (old != blocks.end()) DropBlock(old);
+    Block& b = blocks[ptr] = {size, site, timeNow, 0, FALSE, mapped, fresh};
+    Account(b, +1);
+}
+
+// munmap: drop anonymous mappings in [lo, hi), keeping the parts outside it
+static VOID UnmapBlocks(ADDRINT lo, ADDRINT hi)
+{
+    auto it = blocks.upper_bound(lo);
+    if (it != blocks.begin()) --it;
+    while (it != blocks.end() && it->first < hi)
+    {
+        auto next     = std::next(it);
+        Block b       = it->second;
+        ADDRINT start = it->first, end = start + b.size;
+        if (b.mapped && end > lo)
+        {
+            DropBlock(it);
+            for (auto piece : {std::make_pair(start, std::min(end, lo)), std::make_pair(std::max(start, hi), end)})
+            {
+                if (piece.second <= piece.first) continue;
+                Block& rest = blocks[piece.first] = b;
+                rest.size    = piece.second - piece.first;
+                rest.sampled = 0;
+                Account(rest, +1);
+            }
+        }
+        it = next;
+    }
+}
+
+// Attribute the selected addresses touched so far to the blocks containing them.
+static VOID Attribute()
+{
+    for (auto& kv : blocks)
+        kv.second.sampled = 0;
+    otherSampled = 0;
+    footprint.ForEach([](ADDRINT address, UINT32 size) {
+        auto it = blocks.upper_bound(address);
+        if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.size)
+            std::prev(it)->second.sampled += size;
+        else
+            otherSampled += size;
+    });
+    for (auto& kv : sites)
+        kv.second.liveSize = kv.second.liveSampled = kv.second.newSize = kv.second.newSampled = 0;
+    for (const auto& kv : blocks)
+        Account(kv.second, +1);
+}
+
+// End of a window: blocks live for all of it are examined.
+static VOID EndWindow()
+{
+    for (auto& kv : blocks)
+        if (kv.second.born <= windowStart) kv.second.examined = TRUE;
+    Attribute();
+    windowsDone++;
+}
+
+// Bytes of [lo, hi) on pages that have been touched (are resident or swapped).
+static UINT64 Resident(ADDRINT lo, ADDRINT hi)
+{
+    const ADDRINT page = 1 << PAGE_BITS;
+    ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
+    pageBits.resize(last - first + 1);
+    ssize_t want = pageBits.size() * sizeof(UINT64);
+    if (lseek(pagemapFd, first * sizeof(UINT64), SEEK_SET) < 0 || read(pagemapFd, pageBits.data(), want) != want)
+        return hi - lo;
+    UINT64 bytes = 0;
+    for (ADDRINT k = 0; k < pageBits.size(); k++)
+    {
+        if (!(pageBits[k] >> 62)) continue; // bit 63: present, bit 62: swapped
+        ADDRINT a = (first + k) << PAGE_BITS;
+        bytes += std::min(hi, a + page) - std::max(lo, a);
+    }
+    return bytes;
+}
+
 static ADDRINT ForgetAllocation(ADDRINT ptr)
 {
     PIN_GetLock(&allocLock, 1);
@@ -424,12 +668,27 @@ static ADDRINT ForgetAllocation(ADDRINT ptr)
     return size;
 }
 
-static VOID RememberAllocation(ADDRINT ptr, ADDRINT size)
+static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
 {
     if (ptr == 0) return;
     PIN_GetLock(&allocLock, 1);
     allocations[ptr] = size;
     PIN_ReleaseLock(&allocLock);
+    if (windowed)
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (!finished) AddBlock(ptr, size, threads[tid].allocSite, FALSE, threads[tid].allocFresh);
+        PIN_ReleaseLock(&stateLock);
+    }
+}
+
+static VOID ForgetBlock(THREADID tid, ADDRINT ptr)
+{
+    if (!windowed) return;
+    PIN_GetLock(&stateLock, tid + 1);
+    auto it = blocks.find(ptr);
+    if (!finished && it != blocks.end()) DropBlock(it);
+    PIN_ReleaseLock(&stateLock);
 }
 
 // Entry analysis: only the outermost allocator call of a thread is tracked,
@@ -437,12 +696,14 @@ static VOID RememberAllocation(ADDRINT ptr, ADDRINT size)
 // call has a lower stack pointer than the outermost one; an entry at the same
 // or a higher one is a new outermost call (the previous one jumped back to
 // its entry, or returned without its exit being seen).
-static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT size, ADDRINT ptr, ADDRINT out)
+static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT site, ADDRINT size, ADDRINT ptr, ADDRINT out)
 {
     ThreadData& t = threads[tid];
     if (t.allocDepth > 0 && sp >= t.allocSp) t.allocDepth = 0;
     if (t.allocDepth++ > 0) return;
     t.allocSp   = sp;
+    t.allocSite  = site;
+    t.allocFresh = FALSE;
     t.allocSize = size;
     t.allocPtr  = ptr;
     t.allocOut  = out;
@@ -458,11 +719,14 @@ static BOOL AllocLeave(THREADID tid)
 // malloc(size), memalign(align, size), aligned_alloc(align, size), valloc(size)
 static VOID MallocExit(THREADID tid, ADDRINT ret)
 {
-    if (AllocLeave(tid)) RememberAllocation(ret, threads[tid].allocSize);
+    if (AllocLeave(tid)) RememberAllocation(tid, ret, threads[tid].allocSize);
 }
 
 // calloc(n, size)
-static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT n, ADDRINT size) { AllocEnter(tid, sp, n * size, 0, 0); }
+static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT site, ADDRINT n, ADDRINT size)
+{
+    AllocEnter(tid, sp, site, n * size, 0, 0);
+}
 
 // posix_memalign(&out, align, size)
 static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
@@ -470,7 +734,7 @@ static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
     if (!AllocLeave(tid) || ret != 0) return;
     ADDRINT ptr = 0;
     PIN_SafeCopy(&ptr, (VOID*)threads[tid].allocOut, sizeof(ptr));
-    RememberAllocation(ptr, threads[tid].allocSize);
+    RememberAllocation(tid, ptr, threads[tid].allocSize);
 }
 
 // free(ptr): released at entry, because glibc's free leaves through a tail
@@ -479,6 +743,7 @@ static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
 static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
 {
     ADDRINT size = ForgetAllocation(ptr);
+    ForgetBlock(tid, ptr);
     QueueRelease(tid, ctxt, ptr, ptr + size);
 }
 
@@ -489,16 +754,17 @@ static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     ADDRINT ptr = threads[tid].allocPtr, size = threads[tid].allocSize;
     if (ptr == 0)
     {
-        RememberAllocation(ret, size);
+        RememberAllocation(tid, ret, size);
         return;
     }
     if (ret == 0 && size != 0) return; // failed: the old block is untouched
     ADDRINT oldSize = ForgetAllocation(ptr);
+    ForgetBlock(tid, ptr);
     if (ret == ptr)
         QueueRelease(tid, ctxt, ptr + size, ptr + oldSize);
     else
         QueueRelease(tid, ctxt, ptr, ptr + oldSize);
-    RememberAllocation(ret, size);
+    RememberAllocation(tid, ret, size);
 }
 
 static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLIST enterArgs, AFUNPTR exit,
@@ -510,11 +776,13 @@ static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLI
     if (!RTN_Valid(rtn) || SEC_Name(RTN_Sec(rtn)).find(".plt") == 0) return;
     if (!instrumented.insert(RTN_Address(rtn)).second) return;
     RTN_Open(rtn);
-    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_IARGLIST, enterArgs,
-                   IARG_END);
+    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP, IARG_IARGLIST,
+                   enterArgs, IARG_END);
     RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
     RTN_Close(rtn);
 }
+
+static VOID MmapEnter(THREADID tid, ADDRINT site) { threads[tid].mmapSite = site; }
 
 static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args)
 {
@@ -549,6 +817,9 @@ VOID ImageLoad(IMG img, VOID* v)
     IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
 
     InstrumentAllocator(img, "malloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
+    // operator new / new[]: the outermost call, so blocks get the caller's site
+    InstrumentAllocator(img, "_Znwm", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
+    InstrumentAllocator(img, "_Znam", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "valloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "memalign", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "aligned_alloc", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
@@ -566,14 +837,29 @@ VOID ImageLoad(IMG img, VOID* v)
                        IARG_END);
         RTN_Close(free);
     }
+
+    // windowed: the caller of mmap is the site of an anonymous mapping
+    RTN mmap = RTN_FindByName(img, "mmap");
+    if (windowed && RTN_Valid(mmap) && SEC_Name(RTN_Sec(mmap)).find(".plt") != 0)
+    {
+        RTN_Open(mmap);
+        RTN_InsertCall(mmap, IPOINT_BEFORE, AFUNPTR(MmapEnter), IARG_THREAD_ID, IARG_RETURN_IP, IARG_END);
+        RTN_Close(mmap);
+    }
 }
 
-// munmap(addr, len) is caught at the system call, whoever makes it.
+// munmap(addr, len) is caught at the system call, whoever makes it; with
+// -window so is an anonymous mmap made outside the allocator (a new block).
 VOID SyscallEntry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
 {
     ThreadData& t = threads[tid];
     t.munmapLo = t.munmapHi = 0;
-    if (PIN_GetSyscallNumber(ctxt, std) != SYS_munmap) return;
+    t.mmapLen               = 0;
+    ADDRINT number          = PIN_GetSyscallNumber(ctxt, std);
+    BOOL anonymous = number == SYS_mmap && (PIN_GetSyscallArgument(ctxt, std, 3) & MAP_ANONYMOUS);
+    if (windowed && anonymous && t.allocDepth == 0) t.mmapLen = (PIN_GetSyscallArgument(ctxt, std, 1) + 4095) & ~(ADDRINT)4095;
+    if (windowed && (anonymous || number == SYS_mremap) && t.allocDepth > 0) t.allocFresh = TRUE;
+    if (number != SYS_munmap) return;
     ADDRINT lo  = PIN_GetSyscallArgument(ctxt, std, 0);
     ADDRINT len = PIN_GetSyscallArgument(ctxt, std, 1);
     t.munmapLo  = lo;
@@ -583,8 +869,25 @@ VOID SyscallEntry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
 VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
 {
     ThreadData& t = threads[tid];
-    if (t.munmapHi > t.munmapLo && PIN_GetSyscallReturn(ctxt, std) == 0) QueueRelease(tid, ctxt, t.munmapLo, t.munmapHi);
-    t.munmapLo = t.munmapHi = 0;
+    ADDRINT ret   = PIN_GetSyscallReturn(ctxt, std);
+    if (t.munmapHi > t.munmapLo && ret == 0)
+    {
+        QueueRelease(tid, ctxt, t.munmapLo, t.munmapHi);
+        if (windowed)
+        {
+            PIN_GetLock(&stateLock, tid + 1);
+            if (!finished) UnmapBlocks(t.munmapLo, t.munmapHi);
+            PIN_ReleaseLock(&stateLock);
+        }
+    }
+    if (t.mmapLen && ret != (ADDRINT)MAP_FAILED)
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (!finished) AddBlock(ret, t.mmapLen, t.mmapSite, TRUE, TRUE);
+        PIN_ReleaseLock(&stateLock);
+    }
+    t.munmapLo = t.munmapHi = t.mmapLen = 0;
+    t.mmapSite = 0;
 }
 
 /* ===================================================================== */
@@ -658,6 +961,8 @@ static UINT64 BinInterval(UINT32 mapIndex)
     return sampledBinInterval;
 }
 
+static VOID WriteWindowed();
+
 static VOID WriteSnapshot()
 {
     if (timeNow == lastSnapshot) return;
@@ -698,6 +1003,67 @@ static VOID WriteSnapshot()
     for (UINT32 m = 0; m < bins.size(); m++)
         add(BinInterval(m), m % numBins, bins[m], binObservations[m]);
     timelineFile.write(text.data(), text.size());
+    if (windowed) WriteWindowed();
+}
+
+static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,FreshEst,"
+                                     "ExaminedBytes,ExaminedEst,NewBytes,NewEst,OtherEst,Estimate,Rho,Window,Period";
+
+// windowed: the footprint estimate (see "Windows" at the top)
+static VOID WriteWindowed()
+{
+    if (watching) Attribute(); // selected bytes change only inside windows
+    const double R = KnobSamplingInterval.Value();
+    UINT64 freshBytes = 0, freshResident = 0, freshSampled = 0;
+    for (const auto& kv : blocks)
+    {
+        if (!kv.second.fresh) continue;
+        freshBytes += kv.second.size, freshSampled += kv.second.sampled;
+        freshResident += Resident(kv.first, kv.first + kv.second.size);
+    }
+    UINT64 size = 0, sampled = 0;
+    for (const auto& kv : sites)
+        size += kv.second.liveSize + kv.second.freedSize, sampled += kv.second.liveSampled + kv.second.freedSampled;
+    double rhoAll = size ? R * sampled / size : 1.0;
+    UINT64 examinedBytes = 0, newBytes = 0;
+    double examinedEst = 0, newEst = 0;
+    for (const auto& kv : sites)
+    {
+        const Site& st = kv.second;
+        examinedBytes += st.liveSize, newBytes += st.newSize;
+        examinedEst += R * st.liveSampled;
+        UINT64 siteSize = st.liveSize + st.freedSize;
+        double rho      = siteSize ? R * (st.liveSampled + st.freedSampled) / siteSize : rhoAll;
+        newEst += std::max(R * st.newSampled, rho * st.newSize);
+    }
+    double otherEst = R * otherSampled;
+    windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << freshBytes + examinedBytes + newBytes
+                 << "," << blocks.size() << "," << freshBytes << "," << freshResident << "," << (UINT64)(R * freshSampled) << ","
+                 << examinedBytes << "," << (UINT64)examinedEst << "," << newBytes << "," << (UINT64)newEst << ","
+                 << (UINT64)otherEst << "," << (UINT64)(freshResident + examinedEst + newEst + otherEst) << "," << rhoAll
+                 << "," << KnobWindow.Value() << "," << KnobPeriod.Value() << "\n";
+}
+
+// windowed: open or close a window when time reaches it
+static VOID AdvanceWindows()
+{
+    while (timeNow >= nextToggle)
+    {
+        if (watching)
+        {
+            EndWindow();
+            watching   = FALSE;
+            nextToggle = windowStart + KnobPeriod.Value();
+        }
+        else
+        {
+            watching    = TRUE;
+            windowStart = nextToggle;
+            nextToggle  = windowStart + KnobWindow.Value();
+        }
+        flushPending = TRUE;
+        epoch++;
+    }
 }
 
 static VOID WriteOutputs();
@@ -706,6 +1072,7 @@ static VOID WriteOutputs();
 static BOOL Tick(UINT64 now)
 {
     if (now > timeNow) timeNow = now;
+    if (windowed) AdvanceWindows();
     if (KnobSnapshot.Value() && timeNow >= nextSnapshot)
     {
         WriteSnapshot();
@@ -735,13 +1102,38 @@ static VOID RecordSelected(THREADID tid, ADDRINT address, UINT32 size)
 {
     if (address == 0) return;
     PIN_GetLock(&stateLock, tid + 1);
-    if (!finished)
+    if (!finished && watching) // (windowed: code from a closed window runs until the thread's next check)
     {
         ++observations;
         SpatialReference(address, size);
         Tick(TotalRefs());
     }
+    BOOL flush   = flushPending;
+    flushPending = FALSE;
     PIN_ReleaseLock(&stateLock);
+    if (flush) PIN_RemoveInstrumentation(); // re-instrument for the window change
+}
+
+// windowed: a thread has counted another checkStep references. Removing
+// instrumentation does not change code that is running: a loop keeps jumping
+// back into its old translation. So each thread, at its next check after a
+// window change, restarts at the current instruction, in code instrumented
+// for the new state.
+static VOID CheckTime(THREADID tid, CONTEXT* ctxt)
+{
+    ThreadData& t = threads[tid];
+    t.checkAt     = t.refs + checkStep;
+    PIN_GetLock(&stateLock, tid + 1);
+    if (!finished) Tick(TotalRefs());
+    BOOL flush   = flushPending;
+    flushPending = FALSE;
+    PIN_ReleaseLock(&stateLock);
+    if (flush) PIN_RemoveInstrumentation();
+    if (t.epoch != epoch)
+    {
+        t.epoch = epoch;
+        PIN_ExecuteAt(ctxt);
+    }
 }
 
 VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UINT64 numElements, VOID* v)
@@ -845,6 +1237,11 @@ BOOL InitOutputFiles()
         timelineFile.open(outputFileNamePrefix + "_timeline.csv");
         timelineFile << TIMELINE_HEADER << "\n";
         nextSnapshot = KnobSnapshot.Value();
+        if (windowed)
+        {
+            windowedFile.open(outputFileNamePrefix + "_windowed.csv");
+            windowedFile << WINDOWED_HEADER << "\n";
+        }
     }
     return TRUE;
 }
@@ -873,6 +1270,7 @@ static VOID WriteOutputs()
         if (timeNow == lastSnapshot) timeNow++;
         WriteSnapshot();
         timelineFile.close();
+        windowedFile.close();
     }
 }
 
@@ -966,6 +1364,22 @@ int main(int argc, char* argv[])
         numBins = KnobNumSplits.Value();
         if (KnobSamplingInterval.Value() == 0 || numBins == 0) return Usage("-i and -s must be positive");
         spatialThreshold = ~(UINT64)0 / KnobSamplingInterval.Value();
+        if (KnobWindow.Value())
+        {
+            if (KnobPeriod.Value() <= KnobWindow.Value()) return Usage("-period must be larger than -window");
+            if (!KnobSnapshot.Value()) return Usage("-window needs -snapshot");
+            windowed   = TRUE;
+            // residency of fresh blocks is their touched pages, at 4 KB granularity only without huge pages
+            syscall(SYS_prctl, PR_SET_THP_DISABLE, 1, 0, 0, 0); // Pin's CRT has no prctl()
+            pagemapFd = open("/proc/self/pagemap", O_RDONLY);
+            if (pagemapFd < 0) return Usage("-window needs /proc/self/pagemap");
+            nextToggle = KnobWindow.Value();
+            // Threads advance time every checkStep references: well inside a window, the gap
+            // between windows and a snapshot, but not so often that the lock costs (a window
+            // shorter than 8 x 10^4 references lasts longer than asked).
+            UINT64 shortest = std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), KnobSnapshot.Value()});
+            checkStep       = std::max< UINT64 >(10000, shortest / 8);
+        }
         UINT64 base      = KnobSeed.Value().empty() ? PIN_GetPid() : strtoull(KnobSeed.Value().c_str(), NULL, 10);
         salt             = Mix(base + 0x9e3779b97f4a7c15ULL);
         bins.resize(numBins);
@@ -976,7 +1390,7 @@ int main(int argc, char* argv[])
 
     PIN_InitLock(&stateLock);
     PIN_InitLock(&allocLock);
-    if (KnobTrackFrees.Value())
+    if (KnobTrackFrees.Value() || windowed)
     {
         footprint.SetIndexed(TRUE);
         for (Footprint& bin : bins)

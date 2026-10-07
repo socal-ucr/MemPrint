@@ -23,6 +23,8 @@
 #   --snapshot N            also write a footprint timeline every N memory references
 #   --track-frees           remove freed (free/realloc/munmap) memory from the footprints
 #   --stop N                stop tracing after N memory references (partial trace)
+#   --window N --period P   spatial: watch accesses for N of every P memory references;
+#                           live allocations are tracked throughout (needs --snapshot)
 #
 # Outputs:
 #   $TRACE_DIR/<bench>/              trace CSVs (and *_timeline.csv) written by the Pin tool
@@ -54,6 +56,8 @@ while [[ $# -gt 0 ]]; do
         --snapshot) EXTRA_KNOBS+=(-snapshot "$2"); shift ;;
         --track-frees) EXTRA_KNOBS+=(-track_frees 1) ;;
         --stop) EXTRA_KNOBS+=(-stop "$2"); shift ;;
+        --window) EXTRA_KNOBS+=(-window "$2"); shift ;;
+        --period) EXTRA_KNOBS+=(-period "$2"); shift ;;
         -h|--help) usage ;;
         *) die "unknown option $1" ;;
     esac

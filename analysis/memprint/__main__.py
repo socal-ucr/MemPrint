@@ -151,6 +151,22 @@ def cmd_timeline(args, paths):
         summarize_timeline(recon, fcast)
         return
 
+    if args.action == "windowed":
+        results, curves = [], []
+        for w in workloads:
+            directory = Path(args.run) if args.run else paths.traces / w
+            r, c = timeline.evaluate_windowed(traces.load_timelines(directory, prefixes=("Buffered", "Spatial")),
+                                              traces.load_windowed(directory), w)
+            results.append(r)
+            curves.append(c)
+        results = pd.concat(results)
+        write(results, paths.data / "timeline_windowed.csv", index=False)
+        write(pd.concat(curves), paths.data / "timeline_windowed_curves.csv", index=False)
+        pd.set_option("display.width", 200)
+        print(results.pivot_table(index=["workload", "config", "sample_rate", "watched"], columns="estimate",
+                                  values=["mape", "peak_error"]).round(1).to_string())
+        return
+
     # estimate / forecast a single sampler run
     models = pd.read_csv(paths.data / "timeline_models.csv").set_index("workload")
     for w in workloads:
@@ -276,15 +292,16 @@ def main(argv=None):
     p.set_defaults(func=cmd_plot)
 
     p = sub.add_parser("timeline", help="footprint over time (-snapshot traces)")
-    p.add_argument("action", choices=["preprocess", "build", "estimate", "forecast"],
+    p.add_argument("action", choices=["preprocess", "build", "estimate", "forecast", "windowed"],
                    help="preprocess: traces/<wl>/*_timeline.csv -> data/<wl>_timeline.csv; "
                         "build: evaluate and fit models -> data/timeline_*.csv; "
-                        "estimate/forecast: apply the model to sampler runs")
+                        "estimate/forecast: apply the model to sampler runs; "
+                        "windowed: evaluate -window runs against the splitter -> data/timeline_windowed.csv")
     p.add_argument("workloads", nargs="*")
     p.add_argument("--subset", choices=["NZ", "MT", "L2O"], default="L2O", help="build: training subset of the final model")
     p.add_argument("--variant", choices=list(timeline.VARIANTS), default="base",
                    help="build: model features (time adds log Time)")
-    p.add_argument("--run", help="estimate/forecast: directory with the sampler timelines (default traces/<wl>)")
+    p.add_argument("--run", help="estimate/forecast/windowed: directory with the timelines (default traces/<wl>)")
     p.add_argument("--upto", type=float, help="forecast: use the run up to this many memory references")
     p.set_defaults(func=cmd_timeline)
 

@@ -56,6 +56,17 @@ for spec in "free 2 2.7" "reuse 4 3.6" "threads 2 1.8" "parallel 12 10.8"; do  #
         --tolerance "$(awk -v p="$peak" 'BEGIN { print 0.05 * p + 0.1 }')" --slack 0.6 --final-max 0.6 || failed=1
 done
 
+# windowed: accesses watched for 10% of the run; allocations tracked throughout
+echo "windowed"
+for spec in "free 2" "reuse 4" "threads 2" "parallel 12"; do
+    read -r program peak <<< "$spec"
+    "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 5000 -window 20000 -period 200000 \
+        -outdir "$WORK/out/windowed-$program" -name "windowed-$program" -- "$WORK/$program" > /dev/null 2>&1 || failed=1
+    echo "  $program"
+    python3 "$HERE/check.py" "$WORK/out/windowed-$program"/*_windowed.csv --windowed --peak "$peak" \
+        --tolerance "$(awk -v p="$peak" 'BEGIN { print 0.05 * p + 0.1 }')" --slack 0.6 --final-max 0.6 || failed=1
+done
+
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"
 "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode splitter -snapshot 20000 -stop 200000 -outdir "$WORK/out/stop" -name stop-test \

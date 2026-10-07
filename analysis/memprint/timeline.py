@@ -403,6 +403,39 @@ def evaluate_spatial(timeline, truths, test_config, workload, split):
     return rows, curves
 
 
+WINDOWED_ESTIMATES = {
+    "windowed": "Estimate",           # allocations + residency + windows
+    "allocated": "AllocatedBytes",    # live allocations alone
+    "windows only": "WindowsOnly",    # selected footprint x i, selected only inside windows
+}
+
+
+def evaluate_windowed(timeline, windowed, workload):
+    """Error of every windowed spatial run (memprint_trace -window) against
+    the splitter's truth for the same config, with two baselines: the live
+    allocated bytes, and the windows' selected footprint x i alone."""
+    truths = {c: t for c, t in truth_curves(timeline).groupby("Config")}
+    spatial = timeline[(timeline["Kind"] == "spatial") & (timeline["Bin"] == -1)]
+    rows, curves = [], []
+    for (config, pid), run in windowed.groupby(["Config", "PID"]):
+        if config not in truths:
+            continue
+        truth = truths[config]
+        run = run.sort_values("Time")
+        own = spatial[spatial["PID"] == pid].set_index("Time")["MemUsageObs"] * run["RunInterval"].iloc[0]
+        curve = run.assign(WindowsOnly=own.reindex(run["Time"]).to_numpy())
+        run_end = float(curve["Time"].max())
+        window, period = int(run["Window"].iloc[0]), int(run["Period"].iloc[0])
+        for name, column in WINDOWED_ESTIMATES.items():
+            labels = dict(workload=workload, config=config, pid=pid, estimate=name, sample_rate=int(run["RunInterval"].iloc[0]),
+                          watched=window / period, windows=run_end / period)
+            mape, peak = curve_error(curve, truth, value=column, run_end=run_end)
+            rows.append({**labels, "mape": mape, "peak_error": peak,
+                         "error_at_peak": error_at_peak(curve, truth, value=column, run_end=run_end)})
+        curves.append(curve.assign(Time=curve["Time"] / run_end * truth["Time"].max(), workload=workload))
+    return pd.DataFrame(rows), (pd.concat(curves) if curves else pd.DataFrame())
+
+
 def truth_frame(truths):
     """{config: truth curve} -> one table (Config, Time, Truth)."""
     return pd.concat([t.assign(Config=c) for c, t in truths.items()])[["Config", "Time", "Truth"]]
