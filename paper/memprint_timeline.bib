@@ -1,0 +1,185 @@
+@inproceedings{Luk2005Pin,
+author = {Luk, Chi-Keung and Cohn, Robert and Muth, Robert and Patil, Harish and Klauser, Artur and Lowney, Geoff and Wallace, Steven and Reddi, Vijay Janapa and Hazelwood, Kim},
+title = {Pin: building customized program analysis tools with dynamic instrumentation},
+year = {2005},
+isbn = {1595930566},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1065010.1065034},
+doi = {10.1145/1065010.1065034},
+abstract = {Robust and powerful software instrumentation tools are essential for program analysis tasks such as profiling, performance evaluation, and bug detection. To meet this need, we have developed a new instrumentation system called Pin. Our goals are to provide easy-to-use, portable, transparent, and efficient instrumentation. Instrumentation tools (called Pintools) are written in C/C++ using Pin's rich API. Pin follows the model of ATOM, allowing the tool writer to analyze an application at the instruction level without the need for detailed knowledge of the underlying instruction set. The API is designed to be architecture independent whenever possible, making Pintools source compatible across different architectures. However, a Pintool can access architecture-specific details when necessary. Instrumentation with Pin is mostly transparent as the application and Pintool observe the application's original, uninstrumented behavior. Pin uses dynamic compilation to instrument executables while they are running. For efficiency, Pin uses several techniques, including inlining, register re-allocation, liveness analysis, and instruction scheduling to optimize instrumentation. This fully automated approach delivers significantly better instrumentation performance than similar tools. For example, Pin is 3.3x faster than Valgrind and 2x faster than DynamoRIO for basic-block counting. To illustrate Pin's versatility, we describe two Pintools in daily use to analyze production software. Pin is publicly available for Linux platforms on four architectures: IA32 (32-bit x86), EM64T (64-bit x86), Itanium®, and ARM. In the ten months since Pin 2 was released in July 2004, there have been over 3000 downloads from its website.},
+booktitle = {Proceedings of the 2005 ACM SIGPLAN Conference on Programming Language Design and Implementation},
+pages = {190–200},
+numpages = {11},
+keywords = {program analysis tools, instrumentation, dynamic compilation},
+location = {Chicago, IL, USA},
+series = {PLDI '05}
+}
+
+@inproceedings{Nethercote2007Valgrind,
+author = {Nethercote, Nicholas and Seward, Julian},
+title = {Valgrind: a framework for heavyweight dynamic binary instrumentation},
+year = {2007},
+isbn = {9781595936332},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1250734.1250746},
+doi = {10.1145/1250734.1250746},
+abstract = {Dynamic binary instrumentation (DBI) frameworks make it easy to build dynamic binary analysis (DBA) tools such as checkers and profilers. Much of the focus on DBI frameworks has been on performance; little attention has been paid to their capabilities. As a result, we believe the potential of DBI has not been fully exploited.In this paper we describe Valgrind, a DBI framework designed for building heavyweight DBA tools. We focus on its unique support for shadow values-a powerful but previously little-studied and difficult-to-implement DBA technique, which requires a tool to shadow every register and memory value with another value that describes it. This support accounts for several crucial design features that distinguish Valgrind from other DBI frameworks. Because of these features, lightweight tools built with Valgrind run comparatively slowly, but Valgrind can be used to build more interesting, heavyweight tools that are difficult or impossible to build with other DBI frameworks such as Pin and DynamoRIO.},
+booktitle = {Proceedings of the 28th ACM SIGPLAN Conference on Programming Language Design and Implementation},
+pages = {89–100},
+numpages = {12},
+keywords = {Memcheck, Valgrind, dynamic binary analysis, dynamic binary instrumentation, shadow values},
+location = {San Diego, California, USA},
+series = {PLDI '07}
+}
+
+@manual{ValgrindMassif,
+  title        = {Valgrind Massif: Heap Profiler},
+  author       = {Julian Seward and Nicholas Nethercote},
+  year         = {2015},
+  note         = {Available at \url{http://valgrind.org/docs/manual/ms-manual.html}}
+}
+
+@INPROCEEDINGS{Xu2020MemGaze,
+  author={Kilic, Ozgur O. and Tallent, Nathan R. and Suriyakumar, Yasodha and Xie, Chenhao and Marquez, Andrés and Eranian, Stephane},
+  booktitle={2022 IEEE International Conference on Cluster Computing (CLUSTER)}, 
+  title={MemGaze: Rapid and Effective Load-Level Memory Trace Analysis}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={484-495},
+  keywords={Measurement;Sequences;System performance;Prefetching;Data structures;Phasor measurement units;Registers;memory access tracing;processor tracing;spatio-temporal reuse;footprint;memory access patterns;MemGaze},
+  doi={10.1109/CLUSTER51413.2022.00058}}
+
+@inproceedings{Berg2013StatCache,
+author = {Berg, Erik and Hagersten, Erik},
+title = {Fast data-locality profiling of native execution},
+year = {2005},
+isbn = {1595930221},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1064212.1064232},
+doi = {10.1145/1064212.1064232},
+abstract = {Performance tools based on hardware counters can efficiently profile the cache behavior of an application and help software developers improve its cache utilization. Simulator-based tools can potentially provide more insights and flexibility and model many different cache configurations, but have the drawback of large run-time overhead.We present StatCache, a performance tool based on a statistical cache model. It has a small run-time overhead while providing much of the flexibility of simulator-based tools. A monitor process running in the background collects sparse memory access statistics about the analyzed application running natively on a host computer. Generic locality information is derived and presented in a code-centric and/or data-centric view.We evaluate the accuracy and performance of the tool using ten SPEC CPU2000 benchmarks. We also exemplify how the flexibility of the tool can be used to better understand the characteristics of cache-related performance problems.},
+booktitle = {Proceedings of the 2005 ACM SIGMETRICS International Conference on Measurement and Modeling of Computer Systems},
+pages = {169–180},
+numpages = {12},
+keywords = {profiling tool, cache behavior},
+location = {Banff, Alberta, Canada},
+series = {SIGMETRICS '05}
+}
+
+@INPROCEEDINGS{patil2005pinpoints,
+  author={Patil, H. and Cohn, R. and Charney, M. and Kapoor, R. and Sun, A. and Karunanidhi, A.},
+  booktitle={37th International Symposium on Microarchitecture (MICRO-37'04)}, 
+  title={Pinpointing Representative Portions of Large Intel ® Itanium ® Programs with Dynamic Instrumentation}, 
+  year={2004},
+  volume={},
+  number={},
+  pages={81-92},
+  keywords={Instruments;Computational fluid dynamics;Computational modeling;Clustering algorithms;Sun;Microarchitecture;Database systems;Packaging;Production systems;Bayesian methods},
+  doi={10.1109/MICRO.2004.28}}
+
+@INPROCEEDINGS{cho2013instrumentation,
+  author={Cho, Hyoun Kyu and Moseley, Tipp and Hank, Richard and Bruening, Derek and Mahlke, Scott},
+  booktitle={Proceedings of the 2013 IEEE/ACM International Symposium on Code Generation and Optimization (CGO)}, 
+  title={Instant profiling: Instrumentation sampling for profiling datacenter applications}, 
+  year={2013},
+  volume={},
+  number={},
+  pages={1-10},
+  keywords={Instruments;Software;Radiation detectors;Hardware;Context;Switches;Optimization;Profiling;Instrumentation;Datacenters},
+  doi={10.1109/CGO.2013.6494982}}
+
+@inproceedings{roca_nonell2020pebs,
+author = {Nonell, Aleix Roca and Gerofi, Balazs and Bautista-Gomez, Leonardo and Martinet, Dominique and Querol, Vicen\c{c} Beltran and Ishikawa, Yutaka},
+title = {On the Applicability of PEBS based Online Memory Access Tracking for Heterogeneous Memory Management at Scale},
+year = {2018},
+isbn = {9781450361132},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3286475.3286477},
+doi = {10.1145/3286475.3286477},
+abstract = {Operating systems have historically had to manage only a single type of memory device. The imminent availability of heterogeneous memory devices based on emerging memory technologies confronts the classic single memory model and opens a new spectrum of possibilities for memory management. Transparent data movement between different memory devices based on access patterns of applications is a desired feature to make optimal use of such devices and to hide the complexity of memory management to the end user. However, capturing memory access patterns of an application at runtime comes at a cost, which is particularly challenging for large-scale parallel applications that may be sensitive to system noise.In this work, we focus on the access pattern profiling phase prior to the actual memory relocation. We study the feasibility of using Intel's Processor Event-Based Sampling (PEBS) feature to record memory accesses by sampling at runtime and study the overhead at scale. We have implemented a custom PEBS driver in the IHK/-McKernel lightweight multi-kernel operating system, one of whose advantages is minimal system interference due to the lightweight kernel's simple design compared to other OS kernels such as Linux. We present the PEBS overhead of a set of scientific applications and show the access patterns identified in noise sensitive HPC applications. Our results show that clear access patterns can be captured with a 10\% overhead in the worst-case and 1\% in the best case when running on up to 128k CPU cores (2,048 Intel Xeon Phi Knights Landing nodes). We conclude that online memory access profiling using PEBS at large-scale is promising for memory management in heterogeneous memory environments.},
+booktitle = {Proceedings of the Workshop on Memory Centric High Performance Computing},
+pages = {50–57},
+numpages = {8},
+keywords = {heterogeneous memory, high-performance computing, operating systems},
+location = {Dallas, TX, USA},
+series = {MCHPC'18}
+}
+
+@inproceedings{miksits2024arm_memprof,
+author = {Miksits, Samuel and Shi, Ruimin and Gokhale, Maya and Wahlgren, Jacob and Schieffer, Gabin and Peng, Ivy},
+title = {Multi-level Memory-Centric Profiling on ARM Processors with ARM SPE},
+year = {2025},
+isbn = {9798350355543},
+publisher = {IEEE Press},
+url = {https://doi.org/10.1109/SCW63240.2024.00139},
+doi = {10.1109/SCW63240.2024.00139},
+abstract = {High-end ARM processors are emerging in data centers and HPC systems, posing as a strong contender to x86 machines. Memory-centric profiling is an important approach for dissecting an application's bottlenecks on memory access and guiding optimizations. Many existing memory profiling tools leverage hardware performance counters and precise event sampling, such as Intel PEBS and AMD IBS, to achieve high accuracy and low overhead. In this work, we present a multi-level memory profiling tool for ARM processors, leveraging Statistical Profiling Extension (SPE). We evaluate the tool using both HPC and Cloud workloads on the ARM Ampere processor. Our results provide the first quantitative assessment of time overhead and sampling accuracy of ARM SPE for memory-centric profiling at different sampling periods and aux buffer sizes.},
+booktitle = {Proceedings of the SC '24 Workshops of the International Conference on High Performance Computing, Network, Storage, and Analysis},
+pages = {996–1005},
+numpages = {10},
+keywords = {ARM SPE, memory profiling, precise event sampling},
+location = {Atlanta, GA, USA},
+series = {SC-W '24}
+}
+
+@inproceedings{Beyls2005ReuseDistance,
+author = {Beyls, Kristof and D'Hollander, Erik H.},
+title = {Reuse Distance-Based Cache Hint Selection},
+year = {2002},
+isbn = {3540440496},
+publisher = {Springer-Verlag},
+address = {Berlin, Heidelberg},
+abstract = {Modern instruction sets extend their load/store-instructions with cache hints, as an additional means to bridge the processor-memory speed gap. Cache hints are used to specify the cache level at which the data is likely to be found, as well as the cache level where the data is stored after accessing it. In order to improve a program's cache behavior, the cache hint is selected based on the data locality of the instruction. We represent the data locality of an instruction by its reuse distance distribution. The reuse distance is the amount of data addressed between two accesses to the same memory location. The distribution allows to efficiently estimate the cache level where the data will be found, and to determine the level where the data should be stored to improve the hit rate. The Open64 EPIC-compiler was extended with cache hint selection and resulted in speedups of up to 36\% in numerical and 23\% in nonnumerical programs on an Itanium multiprocessor.},
+booktitle = {Proceedings of the 8th International Euro-Par Conference on Parallel Processing},
+pages = {265–274},
+numpages = {10},
+series = {Euro-Par '02}
+}
+
+@unpublished{memprint,
+  author = {Mustakin, Nafis and Manzano, Joseph and Wong, Daniel},
+  title  = {{MemPrint}: Constructing Program Memory Footprint Estimations using Statistical Methods from Sparsely Sampled {Pin}-based Memory Traces},
+  note   = {Manuscript},
+  year   = {2025}
+}
+@article{chao1984,
+  author  = {Chao, Anne},
+  title   = {Nonparametric Estimation of the Number of Classes in a Population},
+  journal = {Scandinavian Journal of Statistics},
+  volume  = {11},
+  number  = {4},
+  pages   = {265--270},
+  year    = {1984}
+}
+@article{chiu2014ichao,
+  author  = {Chiu, Chun-Huo and Wang, Yi-Ting and Walther, Bruno A. and Chao, Anne},
+  title   = {An Improved Nonparametric Lower Bound of Species Richness via a Modified {Good--Turing} Frequency Formula},
+  journal = {Biometrics},
+  volume  = {70},
+  number  = {3},
+  pages   = {671--682},
+  year    = {2014}
+}
+@misc{polybench,
+  author = {Pouchet, Louis-No{\"e}l},
+  title  = {{PolyBench/C} 4.2.1: The Polyhedral Benchmark Suite},
+  year   = {2016},
+  note   = {\url{https://sourceforge.net/projects/polybench/}}
+}
+@inproceedings{minivite,
+  author    = {Ghosh, Sayan and Halappanavar, Mahantesh and Tumeo, Antonino and Kalyanaraman, Ananth and Gebremedhin, Assefaw H.},
+  title     = {{miniVite}: A Graph Analytics Benchmarking Tool for Massively Parallel Systems},
+  booktitle = {Proceedings of the IEEE/ACM Performance Modeling, Benchmarking and Simulation of High Performance Computer Systems Workshop (PMBS)},
+  year      = {2018}
+}
+@misc{pagemap,
+  author = {{The Linux Kernel Documentation}},
+  title  = {Examining Process Page Tables ({/proc/pid/pagemap})},
+  note   = {\url{https://www.kernel.org/doc/html/latest/admin-guide/mm/pagemap.html}},
+  year   = {2024}
+}

@@ -45,7 +45,7 @@ Spatial sampling still checks every memory access, even when it records only 1 i
 
 Ground truth comes from full traces (splitter with `-track_frees`) of the same input and thread count. Each windowed run is scored on its whole timeline, with time as a fraction of the run. Settings: 1-in-100 chunks, about 20 windows per run, nothing tuned per workload.
 
-**PolyBench LARGE** (2mm, gemm, jacobi-2d; 25–37 MB, 12–34 billion references):
+**PolyBench LARGE** (2mm, gemm, jacobi-2d; live peaks of 27–37 MB, 28–49 billion references):
 - Mean error is 0.0–0.2% and peak error within 0.2%, at every watched fraction including none.
 - Every array is fresh, so residency alone gives the exact curve.
 - Baselines:

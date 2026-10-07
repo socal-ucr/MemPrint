@@ -1,0 +1,308 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,calc}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+\newcommand{\memprint}{MemPrint}
+\newcommand{\knob}[1]{\texttt{-#1}}
+\newcommand{\secref}[1]{Section~\ref{#1}}
+\newcommand{\figref}[1]{Figure~\ref{#1}}
+\newcommand{\tabref}[1]{Table~\ref{#1}}
+
+\title{Estimating the Live Memory Footprint of a Program over Time\\from Sparse Dynamic Instrumentation}
+\author{Nafis Mustakin\\University of California, Riverside}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\memprint{} estimates the total memory footprint of a program from a sparse, randomly sampled Pin trace by learning a correction factor from fully traced small inputs. We extend the question from one number per run to the live footprint over the whole run, with deallocations removed, and we report what we learned while answering it. First, estimators that work from sampled memory references cannot separate new memory from memory that is touched again, and at a 1-in-25 sampling rate the best of them, a known-rate species-richness estimator with a learned correction, still has 24\% mean error when extrapolating to a larger input. Second, sampling addresses instead of references removes that difficulty, because every address is selected with the same probability regardless of how often it is accessed. Address sampling needs no training, and it estimates the live footprint over time within 0.9\% to 4.2\% mean error on PolyBench at 1 in 25 to 1 in 100 addresses, and within 0.2\% to 6.1\% on miniVite with 1, 4 and 16 threads at 1 in 25 to 1 in 1000. Third, address sampling still pays for a check on every memory access, which costs 20$\times$ to 42$\times$ native time on large inputs. We therefore watch accesses only in short windows and track allocations and page residency for the whole run. Watching 5\% of the run, this windowed estimator stays within 0.2\% of the true footprint on PolyBench LARGE and within 2.5\% to 2.9\% mean error (3.6\% to 3.9\% at the peak) on miniVite with 65536 vertices, at 2.4$\times$ to 3.5$\times$ native time on PolyBench and 12$\times$ to 14$\times$ on miniVite.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+A compiler or runtime that places, prefetches or compresses data needs to know how much memory a program touches and when. Heap profilers such as Valgrind Massif~\cite{ValgrindMassif} record allocations, but an allocation says nothing about which of its bytes are used, and they miss stack and library memory. Dynamic binary instrumentation with Pin~\cite{Luk2005Pin} sees every memory access, but instrumenting every access slows a program by one to two orders of magnitude. \memprint{}~\cite{memprint} addresses the cost by sampling memory references sparsely and learning, from fully traced small inputs, a factor $\alpha$ that scales the sampled footprint to the true footprint of a large input.
+
+\memprint{} predicts one number per run, the cumulative footprint. Many uses need the footprint over time instead, with freed memory removed, because the peak of the live footprint determines how much memory a program needs and its timing determines when that memory is needed. In this work we extend \memprint{} to estimate the live footprint over time, and we record the approaches we tried, including the ones that failed, because the failures explain the design that works.
+
+In this work, we make the following contributions:
+\begin{itemize}
+\item We extend the \memprint{} Pin tool with deallocation tracking, timed snapshots and partial traces, and we identify and fix two cross-thread ordering errors that made multithreaded peaks up to 19\% too low (\secref{sec:tool}).
+\item We show that estimators working from sampled memory references, including the per-snapshot $\alpha$ model, Chao1, iChao1 and a known-rate negative binomial estimator with a learned correction, cannot reach low error at sparse rates, because a sparse reference sample cannot tell new memory from reused memory (\secref{sec:reference}).
+\item We propose address (spatial) sampling, which selects addresses by a salted hash and records every access to them, and show that it estimates the live footprint over time without training (\secref{sec:spatial}).
+\item We propose windowed sampling, which watches accesses only in short windows while tracking allocations and page residency for the whole run, and which corrects for overlapping accesses with a density measured on sampled 64-byte chunks (\secref{sec:windowed}).
+\item We evaluate all estimators against full traces on PolyBench~\cite{polybench} and miniVite~\cite{minivite}, and list the limitations and next steps (\secref{sec:discussion} and \secref{sec:next}).
+\end{itemize}
+
+\section{Background}
+\label{sec:background}
+
+\paragraph{Footprint.}
+Following \memprint{}, the \emph{footprint} of a set of memory references is the sum, over the distinct start addresses referenced, of the largest access size seen at each start address. The \emph{live footprint} at time $t$ is the footprint of the references made up to $t$, with every address inside a freed range removed at the moment it is freed. Time is measured in memory references executed, because that unit does not depend on how much the instrumentation slows the program.
+
+\paragraph{\memprint{}.}
+The \memprint{} Pin tool has two modes. The \emph{splitter} records every memory reference and, for a list of sampling intervals $k$, splits a 1-in-$k$ subsample of the references into 20 independent bins. The \emph{sampler} records 1 in $i$ references and assigns each sampled reference to a Poisson number of bins out of $s$, with mean $\lambda = s/r$. \memprint{} fits a log-linear regression for $\alpha = F/\bar{F}_{\text{bin}}$, where $F$ is the true footprint and $\bar{F}_{\text{bin}}$ the mean footprint of the bins, from seven features of the bins (their mean, their standard deviation and the sampling interval), on the splitter traces of small inputs, and applies it to a sampler trace of a large input. We reorganized the original scripts into one package and reproduced all 16 data figures of the \memprint{} manuscript pixel for pixel, together with its tables. The only difference is the manuscript's average row of the MAPE table, which was computed from an earlier version of the data.
+
+\paragraph{Workloads and machine.}
+We use four PolyBench/C 4.2.1 kernels~\cite{polybench} (2mm, gemm, jacobi-2d and atax), compiled without optimization as in \memprint{}, at the sizes MINI to MEDIUM for the reference and address sampling studies and at LARGE for windowed sampling. We use miniVite~\cite{minivite}, a distributed Louvain community detection proxy application, on generated random geometric graphs of 1024 to 65536 vertices, built against OpenMPI 5.0.5 from Spack and run as one MPI rank with 1, 4 or 16 OpenMP threads and \texttt{OMP\_WAIT\_POLICY=passive}. All runs use Pin 3.30 on a two-socket Intel Xeon E5-2620 v4 machine (16 cores, 32 threads, 62 GB) with Rocky Linux 8.10 (kernel 4.18) and GCC 8.5.
+
+\paragraph{Error metrics.}
+For an estimated curve $\hat{F}(t)$ and the true curve $F(t)$ from a full trace of the same input, we report three metrics, each as a percentage. The \emph{mean error} is the mean absolute percentage error over the snapshots, with times compared as fractions of each run. The \emph{error of the peak} compares $\max_t \hat{F}(t)$ with $\max_t F(t)$, wherever each occurs. The \emph{error at the peak} compares $\hat{F}$ and $F$ at the moment $F$ peaks. A trained estimator is evaluated, as in \memprint{}, on the largest input (extrapolation) and on the middle input (interpolation) after training on the other inputs.
+
+\section{Instrumenting deallocations and time}
+\label{sec:tool}
+
+We added three options to the Pin tool, and with all three off its outputs remain byte-identical to the original tool, which we verified on PolyBench with fixed seeds and address space randomization disabled.
+
+\paragraph{Deallocation tracking (\knob{track\_frees}).}
+The tool hooks the malloc family (malloc, calloc, realloc, memalign, aligned\_alloc, valloc and posix\_memalign) and records each block's size at the allocator's exit, and it removes a block's range from every footprint when the block is freed. Three details were necessary for correct results. First, glibc's \texttt{free} leaves through a tail jump that Pin does not report as a return, so the tool releases a block at the entry of \texttt{free}. Second, only the outermost allocator call is tracked, because allocator functions call each other, and the tool skips PLT stubs and functions that share an address (aliases), which otherwise produce several entry events per call. Third, \texttt{munmap} is caught at the system call, so that mappings released by libraries that bypass libc are removed too. In buffered modes, a release is queued with the position of the thread's trace buffer at the time of the call, so that it is applied after the thread's earlier accesses.
+
+\paragraph{Snapshots and partial traces (\knob{snapshot}, \knob{stop}).}
+Every $N$ memory references the tool appends the current footprints to a timeline file, and \knob{stop} writes all outputs after $N$ references and detaches Pin, so that the program finishes natively. Formatting the snapshot rows with the C runtime that Pin provides took about 7\,ms per snapshot, so the tool formats numbers by hand.
+
+\paragraph{Cross-thread ordering.}
+Pin buffers each thread's references separately, so references reach the tool in buffer order rather than program order. As a result, a free in one thread could be applied before another thread's earlier references to the same block, and those references then added the freed block back. On a test with 8 threads and 12\,MB live at a barrier, the full trace reported a peak of 9.8 to 10.8\,MB. The tool now uses 16-page buffers when snapshots or frees are on, which gives 12.08\,MB on every run. For address sampling (\secref{sec:spatial}) we first held releases back with vector clocks, which was correct but took 7474\,s on miniVite, because miniVite frees memory constantly while its MPI helper threads rarely fill a buffer. We replaced it by recording selected accesses immediately under a lock, which gives 12.03 to 12.27\,MB on the test (truth 12.09\,MB) in 28 to 40\,s on miniVite. A test suite of small programs with known footprints (frees, realloc in place and moved, calloc and C++ new, partial munmap, threads, many small blocks) checks every mode.
+
+\section{Estimating from sampled references}
+\label{sec:reference}
+
+The first approach applies the \memprint{} idea at every snapshot: estimate the footprint at time $t$ from the sampled references up to $t$. \tabref{tab:reference} summarizes the estimators, and \figref{fig:reference} shows them on 2mm MEDIUM.
+
+\paragraph{The $\alpha$ model per snapshot.}
+Fitting $\alpha$ on the splitter's bins at every snapshot of the training inputs and applying it to the sampler gives 45\% (extrapolation) and 31\% (interpolation) mean error. A single bin holds 0.1\% to 10\% of the footprint and almost never samples an address twice, so the model cannot tell new memory from memory that is touched again, and on a plateau of the true footprint its estimate keeps rising.
+
+\paragraph{Species-richness estimators.}
+Counting how many addresses were sampled exactly once ($f_1$), twice ($f_2$), and so on, is the classic setting of estimating the number of unseen species, and the tool now reports $f_1$ to $f_4$ and the union of each interval's bins. Chao1~\cite{chao1984} and iChao1~\cite{chiu2014ichao} fix the plateaus, and the jacobi-2d extrapolation error falls from 42\% to 52\% down to 4\% on the splitter's unions and 9\% on the sampler, but they are lower bounds when reuse is uneven, and they underestimate kernels with many addresses touched once by 30\% to 60\% at moderate density and overshoot by 50\% to 245\% at the densest unions, where $f_2 \ll f_1$.
+
+\paragraph{A known-rate estimator.}
+Unlike the ecological setting, our sampling rate $p$ is known exactly, and so is the number of references executed, $T$. We model the number of accesses of an address as $1 + X$ with $X$ negative binomial (mean $m$, shape $a$), so the number of times an address is sampled has the probability generating function $(q + pz)\,B(z)$ with $q = 1-p$ and $B(z) = ((1+c) - cz)^{-a}$, $c = mp/a$. For a given shape $a$, the number of addresses $U$ follows from $U\,(1 + m) = T$ and $U\,(1 - P(0)) = S$, where $S$ is the number of addresses seen, and the shape is chosen by how well $U P(1), \dots, U P(4)$ match $f_1$ to $f_4$. On dense samples (1 in 5) its bias is $+1\%$ to $-12\%$, against $+53\%$ to $+245\%$ for iChao1, but at 1 in 50 and sparser the counts $f_2$ to $f_4$ are too small to identify the shape, and the error ranges from $-90\%$ to $+215\%$. Fixing the shape from the training inputs does not work (40\% to 150\% error), because the fitted shapes are small (0.02 to 0.08), which indicates a mixture of memory touched once and heavily reused data rather than one smooth distribution. We also found that a sampler's union of bins holds only the fraction $1 - e^{-\lambda}$ of the sampled references, so its sampling rate is $(1-e^{-\lambda})/i$ rather than $1/i$, and our first known-rate results had overstated the rate by 1.6$\times$.
+
+\paragraph{A hybrid estimator.}
+The known-rate estimator errs systematically, underestimating while addresses have not yet been reused. We therefore fit a ridge regression for $\log(F/\hat{F}_{\text{known}})$ on the training inputs, from the known-rate extrapolation factor, $\log((f_2+1)/(f_1+1))$, $f_1/S$, the sampling rate and the $\alpha$ model's features. With a dense sampler (1 in 3, about 40\% to 55\% of the cost of a full trace) the hybrid reaches 6\% and 5\% mean error, and at 1 in 25 it reaches 24\% and 9\% (\tabref{tab:reference}). We tested four refinements at 1 in 25: training the correction at exactly the sampler's rate, making the estimate non-decreasing between frees, fitting one reuse shape per run, and adding the share of new addresses among recent samples. The extrapolation error stayed between 23\% and 25\%, and replacing byte-valued features with size-invariant ratios did not reduce it either. The remaining error is a size bias: in 2mm and gemm each element is reused about $N$ times, so a larger input shows more repeats per address at the same rate than any training input did.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Estimators that work from sampled references, on four PolyBench kernels with the largest (extrapolation) and middle (interpolation) MINI to MEDIUM size held out. Values are the mean absolute error over the kernels, in percent.}
+\label{tab:reference}
+\begin{tabular}{llcccccc}
+\toprule
+& & \multicolumn{3}{c}{Extrapolation} & \multicolumn{3}{c}{Interpolation} \\
+\cmidrule(lr){3-5} \cmidrule(lr){6-8}
+Estimator & Sampler & Mean & Of peak & At peak & Mean & Of peak & At peak \\
+\midrule
+$\alpha$ model per snapshot & 1/25, 1/50 & 45 & 30 & 58 & 31 & 59 & 49 \\
+Chao1 & 1/25 & 28 & 9 & 33 & 57 & 39 & 60 \\
+iChao1 & 1/25 & 27 & 11 & 33 & 55 & 36 & 58 \\
+Known rate & 1/3 & 12 & 26 & 17 & 7 & 23 & 10 \\
+Hybrid & 1/3 & 6 & 11 & 12 & 5 & 9 & 8 \\
+Hybrid, with refinements & 1/25 & 24 & 21 & 38 & 9 & 12 & 24 \\
+\midrule
+Address sampling (\secref{sec:spatial}) & 1/25 & 0.9 & 0.8 & 0.8 & 3.4 & 3.4 & 3.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.55\linewidth]{figures/reference_vs_spatial.pdf}
+\caption{Live footprint of 2mm MEDIUM (held out) over the run, against estimates from 1-in-25 reference samples and from 1-in-100 address samples. The address sample tracks the truth closely, while the reference sampling estimators overshoot, undershoot or lag.}
+\label{fig:reference}
+\end{figure}
+
+\section{Address sampling}
+\label{sec:spatial}
+
+The reference sampling estimators fail for one reason: an address accessed $r$ times appears in a reference sample with probability $1-(1-p)^r$, and $r$ is unknown and grows with the input size. Address sampling removes that dependence.
+
+\paragraph{Method.}
+The tool's \emph{spatial} mode selects an address $a$ when $h(a \oplus \sigma) < 2^{64}/i$, where $h$ is the splitmix64 finalizer and $\sigma$ a per-run salt, and it records every access to a selected address. Each address is selected with probability $1/i$ regardless of its access pattern, so the selected footprint $F_S(t)$ gives the unbiased estimate $\hat{F}(t) = i\,F_S(t)$ with no model and no training, and its relative error is about $1/\sqrt{U/i}$ for $U$ live addresses. The tool also splits the selected addresses into 20 hash buckets, each an independent $1/(20i)$ sample, which gives every snapshot a standard error. The salt makes the selection independent of strides and alignment. Selected accesses are rare, so the tool records them and applies releases immediately under one lock, which keeps cross-thread order exact.
+
+\paragraph{Accuracy.}
+On PolyBench, with the largest and middle MINI to MEDIUM sizes held out as before, address sampling gives 0.9\% and 3.4\% mean error at 1 in 25 addresses, 2.3\% and 4.2\% at 1 in 100, 2.3\% and 9.9\% at 1 in 250, and 6.7\% and 17.5\% at 1 in 1000 (\figref{fig:spatial}). The error follows the binomial prediction: the largest sizes (130{,}000 to 200{,}000 addresses) stay within 1\% to 7\% down to 1 in 1000, whereas the middle sizes (about 28{,}000 addresses) need 1 in 100 or denser. The true footprint lies within two standard errors in 100\% of snapshots at 1 in 25 and 1 in 100, and in 88\% and 77\% at 1 in 250 and 1 in 1000.
+
+\paragraph{miniVite and threads.}
+Built against the system OpenMPI, miniVite touched about 175\,MB at every size, mostly MPI start-up buffers, and spinning OpenMP threads made 97\% of its 1.76 billion references at 1024 vertices. Built against OpenMPI 5.0.5 with passive waiting, a full trace at 1024 vertices gives a cumulative footprint of 6.8 to 7.0\,MB, which matches the 6.84\,MB in the \memprint{} manuscript, from 44 million references. With frees tracked, the live peak is 4.9, 6.2 and 7.9\,MB at 1024, 4096 and 8192 vertices at every thread count. Address sampling gives 0.2\% to 6.1\% mean error at every rate from 1 in 25 to 1 in 1000 with 1, 4 and 16 threads, the error of the peak is at most 2.8\%, and the truth lies within two standard errors in 94\% to 100\% of snapshots. At 8192 vertices it runs in 26 to 41\,s, against 168 to 198\,s for a full trace and about 0.25\,s natively.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/spatial_rate.pdf}
+\caption{Address sampling error against the fraction of addresses selected. PolyBench values are the mean over 2mm, gemm, jacobi-2d and atax for the held-out largest and middle MINI to MEDIUM sizes. miniVite values are the mean over 1024, 4096 and 8192 vertices.}
+\label{fig:spatial}
+\end{figure}
+
+\section{Windowed sampling}
+\label{sec:windowed}
+
+Address sampling still evaluates the selection test on every memory access. On the LARGE PolyBench inputs that test alone costs 20$\times$ to 42$\times$ native time (203\,s for 2mm against 7.5\,s), while Pin without a tool costs almost nothing (7.7\,s). For long real workloads, therefore, the per-access test is the obstacle, and the sampling rate is not. Windowed sampling watches accesses only for $W$ of every $P$ references and keeps everything else that it needs running for the whole run at low cost (\figref{fig:design}).
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\small, >=Stealth,
+  lane/.style={draw=black!40, rounded corners=1pt, minimum height=5mm, inner sep=2pt},
+  win/.style={fill=blue!18, draw=blue!50, minimum height=5mm, inner sep=0pt}]
+  \def\L{11.5}
+  \draw[->, black!70] (0,0) -- (\L,0) node[right] {time};
+  \foreach \x in {0.3, 3.1, 5.9, 8.7} {
+    \node[win, minimum width=6mm, anchor=south west] at (\x,0.15) {};
+  }
+  \node[anchor=west, font=\footnotesize] at (0,0.95) {windows: a 1-in-$i$ sample of 64-byte chunks, every access in a selected chunk};
+  \node[lane, minimum width=\L cm, anchor=west, fill=black!4] (bbl) at (0,-0.6) {};
+  \node[anchor=west, font=\footnotesize] at (0.1,-0.6) {always: one counter add per basic block (time)};
+  \node[lane, minimum width=\L cm, anchor=west, fill=black!4] (alloc) at (0,-1.25) {};
+  \node[anchor=west, font=\footnotesize] at (0.1,-1.25) {always: allocator and munmap hooks (live blocks, fresh or reused)};
+  \node[lane, minimum width=\L cm, anchor=west, fill=black!4] (res) at (0,-1.9) {};
+  \node[anchor=west, font=\footnotesize] at (0.1,-1.9) {at every snapshot: page residency of each live block from /proc/self/pagemap};
+  \node[draw, rounded corners=2pt, align=center, font=\footnotesize, inner sep=4pt] (est) at (\L/2,-3.1)
+    {$\hat F(t) \;=\; R_{\text{fresh}}(t) \;+\; d\,R_{\text{reused}}(t) \;+\; i\,F_{S,\text{outside}}(t)$,\quad
+     $d = F_{S,\text{reused}} / C_{S,\text{reused}}$};
+  \draw[->, black!60] (res.south) -- (est.north);
+\end{tikzpicture}
+\caption{Windowed sampling. Accesses are watched only inside windows (shaded). Time, live allocations and page residency are tracked for the whole run. $R$ is the resident (touched) bytes of fresh or reused blocks, $F_S$ the selected footprint, $C_S$ the bytes that selected accesses cover, and $d$ the density.}
+\label{fig:design}
+\end{figure}
+
+\paragraph{Time between windows.}
+Between windows the tool counts memory references with one inlined add per basic block, using the number of memory operands in the block. On miniVite with one thread this count matches the splitter's per-access count to within 0.0001\% over 1.78 billion references. A REP string instruction counts once rather than once per iteration.
+
+\paragraph{Switching instrumentation.}
+The tool switches between the two kinds of instrumentation with \texttt{PIN\_RemoveInstrumentation}, which discards Pin's translated code. However, translated code that is already running does not change, because a loop keeps jumping back into its own translation. In 2mm, a window that had closed kept sampling for the rest of the loop nest, so a run that should have watched nothing took 70\,s instead of 19\,s. Each thread therefore checks the window state every few thousand references, and when the state has changed it restarts at the current instruction with \texttt{PIN\_ExecuteAt}, so that Pin translates the code again with the new instrumentation. The tool discards selected accesses that stale code records after a window has closed.
+
+\paragraph{Live blocks and residency.}
+The allocator hooks of \secref{sec:tool} run for the whole run and maintain the set of live blocks, which also includes anonymous mmaps made outside the allocator. A block is \emph{fresh} when its pages were mapped for it, that is, an anonymous mmap or an allocation during which the allocator called mmap or mremap, and \emph{reused} otherwise, for example a small block from the heap. A page of anonymous memory becomes resident at its first read or write, so the resident bytes of a fresh block, read from \texttt{/proc/self/pagemap}~\cite{pagemap} at every snapshot, are its touched bytes to within one 4\,KB page, including between windows. The machine enables transparent huge pages, which make a whole 2\,MB region resident at one touch, so the tool disables them for the traced process with \texttt{prctl(PR\_SET\_THP\_DISABLE)}. Without that setting, a test that touched 16\,MB of a 64\,MB block reported 18.4\,MB resident, and with it the tool reports exactly 16\,MB. The tool reads the pagemap entries in chunks of 512 pages and visits blocks in address order, so neighboring blocks share reads.
+
+\paragraph{Density.}
+On miniVite, residency alone underestimates the peak by about 20\% at every watched fraction (\figref{fig:fraction}), because the footprint counts the largest access at every start address, so overlapping accesses, for example unaligned copies, count more than the bytes they touch. In miniVite's reused heap blocks, the footprint per touched byte, which we call the \emph{density}, is about 1.45 for most of the run and about 1.1 at its end. A density measured on selected single addresses depends on how much of each block the windows saw, and a density measured on sampled pages was noisy (one run ended at 2.7), because a page with few touched addresses enters the sample only when one of them is selected. The windows therefore select 64-byte chunks instead of addresses. Inside a selected chunk the tool sees every access, so it knows both the footprint and the bytes covered on the same memory, and their ratio does not depend on the windows' coverage of the run. Chunks are still selected with probability $1/i$, so $i\,F_S$ remains unbiased. The tool uses $d=1$ until the selected accesses cover $64\,\text{KB}/i$.
+
+\paragraph{Estimate.}
+At every snapshot the estimate is
+\begin{equation}
+\hat{F}(t) = R_{\text{fresh}}(t) + d(t)\,R_{\text{reused}}(t) + i\,F_{S,\text{outside}}(t),
+\label{eq:windowed}
+\end{equation}
+where $R$ is the resident bytes of the live fresh or reused blocks and $F_{S,\text{outside}}$ is the selected footprint outside every block (stack, globals and shared memory), which only windows see. We first estimated reused blocks from the windows' samples, with an allocation-site model for blocks that no window had yet examined, but that estimate missed every touch made between windows and reached 29\% to 47\% mean error on miniVite at 1\% watched and 8\% to 25\% at 5\%.
+
+\subsection{Evaluation}
+
+We compare windowed runs with a full trace (splitter with frees tracked) of the same input and thread count, at 1 in 100 chunks and about 20 windows per run, without tuning any setting per workload. The inputs are 2mm, gemm and jacobi-2d LARGE (live peaks of 27 to 37\,MB, 28 to 49 billion references) and miniVite with 32768 and 65536 vertices (live peaks of 20 and 36\,MB, 6.6 and 25 billion references). We compare \eqref{eq:windowed} with three baselines: the same estimate without the density ($d=1$), the windows' selected footprint alone ($i\,F_S$), and the live allocated bytes.
+
+\paragraph{PolyBench.}
+Every PolyBench array is allocated by a fresh mmap, so residency alone gives the exact curve, and the windowed estimate is within 0.0\% to 0.2\% mean error and within 0.2\% at the peak at every watched fraction, including none (\figref{fig:curves}, left). The windows' sample alone gives 0.6\% to 8.3\% mean error at 5\% watched and 11\% to 49\% at 1\%, because it misses memory that is written once and then not touched while a window is open. The live allocated bytes give 0.4\% to 4.5\%.
+
+\paragraph{miniVite.}
+The footprint of miniVite grows in reused heap blocks for the whole run, and it allocates far more than it touches, so the live allocated bytes overestimate it, with 67\% to 107\% mean error (\figref{fig:curves}, right). \tabref{tab:windowed} and \figref{fig:fraction} show the windowed estimate. With 65536 vertices and 5\% watched, it reaches 2.5\% and 2.9\% mean error with 1 and 4 threads, and $-3.9\%$ and $-3.6\%$ error of the peak, against 12.1\% and 11.5\% mean error and about $-19\%$ at the peak without the density. At 1\% watched the measured density is only 1.05 to 1.12, so the peak is about 15\% low, and with nothing watched the density stays 1 and memory outside blocks is not seen at all. With 32768 vertices and 4 threads the peak remains 12\% to 17\% low at 5\% to 20\% watched, and we have not yet found the cause (\secref{sec:discussion}). Selecting 1 in 25 chunks instead of 1 in 100 changes the results by less than 2 points.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/windowed_curves.pdf}
+\caption{Live footprint over the run with 5\% of the run watched (20 windows, marked at the top) and 1 in 100 chunks selected. On 2mm LARGE the windowed estimate and the estimate without density coincide with the truth.}
+\label{fig:curves}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/windowed_fraction.pdf}
+\caption{miniVite: windowed estimate error against the fraction of the run watched, with 1 in 100 chunks. Faded lines are the same estimate without the density correction.}
+\label{fig:fraction}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Windowed estimate on miniVite, mean error / error of the peak in percent, 1 in 100 chunks.}
+\label{tab:windowed}
+\begin{tabular}{lcccc}
+\toprule
+Input, threads & Nothing watched & 1\% & 5\% & 20\% \\
+\midrule
+65536, 1 thread & 26.4 / $-24.8$ & 9.1 / $-14.9$ & 2.5 / $-3.9$ & 4.0 / $-1.7$ \\
+65536, 4 threads & 26.5 / $-24.8$ & 8.6 / $-15.1$ & 2.9 / $-3.6$ & 2.1 / $-3.4$ \\
+32768, 4 threads & 31.8 / $-27.7$ & 16.2 / $-21.2$ & 6.2 / $-17.2$ & 5.3 / $-11.9$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Cost.}
+\tabref{tab:cost} and \figref{fig:cost} report runtimes measured one at a time on an otherwise idle machine, one run per configuration. On PolyBench LARGE, windowed sampling at 5\% watched costs 2.4$\times$ to 3.5$\times$ native time, against 20$\times$ to 42$\times$ for full address sampling, and with nothing watched it costs 1.7$\times$ to 2.3$\times$, which is the cost of the per-block counter. On miniVite with 65536 vertices it costs 11.5$\times$ (1 thread) and 13.8$\times$ (4 threads) at 5\% watched, against 25$\times$ and 27$\times$. The floor on miniVite is higher because Pin itself costs 1.8$\times$ (MPI start-up code is translated once) and because miniVite makes 8 million malloc and free calls at 65536 vertices, each hooked and recorded under a lock, and on miniVite with 16384 vertices disabling the allocator hooks saved 7\,s of 22\,s. One timing of miniVite with 4 threads at 20\% watched took 199\,s and a repeat took 100\,s, and we report the repeat. The full traces that provided the truth took 1237 to 1717\,s, but they ran concurrently, so they are not directly comparable.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Runtime in seconds, one run each, 1 in 100 addresses or chunks, about 20 windows.}
+\label{tab:cost}
+\begin{tabular}{lrrrrrrr}
+\toprule
+& & Pin, & Full & \multicolumn{4}{c}{Windowed, fraction watched} \\
+\cmidrule(lr){5-8}
+Workload & Native & no tool & spatial & none & 1\% & 5\% & 20\% \\
+\midrule
+2mm LARGE & 7.5 & 7.7 & 203 & 15.0 & 16.1 & 22.3 & 43.1 \\
+gemm LARGE & 5.0 & 5.4 & 208 & 11.4 & 13.0 & 17.4 & 35.0 \\
+jacobi-2d LARGE & 11.3 & 11.6 & 228 & 18.7 & 20.2 & 27.4 & 53.5 \\
+miniVite 65536, 1 thread & 6.4 & 11.6 & 161 & 46.1 & 63.0 & 73.7 & 88.8 \\
+miniVite 65536, 4 threads & 5.9 & 11.0 & 161 & 57.7 & 73.7 & 81.5 & 99.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.75\linewidth]{figures/cost.pdf}
+\caption{Runtime relative to native against the fraction of the run watched, with full address sampling for comparison (logarithmic scale).}
+\label{fig:cost}
+\end{figure}
+
+\section{Discussion and limitations}
+\label{sec:discussion}
+
+\paragraph{What makes the estimate work.}
+Each component of \eqref{eq:windowed} addresses one failure we observed. Residency records first touches whether or not a window is open, which the windows' sample alone cannot do, and the density corrects the difference between the footprint metric and touched bytes, which residency alone cannot do. The chunk sample makes the density independent of how much of the run the windows covered.
+
+\paragraph{Limitations.}
+A limitation of residency is that it attributes to a reused block every resident page in its range, including pages touched by earlier blocks at the same addresses, which would make the estimate too high for a program that frees and reallocates heap memory heavily. In miniVite the heap grows, and the residency of reused blocks stayed below their touched bytes. A limitation of the density is that one value covers all reused blocks and that it needs a few windows before it leaves 1, which explains the error at 1\% watched. The 12\% to 17\% peak error on miniVite with 32768 vertices and 4 threads is not explained, and since that run is the shortest (20 windows of 16 to 66 million references) and the only input not also run with one thread, the cause may be too few windows or the alignment of multithreaded runs in time. Memory outside blocks is seen only in windows, and the tool does not track mremap outside realloc, brk, or stack frames. Address and chunk selection depend on absolute addresses, which move when the tool binary changes size, so spatial outputs are not byte-identical across tool builds, whereas splitter and sampler outputs are.
+
+\paragraph{Generality of the evaluation.}
+We evaluated two applications, one of which (PolyBench) uses only fresh memory. It remains unclear how the windowed estimate behaves on programs with heavy heap churn, on long-running programs whose footprint changes in phases shorter than a window period, and with many MPI ranks.
+
+\section{Related work}
+\label{sec:related}
+
+Valgrind~\cite{Nethercote2007Valgrind} and its heap profiler Massif~\cite{ValgrindMassif} record allocations at high cost and do not measure which allocated bytes are used. MemGaze~\cite{Xu2020MemGaze} analyzes sampled load-level traces collected with hardware support, and PEBS~\cite{roca_nonell2020pebs} and ARM SPE~\cite{miksits2024arm_memprof} sample memory accesses at low cost, but like the sampler of \memprint{}, they sample references, so they share the reuse bias of \secref{sec:reference}. StatCache-style locality profiling~\cite{Berg2013StatCache} and reuse distance analysis~\cite{Beyls2005ReuseDistance} estimate cache behavior rather than footprint. PinPoints~\cite{patil2005pinpoints} instruments representative regions of a run, and instrumentation sampling for datacenter profiling~\cite{cho2013instrumentation} switches instrumentation on and off over time, as our windows do, but neither reconstructs a footprint that depends on first touches made outside the instrumented regions. Chao1~\cite{chao1984} and iChao1~\cite{chiu2014ichao} estimate the number of unseen species from frequency counts, and our known-rate estimator adapts that idea to a sample whose rate is known exactly.
+
+\section{Next steps}
+\label{sec:next}
+
+We propose the following next steps, in order of priority.
+\begin{enumerate}
+\item \textbf{Explain the miniVite 32768 peak error.} Run that input with one thread and with 40 and 80 windows per run, to separate the effect of too few windows from the effect of aligning multithreaded runs in time.
+\item \textbf{Test programs with heavy heap reuse.} Evaluate a workload that frees and reallocates large heap regions, for example a graph or sparse-matrix code with per-iteration buffers, to measure how much residency overestimates reused blocks. If it does, read the pagemap of a block's range at allocation time and count only pages that become resident afterwards.
+\item \textbf{Measure density per allocation site or size class.} One density for all reused blocks is the main source of error at sparse windows, and the chunk sample already records which block each selected access belongs to.
+\item \textbf{Reduce the floor cost of the allocator hooks.} miniVite spends about a third of its windowed runtime in the hooks. Probe mode instrumentation of the allocator, or a lock-free per-thread log of allocation events merged at snapshots, would lower it.
+\item \textbf{Place windows adaptively.} Open a window when a large block is allocated or when the rate of newly resident pages changes, instead of at a fixed period, so that phases shorter than a period are still observed.
+\item \textbf{Evaluate at scale.} Run windowed sampling on a long application with several MPI ranks, where a full trace is infeasible, and validate the peak against the maximum resident set size reported by the operating system, which is an upper bound at page granularity.
+\item \textbf{Combine with hardware sampling.} PEBS or ARM SPE could replace the per-block counter and the chunk sample at even lower cost, with the known-rate correction of \secref{sec:reference} for their reference bias.
+\item \textbf{Revisit forecasting.} Forecasting the rest of the curve from a prefix by scaling the training curves reached about 10\% to 20\% error of the peak for interpolation and was unreliable for extrapolation. Windowed sampling makes long prefixes cheap, which may make a phase-based forecast practical.
+\end{enumerate}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+Estimating the live footprint over time from sampled memory references fails at sparse rates, because a reference sample cannot separate new memory from reused memory. Sampling addresses instead removes that difficulty and needs no training, and watching addresses only in short windows, while tracking allocations and page residency for the whole run, keeps the estimate within 0.2\% on PolyBench LARGE and within 2.5\% to 2.9\% on miniVite with 65536 vertices at 5\% of the run watched, at 2.4$\times$ to 3.5$\times$ native time on PolyBench and 12$\times$ to 14$\times$ on miniVite.
+
+\bibliographystyle{plain}
+\bibliography{memprint_timeline}
+
+\end{document}
