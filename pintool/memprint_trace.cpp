@@ -158,6 +158,9 @@ KNOB< UINT32 > KnobBufferPages(KNOB_MODE_WRITEONCE, "pintool", "buffer_pages", "
 KNOB< UINT64 > KnobWindow(KNOB_MODE_WRITEONCE, "pintool", "window", "0",
                           "spatial: watch accesses for N memory references of every -period (0: always; implies -track_frees)");
 KNOB< UINT64 > KnobPeriod(KNOB_MODE_WRITEONCE, "pintool", "period", "0", "spatial with -window: window period in memory references");
+KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
+                              "spatial with -window: clear the kernel's soft-dirty page bits every N memory references "
+                              "(default: every 10 snapshots; 0: off, reused blocks are measured by residency)");
 KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
                         "after N memory references, write the outputs and detach (0: run to the end)");
 
@@ -308,6 +311,7 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
     ADDRINT mmapLen = 0; // windowed: anonymous mmap in progress
+    BOOL clearDirty = FALSE; // windowed: clear soft-dirty bits when this system call returns
 };
 ThreadData threads[MAX_THREADS];
 
@@ -334,6 +338,9 @@ struct Block
     ADDRINT size;
     BOOL mapped; // an anonymous mmap (munmap can trim it)
     BOOL fresh;  // its pages were mapped for it, so its resident pages are the ones it touched
+    vector< UINT8 > written; // reused blocks: per page, written since the block was allocated (soft-dirty)
+    UINT64 sampled = 0, covered = 0; // selected footprint in the block and the bytes it covers (last Attribute)
+    BOOL allWritten = FALSE;         // every page of `written` is set, so harvests can skip it
 };
 BOOL windowed = FALSE;
 volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
@@ -346,6 +353,8 @@ std::map< ADDRINT, Block > blocks; // guarded by stateLock
 UINT64 kindSampled[2] = {0, 0}, kindCovered[2] = {0, 0}, otherSampled = 0;
 ofstream windowedFile;
 int pagemapFd = -1;       // /proc/self/pagemap
+int clearRefsFd = -1;     // /proc/self/clear_refs, to clear soft-dirty bits (-dirty_every)
+UINT64 dirtyEvery = 0, nextDirtyClear = 0;
 vector< UINT64 > pageBits; // buffer for pagemap entries
 
 vector< UINT32 > intervals;          // splitter
@@ -585,15 +594,17 @@ static VOID Attribute()
     {
         ADDRINT address;
         UINT32 size;
-        BOOL fresh;
+        Block* block;
         bool operator<(const Access& o) const { return address < o.address; }
     };
     vector< Access > inBlocks;
     otherSampled = 0;
+    for (auto& kv : blocks)
+        kv.second.sampled = kv.second.covered = 0;
     footprint.ForEach([&inBlocks](ADDRINT address, UINT32 size) {
         auto it = blocks.upper_bound(address);
         if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.size)
-            inBlocks.push_back({address, size, std::prev(it)->second.fresh});
+            inBlocks.push_back({address, size, &std::prev(it)->second});
         else
             otherSampled += size;
     });
@@ -603,9 +614,15 @@ static VOID Attribute()
     ADDRINT coveredTo = 0;
     for (const Access& a : inBlocks)
     {
-        kindSampled[a.fresh] += a.size;
+        BOOL fresh = a.block->fresh;
+        kindSampled[fresh] += a.size, a.block->sampled += a.size;
         ADDRINT end = a.address + a.size;
-        if (end > coveredTo) kindCovered[a.fresh] += end - std::max(a.address, coveredTo), coveredTo = end;
+        if (end > coveredTo)
+        {
+            ADDRINT more = end - std::max(a.address, coveredTo);
+            kindCovered[fresh] += more, a.block->covered += more;
+            coveredTo = end;
+        }
     }
 }
 
@@ -616,7 +633,9 @@ ADDRINT cachedFirst = 0;
 static VOID ForgetResidency() { pageBits.clear(); }
 
 // Bytes of [lo, hi) on pages that have been touched (are resident or swapped).
-static UINT64 Resident(ADDRINT lo, ADDRINT hi)
+// With `written`, also marks the pages written since the last soft-dirty clear
+// (pagemap bit 55) and returns in *writtenBytes the bytes on pages marked so far.
+static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, UINT64* writtenBytes = NULL)
 {
     const ADDRINT page = 1 << PAGE_BITS, chunk = 512;
     ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
@@ -629,17 +648,61 @@ static UINT64 Resident(ADDRINT lo, ADDRINT hi)
         if (lseek(pagemapFd, first * sizeof(UINT64), SEEK_SET) >= 0) got = read(pagemapFd, pageBits.data(), want);
         // past the end of the address space the read is short
         pageBits.resize(got > 0 ? got / sizeof(UINT64) : 0);
-        if (last >= cachedFirst + pageBits.size()) return hi - lo;
+        if (last >= cachedFirst + pageBits.size())
+        {
+            if (writtenBytes) *writtenBytes = hi - lo;
+            return hi - lo;
+        }
     }
-    UINT64 bytes = 0;
+    if (written) written->resize(last - first + 1, 0);
+    UINT64 bytes = 0, wbytes = 0;
     for (ADDRINT p = first; p <= last; p++)
     {
-        if (!(pageBits[p - cachedFirst] >> 62)) continue; // bit 63: present, bit 62: swapped
-        ADDRINT a = p << PAGE_BITS;
-        bytes += std::min(hi, a + page) - std::max(lo, a);
+        UINT64 bits = pageBits[p - cachedFirst];
+        ADDRINT a = p << PAGE_BITS, overlap = std::min(hi, a + page) - std::max(lo, a);
+        if (written)
+        {
+            UINT8& w = (*written)[p - first];
+            if ((bits >> 55) & 1) w = 1;
+            if (w) wbytes += overlap;
+        }
+        if (bits >> 62) bytes += overlap; // bit 63: present, bit 62: swapped
     }
+    if (writtenBytes) *writtenBytes = wbytes;
     return bytes;
 }
+
+// Record every reused block's written pages (soft-dirty since the last clear).
+static VOID Harvest()
+{
+    ForgetResidency();
+    for (auto& kv : blocks)
+    {
+        Block& b = kv.second;
+        if (b.fresh || b.allWritten) continue;
+        UINT64 w = 0;
+        Resident(kv.first, kv.first + b.size, &b.written, &w);
+        b.allWritten = w == b.size;
+    }
+    ForgetResidency();
+}
+
+static VOID ClearDirty()
+{
+    if (write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1;
+}
+
+static VOID HarvestAndClear()
+{
+    Harvest();
+    ClearDirty();
+}
+
+// Allocations of at least this size clear the soft-dirty bits when the
+// allocator is entered, so that writes made to the new block's pages by
+// earlier blocks are not counted as its own; smaller blocks share pages with
+// other blocks anyway.
+#define DIRTY_CLEAR_MIN (16 * 1024)
 
 static ADDRINT ForgetAllocation(ADDRINT ptr)
 {
@@ -664,9 +727,24 @@ static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
     if (windowed)
     {
         PIN_GetLock(&stateLock, tid + 1);
-        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
+        if (!finished)
+        {
+            AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
+        }
         PIN_ReleaseLock(&stateLock);
     }
+}
+
+// windowed: realloc in place; FALSE if the block is not tracked (or not windowed)
+static BOOL ResizeBlock(THREADID tid, ADDRINT ptr, ADDRINT size)
+{
+    if (!windowed || size == 0) return FALSE;
+    PIN_GetLock(&stateLock, tid + 1);
+    auto it  = blocks.find(ptr);
+    BOOL got = !finished && it != blocks.end() && !threads[tid].allocFresh;
+    if (got) it->second.size = size, it->second.allWritten = FALSE; // the page bitmap follows at the next scan
+    PIN_ReleaseLock(&stateLock);
+    return got;
 }
 
 static VOID ForgetBlock(THREADID tid, ADDRINT ptr)
@@ -689,6 +767,13 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT size, ADDRINT ptr, ADDR
     if (t.allocDepth++ > 0) return;
     t.allocSp   = sp;
     t.allocFresh = FALSE;
+    // At the entry, before calloc zeroes or realloc copies the new block's memory: see DIRTY_CLEAR_MIN.
+    if (clearRefsFd >= 0 && size >= DIRTY_CLEAR_MIN)
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (!finished && clearRefsFd >= 0) HarvestAndClear();
+        PIN_ReleaseLock(&stateLock);
+    }
     t.allocSize = size;
     t.allocPtr  = ptr;
     t.allocOut  = out;
@@ -741,6 +826,15 @@ static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     }
     if (ret == 0 && size != 0) return; // failed: the old block is untouched
     ADDRINT oldSize = ForgetAllocation(ptr);
+    if (ret == ptr && ResizeBlock(tid, ptr, size))
+    {
+        // in place: the block keeps the pages it has written
+        QueueRelease(tid, ctxt, ptr + size, ptr + oldSize);
+        PIN_GetLock(&allocLock, 1);
+        allocations[ptr] = size;
+        PIN_ReleaseLock(&allocLock);
+        return;
+    }
     ForgetBlock(tid, ptr);
     if (ret == ptr)
         QueueRelease(tid, ctxt, ptr + size, ptr + oldSize);
@@ -827,6 +921,15 @@ VOID SyscallEntry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
     BOOL anonymous = number == SYS_mmap && (PIN_GetSyscallArgument(ctxt, std, 3) & MAP_ANONYMOUS);
     if (windowed && anonymous && t.allocDepth == 0) t.mmapLen = (PIN_GetSyscallArgument(ctxt, std, 1) + 4095) & ~(ADDRINT)4095;
     if (windowed && (anonymous || number == SYS_mremap) && t.allocDepth > 0) t.allocFresh = TRUE;
+    // A region the kernel creates or grows (brk, mmap, mremap) reads as soft-dirty in pagemap
+    // until the next clear, whatever was written: harvest the bits now and clear them on exit.
+    if (clearRefsFd >= 0 && (number == SYS_brk || number == SYS_mmap || number == SYS_mremap))
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (!finished && clearRefsFd >= 0) Harvest();
+        PIN_ReleaseLock(&stateLock);
+        t.clearDirty = TRUE;
+    }
     if (number != SYS_munmap) return;
     ADDRINT lo  = PIN_GetSyscallArgument(ctxt, std, 0);
     ADDRINT len = PIN_GetSyscallArgument(ctxt, std, 1);
@@ -838,6 +941,13 @@ VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
 {
     ThreadData& t = threads[tid];
     ADDRINT ret   = PIN_GetSyscallReturn(ctxt, std);
+    if (t.clearDirty)
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (clearRefsFd >= 0) ClearDirty();
+        PIN_ReleaseLock(&stateLock);
+        t.clearDirty = FALSE;
+    }
     if (t.munmapHi > t.munmapLo && ret == 0)
     {
         QueueRelease(tid, ctxt, t.munmapLo, t.munmapHi);
@@ -975,27 +1085,49 @@ static VOID WriteSnapshot()
 
 static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
-                                     "Window,Period";
+                                     "Window,Period,ReusedWritten";
 
 // windowed: the footprint estimate (see "Windows" at the top)
 static VOID WriteWindowed()
 {
     if (watching) Attribute(); // the selected footprint changes only inside windows
-    UINT64 bytes[2] = {0, 0}, resident[2] = {0, 0}; // reused [0], fresh [1]
-    ForgetResidency();
-    for (const auto& kv : blocks)
-    {
-        bytes[kv.second.fresh] += kv.second.size;
-        resident[kv.second.fresh] += Resident(kv.first, kv.first + kv.second.size);
-    }
     const UINT64 R = KnobSamplingInterval.Value();
-    double density = R * kindCovered[0] >= 65536 ? (double)kindSampled[0] / kindCovered[0] : 1.0;
-    double estimate = resident[1] + density * resident[0] + R * otherSampled;
+    double reusedDensity = R * kindCovered[0] >= 65536 ? (double)kindSampled[0] / kindCovered[0] : 1.0;
+    UINT64 bytes[2] = {0, 0}, resident[2] = {0, 0}, reusedWritten = 0; // reused [0], fresh [1]
+    double blocksEstimate = 0;
+    ForgetResidency();
+    for (auto& kv : blocks)
+    {
+        Block& b = kv.second;
+        bytes[b.fresh] += b.size;
+        UINT64 w = 0;
+        UINT64 r = Resident(kv.first, kv.first + b.size, b.fresh || clearRefsFd < 0 ? NULL : &b.written, &w);
+        resident[b.fresh] += r;
+        if (!b.fresh) reusedWritten += w;
+        // touched bytes x density: the block's own once its sample covers 64 KB / i, else that of all
+        // reused blocks (reused) or 1 (fresh: large arrays, mostly written in whole words)
+        UINT64 touched = b.fresh ? r : clearRefsFd >= 0 ? w : r;
+        double density = R * b.covered >= 65536 ? (double)b.sampled / b.covered : b.fresh ? 1.0 : reusedDensity;
+        blocksEstimate += touched * density;
+    }
+    // Clear the soft-dirty bits every dirtyEvery references (not at every snapshot: after a
+    // clear the kernel write-protects pages, so each page's next write faults once).
+    if (clearRefsFd >= 0 && timeNow >= nextDirtyClear)
+    {
+        if (write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1; // the scan above harvested the bits
+        while (nextDirtyClear <= timeNow)
+            nextDirtyClear += dirtyEvery;
+    }
+    // Reused blocks may sit on pages that earlier blocks touched, so their residency overstates
+    // them; the pages written since they were allocated do not (heap memory is written before it
+    // is read). Without soft-dirty tracking, residency is used.
+    double density  = reusedDensity;
+    double estimate = blocksEstimate + R * otherSampled;
     windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << bytes[0] + bytes[1] << ","
                  << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
                  << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
                  << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
-                 << KnobPeriod.Value() << "\n";
+                 << KnobPeriod.Value() << "," << reusedWritten << "\n";
 }
 
 // windowed: open or close a window when time reaches it
@@ -1328,6 +1460,15 @@ int main(int argc, char* argv[])
             syscall(SYS_prctl, PR_SET_THP_DISABLE, 1, 0, 0, 0); // Pin's CRT has no prctl()
             pagemapFd = open("/proc/self/pagemap", O_RDONLY);
             if (pagemapFd < 0) return Usage("-window needs /proc/self/pagemap");
+            dirtyEvery = KnobDirtyEvery.Value().empty() ? 10 * KnobSnapshot.Value()
+                                                         : strtoull(KnobDirtyEvery.Value().c_str(), NULL, 10);
+            if (dirtyEvery)
+            {
+                clearRefsFd = open("/proc/self/clear_refs", O_WRONLY);
+                // start from a clean state: pages written before the program started are not its blocks'
+                if (clearRefsFd >= 0 && write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1;
+                nextDirtyClear = dirtyEvery;
+            }
             nextToggle = KnobWindow.Value();
             // Threads advance time every checkStep references: well inside a window, the gap
             // between windows and a snapshot, but not so often that the lock costs (a window

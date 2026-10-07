@@ -18,6 +18,7 @@ cc -O1 -pthread -o "$WORK/threads" "$HERE/threads.c"
 cc -O1 -o "$WORK/small_blocks" "$HERE/small_blocks.c"
 cc -O1 -o "$WORK/reuse" "$HERE/reuse.c"
 cc -O1 -pthread -o "$WORK/parallel" "$HERE/parallel.c"
+cc -O1 -o "$WORK/churn" "$HERE/churn.c"
 
 failed=0
 # run <test name> <program> <pin knobs> -- <check.py arguments>
@@ -66,6 +67,15 @@ for spec in "free 2" "reuse 4" "threads 2" "parallel 12"; do
     python3 "$HERE/check.py" "$WORK/out/windowed-$program"/*_windowed.csv --windowed --peak "$peak" \
         --tolerance "$(awk -v p="$peak" 'BEGIN { print 0.05 * p + 0.1 }')" --slack 0.6 --final-max 0.6 || failed=1
 done
+
+# windowed, heap reuse: blocks inherit resident pages from freed ones but touch only a quarter of
+# them; the estimate must follow the pages written since each block was allocated (true peak
+# 1.22 MB; residency alone gives about 4.5 MB; whole pages add up to 4 KB per block)
+echo "  churn"
+"$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 1000000 -window 1000000 -period 20000000 \
+    -outdir "$WORK/out/windowed-churn" -name windowed-churn -- "$WORK/churn" 0.25 > /dev/null 2>&1 || failed=1
+python3 "$HERE/check.py" "$WORK/out/windowed-churn"/*_windowed.csv --windowed --peak 1.22 --tolerance 0.1 --slack 0.55 \
+    --final-max 0.6 || failed=1
 
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"
