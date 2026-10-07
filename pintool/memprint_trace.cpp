@@ -158,6 +158,9 @@ KNOB< UINT32 > KnobBufferPages(KNOB_MODE_WRITEONCE, "pintool", "buffer_pages", "
 KNOB< UINT64 > KnobWindow(KNOB_MODE_WRITEONCE, "pintool", "window", "0",
                           "spatial: watch accesses for N memory references of every -period (0: always; implies -track_frees)");
 KNOB< UINT64 > KnobPeriod(KNOB_MODE_WRITEONCE, "pintool", "period", "0", "spatial with -window: window period in memory references");
+KNOB< UINT64 > KnobWindowAlloc(KNOB_MODE_WRITEONCE, "pintool", "window_alloc", "1048576",
+                               "spatial with -window: an allocation of at least N bytes opens a window, at most one "
+                               "per period on top of the periodic ones (0: off)");
 KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
                               "spatial with -window: clear the kernel's soft-dirty page bits every N memory references "
                               "(default: every 10 snapshots; 0: off, reused blocks are measured by residency)");
@@ -308,6 +311,7 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     UINT32 allocDepth = 0;
     ADDRINT allocSp = 0; // stack pointer at the outermost call
     ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0;
+    BOOL allocMallocLike = FALSE; // the outermost call returns its block (malloc, calloc, memalign, ...)
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
     ADDRINT mmapLen = 0; // windowed: anonymous mmap in progress
@@ -345,7 +349,11 @@ struct Block
 BOOL windowed = FALSE;
 volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
 BOOL flushPending = FALSE;     // instrumentation must be redone for a window change
-UINT64 windowStart = 0, nextToggle = 0, windowsDone = 0, checkStep = 0;
+UINT64 windowStart = 0, windowEnd = 0, nextPeriodic = 0, windowsDone = 0, checkStep = 0;
+// Windows opened by large allocations (-window_alloc): how many, when the last one ended, and
+// whether the current window is one; references watched in closed windows.
+UINT64 triggeredWindows = 0, lastTriggeredEnd = 0, watchedRefs = 0;
+BOOL triggeredWindow = FALSE;
 volatile UINT32 epoch = 0; // windowed: number of window changes
 std::map< ADDRINT, Block > blocks; // guarded by stateLock
 // Selected footprint and the bytes its accesses cover, in reused [0] and fresh
@@ -558,10 +566,23 @@ static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
 
 /* Windows: live blocks (called with stateLock held) ---------------------- */
 
+static VOID MaybeTriggerWindow(ADDRINT size);
+
 static VOID AddBlock(ADDRINT ptr, ADDRINT size, BOOL mapped, BOOL fresh)
 {
     if (ptr == 0 || size == 0) return;
     blocks[ptr] = {size, mapped, fresh};
+    MaybeTriggerWindow(size);
+}
+
+// After releasing stateLock: re-instrument if a window opened or closed.
+static VOID ApplyWindowChange()
+{
+    PIN_GetLock(&stateLock, 1);
+    BOOL flush   = flushPending;
+    flushPending = FALSE;
+    PIN_ReleaseLock(&stateLock);
+    if (flush) PIN_RemoveInstrumentation();
 }
 
 static VOID DropBlock(ADDRINT ptr) { blocks.erase(ptr); }
@@ -727,11 +748,9 @@ static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
     if (windowed)
     {
         PIN_GetLock(&stateLock, tid + 1);
-        if (!finished)
-        {
-            AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
-        }
+        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
         PIN_ReleaseLock(&stateLock);
+        ApplyWindowChange();
     }
 }
 
@@ -757,16 +776,36 @@ static VOID ForgetBlock(THREADID tid, ADDRINT ptr)
 
 // Entry analysis: only the outermost allocator call of a thread is tracked,
 // so allocator functions calling each other are not counted twice. A nested
-// call has a lower stack pointer than the outermost one; an entry at the same
-// or a higher one is a new outermost call (the previous one jumped back to
-// its entry, or returned without its exit being seen).
-static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT size, ADDRINT ptr, ADDRINT out)
+// call is made from inside one of the instrumented allocation functions and
+// runs with a lower stack pointer than the outermost call. Any other entry
+// starts a new outermost call: the previous one left without its exit being
+// seen. glibc's calloc does that the first time the allocator is used: it
+// calls malloc through an initialization function and then jumps to memset
+// instead of returning. So when a call nested in a malloc-like call (malloc,
+// calloc, memalign, ...) returns a block, the block is recorded at once with
+// the outer call's size; if the outer call's exit is seen, it records the same
+// block again, which changes nothing.
+struct CodeRange
+{
+    ADDRINT lo, hi;
+};
+vector< CodeRange > allocatorCode; // instrumented allocation functions (reserved, never reallocated)
+
+static BOOL InAllocator(ADDRINT pc)
+{
+    for (const CodeRange& r : allocatorCode)
+        if (pc >= r.lo && pc < r.hi) return TRUE;
+    return FALSE;
+}
+
+static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike, ADDRINT size, ADDRINT ptr, ADDRINT out)
 {
     ThreadData& t = threads[tid];
-    if (t.allocDepth > 0 && sp >= t.allocSp) t.allocDepth = 0;
+    if (t.allocDepth > 0 && (sp >= t.allocSp || !InAllocator(caller))) t.allocDepth = 0;
     if (t.allocDepth++ > 0) return;
-    t.allocSp   = sp;
-    t.allocFresh = FALSE;
+    t.allocSp         = sp;
+    t.allocMallocLike = mallocLike;
+    t.allocFresh      = FALSE;
     // At the entry, before calloc zeroes or realloc copies the new block's memory: see DIRTY_CLEAR_MIN.
     if (clearRefsFd >= 0 && size >= DIRTY_CLEAR_MIN)
     {
@@ -789,11 +828,18 @@ static BOOL AllocLeave(THREADID tid)
 // malloc(size), memalign(align, size), aligned_alloc(align, size), valloc(size)
 static VOID MallocExit(THREADID tid, ADDRINT ret)
 {
-    if (AllocLeave(tid)) RememberAllocation(tid, ret, threads[tid].allocSize);
+    ThreadData& t = threads[tid];
+    if (AllocLeave(tid))
+        RememberAllocation(tid, ret, t.allocSize);
+    else if (t.allocDepth > 0 && t.allocMallocLike && ret)
+        RememberAllocation(tid, ret, t.allocSize); // in case the outermost call's exit is not seen
 }
 
 // calloc(n, size)
-static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT n, ADDRINT size) { AllocEnter(tid, sp, n * size, 0, 0); }
+static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike, ADDRINT n, ADDRINT size)
+{
+    AllocEnter(tid, sp, caller, mallocLike, n * size, 0, 0);
+}
 
 // posix_memalign(&out, align, size)
 static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
@@ -852,8 +898,10 @@ static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLI
     if (!RTN_Valid(rtn) || SEC_Name(RTN_Sec(rtn)).find(".plt") == 0) return;
     if (!instrumented.insert(RTN_Address(rtn)).second) return;
     RTN_Open(rtn);
-    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_IARGLIST, enterArgs,
-                   IARG_END);
+    // read by analysis routines of other threads: reserved in main, so pushing never moves it
+    if (allocatorCode.size() < allocatorCode.capacity()) allocatorCode.push_back({RTN_Address(rtn), RTN_Address(rtn) + RTN_Size(rtn)});
+    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP, IARG_BOOL,
+                   exit == AFUNPTR(MallocExit), IARG_IARGLIST, enterArgs, IARG_END);
     RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
     RTN_Close(rtn);
 }
@@ -963,6 +1011,7 @@ VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
         PIN_GetLock(&stateLock, tid + 1);
         if (!finished) AddBlock(ret, t.mmapLen, TRUE, TRUE);
         PIN_ReleaseLock(&stateLock);
+        ApplyWindowChange();
     }
     t.munmapLo = t.munmapHi = t.mmapLen = 0;
 }
@@ -1085,7 +1134,7 @@ static VOID WriteSnapshot()
 
 static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
-                                     "Window,Period,ReusedWritten";
+                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs";
 
 // windowed: the footprint estimate (see "Windows" at the top)
 static VOID WriteWindowed()
@@ -1127,30 +1176,67 @@ static VOID WriteWindowed()
                  << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
                  << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
                  << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
-                 << KnobPeriod.Value() << "," << reusedWritten << "\n";
+                 << KnobPeriod.Value() << "," << reusedWritten << "," << triggeredWindows << ","
+                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "\n";
 }
 
-// windowed: open or close a window when time reaches it
+// windowed: windows are periodic (one of -window references at every multiple of -period)
+// or triggered by a large allocation (-window_alloc). Opening or closing one changes the
+// instrumentation, which the caller applies after releasing stateLock (flushPending).
+static VOID OpenWindow(UINT64 start, BOOL triggered)
+{
+    watching        = TRUE;
+    triggeredWindow = triggered;
+    windowStart     = start;
+    windowEnd       = start + KnobWindow.Value();
+    flushPending    = TRUE;
+    epoch++;
+}
+
+static VOID CloseWindow()
+{
+    Attribute();
+    windowsDone++;
+    watchedRefs += windowEnd - windowStart;
+    if (triggeredWindow) lastTriggeredEnd = windowEnd;
+    watching     = FALSE;
+    flushPending = TRUE;
+    epoch++;
+}
+
+// windowed: open or close windows when time reaches them
 static VOID AdvanceWindows()
 {
-    while (timeNow >= nextToggle)
+    for (;;)
     {
-        if (watching)
+        if (watching && nextPeriodic <= timeNow)
         {
-            Attribute();
-            windowsDone++;
-            watching   = FALSE;
-            nextToggle = windowStart + KnobPeriod.Value();
+            // a periodic window that starts inside an open (triggered) window extends it
+            windowEnd = std::max(windowEnd, nextPeriodic + KnobWindow.Value());
+            nextPeriodic += KnobPeriod.Value();
+        }
+        else if (watching && timeNow >= windowEnd)
+            CloseWindow();
+        else if (!watching && timeNow >= nextPeriodic)
+        {
+            OpenWindow(nextPeriodic, FALSE);
+            nextPeriodic += KnobPeriod.Value();
         }
         else
-        {
-            watching    = TRUE;
-            windowStart = nextToggle;
-            nextToggle  = windowStart + KnobWindow.Value();
-        }
-        flushPending = TRUE;
-        epoch++;
+            break;
     }
+}
+
+// windowed: a block of `size` bytes was allocated. A large allocation is usually followed by
+// the program filling the block, so a window opened now measures the block's density. At most
+// one such window per period, so at most twice the periodic watched fraction is watched.
+static VOID MaybeTriggerWindow(ADDRINT size)
+{
+    UINT64 threshold = KnobWindowAlloc.Value();
+    if (!threshold || size < threshold || watching) return;
+    if (triggeredWindows && timeNow < lastTriggeredEnd + KnobPeriod.Value()) return;
+    OpenWindow(timeNow, TRUE);
+    triggeredWindows++;
 }
 
 static VOID WriteOutputs();
@@ -1469,7 +1555,9 @@ int main(int argc, char* argv[])
                 if (clearRefsFd >= 0 && write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1;
                 nextDirtyClear = dirtyEvery;
             }
-            nextToggle = KnobWindow.Value();
+            // the first periodic window opens at time 0
+            nextPeriodic = KnobPeriod.Value();
+            windowEnd    = KnobWindow.Value();
             // Threads advance time every checkStep references: well inside a window, the gap
             // between windows and a snapshot, but not so often that the lock costs (a window
             // shorter than 8 x 10^4 references lasts longer than asked).
@@ -1484,6 +1572,7 @@ int main(int argc, char* argv[])
         return Usage("unknown -mode " + KnobMode.Value());
     binObservations.assign(bins.size(), 0);
 
+    allocatorCode.reserve(64);
     PIN_InitLock(&stateLock);
     PIN_InitLock(&allocLock);
     if (KnobTrackFrees.Value() || windowed)

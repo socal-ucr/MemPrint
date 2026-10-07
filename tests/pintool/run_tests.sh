@@ -19,6 +19,7 @@ cc -O1 -o "$WORK/small_blocks" "$HERE/small_blocks.c"
 cc -O1 -o "$WORK/reuse" "$HERE/reuse.c"
 cc -O1 -pthread -o "$WORK/parallel" "$HERE/parallel.c"
 cc -O1 -o "$WORK/churn" "$HERE/churn.c"
+cc -O1 -o "$WORK/first_calloc" "$HERE/first_calloc.c"
 
 failed=0
 # run <test name> <program> <pin knobs> -- <check.py arguments>
@@ -40,6 +41,7 @@ run realloc realloc -track_frees 1 -- --peak 4 --freed 4.0625
 run calloc-new calloc_new -track_frees 1 -- --peak 1.5 --freed 1.5 --slack 0.75  # libstdc++ keeps its own pools
 run mmap mmap -track_frees 1 -- --peak 4 --freed 4
 run threads threads -track_frees 1 -- --peak 2 --freed 2
+run first-calloc first_calloc -track_frees 1 -- --peak 4 --freed 6 --slack 0.6
 run small-blocks small_blocks -track_frees 1 -- --peak 0.125 --freed 2
 run parallel parallel -track_frees 1 -- --peak 12 --freed 12 --slack 1
 # Chao1 is checked before the final free (footprint 0 at exit), so run without -track_frees
@@ -76,6 +78,17 @@ echo "  churn"
     -outdir "$WORK/out/windowed-churn" -name windowed-churn -- "$WORK/churn" 0.25 > /dev/null 2>&1 || failed=1
 python3 "$HERE/check.py" "$WORK/out/windowed-churn"/*_windowed.csv --windowed --peak 1.22 --tolerance 0.1 --slack 0.55 \
     --final-max 0.6 || failed=1
+
+# windowed: the first allocation is a calloc whose exit is not seen; its 4 MB block must be tracked
+echo "  first-calloc"
+"$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 5000 -window 20000 -period 200000 \
+    -outdir "$WORK/out/windowed-first-calloc" -name windowed-first-calloc -- "$WORK/first_calloc" > /dev/null 2>&1 || failed=1
+allocated=$(awk -F, 'NR > 1 && $4 > m { m = $4 } END { print m + 0 }' "$WORK"/out/windowed-first-calloc/*_windowed.csv)
+if [[ $allocated -ge 4194304 ]]; then
+    echo "    ok   largest allocated $allocated bytes >= 4 MB"
+else
+    echo "    FAIL largest allocated $allocated bytes < 4 MB"; failed=1
+fi
 
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"
