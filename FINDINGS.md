@@ -112,7 +112,7 @@ Results with 1-in-100 chunks, about 20 periodic windows, mean error / peak error
 | miniVite 32768, 1 thread, 1% | 14.4 / −14.1 | 17.3 / −16.7 | 1.3% |
 | miniVite 32768, 4 threads, 1% | 17.1 / −15.2 | 15.5 / −16.2 | 1.3% |
 
-- miniVite makes 5–7 allocations of 1 MB or more that open windows.
+- Allocations of 1 MB or more opened 5–7 windows on miniVite (at most one per period).
 - The mean error drops by 2–7 points, and the 32768 peak improves from −9% to −6%, but the 65536 peak gets worse (−2% to −5.5%). A likely cause, not yet checked: a block's density is then dominated by the window at its allocation, where the block is filled with aligned writes, rather than by its later, overlapping accesses.
 - PolyBench (arrays allocated inside the first window) and the churn test (blocks under 1 MB) open no extra windows, and their results are unchanged.
 
