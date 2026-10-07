@@ -1,10 +1,118 @@
-# Findings: footprint over time (branch `timeline-chao`)
+# Findings: footprint over time
 
 Summary: sampling *addresses* instead of references (`-mode spatial`) estimates the live footprint over time within about 1–10% at 1-in-25 to 1-in-250 addresses on PolyBench, and within 0.2–6% on miniVite with 1, 4 or 16 threads. It needs no training and runs at about the cost of instrumentation alone (miniVite 8192: ~30 s vs ~180 s for a full trace). Everything after "Data" documents the reference-sampling route that led there.
 
 Goal: reconstruct a program's live memory footprint over time from a sparse Pin trace. The data is the timelines written with `-snapshot`/`-track_frees` (see README).
 
 On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This branch adds per-address sample counts to the Pin tool and tries estimators of the memory that was never sampled.
+
+## Windowed sampling: watching part of a run (branch `windowed`)
+
+Summary: for long runs, the Pin tool can watch memory accesses for a small fraction of the run, as long as it tracks allocations and page residency the whole time. On PolyBench LARGE this reconstructs the live footprint over time within 0.2% at any watched fraction. On miniVite 65536 it is within about 3% on average and 2–4% at the peak, watching 5–20% of the run. At 5% watched that costs 2.4–3.5× native on PolyBench, against 20–42× for full spatial sampling, and 12–14× on miniVite, against 25–27×.
+
+### Why
+
+Spatial sampling still checks every memory access, even when it records only 1 in 100 addresses. On 2mm LARGE that alone takes 203 s against 7.5 s native, and Pin itself costs almost nothing (7.7 s). For long real workloads that overhead is the obstacle, not the sampling rate.
+
+### Method
+
+`-mode spatial -window W -period P` watches accesses for W of every P memory references.
+
+**Between windows,** only two things run:
+- a reference counter, one inlined add per basic block, which keeps time;
+- the allocator hooks.
+
+**Live allocations are tracked all the time.** These are heap blocks (the malloc family) and anonymous mmaps. Frees remove them.
+
+**At every snapshot (`-snapshot N`), the estimate is:**
+
+    touched bytes of fresh blocks
+    + touched bytes of reused blocks × density
+    + windows' selected footprint outside blocks × i
+
+- **Touched bytes:** the bytes of a block on resident pages, read from `/proc/self/pagemap`. A page becomes resident when it is first read or written, so residency records first touches whether or not a window is open.
+- **Fresh blocks** got pages mapped for them: an anonymous mmap, or a malloc that made a new mmap. Their pages start untouched, so residency is exact to the page.
+- **Reused blocks** sit on heap pages that may have been used before.
+- **Huge pages:** the tool disables transparent huge pages for the traced process (`prctl(PR_SET_THP_DISABLE)`). Without that, a single touch makes a whole 2 MB region resident.
+- **Density:** the footprint counts the largest access at every start address, so overlapping accesses (unaligned copies, mixed widths) count more than the bytes they touch. Density is footprint ÷ covered bytes in reused blocks. In miniVite's heap it is about 1.45 for most of the run and about 1.1 at the end.
+  - Windows select 1-in-i 64-byte chunks instead of single addresses. They therefore see every access in a selected chunk, and can measure footprint and covered bytes on the same memory.
+  - The ratio doesn't depend on how much of the run the windows covered.
+- **Memory outside blocks** (stack, globals, MPI shared memory) is seen only in windows.
+
+**Output:** each snapshot is a row of `<prefix>_windowed.csv` with every component. `analysis -m memprint timeline windowed` scores the runs against the splitter's truth.
+
+### Accuracy
+
+Ground truth comes from full traces (splitter with `-track_frees`) of the same input and thread count. Each windowed run is scored on its whole timeline, with time as a fraction of the run. Settings: 1-in-100 chunks, about 20 windows per run, nothing tuned per workload.
+
+**PolyBench LARGE** (2mm, gemm, jacobi-2d; 25–37 MB, 12–34 billion references):
+- Mean error is 0.0–0.2% and peak error within 0.2%, at every watched fraction including none.
+- Every array is fresh, so residency alone gives the exact curve.
+- Baselines:
+  - live allocated bytes: 0.4–4.5% mean error;
+  - the windows' selected footprint alone at 5% watched: 0.6–8.3%;
+  - the same at 1% watched: 11–49%.
+
+**miniVite** (Louvain on random geometric graphs; its footprint grows in reused heap blocks). Each cell is mean error / peak error, %:
+
+| Input, threads | Nothing watched | 1% | 5% | 20% | 5%, 1-in-25 |
+|---|---|---|---|---|---|
+| 65536, 1 thread | 26.4 / −24.8 | 9.1 / −14.9 | 2.5 / −3.9 | 4.0 / −1.7 | 3.5 / −2.8 |
+| 65536, 4 threads | 26.5 / −24.8 | 8.6 / −15.1 | 2.9 / −3.6 | 2.1 / −3.4 | 3.3 / −2.6 |
+| 32768, 4 threads | 31.8 / −27.7 | 16.2 / −21.2 | 6.2 / −17.2 | 5.3 / −11.9 | 4.3 / −16.5 |
+
+Baselines at 5% watched (65536, 1 thread):
+- residency without the density correction: 12.1 / −19.5;
+- the windows' selected footprint alone: 45.9 / −46.6;
+- live allocated bytes: 67.4 / +44.2. miniVite reserves much more than it touches.
+
+- **Residency is necessary.** Windows alone see only accesses that happen inside a window. They miss memory that is touched once and then left alone.
+- **Density is necessary.** Without it, miniVite's peak is about 20% low at every watched fraction.
+- **Watched fraction.** 5% is enough on miniVite 65536.
+  - At 1% the density measured mid-run is 1.05–1.12, against about 1.45 at 5% and 20%.
+  - With nothing watched, density falls back to 1 and memory outside blocks isn't seen at all.
+- **miniVite 32768 at 4 threads** stays 12–17% low at the peak. It is the shortest run (6.6 billion references, 20 windows of 16–66 million references). I haven't found the cause; the same input with 1 thread was not run.
+- **Threads.** 1 and 4 threads agree on 65536.
+
+### Cost
+
+Seconds, quiet machine, one run each, 1-in-100, about 20 windows:
+
+| Workload | Native | Pin, no tool | Full spatial | Nothing watched | 1% | 5% | 20% |
+|---|---|---|---|---|---|---|---|
+| 2mm LARGE | 7.5 | 7.7 | 203 | 15.0 | 16.1 | 22.3 | 43.1 |
+| gemm LARGE | 5.0 | 5.4 | 208 | 11.4 | 13.0 | 17.4 | 35.0 |
+| jacobi-2d LARGE | 11.3 | 11.6 | 228 | 18.7 | 20.2 | 27.4 | 53.5 |
+| miniVite 65536, 1 thread | 6.4 | 11.6 | 161 | 46.1 | 63.0 | 73.7 | 88.8 |
+| miniVite 65536, 4 threads | 5.9 | 11.0 | 161 | 57.7 | 73.7 | 81.9 | 99.9 |
+
+- **Full traces** for the truth took 1237–1717 s. Those ran concurrently, so they are not comparable to this table.
+- **One outlier:** a first timing of miniVite 4 threads at 20% took 199 s; a rerun took 100 s.
+- **PolyBench:** with nothing watched, the cost is the per-block reference counter, about 2× native. Each further 1% watched adds about 1% of the full spatial cost.
+- **miniVite** has a higher floor. It makes 8 million malloc/free calls at 65536, each hooked and recorded under a lock. On miniVite 16384, turning the allocator hooks off saved about 7 s of 22.
+
+### Implementation notes
+
+- **Switching windows.** `PIN_RemoveInstrumentation` doesn't change code that is running: a loop keeps jumping back into its old translation. In 2mm, a window that had "closed" kept sampling for the rest of the loop nest.
+  - Each thread therefore checks the window state every few thousand references. If it changed, the thread restarts at its current instruction (`PIN_ExecuteAt`) in freshly instrumented code.
+  - Accesses recorded by stale code after a window closes are dropped.
+- **Reference counting.** Counting per basic block matches the splitter's per-access count to within 0.0001% on miniVite (1.78 billion references). A REP string instruction counts once, not once per iteration.
+- **Footprint per block** comes from the chunk sample, sorted, as the union of the selected accesses' byte ranges.
+
+### Limitations
+
+- **Pages touched before allocation.** Residency assumes a reused block's resident pages were touched by that block. A program that frees and reallocates heap memory heavily could make the estimate too high. In miniVite the heap grows, and residency stayed below the touched bytes.
+- **Density** is one number for all reused blocks, and it needs a few windows' worth of chunks (64 KB covered) before it moves off 1.
+- **Not tracked:** `mremap` outside realloc, `brk`, and stack frames. Memory outside blocks is estimated from windows only.
+- **Selection is by absolute address,** so spatial and windowed outputs change between tool builds (the app's mmap addresses move). Splitter and sampler outputs stay byte-identical.
+
+### Reproduce
+
+    scripts/run.sh polybench --bench 2mm --configs LARGE --mode spatial -i 100 -s 20 --runs 1 \
+        --snapshot 7000000 --window 85000000 --period 1700000000      # 5% watched, ~20 windows
+    scripts/run.sh polybench --bench 2mm --configs LARGE --mode splitter --runs 1 \
+        --intervals 1000 --bins 1 --snapshot 7000000 --track-frees     # truth
+    python -m memprint timeline windowed 2mm                           # from analysis/
 
 ## Headline: spatial (address) sampling
 
