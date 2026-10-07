@@ -1,6 +1,6 @@
 # Findings: footprint over time (branch `timeline-chao`)
 
-Summary: sampling *addresses* instead of references (`-mode spatial`) estimates the live footprint over time within 1–5% at 1-in-100 to 1-in-250 addresses, with no training, at near the instrumentation-only cost. Everything after "Data" documents the reference-sampling route that led there.
+Summary: sampling *addresses* instead of references (`-mode spatial`) estimates the live footprint over time within about 1–10% at 1-in-25 to 1-in-250 addresses on PolyBench, and within 0.2–6% on miniVite with 1, 4 or 16 threads. It needs no training and runs at about the cost of instrumentation alone (miniVite 8192: ~30 s vs ~180 s for a full trace). Everything after "Data" documents the reference-sampling route that led there.
 
 Goal: reconstruct a program's live memory footprint over time from a sparse Pin trace. The data is the timelines written with `-snapshot`/`-track_frees` (see README).
 
@@ -12,28 +12,63 @@ On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This b
 
 This removes the core difficulty of all the reference-sampling estimators below. With reference sampling, an address accessed r times is seen with probability 1 − (1 − p)^r, and r is unknown and grows with input size.
 
+Selected accesses are rare, so they are recorded immediately, under a lock, as they happen; frees are applied as they happen too. The order across threads is therefore exact, and time is the true count of references executed.
+
+### PolyBench
+
 Held-out runs (largest and middle size of 2mm, gemm, jacobi-2d, atax; truth from the splitter); mean absolute error, extrapolation / interpolation, %:
 
 | Method | MAPE | Error of peak | Error at peak | Runtime, MEDIUM (2mm / gemm / jacobi-2d) |
 |---|---|---|---|---|
-| Spatial 1/25 addresses | 0.8 / 3.1 | 0.7 / 3.0 | 0.7 / 3.0 | 4.1 / 3.7 / 3.9 s |
-| Spatial 1/100 | 2.6 / 3.8 | 2.5 / 3.3 | 2.5 / 15.0 | 3.7 / 3.4 / 3.4 s |
-| Spatial 1/250 | 5.1 / 10.3 | 5.2 / 7.4 | 5.2 / 15.5 | 3.7 / 3.4 / 3.3 s |
-| Spatial 1/1000 | 3.8 / 28.1 | 3.2 / 13.3 | 3.4 / 13.6 | 3.6 / 3.4 / 3.2 s |
+| Spatial 1/25 addresses | 0.9 / 3.4 | 0.8 / 3.4 | 0.8 / 3.4 | 6.0 / 3.9 / 4.2 s |
+| Spatial 1/100 | 2.3 / 4.2 | 2.3 / 3.9 | 2.3 / 4.0 | 3.7 / 3.3 / 3.4 s |
+| Spatial 1/250 | 2.3 / 9.9 | 2.4 / 9.4 | 2.3 / 9.6 | 3.5 / 3.4 / 3.3 s |
+| Spatial 1/1000 | 6.7 / 17.5 | 6.6 / 14.9 | 6.6 / 27.2 | 3.3 / 3.2 / 3.1 s |
 | Best reference-sampling hybrid, `-i 25` | 24.3 / 8.7 | 21.0 / 12.2 | 38.3 / 24.0 | 7.6 / 6.5 / 8.2 s |
 | Best reference-sampling hybrid, `-i 3` | 4.8 / 4.2 | 6.2 / 6.4 | 9.1 / 9.4 | ~25 / 20 / 32 s |
 | Splitter (full trace) | — | — | — | 41.3 / 31.8 / 47.9 s |
 
 - **Accuracy follows the binomial prediction,** relative error ≈ 1/√(addresses / R).
-  - The largest sizes (1–1.6 MB, about 130–200k addresses) stay within 1–5% down to 1/1000.
+  - The largest sizes (1–1.6 MB, about 130–200k addresses) stay within 1–7% down to 1/1000.
   - The middle sizes (about 0.22 MB, about 28k addresses) need 1/100 or denser. At 1/1000 only about 28 addresses are selected.
   - The error is largest early in a run, when the footprint is still tiny.
-- **The bucket error bar is honest at dense rates.** The truth lies within ±2 standard errors in 100% of snapshots at 1/25 and 87–92% at sparser rates (nominal 95%; a 20-bucket standard error is itself noisy).
-- **Cost:** cheaper than reference sampling at the same rate, and close to the instrumentation-only floor. Only selected addresses are analysed, and the hash check is inlined.
-- **Time:** every reference is counted in the inlined check, so run lengths are exact. A recorded access is timed by interpolating between buffer flushes, using a 1-page buffer of about 170 records, so the time resolution is about 170 × R references.
-  - The first version used 16 pages. Over atax SMALL's growth phase that misplaced accesses in time, giving 19–34% MAPE instead of 2–6%.
-  - At 1/1000 on runs of under a million references the timing is still coarse (visible in atax SMALL).
-- **Caveats:** small structures are sampled at R too, so a single small buffer is either missed or over-weighted, and there is no per-object breakdown at sparse rates. Hashing start addresses mirrors the paper's footprint definition (largest access size per start address).
+- **The bucket error bar is honest at dense rates.** The truth lies within ±2 standard errors in 100% of snapshots at 1/25 and 1/100, 88% at 1/250 and 77% at 1/1000 (nominal 95%; a 20-bucket standard error is itself noisy).
+
+### miniVite and multithreading
+
+miniVite was rebuilt against spack's OpenMPI 5.0.5, the MPI behind the paper's runs, and run with `OMP_WAIT_POLICY=passive`.
+- **Footprint:** a full trace of 1024 vertices gives 6.8–7.0 MB cumulative footprint, matching the paper's 6.84 MB. With the system OpenMPI it was ~175 MB, mostly MPI start-up memory.
+- **References:** 44 million instead of the paper-era 1.76 billion. About 97% of those were OpenMP threads spinning while they waited.
+
+Every spatial run is compared with the full trace of the same size and the same thread count, with no training. The live peak with `-track_frees` is 4.9, 6.2 and 7.9 MB at 1024, 4096 and 8192 vertices, the same at every thread count.
+
+| Threads | Spatial 1/25 | 1/100 | 1/250 | 1/1000 |
+|---|---|---|---|---|
+| 1 | 0.2–0.9% | 0.4–1.0% | 2.0–3.3% | 1.9–4.1% |
+| 4 | 0.2–1.3% | 1.0–1.6% | 1.2–4.9% | 1.3–6.0% |
+| 16 | 0.4–0.8% | 0.6–2.0% | 1.3–2.3% | 1.5–6.1% |
+
+(MAPE range over the three sizes.)
+
+- **Peaks and error bars hold under threads.** Error of peak is ≤ 2.8% in every case. The truth lies within ±2 standard errors in 94–100% of snapshots, and run lengths match the full trace exactly.
+- **Cost, 8192 vertices:**
+
+  | Threads | Native | Splitter | Spatial (1/25 … 1/1000) |
+  |---|---|---|---|
+  | 1 | 0.24 s | 168 s | 28–32 s |
+  | 4 | 0.20 s | 198 s | 28–41 s |
+  | 16 | 0.28 s | 176 s | 26–38 s |
+
+  The per-access lock is not a bottleneck at these rates.
+- **Multithreading bugs found and fixed.** `tests/pintool/parallel.c` has 8 threads with 12 MB live at a barrier.
+  - Buffered modes kept each thread's accesses in its own trace buffer, so a free in one thread could be applied before another thread's earlier accesses: the full-trace peak came out at 9.8–10.8 MB.
+  - With `-snapshot`/`-track_frees` the buffer is now 16 pages, giving 12.08 MB on every run; default outputs are unchanged.
+  - A first spatial fix held frees back with vector clocks. It was correct, but on miniVite, which frees constantly while MPI helper threads rarely flush, it took 7474 s. Recording spatial accesses immediately replaced it: 12 runs give 12.03–12.27 MB, with 28–40 s on miniVite.
+
+### Caveats
+
+- Small structures are sampled at R too, so a single small buffer is either missed or over-weighted, and there is no per-object breakdown at sparse rates.
+- Hashing start addresses mirrors the paper's footprint definition (largest access size per start address).
 
 ## Data
 
