@@ -8,7 +8,7 @@ On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This b
 
 ## Windowed sampling: watching part of a run (branch `windowed`)
 
-Summary: for long runs, the Pin tool can watch memory accesses for a small fraction of the run, as long as it tracks allocations and page residency the whole time. On PolyBench LARGE this reconstructs the live footprint over time within 0.2% at any watched fraction. On miniVite 65536 it is within about 3% on average and 2–4% at the peak, watching 5–20% of the run. At 5% watched that costs 2.4–3.5× native on PolyBench, against 20–42× for full spatial sampling, and 12–14× on miniVite, against 25–27×.
+Summary: for long runs, the Pin tool can watch memory accesses for a small fraction of the run, as long as it tracks allocations and page residency the whole time. On PolyBench LARGE this reconstructs the live footprint over time within 0.2% at any watched fraction. On miniVite 65536 it is within 1.7–4.5% on average and 0.4–3% at the peak, watching 5–20% of the run, and on miniVite 32768 within 2.1–8.3% on average and 4–10% at the peak. A heap-churn test, where new blocks land on pages that freed blocks touched, stays within about 24% (page granularity) instead of +250%. At 5% watched that costs 2.8–3.2× native on PolyBench, against 21–36× for full spatial sampling, and 13–15× on miniVite, against 25–27×.
 
 ### Why
 
@@ -26,15 +26,19 @@ Spatial sampling still checks every memory access, even when it records only 1 i
 
 **At every snapshot (`-snapshot N`), the estimate is:**
 
-    touched bytes of fresh blocks
-    + touched bytes of reused blocks × density
+    Σ over live blocks (touched bytes × density)
     + windows' selected footprint outside blocks × i
 
 - **Touched bytes:** the bytes of a block on resident pages, read from `/proc/self/pagemap`. A page becomes resident when it is first read or written, so residency records first touches whether or not a window is open.
 - **Fresh blocks** got pages mapped for them: an anonymous mmap, or a malloc that made a new mmap. Their pages start untouched, so residency is exact to the page.
-- **Reused blocks** sit on heap pages that may have been used before.
+- **Reused blocks** sit on heap pages that may have been used before, so their residency can include pages that earlier blocks touched. They are measured instead by the pages *written* since they were allocated, from the kernel's soft-dirty bits (pagemap bit 55, cleared by writing `4` to `/proc/self/clear_refs`). Heap memory is written before it is read, so written pages are its touched pages.
+  - Clearing write-protects every page, so the next write to each page faults once. Bits are therefore cleared at three points rather than at every snapshot.
+    - At the allocator's entry, for allocations of 16 KB or more, after recording every reused block's written pages. Writes to the new block's pages by earlier blocks then do not count, and calloc's zeroing and realloc's copy, which happen inside the call, do.
+    - Around `brk`, `mmap` and `mremap`: pagemap reports a whole region as soft-dirty when the kernel creates or grows it, whatever was written. The bits are recorded at the system call's entry and cleared at its exit.
+    - Every `-dirty_every` references (default: every 10 snapshots).
+  - Blocks whose pages are all marked written are skipped when recording, and realloc in place keeps a block's marks.
 - **Huge pages:** the tool disables transparent huge pages for the traced process (`prctl(PR_SET_THP_DISABLE)`). Without that, a single touch makes a whole 2 MB region resident.
-- **Density:** the footprint counts the largest access at every start address, so overlapping accesses (unaligned copies, mixed widths) count more than the bytes they touch. Density is footprint ÷ covered bytes in reused blocks. In miniVite's heap it is about 1.45 for most of the run and about 1.1 at the end.
+- **Density:** the footprint counts the largest access at every start address, so overlapping accesses (unaligned copies, mixed widths) count more than the bytes they touch. Density is footprint ÷ covered bytes, measured per block once the block's sample covers 64 KB / i. Otherwise a reused block uses the density of all reused blocks and a fresh block uses 1. In miniVite's heap it is about 1.45 for most of the run and about 1.1 at the end.
   - Windows select 1-in-i 64-byte chunks instead of single addresses. They therefore see every access in a selected chunk, and can measure footprint and covered bytes on the same memory.
   - The ratio doesn't depend on how much of the run the windows covered.
 - **Memory outside blocks** (stack, globals, MPI shared memory) is seen only in windows.
@@ -57,22 +61,39 @@ Ground truth comes from full traces (splitter with `-track_frees`) of the same i
 
 | Input, threads | Nothing watched | 1% | 5% | 20% | 5%, 1-in-25 |
 |---|---|---|---|---|---|
-| 65536, 1 thread | 26.4 / −24.8 | 9.1 / −14.9 | 2.5 / −3.9 | 4.0 / −1.7 | 3.5 / −2.8 |
-| 65536, 4 threads | 26.5 / −24.8 | 8.6 / −15.1 | 2.9 / −3.6 | 2.1 / −3.4 | 3.3 / −2.6 |
-| 32768, 4 threads | 31.8 / −27.7 | 16.2 / −21.2 | 6.2 / −17.2 | 5.3 / −11.9 | 4.3 / −16.5 |
+| 65536, 1 thread | 25.9 / −24.6 | 9.1 / −14.5 | 3.8 / −1.9 | 4.5 / −0.4 | 3.5 / −3.1 |
+| 65536, 4 threads | 26.4 / −24.8 | 8.4 / −14.4 | 3.1 / −3.0 | 1.7 / −2.8 | 3.9 / −2.6 |
+| 32768, 1 thread | 32.1 / −27.9 | 14.4 / −14.1 | 8.3 / −9.8 | 4.3 / −4.3 | 5.6 / −8.8 |
+| 32768, 4 threads | 32.3 / −28.0 | 17.1 / −15.2 | 5.7 / −9.0 | 2.1 / −4.8 | 6.4 / −9.5 |
 
 Baselines at 5% watched (65536, 1 thread):
-- residency without the density correction: 12.1 / −19.5;
-- the windows' selected footprint alone: 45.9 / −46.6;
+- residency without the density correction: 12.6 / −19.7;
+- the windows' selected footprint alone: 44.5 / −45.5;
 - live allocated bytes: 67.4 / +44.2. miniVite reserves much more than it touches.
+
+Before soft-dirty tracking and per-block density, the same runs gave 2.1–4.0 / −1.7 to −3.9 on 65536, about the same, and 5.3–6.2 / −11.9 to −17.2 on 32768 with 4 threads.
 
 - **Residency is necessary.** Windows alone see only accesses that happen inside a window. They miss memory that is touched once and then left alone.
 - **Density is necessary.** Without it, miniVite's peak is about 20% low at every watched fraction.
 - **Watched fraction.** 5% is enough on miniVite 65536.
   - At 1% the density measured mid-run is 1.05–1.12, against about 1.45 at 5% and 20%.
   - With nothing watched, density falls back to 1 and memory outside blocks isn't seen at all.
-- **miniVite 32768 at 4 threads** stays 12–17% low at the peak. It is the shortest run (6.6 billion references, 20 windows of 16–66 million references). I haven't found the cause; the same input with 1 thread was not run.
-- **Threads.** 1 and 4 threads agree on 65536.
+- **miniVite 32768's peak** is a spike that lasts about 0.3% of the run, at 90.5%: 4.3 MB of new heap blocks appear and the true footprint jumps from 13.3 to 19.9 MB.
+  - It was not threads or windows: 1 and 4 threads estimated 17.6 and 17.5 MB at the spike, three repeated runs agreed within 1.4 points, 40 or 80 shorter windows were slightly worse than 20, and watching all the time at 1-in-16 chunks still missed by 12%.
+  - At the spike a large fresh block is written with overlapping accesses, at about 1.3 footprint bytes per touched byte, while fresh blocks were counted at their touched bytes. Density per block fixed most of it: −9% at 5% watched (from −17%) and −5% at 20% (from −12%). At 5% the spike is not always inside a window.
+- **Threads.** 1 and 4 threads agree within a few points on both inputs.
+
+**Heap churn** (`tests/pintool/churn.c`): 64 live heap blocks of 16–112 KB, each freed and replaced in turn, of which only the first quarter (or half) is written; the live footprint peaks at 1.3 MB (2.5 MB). Each cell is mean error / peak error, %, 5% watched:
+
+| Fraction of each block touched | Live allocated bytes | Residency | Windowed (written pages) |
+|---|---|---|---|
+| 25% | 259 / +268 | 248 / +269 | 23.9 / +22.2 |
+| 50% | 92 / +93 | 91 / +90 | 12.9 / +12.1 |
+| 100% | 2.4 / −1.7 | 0.9 / +0.5 | 0.8 / +0.5 |
+
+- Residency fails because freed blocks' pages stay resident and are handed to later blocks.
+- The windowed estimate's remaining error is page granularity: each block's touched prefix ends inside a 4 KB page, which adds up to 4 KB per block (64 blocks, about 0.25 MB).
+- It is the same at every watched fraction (21.9–25.8% for 25% touched), because written pages, not windows, carry the estimate.
 
 ### Cost
 
@@ -80,14 +101,15 @@ Seconds, quiet machine, one run each, 1-in-100, about 20 windows:
 
 | Workload | Native | Pin, no tool | Full spatial | Nothing watched | 1% | 5% | 20% |
 |---|---|---|---|---|---|---|---|
-| 2mm LARGE | 7.5 | 7.7 | 203 | 15.0 | 16.1 | 22.3 | 43.1 |
-| gemm LARGE | 5.0 | 5.4 | 208 | 11.4 | 13.0 | 17.4 | 35.0 |
-| jacobi-2d LARGE | 11.3 | 11.6 | 228 | 18.7 | 20.2 | 27.4 | 53.5 |
-| miniVite 65536, 1 thread | 6.4 | 11.6 | 161 | 46.1 | 63.0 | 73.7 | 88.8 |
-| miniVite 65536, 4 threads | 5.9 | 11.0 | 161 | 57.7 | 73.7 | 81.9 | 99.9 |
+| 2mm LARGE | 7.5 | 8.1 | 211 | 15.8 | 16.9 | 23.1 | 43.6 |
+| gemm LARGE | 6.0 | 6.1 | 215 | 11.7 | 13.1 | 19.0 | 37.0 |
+| jacobi-2d LARGE | 11.3 | 11.6 | 236 | 21.5 | 23.3 | 31.2 | 59.4 |
+| miniVite 65536, 1 thread | 6.5 | 11.5 | 163 | 59.6 | 79.4 | 84.3 | 104.1 |
+| miniVite 65536, 4 threads | 6.1 | 11.0 | 161 | 72.3 | 85.8 | 93.0 | 111.2 |
 
 - **Full traces** for the truth took 1237–1717 s. Those ran concurrently, so they are not comparable to this table.
-- **One outlier:** a first timing of miniVite 4 threads at 20% took 199 s; a rerun took 100 s.
+- **Outliers:** one timing of jacobi-2d at 5% watched took 173 s and a rerun took 31.2 s, which the table shows. With the previous tool, one miniVite run at 20% took 199 s against 100 s on a rerun.
+- **Soft-dirty tracking** costs about 14% on miniVite at 5% watched (73.7 → 84.3 s with 1 thread, 81.5 → 93.0 s with 4) and 4–14% on PolyBench, against the tool without it. With 1 thread miniVite clears the bits 8509 times; recording only blocks not yet fully written brought that run from 138 s down to 86 s.
 - **PolyBench:** with nothing watched, the cost is the per-block reference counter, about 2× native. Each further 1% watched adds about 1% of the full spatial cost.
 - **miniVite** has a higher floor. It makes 8 million malloc/free calls at 65536, each hooked and recorded under a lock. On miniVite 16384, turning the allocator hooks off saved about 7 s of 22.
 
@@ -101,9 +123,10 @@ Seconds, quiet machine, one run each, 1-in-100, about 20 windows:
 
 ### Limitations
 
-- **Pages touched before allocation.** Residency assumes a reused block's resident pages were touched by that block. A program that frees and reallocates heap memory heavily could make the estimate too high. In miniVite the heap grows, and residency stayed below the touched bytes.
-- **Density** is one number for all reused blocks, and it needs a few windows' worth of chunks (64 KB covered) before it moves off 1.
-- **Not tracked:** `mremap` outside realloc, `brk`, and stack frames. Memory outside blocks is estimated from windows only.
+- **Written pages miss reads.** A reused block is measured by the pages written since it was allocated, so memory it only reads (rare for heap memory) is missed. Blocks under 16 KB do not clear the bits when allocated, so they can inherit marks from earlier writes since the last clear; they share pages with other blocks anyway. With several threads, writes made by other threads between a `brk`/`mmap` system call's entry and exit are lost.
+- **Page granularity:** up to 4 KB per block, which dominates for programs with many small, partly touched blocks (about +22% on the churn test).
+- **Density** needs a block (or all reused blocks) to have a few windows' worth of chunks (64 KB covered) before it moves off 1, and fresh blocks never seen in a window count at 1.
+- **Not tracked:** `mremap` outside realloc and stack frames. Memory outside blocks is estimated from windows only.
 - **Selection is by absolute address,** so spatial and windowed outputs change between tool builds (the app's mmap addresses move). Splitter and sampler outputs stay byte-identical.
 
 ### Reproduce

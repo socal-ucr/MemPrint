@@ -8,9 +8,9 @@ DIR holds the experiment outputs this paper reports (not in the repository):
     tld12/traces/2mm/                   2mm MEDIUM splitter and spatial timelines
     tld12/data/spatial_eval.csv         spatial sampling on PolyBench (held-out runs)
     tld11/spatial_eval.csv              spatial sampling on miniVite, 1/4/16 threads
-    win/eval5/<workload>/               windowed runs and their splitter truth
-    win/eval5/results.csv               timeline windowed results
-    win/timing.txt                      sequential timings ("<workload> <mode> <seconds>"; a
+    win/eval6/<workload>/               windowed runs and their splitter truth (--eval)
+    win/eval6/results.csv               timeline windowed results
+    win/timing6.txt                     sequential timings (--timing) ("<workload> <mode> <seconds>"; a
                                         repeated line is a rerun and replaces the earlier one)
 """
 
@@ -30,6 +30,7 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 SLOTS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 DASHES = ["-", (0, (5, 2)), (0, (1, 1.5)), (0, (6, 2, 1, 2)), (0, (3, 1, 1, 1, 1, 1))]
 MB = 1e6
+EVAL, TIMING = "win/eval6", "win/timing6.txt"  # overridden by --eval / --timing
 
 plt.rcParams.update({
     "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8, "legend.fontsize": 7,
@@ -121,7 +122,7 @@ def fig_windowed_curves(scratch, out):
     """Truth and windowed estimates over time, 5% watched, 1/100 chunks."""
     fig, axes = plt.subplots(1, 2, figsize=(6.8, 2.3))
     for ax, (name, title) in zip(axes, [("2mm-LARGE", "2mm LARGE"), ("miniVite1t-65536", "miniVite 65536, 1 thread")]):
-        d = os.path.join(scratch, "win/eval5", name)
+        d = os.path.join(scratch, EVAL, name)
         tx, ty = splitter_truth(glob.glob(f"{d}/Buffered_*_timeline.csv")[0])
         f, w = windowed_run(d, 100, 0.05)
         x = w["Time"] / w["Time"].max()
@@ -129,7 +130,7 @@ def fig_windowed_curves(scratch, out):
         own = own[own["Bin"] == -1].set_index("Time")["MemUsageObs"] * 100
         truth(ax, tx, ty / MB)
         series(ax, x, w["Estimate"] / MB, 0, "Windowed estimate")
-        series(ax, x, (w["FreshResident"] + w["ReusedResident"] + w["OtherEst"]) / MB, 1, "Without density")
+        series(ax, x, (w["FreshResident"] + w["ReusedResident"] + w["OtherEst"]) / MB, 1, "Resident pages, no density")
         series(ax, x, own.reindex(w["Time"]).to_numpy() / MB, 2, "Windows' sample alone")
         series(ax, x, w["AllocatedBytes"] / MB, 3, "Live allocated bytes")
         # windows (each 0.25% of the run) as ticks along the top edge
@@ -161,10 +162,10 @@ def window_spans(w):
 
 def fig_windowed_fraction(scratch, out):
     """miniVite: error against the watched fraction."""
-    r = pd.read_csv(os.path.join(scratch, "win/eval5/results.csv"))
+    r = pd.read_csv(os.path.join(scratch, EVAL + "/results.csv"))
     r = r[(r["sample_rate"] == 100) & r["workload"].str.startswith("miniVite")]
     runs = [("miniVite1t", "65536", "65536, 1 thread"), ("miniVite", "65536", "65536, 4 threads"),
-            ("miniVite", "32768", "32768, 4 threads")]
+            ("miniVite1t", "32768", "32768, 1 thread"), ("miniVite", "32768", "32768, 4 threads")]
     fig, axes = plt.subplots(1, 2, figsize=(6.8, 2.1))
     xs = [0, 1, 2, 3]
     for slot, (wl, config, label) in enumerate(runs):
@@ -188,7 +189,7 @@ def fig_windowed_fraction(scratch, out):
 
 def fig_cost(scratch, out):
     """Runtime relative to native against the watched fraction, with full spatial sampling."""
-    rows = [l.split() for l in open(os.path.join(scratch, "win/timing.txt")) if l.strip() and "ALL DONE" not in l]
+    rows = [l.split() for l in open(os.path.join(scratch, TIMING)) if l.strip() and "ALL DONE" not in l]
     t = pd.DataFrame(rows, columns=["workload", "mode", "seconds"]).astype({"seconds": float})
     t = t.groupby(["workload", "mode"])["seconds"].last().unstack()  # reruns replace earlier runs
     names = [("2mm-LARGE", "2mm LARGE"), ("gemm-LARGE", "gemm LARGE"), ("jacobi-2d-LARGE", "jacobi-2d LARGE"),
@@ -209,13 +210,38 @@ def fig_cost(scratch, out):
     plt.close(fig)
 
 
+def fig_churn(scratch, out):
+    """Heap churn: blocks on inherited resident pages, a quarter of each touched."""
+    d = os.path.join(scratch, EVAL, "churn-0.25")
+    tx, ty = splitter_truth(glob.glob(f"{d}/Buffered_*_timeline.csv")[0])
+    _, w = windowed_run(d, 100, 0.05)
+    x = w["Time"] / w["Time"].max()
+    fig, ax = plt.subplots(figsize=(3.4, 2.2))
+    truth(ax, tx, ty / MB)
+    series(ax, x, w["Estimate"] / MB, 0, "Windowed (written pages)")
+    series(ax, x, (w["FreshResident"] + w["ReusedResident"] + w["OtherEst"]) / MB, 1, "Resident pages")
+    series(ax, x, w["AllocatedBytes"] / MB, 3, "Live allocated bytes")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel("Fraction of the run (memory references)")
+    ax.set_ylabel("Live footprint (MB)")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), ncol=2)
+    fig.savefig(os.path.join(out, "churn.pdf"))
+    plt.close(fig)
+
+
 def main():
+    global EVAL, TIMING
     parser = argparse.ArgumentParser()
     parser.add_argument("--scratch", required=True)
     parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "figures"))
+    parser.add_argument("--eval", default=EVAL, help="windowed runs, relative to --scratch")
+    parser.add_argument("--timing", default=TIMING, help="timings, relative to --scratch")
     args = parser.parse_args()
+    EVAL, TIMING = args.eval, args.timing
     os.makedirs(args.out, exist_ok=True)
-    for make in (fig_reference_vs_spatial, fig_spatial_rate, fig_windowed_curves, fig_windowed_fraction, fig_cost):
+    for make in (fig_reference_vs_spatial, fig_spatial_rate, fig_windowed_curves, fig_windowed_fraction, fig_cost,
+                 fig_churn):
         make(args.scratch, args.out)
         print(make.__name__, "done")
 
