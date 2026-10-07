@@ -50,26 +50,34 @@
  * -window, references are counted per basic block (a REP string instruction
  * counts once).
  *
- * Windows (-window): footprint ~ touched bytes of the live allocations (heap
- * blocks and anonymous mmaps, always known exactly) + touched memory outside
- * them (stack, globals). The selected addresses touched in any window so far
- * are attributed to the block containing them. A block live for a whole
- * window is "examined": its estimate is the selected bytes in it x i. A block
- * not yet examined is estimated by the touched fraction of the examined
- * blocks from the same allocation site (call site of malloc/new), or of all
- * examined blocks for a new site, x its size. Memory outside blocks is the
- * selected bytes there x i. A block whose pages were mapped for it (an
- * anonymous mmap, or a malloc served by a new mmap) is "fresh": its pages are
- * untouched when allocated, so its touched pages, read from
- * /proc/self/pagemap at every snapshot, measure it exactly to the page
- * between windows too (transparent huge pages are disabled for this). Each
- * snapshot is a row of <prefix>_windowed.csv: Time, Watching (in a window),
- * Windows (completed), AllocatedBytes and Blocks (live), FreshBytes,
- * FreshResident (touched bytes of fresh blocks), FreshEst (their selected
- * bytes x i, for comparison), ExaminedBytes/ExaminedEst and NewBytes/NewEst
- * (other blocks, examined or not), OtherEst (outside blocks), Estimate
- * (FreshResident + ExaminedEst + NewEst + OtherEst), Rho (touched fraction of
- * all examined blocks), Window and Period.
+ * Windows (-window): live allocations (heap blocks and anonymous mmaps) are
+ * tracked all the time, and the footprint is estimated at every snapshot as
+ *
+ *   touched bytes of fresh blocks
+ *   + touched bytes of reused blocks x density
+ *   + selected footprint outside blocks x i.
+ *
+ * A block is "fresh" when its pages were mapped for it (an anonymous mmap, or
+ * a malloc served by a new mmap), so they are untouched when it is allocated;
+ * otherwise "reused" (e.g. small blocks from the heap). Touched bytes are the
+ * block's bytes on resident pages, read from /proc/self/pagemap at every
+ * snapshot: exact to the 4 KB page for fresh blocks, between windows too
+ * (transparent huge pages are disabled for the process). The footprint counts
+ * the largest access at every start address, so overlapping accesses (e.g.
+ * unaligned copies) count more than the bytes they touch; density is that
+ * ratio for reused blocks, measured in the windows. Windows select 1-in-i
+ * 64-byte chunks and see every access in them, so they know both the
+ * footprint and the bytes covered in the selected chunks; the ratio does not
+ * depend on how much of the run the windows covered. Memory outside blocks
+ * (stack, globals) is only seen in windows.
+ *
+ * Each snapshot is a row of <prefix>_windowed.csv: Time, Watching (in a
+ * window), Windows (completed), AllocatedBytes and Blocks (live), FreshBytes,
+ * FreshResident, ReusedBytes, ReusedResident, then the windows' selected
+ * footprint x i in fresh blocks, reused blocks and outside blocks (FreshEst,
+ * ReusedEst, OtherEst), the bytes covered x i in fresh and reused blocks
+ * (FreshCovered, ReusedCovered), Density (ReusedEst / ReusedCovered, 1 until
+ * 64 KB are covered), Estimate, Window and Period.
  *
  * Output (in -outdir, which is created if missing):
  *   <Prefix>_<name>_<interval>_<pid>[_<args>].csv
@@ -296,10 +304,10 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     // Allocator call in progress (outermost call only)
     UINT32 allocDepth = 0;
     ADDRINT allocSp = 0; // stack pointer at the outermost call
-    ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0, allocSite = 0;
+    ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0;
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
-    ADDRINT mmapLen = 0, mmapSite = 0; // windowed: anonymous mmap in progress
+    ADDRINT mmapLen = 0; // windowed: anonymous mmap in progress
 };
 ThreadData threads[MAX_THREADS];
 
@@ -320,24 +328,12 @@ BOOL finished = FALSE;   // outputs written (end of run or -stop)
 PIN_LOCK allocLock;
 unordered_map< ADDRINT, ADDRINT > allocations;
 
-// Windows (-window): live allocations and how much of each has been touched.
+// Windows (-window): live allocations.
 struct Block
 {
     ADDRINT size;
-    ADDRINT site;      // return address of the allocator call (0: anonymous mmap)
-    UINT64 born;       // time allocated
-    UINT64 sampled;    // selected bytes touched in it (as of the last attribution)
-    BOOL examined;     // live for a whole window
-    BOOL mapped;       // an anonymous mmap (munmap can trim it)
-    BOOL fresh;        // its pages were new (mapped for it), so residency = touched pages
-};
-struct Site
-{
-    // Blocks that are not fresh. Examined blocks: live, and freed (with their
-    // sampled bytes when freed)
-    UINT64 liveSize = 0, liveSampled = 0, freedSize = 0, freedSampled = 0;
-    // blocks not yet examined
-    UINT64 newSize = 0, newSampled = 0;
+    BOOL mapped; // an anonymous mmap (munmap can trim it)
+    BOOL fresh;  // its pages were mapped for it, so its resident pages are the ones it touched
 };
 BOOL windowed = FALSE;
 volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
@@ -345,8 +341,9 @@ BOOL flushPending = FALSE;     // instrumentation must be redone for a window ch
 UINT64 windowStart = 0, nextToggle = 0, windowsDone = 0, checkStep = 0;
 volatile UINT32 epoch = 0; // windowed: number of window changes
 std::map< ADDRINT, Block > blocks; // guarded by stateLock
-unordered_map< ADDRINT, Site > sites;
-UINT64 otherSampled = 0; // selected bytes touched outside every block
+// Selected footprint and the bytes its accesses cover, in reused [0] and fresh
+// [1] blocks (as of the last Attribute), and selected footprint outside blocks.
+UINT64 kindSampled[2] = {0, 0}, kindCovered[2] = {0, 0}, otherSampled = 0;
 ofstream windowedFile;
 int pagemapFd = -1;       // /proc/self/pagemap
 vector< UINT64 > pageBits; // buffer for pagemap entries
@@ -460,8 +457,11 @@ static ADDRINT PIN_FAST_ANALYSIS_CALL CountRefs(THREADID tid, UINT32 n)
 
 static VOID CheckTime(THREADID tid, CONTEXT* ctxt);
 
-// windowed: select without counting (CountRefs counts)
-static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea) { return Mix(ea ^ salt) < spatialThreshold; }
+// windowed: select 1-in-i 64-byte chunks (every address in a selected chunk),
+// without counting (CountRefs counts). Seeing whole chunks gives the bytes the
+// selected accesses cover as well as their footprint.
+#define CHUNK_BITS 6
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea) { return Mix((ea >> CHUNK_BITS) ^ salt) < spatialThreshold; }
 
 static UINT32 MemoryReferences(INS ins)
 {
@@ -549,37 +549,13 @@ static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
 
 /* Windows: live blocks (called with stateLock held) ---------------------- */
 
-// Add (+1) or remove (-1) a block's contribution to its site's statistics.
-static VOID Account(const Block& b, INT32 sign)
-{
-    if (b.fresh) return;
-    Site& s = sites[b.site];
-    if (b.examined)
-        s.liveSize += sign * b.size, s.liveSampled += sign * b.sampled;
-    else
-        s.newSize += sign * b.size, s.newSampled += sign * b.sampled;
-}
-
-static VOID DropBlock(std::map< ADDRINT, Block >::iterator it)
-{
-    const Block& b = it->second;
-    Account(b, -1);
-    if (b.examined && !b.fresh)
-    {
-        Site& s = sites[b.site];
-        s.freedSize += b.size, s.freedSampled += b.sampled;
-    }
-    blocks.erase(it);
-}
-
-static VOID AddBlock(ADDRINT ptr, ADDRINT size, ADDRINT site, BOOL mapped, BOOL fresh)
+static VOID AddBlock(ADDRINT ptr, ADDRINT size, BOOL mapped, BOOL fresh)
 {
     if (ptr == 0 || size == 0) return;
-    auto old = blocks.find(ptr);
-    if (old != blocks.end()) DropBlock(old);
-    Block& b = blocks[ptr] = {size, site, timeNow, 0, FALSE, mapped, fresh};
-    Account(b, +1);
+    blocks[ptr] = {size, mapped, fresh};
 }
+
+static VOID DropBlock(ADDRINT ptr) { blocks.erase(ptr); }
 
 // munmap: drop anonymous mappings in [lo, hi), keeping the parts outside it
 static VOID UnmapBlocks(ADDRINT lo, ADDRINT hi)
@@ -593,62 +569,73 @@ static VOID UnmapBlocks(ADDRINT lo, ADDRINT hi)
         ADDRINT start = it->first, end = start + b.size;
         if (b.mapped && end > lo)
         {
-            DropBlock(it);
-            for (auto piece : {std::make_pair(start, std::min(end, lo)), std::make_pair(std::max(start, hi), end)})
-            {
-                if (piece.second <= piece.first) continue;
-                Block& rest = blocks[piece.first] = b;
-                rest.size    = piece.second - piece.first;
-                rest.sampled = 0;
-                Account(rest, +1);
-            }
+            blocks.erase(it);
+            if (start < lo) blocks[start] = {lo - start, TRUE, b.fresh};
+            if (end > hi) blocks[hi] = {end - hi, TRUE, b.fresh};
         }
         it = next;
     }
 }
 
-// Attribute the selected addresses touched so far to the blocks containing them.
+// Split the selected footprint (accesses in windows so far) between reused
+// blocks, fresh blocks and the rest, with the bytes covered in the blocks.
 static VOID Attribute()
 {
-    for (auto& kv : blocks)
-        kv.second.sampled = 0;
+    struct Access
+    {
+        ADDRINT address;
+        UINT32 size;
+        BOOL fresh;
+        bool operator<(const Access& o) const { return address < o.address; }
+    };
+    vector< Access > inBlocks;
     otherSampled = 0;
-    footprint.ForEach([](ADDRINT address, UINT32 size) {
+    footprint.ForEach([&inBlocks](ADDRINT address, UINT32 size) {
         auto it = blocks.upper_bound(address);
         if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.size)
-            std::prev(it)->second.sampled += size;
+            inBlocks.push_back({address, size, std::prev(it)->second.fresh});
         else
             otherSampled += size;
     });
-    for (auto& kv : sites)
-        kv.second.liveSize = kv.second.liveSampled = kv.second.newSize = kv.second.newSampled = 0;
-    for (const auto& kv : blocks)
-        Account(kv.second, +1);
+    // bytes covered: the union of [address, address + size)
+    std::sort(inBlocks.begin(), inBlocks.end());
+    kindSampled[0] = kindSampled[1] = kindCovered[0] = kindCovered[1] = 0;
+    ADDRINT coveredTo = 0;
+    for (const Access& a : inBlocks)
+    {
+        kindSampled[a.fresh] += a.size;
+        ADDRINT end = a.address + a.size;
+        if (end > coveredTo) kindCovered[a.fresh] += end - std::max(a.address, coveredTo), coveredTo = end;
+    }
 }
 
-// End of a window: blocks live for all of it are examined.
-static VOID EndWindow()
-{
-    for (auto& kv : blocks)
-        if (kv.second.born <= windowStart) kv.second.examined = TRUE;
-    Attribute();
-    windowsDone++;
-}
+// Pagemap entries of pages [cachedFirst, cachedFirst + pageBits.size()), read
+// in chunks so that blocks visited in address order share reads.
+ADDRINT cachedFirst = 0;
+
+static VOID ForgetResidency() { pageBits.clear(); }
 
 // Bytes of [lo, hi) on pages that have been touched (are resident or swapped).
 static UINT64 Resident(ADDRINT lo, ADDRINT hi)
 {
-    const ADDRINT page = 1 << PAGE_BITS;
+    const ADDRINT page = 1 << PAGE_BITS, chunk = 512;
     ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
-    pageBits.resize(last - first + 1);
-    ssize_t want = pageBits.size() * sizeof(UINT64);
-    if (lseek(pagemapFd, first * sizeof(UINT64), SEEK_SET) < 0 || read(pagemapFd, pageBits.data(), want) != want)
-        return hi - lo;
-    UINT64 bytes = 0;
-    for (ADDRINT k = 0; k < pageBits.size(); k++)
+    if (first < cachedFirst || last >= cachedFirst + pageBits.size())
     {
-        if (!(pageBits[k] >> 62)) continue; // bit 63: present, bit 62: swapped
-        ADDRINT a = (first + k) << PAGE_BITS;
+        cachedFirst = first;
+        pageBits.resize(std::max(last - first + 1, chunk));
+        ssize_t want = pageBits.size() * sizeof(UINT64);
+        ssize_t got  = -1;
+        if (lseek(pagemapFd, first * sizeof(UINT64), SEEK_SET) >= 0) got = read(pagemapFd, pageBits.data(), want);
+        // past the end of the address space the read is short
+        pageBits.resize(got > 0 ? got / sizeof(UINT64) : 0);
+        if (last >= cachedFirst + pageBits.size()) return hi - lo;
+    }
+    UINT64 bytes = 0;
+    for (ADDRINT p = first; p <= last; p++)
+    {
+        if (!(pageBits[p - cachedFirst] >> 62)) continue; // bit 63: present, bit 62: swapped
+        ADDRINT a = p << PAGE_BITS;
         bytes += std::min(hi, a + page) - std::max(lo, a);
     }
     return bytes;
@@ -677,7 +664,7 @@ static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
     if (windowed)
     {
         PIN_GetLock(&stateLock, tid + 1);
-        if (!finished) AddBlock(ptr, size, threads[tid].allocSite, FALSE, threads[tid].allocFresh);
+        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
         PIN_ReleaseLock(&stateLock);
     }
 }
@@ -686,8 +673,7 @@ static VOID ForgetBlock(THREADID tid, ADDRINT ptr)
 {
     if (!windowed) return;
     PIN_GetLock(&stateLock, tid + 1);
-    auto it = blocks.find(ptr);
-    if (!finished && it != blocks.end()) DropBlock(it);
+    if (!finished) DropBlock(ptr);
     PIN_ReleaseLock(&stateLock);
 }
 
@@ -696,13 +682,12 @@ static VOID ForgetBlock(THREADID tid, ADDRINT ptr)
 // call has a lower stack pointer than the outermost one; an entry at the same
 // or a higher one is a new outermost call (the previous one jumped back to
 // its entry, or returned without its exit being seen).
-static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT site, ADDRINT size, ADDRINT ptr, ADDRINT out)
+static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT size, ADDRINT ptr, ADDRINT out)
 {
     ThreadData& t = threads[tid];
     if (t.allocDepth > 0 && sp >= t.allocSp) t.allocDepth = 0;
     if (t.allocDepth++ > 0) return;
     t.allocSp   = sp;
-    t.allocSite  = site;
     t.allocFresh = FALSE;
     t.allocSize = size;
     t.allocPtr  = ptr;
@@ -723,10 +708,7 @@ static VOID MallocExit(THREADID tid, ADDRINT ret)
 }
 
 // calloc(n, size)
-static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT site, ADDRINT n, ADDRINT size)
-{
-    AllocEnter(tid, sp, site, n * size, 0, 0);
-}
+static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT n, ADDRINT size) { AllocEnter(tid, sp, n * size, 0, 0); }
 
 // posix_memalign(&out, align, size)
 static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
@@ -776,13 +758,11 @@ static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLI
     if (!RTN_Valid(rtn) || SEC_Name(RTN_Sec(rtn)).find(".plt") == 0) return;
     if (!instrumented.insert(RTN_Address(rtn)).second) return;
     RTN_Open(rtn);
-    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP, IARG_IARGLIST,
-                   enterArgs, IARG_END);
+    RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_IARGLIST, enterArgs,
+                   IARG_END);
     RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
     RTN_Close(rtn);
 }
-
-static VOID MmapEnter(THREADID tid, ADDRINT site) { threads[tid].mmapSite = site; }
 
 static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args)
 {
@@ -817,9 +797,6 @@ VOID ImageLoad(IMG img, VOID* v)
     IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
 
     InstrumentAllocator(img, "malloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
-    // operator new / new[]: the outermost call, so blocks get the caller's site
-    InstrumentAllocator(img, "_Znwm", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
-    InstrumentAllocator(img, "_Znam", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "valloc", AFUNPTR(AllocEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "memalign", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "aligned_alloc", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
@@ -836,15 +813,6 @@ VOID ImageLoad(IMG img, VOID* v)
         RTN_InsertCall(free, IPOINT_BEFORE, AFUNPTR(FreeEnter), IARG_THREAD_ID, IARG_CONTEXT, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
                        IARG_END);
         RTN_Close(free);
-    }
-
-    // windowed: the caller of mmap is the site of an anonymous mapping
-    RTN mmap = RTN_FindByName(img, "mmap");
-    if (windowed && RTN_Valid(mmap) && SEC_Name(RTN_Sec(mmap)).find(".plt") != 0)
-    {
-        RTN_Open(mmap);
-        RTN_InsertCall(mmap, IPOINT_BEFORE, AFUNPTR(MmapEnter), IARG_THREAD_ID, IARG_RETURN_IP, IARG_END);
-        RTN_Close(mmap);
     }
 }
 
@@ -883,11 +851,10 @@ VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
     if (t.mmapLen && ret != (ADDRINT)MAP_FAILED)
     {
         PIN_GetLock(&stateLock, tid + 1);
-        if (!finished) AddBlock(ret, t.mmapLen, t.mmapSite, TRUE, TRUE);
+        if (!finished) AddBlock(ret, t.mmapLen, TRUE, TRUE);
         PIN_ReleaseLock(&stateLock);
     }
     t.munmapLo = t.munmapHi = t.mmapLen = 0;
-    t.mmapSite = 0;
 }
 
 /* ===================================================================== */
@@ -1006,42 +973,29 @@ static VOID WriteSnapshot()
     if (windowed) WriteWindowed();
 }
 
-static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,FreshEst,"
-                                     "ExaminedBytes,ExaminedEst,NewBytes,NewEst,OtherEst,Estimate,Rho,Window,Period";
+static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
+                                     "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
+                                     "Window,Period";
 
 // windowed: the footprint estimate (see "Windows" at the top)
 static VOID WriteWindowed()
 {
-    if (watching) Attribute(); // selected bytes change only inside windows
-    const double R = KnobSamplingInterval.Value();
-    UINT64 freshBytes = 0, freshResident = 0, freshSampled = 0;
+    if (watching) Attribute(); // the selected footprint changes only inside windows
+    UINT64 bytes[2] = {0, 0}, resident[2] = {0, 0}; // reused [0], fresh [1]
+    ForgetResidency();
     for (const auto& kv : blocks)
     {
-        if (!kv.second.fresh) continue;
-        freshBytes += kv.second.size, freshSampled += kv.second.sampled;
-        freshResident += Resident(kv.first, kv.first + kv.second.size);
+        bytes[kv.second.fresh] += kv.second.size;
+        resident[kv.second.fresh] += Resident(kv.first, kv.first + kv.second.size);
     }
-    UINT64 size = 0, sampled = 0;
-    for (const auto& kv : sites)
-        size += kv.second.liveSize + kv.second.freedSize, sampled += kv.second.liveSampled + kv.second.freedSampled;
-    double rhoAll = size ? R * sampled / size : 1.0;
-    UINT64 examinedBytes = 0, newBytes = 0;
-    double examinedEst = 0, newEst = 0;
-    for (const auto& kv : sites)
-    {
-        const Site& st = kv.second;
-        examinedBytes += st.liveSize, newBytes += st.newSize;
-        examinedEst += R * st.liveSampled;
-        UINT64 siteSize = st.liveSize + st.freedSize;
-        double rho      = siteSize ? R * (st.liveSampled + st.freedSampled) / siteSize : rhoAll;
-        newEst += std::max(R * st.newSampled, rho * st.newSize);
-    }
-    double otherEst = R * otherSampled;
-    windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << freshBytes + examinedBytes + newBytes
-                 << "," << blocks.size() << "," << freshBytes << "," << freshResident << "," << (UINT64)(R * freshSampled) << ","
-                 << examinedBytes << "," << (UINT64)examinedEst << "," << newBytes << "," << (UINT64)newEst << ","
-                 << (UINT64)otherEst << "," << (UINT64)(freshResident + examinedEst + newEst + otherEst) << "," << rhoAll
-                 << "," << KnobWindow.Value() << "," << KnobPeriod.Value() << "\n";
+    const UINT64 R = KnobSamplingInterval.Value();
+    double density = R * kindCovered[0] >= 65536 ? (double)kindSampled[0] / kindCovered[0] : 1.0;
+    double estimate = resident[1] + density * resident[0] + R * otherSampled;
+    windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << bytes[0] + bytes[1] << ","
+                 << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
+                 << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
+                 << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
+                 << KnobPeriod.Value() << "\n";
 }
 
 // windowed: open or close a window when time reaches it
@@ -1051,7 +1005,8 @@ static VOID AdvanceWindows()
     {
         if (watching)
         {
-            EndWindow();
+            Attribute();
+            windowsDone++;
             watching   = FALSE;
             nextToggle = windowStart + KnobPeriod.Value();
         }

@@ -404,7 +404,8 @@ def evaluate_spatial(timeline, truths, test_config, workload, split):
 
 
 WINDOWED_ESTIMATES = {
-    "windowed": "Estimate",           # allocations + residency + windows
+    "windowed": "Estimate",           # residency x density + windows outside blocks (the tool's estimate)
+    "no density": "NoDensity",        # the same without the density correction
     "allocated": "AllocatedBytes",    # live allocations alone
     "windows only": "WindowsOnly",    # selected footprint x i, selected only inside windows
 }
@@ -423,7 +424,8 @@ def evaluate_windowed(timeline, windowed, workload):
         truth = truths[config]
         run = run.sort_values("Time")
         own = spatial[spatial["PID"] == pid].set_index("Time")["MemUsageObs"] * run["RunInterval"].iloc[0]
-        curve = run.assign(WindowsOnly=own.reindex(run["Time"]).to_numpy())
+        curve = run.assign(WindowsOnly=own.reindex(run["Time"]).to_numpy(),
+                           NoDensity=run["FreshResident"] + run["ReusedResident"] + run["OtherEst"])
         run_end = float(curve["Time"].max())
         window, period = int(run["Window"].iloc[0]), int(run["Period"].iloc[0])
         for name, column in WINDOWED_ESTIMATES.items():
