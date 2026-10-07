@@ -95,6 +95,46 @@ Before soft-dirty tracking and per-block density, the same runs gave 2.1–4.0 /
 - The windowed estimate's remaining error is page granularity: each block's touched prefix ends inside a 4 KB page, which adds up to 4 KB per block (64 blocks, about 0.25 MB).
 - It is the same at every watched fraction (21.9–25.8% for 25% touched), because written pages, not windows, carry the estimate.
 
+### Windows opened by large allocations
+
+`-window_alloc N` (default 1 MB; 0 turns it off): an allocation of at least N bytes opens a window at once, at most one per period on top of the periodic windows, so at most twice the periodic fraction is watched. A large allocation is usually followed by the program filling the block, and a window then measures the block's density. A periodic window that starts inside such a window extends it.
+
+Results with 1-in-100 chunks, about 20 periodic windows, mean error / peak error, %:
+
+| Run | Periodic only | With allocation windows | Watched |
+|---|---|---|---|
+| miniVite 65536, 1 thread, 5% | 3.8 / −1.9 | 0.8 / −5.5 | 6.7% |
+| miniVite 65536, 4 threads, 5% | 3.1 / −3.0 | 1.5 / −5.1 | 6.7% |
+| miniVite 32768, 1 thread, 5% | 8.3 / −9.8 | 3.0 / −6.1 | 6.3% |
+| miniVite 32768, 4 threads, 5% | 5.7 / −9.0 | 3.2 / −6.0 | 6.3% |
+| miniVite 65536, 1 thread, 1% | 9.1 / −14.5 | 2.4 / −9.5 | 1.4% |
+| miniVite 65536, 4 threads, 1% | 8.4 / −14.4 | 2.2 / −10.1 | 1.4% |
+| miniVite 32768, 1 thread, 1% | 14.4 / −14.1 | 17.3 / −16.7 | 1.3% |
+| miniVite 32768, 4 threads, 1% | 17.1 / −15.2 | 15.5 / −16.2 | 1.3% |
+
+- miniVite makes 5–7 allocations of 1 MB or more that open windows.
+- The mean error drops by 2–7 points, and the 32768 peak improves from −9% to −6%, but the 65536 peak gets worse (−2% to −5.5%). A likely cause, not yet checked: a block's density is then dominated by the window at its allocation, where the block is filled with aligned writes, rather than by its later, overlapping accesses.
+- PolyBench (arrays allocated inside the first window) and the churn test (blocks under 1 MB) open no extra windows, and their results are unchanged.
+
+### GAP and darknet as heap-reuse workloads
+
+MemGaze used GAP (graph kernels) and darknet (neural networks). Copies are in `~/memory_estimator/workloads`. Single-thread windowed runs at 5% watched measured how much of their memory sits in reused heap blocks and how far those blocks' residency exceeds their written pages (the error that soft-dirty tracking removes):
+
+| Run | Fresh blocks (resident) | Reused blocks (resident / written) | Residency − written, max |
+|---|---|---|---|
+| GAP bfs `-g 18 -n 8` | 71 MB (71) | 1.1 MB (1.1 / 1.1) | 1.0 MB |
+| GAP pr `-g 18 -n 4` | 71 MB (71) | 1.1 MB (1.1 / 1.1) | 1.0 MB |
+| GAP cc `-g 18 -n 8` | 71 MB (71) | 1.1 MB (1.1 / 1.1) | 1.0 MB |
+| GAP sssp `-g 18 -n 4` | 130 MB (111) | 5.3 MB (5.3 / 5.3) | 1.0 MB |
+| darknet AlexNet, 4 images, random weights | 513 MB (263) | 17 MB (17 / 17) | 1.1 MB |
+
+- Neither is a heavy heap-reuse workload in the sense that breaks residency. Their large buffers are above glibc's mmap threshold (128 KB, raised dynamically up to 32 MB after frees), so they get new pages, and the reused blocks they do have are fully rewritten.
+- Forcing large blocks onto the heap with `MALLOC_MMAP_THRESHOLD_=33554432` (glibc ignores values above 32 MB) moves more memory into reused blocks (GAP 5–7 MB, darknet 86 MB) but residency still exceeds written pages by at most 1 MB.
+- They are still useful real workloads: darknet allocates 513 MB but touches 263 MB, so allocation-based estimates are 2× off, and GAP has large, irregularly accessed graphs.
+- Better candidates for heap reuse are programs that repeatedly allocate buffers larger than they fill: interpreters, compilers, hash-table-heavy servers.
+
+**darknet exposed a bug.** The tool recorded 53 KB of darknet's 513 MB. glibc's `calloc`, the first time the allocator is used, calls `malloc` through an initialization function and leaves with a jump to `memset`, so its exit is never seen. The tool then treated every later allocation made from deeper in the stack as nested inside it and recorded none. A call now counts as nested only if it comes from inside an instrumented allocation function and runs deeper in the stack, and a block returned by a call nested in a malloc-like call is recorded at once. `tests/pintool/first_calloc.c` checks this; default outputs are unchanged. miniVite, GAP and PolyBench were not affected, because their first allocation is a `malloc`.
+
 ### Cost
 
 Seconds, quiet machine, one run each, 1-in-100, about 20 windows:
