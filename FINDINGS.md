@@ -10,6 +10,42 @@ On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This b
 
 Summary: for long runs, the Pin tool can watch memory accesses for a small fraction of the run, as long as it tracks allocations and page residency the whole time. On PolyBench LARGE this reconstructs the live footprint over time within 0.2% at any watched fraction. On miniVite 65536 it is within 1.7–4.5% on average and 0.4–3% at the peak, watching 5–20% of the run, and on miniVite 32768 within 2.1–8.3% on average and 4–10% at the peak. A heap-churn test, where new blocks land on pages that freed blocks touched, stays within about 24% (page granularity) instead of +250%. At 5% watched that costs 2.8–3.2× native on PolyBench, against 21–36× for full spatial sampling, and 13–15× on miniVite, against 25–27×.
 
+
+### Current definition: the footprint is the bytes touched
+
+From 2026-10-08, with `-track_frees` or `-window`, the tool counts the bytes a program touches (`-footprint bytes`): the union of every access's byte range, live until released. The paper's definition (`-footprint starts`, still the default without those knobs) adds up the largest access at each start address, so overlapping accesses count more than once. An 8-byte read at every byte of a 1 MB buffer gives 8.5 MB under it and 1.15 MB of bytes touched. **The sections below, up to "Ground truth fixed", were measured with the old definition.**
+
+Changes that came with it:
+- **The truth** keeps a bitmap of touched bytes per page, and a release clears exactly the released bytes.
+- **Freed blocks release their whole glibc chunk** (size field, block and slack, read from the chunk header at `free`'s entry). Under bytes, string and copy functions that read past a block's requested size left those bytes "live" for ever: Lua ended with 5.3 MB live and nothing allocated, and now ends with 0.3 MB.
+- **Spatial and windowed sampling select 64-byte chunks** and keep the bytes of each access inside selected chunks, so selected bytes × i is unbiased. Selecting start addresses would let a byte covered by k overlapping accesses in with probability about k/i.
+- **Density is 1 by construction,** so the windowed estimate is the fresh blocks' resident bytes, plus the reused blocks' written bytes, plus the windows' selected bytes outside blocks × i.
+- Default splitter and sampler outputs are byte-identical to before (address randomisation off); the tests pass.
+
+**Results** (single thread, against new full traces; mean error / peak error, %; 1-in-100 chunks, about 20 windows):
+
+| Run | True peak, old → new | Nothing watched | 1% | 5% | 5%, allocation windows | Watching all the time |
+|---|---|---|---|---|---|---|
+| 2mm LARGE | 37.1 → 37.1 MB | — | — | 0.1 / +0.1 | 0.1 / +0.1 | 0.1 / +0.1 |
+| miniVite 65536 | 35.5 → 28.2 MB | — | — | 2.8 / +1.0 | 2.7 / +1.0 | 3.9 / +1.5 |
+| miniVite 32768 | 19.3 → 15.4 MB | 14.5 / −6.8 | 4.3 / +2.0 | 1.8 / +0.8 | 4.0 / +1.9 | 6.9 / +3.2 |
+| GAP bfs | 102.7 → 72.8 MB | 5.0 / −0.3 | 3.0 / −0.0 | 2.3 / +0.1 | 3.4 / +0.4 | 2.4 / +0.2 |
+| darknet AlexNet | 399 → 270 MB | 3.1 / +4.0 | 3.2 / +4.1 | 3.2 / +4.1 | 3.2 / +4.1 | 3.2 / +4.1 |
+| python | 126 → 96 MB | 3.7 / +2.8 | 3.7 / +3.6 | 6.0 / +3.8 | 3.9 / +3.7 | 4.6 / +3.9 |
+| lua | 70.9 → 57.2 MB | 7.5 / −8.1 | 6.2 / −7.5 | 5.8 / −7.5 | 6.2 / −7.3 | 5.3 / −5.2 |
+| perl | 64.5 → 54.8 MB | 1.9 / −3.4 | 1.8 / −2.9 | 1.8 / −1.6 | 1.9 / −2.8 | 1.9 / −2.3 |
+| sqlite | 263 → 74 MB | 6.5 / +0.2 | 9.0 / +1.9 | 8.7 / +1.7 | 8.3 / +2.8 | 8.5 / +0.8 |
+| churn, 25% touched | 1.3 → 1.3 MB | 25.1 / +22.2 | 22.7 / +20.2 | 24.3 / +23.0 | 22.4 / +21.7 | 30.9 / +27.6 |
+
+"Old" is the paper's definition with the allocator fix below.
+
+- **Every real workload is within −8% to +4% of its peak at 5% watched,** against −4% to −61% before (5% with allocation windows, old definition, allocator fix applied). The underestimates came from the definition, which windows could not measure, not from heap reuse.
+- **Watching hardly matters any more.** With nothing watched, the estimate is pages alone, and it is within −8% to +4% of every peak except miniVite 32768 (−6.8%, 14.5% mean). That run has 2–3 MB outside blocks (stack, MPI), which only windows see; 1% watched fixes it.
+- **Cost.** Without windows the runs took 20–54 s for the interpreters and miniVite 32768, against 48–163 s at 5% and 276–982 s for the full traces (18 runs at once, so rough). With almost nothing to watch, the cost is the allocator hooks and the soft-dirty clears.
+- **What is left:**
+  - Page granularity: the churn test is still about +22%, and darknet's +4% is fresh pages touched only in part.
+  - Lua is 5–8% low at every fraction, including full watching. Not yet investigated.
+
 ### Why
 
 Spatial sampling still checks every memory access, even when it records only 1 in 100 addresses. On 2mm LARGE that alone takes 203 s against 7.5 s native, and Pin itself costs almost nothing (7.7 s). For long real workloads that overhead is the obstacle, not the sampling rate.
@@ -489,9 +525,11 @@ Re-measured with `OMP_NUM_THREADS=4 OMP_WAIT_POLICY=passive`, using the f1/f2-on
 
 ## Open questions / next steps
 
-- **Windowed density:** windows underestimate density because it accumulates over the run (GAP, darknet, Lua, Perl: 20–30% low at the peak at 5% watched). Options: model a block's density as a function of the time it was watched and extrapolate to the whole run, or keep a cheap per-block record of access widths and offsets outside windows.
+- **Windowed density** is moot with bytes touched (density 1). It still applies to `-footprint starts`.
 - **Ground truth:** allocator accesses are now excluded for glibc. Other allocators (jemalloc, tcmalloc, pymalloc's arenas inside Python) are neither tracked as blocks nor excluded.
-- **Footprint definition:** decide whether overlapping accesses should count (SQLite's footprint is 3.2× the bytes it touches).
+- **Footprint definition:** decided: bytes touched with `-track_frees` or `-window`. The reference-sampling estimators (α model, Chao, known-rate, hybrid) have not been re-run against bytes-touched truths. Their PolyBench numbers should barely move (arrays of aligned doubles), but miniVite's would.
+- **Windowless mode:** with bytes, pages alone are within 8% of every peak tested except where memory lies outside blocks. Watching 1% covers that; a mode that drops windows entirely would be cheaper still.
+- **Lua is 5–8% low** at every watched fraction, including full watching.
 - **Windowed cost on allocation-heavy programs:** the allocator hooks and soft-dirty clears around `mmap` dominate (cc1 runs 3–4× slower windowed than fully traced).
 - **Hybrid below `-i 5`:** the correction overshoots once it extrapolates past its training range (`-i 8` and sparser); constraining it might move the fall-off.
 - **Generalisation:** the correction is trained per workload on its smaller sizes, like the paper's α model. It has not been tested across workloads, or on miniVite.

@@ -36,6 +36,12 @@
  *
  *   -track_frees 1  free/realloc/munmap remove the released address range
  *                   from every footprint, so footprints are live memory.
+ *   -footprint bytes|starts  the bytes touched (union of every access's byte
+ *                   range), or the paper's sum of the largest access size per
+ *                   start address. Default: bytes with -track_frees or
+ *                   -window, else starts. Spatial sampling with bytes selects
+ *                   64-byte chunks and keeps the bytes of each access inside
+ *                   selected chunks, so selected bytes x i is unbiased.
  *   -snapshot N     every N memory references (time), append the current
  *                   footprints to a timeline CSV.
  *   -stop N         after N references, write all outputs and detach.
@@ -62,10 +68,12 @@
  * otherwise "reused" (e.g. small blocks from the heap). Touched bytes are the
  * block's bytes on resident pages, read from /proc/self/pagemap at every
  * snapshot: exact to the 4 KB page for fresh blocks, between windows too
- * (transparent huge pages are disabled for the process). The footprint counts
- * the largest access at every start address, so overlapping accesses (e.g.
- * unaligned copies) count more than the bytes they touch; density is that
- * ratio for reused blocks, measured in the windows. Windows select 1-in-i
+ * (transparent huge pages are disabled for the process). With -footprint
+ * starts, the footprint counts the largest access at every start address, so
+ * overlapping accesses (e.g. unaligned copies) count more than the bytes they
+ * touch; density is that ratio for reused blocks, measured in the windows.
+ * With -footprint bytes (the default here) the footprint is the bytes touched
+ * and density is 1. Windows select 1-in-i
  * 64-byte chunks and see every access in them, so they know both the
  * footprint and the bytes covered in the selected chunks; the ratio does not
  * depend on how much of the run the windows covered. Memory outside blocks
@@ -164,6 +172,9 @@ KNOB< UINT64 > KnobWindowAlloc(KNOB_MODE_WRITEONCE, "pintool", "window_alloc", "
 KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
                               "spatial with -window: clear the kernel's soft-dirty page bits every N memory references "
                               "(default: every 10 snapshots; 0: off, reused blocks are measured by residency)");
+KNOB< string > KnobFootprint(KNOB_MODE_WRITEONCE, "pintool", "footprint", "",
+                            "bytes (bytes touched) | starts (largest access per start address, the paper's); "
+                            "default: bytes with -track_frees or -window, else starts");
 KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
                         "after N memory references, write the outputs and detach (0: run to the end)");
 
@@ -176,10 +187,16 @@ KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
 // times, from which Chao1/iChao1 estimate how many addresses were never
 // sampled. When indexed, addresses are also grouped by page so that a freed
 // range can be erased.
+// Footprint definition (-footprint): the paper's sum of the largest access size per start
+// address ("starts"), or the bytes touched, the union of [address, address + size) ("bytes").
+// Overlapping accesses (different widths or offsets) count once per start address in the
+// first, once per byte in the second.
+BOOL countBytes = FALSE;
+
 class Footprint
 {
   public:
-    UINT64 bytes = 0;      // sum of the largest access size per address
+    UINT64 bytes = 0;      // footprint: see countBytes
     UINT64 freed = 0;      // bytes removed by Erase
     UINT64 sampled[5] = {0}; // sampled[k]: addresses sampled exactly k times (k = 1..4)
     UINT64 discovered = 0;   // times an address entered the sample (again after a free)
@@ -202,17 +219,19 @@ class Footprint
         }
         Count(e.count, -1);
         Count(++e.count, +1);
-        if (e.size < size)
-        {
+        if (countBytes)
+            bytes += Touch(address, address + size);
+        else if (e.size < size)
             bytes += size - e.size;
-            e.size = size;
-        }
+        if (e.size < size) e.size = size;
     }
 
     // Remove every address in [lo, hi).
     VOID Erase(ADDRINT lo, ADDRINT hi)
     {
-        if (hi <= lo || pages.empty()) return;
+        if (hi <= lo) return;
+        if (countBytes) Untouch(lo, hi);
+        if (pages.empty()) return;
         ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
         if (last - first + 1 < pages.size())
         {
@@ -245,6 +264,78 @@ class Footprint
     PageIndex pages; // page -> addresses recorded in it (when indexed)
     BOOL indexed = FALSE;
 
+    // countBytes: bytes touched, one bit per byte, per page
+    struct Bits
+    {
+        UINT64 word[(1 << PAGE_BITS) / 64] = {0};
+    };
+    unordered_map< ADDRINT, Bits > touched;
+    ADDRINT lastPage = ~(ADDRINT)0;
+    Bits* lastBits   = NULL;
+
+    // Set (or clear) the bits of [lo, hi) within one page; returns how many changed.
+    static UINT64 Mark(Bits& b, ADDRINT lo, ADDRINT hi, BOOL set)
+    {
+        UINT64 changed = 0;
+        for (ADDRINT a = lo; a < hi;)
+        {
+            UINT32 w = (a >> 6) & ((1 << (PAGE_BITS - 6)) - 1), bit = a & 63;
+            UINT32 n    = (UINT32)std::min< ADDRINT >(64 - bit, hi - a);
+            UINT64 mask = (n == 64 ? ~0ULL : ((1ULL << n) - 1)) << bit;
+            UINT64 now  = set ? (b.word[w] | mask) : (b.word[w] & ~mask);
+            changed += __builtin_popcountll(b.word[w] ^ now);
+            b.word[w] = now;
+            a += n;
+        }
+        return changed;
+    }
+
+    // Mark [lo, hi) touched; returns the bytes newly touched.
+    UINT64 Touch(ADDRINT lo, ADDRINT hi)
+    {
+        UINT64 added = 0;
+        while (lo < hi)
+        {
+            ADDRINT page = lo >> PAGE_BITS, end = std::min(hi, (page + 1) << PAGE_BITS);
+            if (page != lastPage) lastBits = &touched[page], lastPage = page;
+            added += Mark(*lastBits, lo, end, TRUE);
+            lo = end;
+        }
+        return added;
+    }
+
+    // Clear [lo, hi): the bytes are released.
+    VOID Untouch(ADDRINT lo, ADDRINT hi)
+    {
+        ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
+        lastPage = ~(ADDRINT)0; // pages may be erased
+        auto clear = [&](unordered_map< ADDRINT, Bits >::iterator it) {
+            ADDRINT start = it->first << PAGE_BITS;
+            UINT64 n      = Mark(it->second, std::max(lo, start), std::min(hi, start + (1 << PAGE_BITS)), FALSE);
+            bytes -= n, freed += n;
+            for (UINT64 w : it->second.word)
+                if (w) return;
+            touched.erase(it);
+        };
+        if (last - first + 1 < touched.size())
+        {
+            for (ADDRINT page = first; page <= last; page++)
+            {
+                auto it = touched.find(page);
+                if (it != touched.end()) clear(it);
+            }
+        }
+        else
+        {
+            for (auto it = touched.begin(); it != touched.end();)
+            {
+                auto next = std::next(it);
+                if (it->first >= first && it->first <= last) clear(it);
+                it = next;
+            }
+        }
+    }
+
     VOID Count(UINT32 count, INT32 delta)
     {
         if (count >= 1 && count <= 4) sampled[count] += delta;
@@ -263,8 +354,7 @@ class Footprint
             }
             auto it = entries.find(address);
             if (it == entries.end()) continue;
-            bytes -= it->second.size;
-            freed += it->second.size;
+            if (!countBytes) bytes -= it->second.size, freed += it->second.size; // (bytes: Untouch)
             Count(it->second.count, -1);
             entries.erase(it);
         }
@@ -311,6 +401,7 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     UINT32 allocDepth = 0;
     ADDRINT allocSp = 0; // stack pointer at the outermost call
     ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0;
+    ADDRINT allocHeader = 0; // realloc: the old chunk's size field at the entry
     BOOL allocMallocLike = FALSE; // the outermost call returns its block (malloc, calloc, memalign, ...)
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
@@ -420,11 +511,24 @@ static inline UINT64 Mix(UINT64 z)
     return z ^ (z >> 31);
 }
 
-// spatial: count every reference, record those to selected addresses.
-static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectAddress(THREADID tid, ADDRINT ea)
+// Bytes are selected in 64-byte chunks (windows always, spatial with countBytes): a chunk is
+// selected with probability 1/i, so selected bytes x i estimates the bytes touched.
+#define CHUNK_BITS 6
+static inline BOOL ChunkSelected(ADDRINT chunk) { return Mix(chunk ^ salt) < spatialThreshold; }
+
+// An access selects if its first or last chunk does (accesses span at most two chunks,
+// except rare long ones, whose middle chunks are then missed).
+static inline BOOL AccessSelected(ADDRINT ea, UINT32 size)
+{
+    ADDRINT first = ea >> CHUNK_BITS, last = (ea + size - 1) >> CHUNK_BITS;
+    return ChunkSelected(first) || (last != first && ChunkSelected(last));
+}
+
+// spatial: count every reference, record those to selected addresses (countBytes: chunks).
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectAddress(THREADID tid, ADDRINT ea, UINT32 size)
 {
     threads[tid].refs++;
-    return Mix(ea ^ salt) < spatialThreshold;
+    return countBytes ? AccessSelected(ea, size) : Mix(ea ^ salt) < spatialThreshold;
 }
 
 static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 rate)
@@ -465,7 +569,7 @@ static VOID InsertRecord(INS ins, UINT32 memOp, UINT32 refSize, BOOL isRead)
     if (mode == SPATIAL)
     {
         INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectAddress), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID,
-                         IARG_MEMORYOP_EA, memOp, IARG_END);
+                         IARG_MEMORYOP_EA, memOp, IARG_UINT32, refSize, IARG_END);
         INS_InsertThenCall(ins, IPOINT_BEFORE, AFUNPTR(RecordSelected), IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp, IARG_UINT32,
                            refSize, IARG_END);
     }
@@ -498,8 +602,10 @@ static VOID CheckTime(THREADID tid, CONTEXT* ctxt);
 // windowed: select 1-in-i 64-byte chunks (every address in a selected chunk),
 // without counting (CountRefs counts). Seeing whole chunks gives the bytes the
 // selected accesses cover as well as their footprint.
-#define CHUNK_BITS 6
-static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea) { return Mix((ea >> CHUNK_BITS) ^ salt) < spatialThreshold; }
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea, UINT32 size)
+{
+    return countBytes ? AccessSelected(ea, size) : ChunkSelected(ea >> CHUNK_BITS);
+}
 
 static UINT32 MemoryReferences(INS ins)
 {
@@ -531,7 +637,7 @@ static VOID TraceWindowed(TRACE trace)
                 for (int k = INS_MemoryOperandIsRead(ins, memOp) + INS_MemoryOperandIsWritten(ins, memOp); k > 0; k--)
                 {
                     INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectWatched), IARG_FAST_ANALYSIS_CALL, IARG_MEMORYOP_EA,
-                                     memOp, IARG_END);
+                                     memOp, IARG_UINT32, refSize, IARG_END);
                     INS_InsertThenCall(ins, IPOINT_BEFORE, AFUNPTR(RecordSelected), IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp,
                                        IARG_UINT32, refSize, IARG_END);
                 }
@@ -639,32 +745,43 @@ static VOID Attribute()
         Block* block;
         bool operator<(const Access& o) const { return address < o.address; }
     };
-    vector< Access > inBlocks;
+    vector< Access > inBlocks, outside;
     otherSampled = 0;
     for (auto& kv : blocks)
         kv.second.sampled = kv.second.covered = 0;
-    footprint.ForEach([&inBlocks](ADDRINT address, UINT32 size) {
+    footprint.ForEach([&inBlocks, &outside](ADDRINT address, UINT32 size) {
         auto it = blocks.upper_bound(address);
         if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.size)
             inBlocks.push_back({address, size, &std::prev(it)->second});
+        else if (countBytes)
+            outside.push_back({address, size, NULL});
         else
             otherSampled += size;
     });
-    // bytes covered: the union of [address, address + size)
+    // bytes covered: the union of [address, address + size); with countBytes that is also the
+    // footprint, so density is 1
     std::sort(inBlocks.begin(), inBlocks.end());
     kindSampled[0] = kindSampled[1] = kindCovered[0] = kindCovered[1] = 0;
     ADDRINT coveredTo = 0;
     for (const Access& a : inBlocks)
     {
         BOOL fresh = a.block->fresh;
-        kindSampled[fresh] += a.size, a.block->sampled += a.size;
+        if (!countBytes) kindSampled[fresh] += a.size, a.block->sampled += a.size;
         ADDRINT end = a.address + a.size;
         if (end > coveredTo)
         {
             ADDRINT more = end - std::max(a.address, coveredTo);
             kindCovered[fresh] += more, a.block->covered += more;
+            if (countBytes) kindSampled[fresh] += more, a.block->sampled += more;
             coveredTo = end;
         }
+    }
+    std::sort(outside.begin(), outside.end());
+    coveredTo = 0;
+    for (const Access& a : outside)
+    {
+        ADDRINT end = a.address + a.size;
+        if (end > coveredTo) otherSampled += end - std::max(a.address, coveredTo), coveredTo = end;
     }
 }
 
@@ -745,6 +862,27 @@ static VOID HarvestAndClear()
 // earlier blocks are not counted as its own; smaller blocks share pages with
 // other blocks anyway.
 #define DIRTY_CLEAR_MIN (16 * 1024)
+
+// The bytes a freed block releases: its whole glibc chunk, [ptr - 8, ptr - 8 + chunk size),
+// read from the chunk's size field (ptr - 8) before the allocator changes it. That is the
+// block, the size field and the slack after the requested size, which string and copy
+// functions read past the end of a block. The prev_size field below belongs to the
+// previous chunk. Without glibc's allocator, or if the field does not fit a chunk of this
+// size (an mmapped chunk, another allocator), only [ptr, ptr + size).
+static ADDRINT ChunkHeader(ADDRINT ptr)
+{
+    ADDRINT header = 0;
+    if (mallocCodeHi == 0 || ptr < 8 || PIN_SafeCopy(&header, (VOID*)(ptr - 8), sizeof(header)) != sizeof(header)) return 0;
+    return header;
+}
+
+static VOID ChunkRange(ADDRINT ptr, ADDRINT size, ADDRINT header, ADDRINT* lo, ADDRINT* hi)
+{
+    ADDRINT chunk = header & ~(ADDRINT)7;
+    BOOL ok       = header && !(header & 2) && chunk % 16 == 0 && chunk >= 32 && chunk >= size + 8 && chunk < size + 8 + 32;
+    *lo = ok ? ptr - 8 : ptr;
+    *hi = ok ? ptr - 8 + chunk : ptr + size;
+}
 
 static ADDRINT ForgetAllocation(ADDRINT ptr)
 {
@@ -834,8 +972,9 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
         if (!finished && clearRefsFd >= 0) HarvestAndClear();
         PIN_ReleaseLock(&stateLock);
     }
-    t.allocSize = size;
-    t.allocPtr  = ptr;
+    t.allocSize   = size;
+    t.allocPtr    = ptr;
+    t.allocHeader = ptr ? ChunkHeader(ptr) : 0; // realloc: the old chunk, before it changes
     t.allocOut  = out;
 }
 
@@ -877,9 +1016,10 @@ static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
 // code, which no footprint counts (InMallocCode).
 static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
 {
-    ADDRINT size = ForgetAllocation(ptr);
+    ADDRINT size = ForgetAllocation(ptr), lo, hi;
     ForgetBlock(tid, ptr);
-    QueueRelease(tid, ctxt, ptr, ptr + size);
+    ChunkRange(ptr, size, size ? ChunkHeader(ptr) : 0, &lo, &hi);
+    QueueRelease(tid, ctxt, lo, hi);
 }
 
 // realloc(ptr, size): releases the old block if it moved, else the tail it shrank by.
@@ -907,7 +1047,11 @@ static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     if (ret == ptr)
         QueueRelease(tid, ctxt, ptr + size, ptr + oldSize);
     else
-        QueueRelease(tid, ctxt, ptr, ptr + oldSize);
+    {
+        ADDRINT lo, hi; // moved: the old chunk is freed (header read at the entry)
+        ChunkRange(ptr, oldSize, threads[tid].allocHeader, &lo, &hi);
+        QueueRelease(tid, ctxt, lo, hi);
+    }
     RememberAllocation(tid, ret, size);
 }
 
@@ -1121,10 +1265,24 @@ static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
 // spatial: every access to a selected address; its hash also picks the bucket.
 static VOID SpatialReference(ADDRINT address, UINT32 size)
 {
-    footprint.Record(address, size);
-    UINT32 bucket = Mix(address ^ salt) % numBins;
-    bins[bucket].Record(address, size);
-    ++binObservations[bucket];
+    if (!countBytes)
+    {
+        footprint.Record(address, size);
+        UINT32 bucket = Mix(address ^ salt) % numBins;
+        bins[bucket].Record(address, size);
+        ++binObservations[bucket];
+        return;
+    }
+    // bytes: only the part of the access inside each selected chunk; the chunk picks the bucket
+    for (ADDRINT chunk = address >> CHUNK_BITS; chunk <= (address + size - 1) >> CHUNK_BITS; chunk++)
+    {
+        if (!ChunkSelected(chunk)) continue;
+        ADDRINT lo = std::max(address, chunk << CHUNK_BITS), hi = std::min(address + size, (chunk + 1) << CHUNK_BITS);
+        footprint.Record(lo, (UINT32)(hi - lo));
+        UINT32 bucket = Mix(chunk ^ salt) % numBins;
+        bins[bucket].Record(lo, (UINT32)(hi - lo));
+        ++binObservations[bucket];
+    }
 }
 
 static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
@@ -1631,6 +1789,15 @@ int main(int argc, char* argv[])
     else
         return Usage("unknown -mode " + KnobMode.Value());
     binObservations.assign(bins.size(), 0);
+
+    if (KnobFootprint.Value() == "bytes")
+        countBytes = TRUE;
+    else if (KnobFootprint.Value() == "starts")
+        countBytes = FALSE;
+    else if (KnobFootprint.Value().empty())
+        countBytes = KnobTrackFrees.Value() || windowed;
+    else
+        return Usage("-footprint must be bytes or starts");
 
     allocatorCode.reserve(64);
     PIN_InitLock(&stateLock);

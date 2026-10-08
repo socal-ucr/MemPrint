@@ -62,6 +62,7 @@ pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler [knobs] -- <
 | `-outdir` | `traces` | output directory (created if missing) |
 | `-name` | binary name | trace name, `<workload>-<config>` (run.sh sets it) |
 | `-seed` | process id | RNG seed base |
+| `-footprint` | see text | `bytes`: bytes touched, the union of every access's byte range. `starts`: the paper's definition, the sum of the largest access size at each start address. Default: `bytes` with `-track_frees` or `-window`, else `starts` |
 
 The tool writes one CSV per footprint: `Buffered_<name>_1_<pid>.csv` (splitter, exact) or `Sampled_<name>_<i>_<pid>.csv` (sampler), plus `..._SubSample_<interval>_bin_<j>.csv` for every bin. Each file contains a single row:
 
@@ -151,9 +152,11 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
 - **`-track_frees 1`:** `free`, `realloc` (the moved block or the shrunk tail) and `munmap` remove the released range from every footprint, so the footprint is live memory.
   - Releases are applied in program order relative to the buffered accesses of the same thread.
   - `free` is handled at its entry, because glibc's `free` exits through a tail jump.
+  - A freed block releases its whole glibc chunk, read from the chunk's size field at `free`'s entry: the block, its size field and the slack after the requested size, which string and copy functions read past the end of a block. If the size field does not fit a chunk of the block's size (an mmapped chunk, another allocator), only the requested size is released.
   - Accesses made by the allocator's own code (glibc's `malloc.c`: chunk headers, free-list links) count as time but not toward any footprint, since they land outside live blocks and would never be released. Without this, a program that allocates and frees 600,000 small blocks keeps 5.7 MB of them "live". The code is found by symbol name; if libc has no symbol table, only its public allocation functions are covered.
   - Not tracked: `mremap`, `brk`, and stack frames. Ordering across threads is the order in which their buffers are processed.
   - The page index this needs roughly doubles the tool's memory use. miniVite 8192 uses about 14 GB.
+- **Footprint definition.** With `-track_frees` or `-window`, footprints count bytes touched (`-footprint bytes`). The paper's definition (`-footprint starts`, the default otherwise) adds up the largest access at each start address, so accesses that overlap count more than once: an 8-byte read at every byte offset of a 1 MB buffer gives 8.5 MB, against 1.15 MB of bytes touched. Spatial sampling in bytes mode selects 64-byte chunks rather than start addresses.
 - **Overhead** on 2mm SMALL:
   - splitter: 1.47 s plain, 1.57 s with `-snapshot 32000` (200 snapshots), 1.77 s adding `-track_frees`;
   - sampler: 1.45 s plain, 1.61 s with both.
