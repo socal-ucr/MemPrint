@@ -113,8 +113,24 @@ Results with 1-in-100 chunks, about 20 periodic windows, mean error / peak error
 | miniVite 32768, 4 threads, 1% | 17.1 / −15.2 | 15.5 / −16.2 | 1.3% |
 
 - Allocations of 1 MB or more opened 5–7 windows on miniVite (at most one per period).
-- The mean error drops by 2–7 points, and the 32768 peak improves from −9% to −6%, but the 65536 peak gets worse (−2% to −5.5%). A likely cause, not yet checked: a block's density is then dominated by the window at its allocation, where the block is filled with aligned writes, rather than by its later, overlapping accesses.
+- The mean error drops by 2–7 points, and the 32768 peak improves from −9% to −6%, but the 65536 peak gets worse (−2% to −5.5%).
 - PolyBench (arrays allocated inside the first window) and the churn test (blocks under 1 MB) open no extra windows, and their results are unchanged.
+
+**Why the 65536 peak gets worse: periodic windows were right by luck.** Single-thread reruns with the current tool (`-window_alloc 0` against the default) give peak errors of −2.6% and −4.4% at 5% watched. A third run watches the whole run (1-in-100 chunks) and gives −1.5%, the floor of the method; its per-block densities serve as the reference. A debug build wrote every block of 256 KB or more at each snapshot. At the true peak (94.6% of the run), per block:
+
+| 5% watched | Fresh blocks: estimate − full watch | Reused blocks: estimate − full watch | Peak error |
+|---|---|---|---|
+| Periodic only | −3.75 MB | +3.09 MB | −2.6% |
+| With allocation windows | +0.03 MB | −0.95 MB | −4.4% |
+
+- **Periodic only:** two large blocks allocated late in the run carry errors that cancel.
+  - A 25 MB fresh block allocated at 88% of the run is not inside any window. It counts at density 1.00 against its true 1.28 (−3.75 MB).
+  - A 9 MB reused block allocated at 94% is not inside a window either. It takes the pooled density of reused blocks, 1.44, against its true 1.00 (+4 MB).
+- **Allocation windows** open at both allocations and measure both blocks exactly (1.28 and 1.00).
+  - The rest of the error is in a few 0.3–0.5 MB reused blocks allocated at the start, below the 1 MB trigger. Their true density is 1.9–2.4, from overlapping accesses throughout the run, and windows measure 1.1–1.3. Full watching removes it.
+  - The guess above that windows opened at allocation bias density toward aligned fills is wrong: every triggered block gets its full-watch density.
+- **32768** has the same structure without the luck. Its 12.6 MB fresh block falls inside a periodic window as well, so allocation windows only fix the reused blocks (−1.02 → −0.54 MB) and the peak goes from −10.1% to −5.7% (full watch: −1.9%).
+- So allocation windows are the more reliable setting. What they still miss is small reused blocks whose overlapping accesses happen outside windows, which a lower trigger threshold would not reach either, since those blocks are allocated at the start.
 
 ### GAP and darknet as heap-reuse workloads
 
@@ -131,7 +147,68 @@ MemGaze used GAP (graph kernels) and darknet (neural networks). Copies are in `~
 - Neither is a heavy heap-reuse workload in the sense that breaks residency. Their large buffers are above glibc's mmap threshold (128 KB, raised dynamically up to 32 MB after frees), so they get new pages, and the reused blocks they do have are fully rewritten.
 - Forcing large blocks onto the heap with `MALLOC_MMAP_THRESHOLD_=33554432` (glibc ignores values above 32 MB) moves more memory into reused blocks (GAP 5–7 MB, darknet 86 MB) but residency still exceeds written pages by at most 1 MB.
 - They are still useful real workloads: darknet allocates 513 MB but touches 263 MB, so allocation-based estimates are 2× off, and GAP has large, irregularly accessed graphs.
-- Better candidates for heap reuse are programs that repeatedly allocate buffers larger than they fill: interpreters, compilers, hash-table-heavy servers.
+- Better candidates for heap reuse are programs that repeatedly allocate buffers larger than they fill: interpreters, compilers, hash-table-heavy servers. They are tested below.
+
+**Accuracy on GAP and darknet** (single thread, against full traces with `-track_frees`; mean error / peak error, %):
+
+| Run | True peak | Allocated bytes | Nothing watched | 5% | 5%, allocation windows | 20%, allocation windows | Watching all the time |
+|---|---|---|---|---|---|---|---|
+| GAP bfs | 102.7 MB | 200.6 / −29.4 | 8.2 / −29.4 | 3.9 / −27.0 | 4.2 / −26.2 | 2.9 / −13.7 | 1.6 / −3.8 |
+| GAP pr | 102.6 MB | 157.1 / −29.4 | 20.1 / −29.4 | 17.7 / −28.9 | 14.4 / −25.2 | 15.9 / −8.4 | 3.2 / −3.6 |
+| GAP cc | 102.7 MB | 197.7 / −29.4 | 7.6 / −29.4 | 4.7 / −29.0 | 5.0 / −27.5 | 3.9 / −19.5 | 1.9 / −3.7 |
+| GAP sssp | 168.2 MB | 183.7 / −19.4 | 7.5 / −20.6 | 3.4 / −8.8 | 4.0 / −14.7 | 4.0 / −10.0 | 2.4 / −0.0 |
+| darknet AlexNet | 400.3 MB | 115.6 / +32.8 | 17.1 / −29.8 | 16.8 / −26.9 | 15.7 / −24.0 | 15.4 / −16.9 | 3.9 / +4.9 |
+
+- **Watching all the time** is within 5% of the peak, so the error at 5% is not a limit of the method.
+- **Density is the problem.** GAP's arrays have a density of 1.36 over the whole run and darknet's 1.47, and windows measure much less. For GAP bfs it is 1.02, 1.08 and 1.19 at 1%, 5% and 20% watched.
+  - A block's density accumulates over the run: each new access pattern (another width, another offset) adds start addresses to memory already covered. A window sees only the patterns used while it is open, so it measures a lower density, and the shortfall shrinks only slowly with the watched fraction.
+  - miniVite shows the same thing: its density is 1.05–1.12 at 1% watched and about 1.45 at 5% and 20%.
+- With 4 threads GAP bfs and pr give the same picture (4.4 / −25.5 and 20.1 / −23.5 at 5%).
+
+### Interpreters, a database and a compiler
+
+Six programs that churn their heap, run under Pin with the system's binaries; native time and memory references in brackets:
+- `python3` 3.6 serialising, parsing and sorting records in rounds of 10k–90k (3.5 s, 10.5 G);
+- `lua` 5.3 growing tables and concatenating strings in rounds (2.5 s, 4.7 G);
+- `perl` 5.26 doing the same with hashes and strings (1.4 s, 2.4 G);
+- `sqlite3` 3.26, an in-memory database of 300k rows with indexes, deletes, a join and `VACUUM` (0.9 s, 2.5 G);
+- GCC 8's `cc1` compiling the SQLite amalgamation at `-O0` (1.6 s, 2.8 G) and `-O1` (4.6 s, 7.3 G).
+
+The scripts are in the session's scratch space, not in the repository.
+
+**They are heap-reuse workloads.** Lua, Perl and SQLite keep 84–100% of their live memory in reused heap blocks (44, 46 and 59 MB at the peak, in 13k–650k blocks). Python and cc1 keep most of theirs in fresh blocks: pymalloc's 256 KB arenas and GCC's garbage-collected pages are mapped with `mmap`.
+
+**Residency still does not break.** The reused blocks' residency exceeds their written pages by at most 0.5 MB at any point of any run, except Python (2.8 MB). The blocks are reused, but each new block is written all over.
+
+**The windowed estimate does break**, for other reasons (mean error / peak error, %, allocation windows on):
+
+| Program | True peak | Allocated bytes | 1% | 5% | 20% | Watching all the time |
+|---|---|---|---|---|---|---|
+| python | 123.7 MB | 26.2 / −20.3 | 20.8 / −17.7 | 17.3 / −17.6 | 12.2 / −10.6 | — |
+| lua | 83.0 MB | 40.6 / −36.8 | 34.6 / −32.8 | 30.3 / −29.5 | 16.4 / −20.4 | 5.4 / −6.9 |
+| perl | 69.0 MB | 20.6 / −22.3 | 16.5 / −17.2 | 14.6 / −10.3 | 9.7 / −13.1 | 2.0 / +2.6 |
+| sqlite | 312.6 MB | 56.0 / −76.3 | 42.9 / −69.7 | 41.5 / −66.3 | 35.7 / −58.8 | 17.4 / −36.2 |
+| cc1 `-O0` | 132.3 MB | 9.5 / −13.7 | 9.5 / −10.5 | 5.7 / −5.3 | — | — |
+
+—: not run. cc1's 20% run and its `-O1` windowed runs were stopped (see Cost). Python's full-watch run was not made.
+
+Three things go wrong, in order of size:
+
+1. **Density accumulates, as in GAP.** Lua's reused blocks have a density of 1.36 over the run, and windows at 5% measure 1.11. Perl: 1.21 against 1.07.
+2. **The ground truth counts allocator metadata as live memory.** The splitter removes `[ptr, ptr + size)` when a block is freed. glibc then writes into the freed chunk (free-list links), and every allocation writes a chunk header just below its block. Those writes are counted again and never released.
+   - A test program that does 3 rounds of allocating, writing and freeing 200,000 blocks of 32–64 bytes leave 5.7 MB "live" at the end, and the peak reads 23.4 MB against about 14.4 MB of program data.
+   - Lua ends its run with 16.7 MB "live" and 0.1 MB allocated. SQLite ends with 104 MB against 16.5 MB, though part of that is the overlap described in 3.
+   - The windowed estimate sees this memory only as memory outside blocks, and only inside windows: 1.0 MB for Lua at 5% watched against 7.0 MB when watching all the time.
+   - miniVite (8 million malloc/free calls) is affected less: at most the 2.2 MB of its 36 MB peak that lies outside blocks, which also holds its stack and MPI buffers.
+3. **SQLite's footprint is not its memory.** Its process peaks at 80 MB resident. Its footprint, the largest access at each start address, peaks at 313 MB, because it reads records and keys at almost every byte offset with overlapping word and vector accesses. Near the end of the run, the live blocks hold 260 MB of footprint over 83 MB of covered bytes (3.2×). Even watching all the time, written pages × density misses the peak by 36%.
+
+**Cost.** Lua, Perl and SQLite with 5% watched took 61–81 s (16 runs at once), and the full trace took 176–319 s. Watching all the time took 53–75 s (3 runs at once), so the windows save almost nothing: the cost is in the allocator hooks (hundreds of thousands of live blocks under a lock) and in clearing soft-dirty bits. cc1 is pathological: 13–18 minutes windowed against 4.7 minutes for its full trace. GCC maps and unmaps its garbage-collected pages constantly, and every `mmap` harvests and clears the soft-dirty bits of all reused blocks. Python took 151–199 s windowed against 700 s for the full trace.
+
+**What this means:**
+- Heap reuse as such is handled: written pages track reused blocks in every program tried.
+- The weak point is density. Windows underestimate it whenever a block's access patterns change over the run, which is the normal case in real programs (GAP, darknet, Lua, Perl), and by 20–30% at the peak at 5% watched.
+- The ground truth should not count allocator metadata. One option is to ignore accesses made inside the allocator's own code when they fall outside a live block.
+- Whether footprint should count overlapping accesses at all is worth deciding: for byte-oriented programs like SQLite it is several times the memory touched.
 
 **darknet exposed a bug.** The tool recorded 53 KB of darknet's 513 MB. glibc's `calloc`, the first time the allocator is used, calls `malloc` through an initialization function and leaves with a jump to `memset`, so its exit is never seen. The tool then treated every later allocation made from deeper in the stack as nested inside it and recorded none. A call now counts as nested only if it comes from inside an instrumented allocation function and runs deeper in the stack, and a block returned by a call nested in a malloc-like call is recorded at once. `tests/pintool/first_calloc.c` checks this; default outputs are unchanged. miniVite, GAP and PolyBench were not affected, because their first allocation is a `malloc`.
 
@@ -327,6 +404,37 @@ The steps were tested in the order below. All numbers are mean absolute error ov
   - The bias more likely sits in the sample statistics themselves. In 2mm and gemm each element is reused about N times, so a larger input means more reuse per address. At the same sampling rate the largest size then shows more repeats than any training size did, whatever units the features use.
 - **Remaining options:** train the correction on the larger sizes only (the tiniest ones may mislead it), constrain it to extrapolate monotonically in the size-related features, or add a feature for reuse per address relative to the known rate (e.g. the expected samples per address implied by the known-rate fit).
 
+## The hybrid between `-i 3` and `-i 25`
+
+Where the hybrid falls off, and what each density costs. Sampler runs `-s 20 -r 20` at `-i` 3, 5, 8, 12, 25, 50, 100 and 250 on the held-out sizes (MEDIUM, SMALL) of 2mm, gemm, jacobi-2d and atax. The correction is trained on splitter unions at exactly each sampler's rate (splitter `-intervals 95,158,253,380,791,1582,3164,7910`, 20 bins). Variant: known-rate per snapshot, smoothed between frees, with the discovery feature. Mean absolute error over the four kernels, extrapolation / interpolation, %; time is MEDIUM, averaged over 2mm, gemm and jacobi-2d (3 runs each, one at a time on a quiet machine):
+
+| `-i` | MAPE | Error of peak | Error at peak | Time, MEDIUM (2mm / gemm / jacobi-2d) | Of a full trace |
+|---|---|---|---|---|---|
+| 3 | 3.6 / 4.9 | 2.0 / 6.1 | 9.1 / 8.6 | 24.5 / 18.1 / 28.8 s | 44% |
+| 5 | 5.9 / 5.8 | 2.7 / 7.6 | 14.8 / 14.2 | 16.8 / 12.8 / 19.7 s | 30% |
+| 8 | 14.2 / 9.5 | 19.9 / 16.4 | 30.1 / 18.7 | 11.1 / 8.9 / 13.0 s | 20% |
+| 12 | 21.8 / 12.4 | 65.1 / 20.4 | 34.9 / 13.7 | 9.3 / 7.5 / 10.8 s | 17% |
+| 25 | 24.5 / 10.4 | 28.1 / 17.1 | 45.5 / 20.4 | 6.4 / 5.4 / 6.9 s | 12% |
+| 50 | 30.7 / 13.2 | 47.4 / 11.3 | 64.0 / 27.1 | 4.9 / 4.3 / 5.1 s | 9% |
+| 100 | 36.3 / 18.2 | 32.4 / 22.2 | 64.5 / 30.1 | — | — |
+| 250 | 40.1 / 16.9 | 24.5 / 21.5 | 55.6 / 44.1 | — | — |
+
+The full trace (splitter, 8 intervals) took 54.4 / 41.2 / 68.4 s; native runs take 0.05–0.09 s.
+
+- **The hybrid holds to `-i 5` and falls off between 5 and 8.** At `-i 5` it is within 4–10% MAPE and −6% to +11% of the peak on every kernel and split, for 69% of the cost of `-i 3` and 30% of a full trace. At `-i 8` 2mm's extrapolation goes to 27% MAPE and +40% on the peak, and atax's peak to +29%.
+- **Past the fall-off it overshoots the peak.** At `-i 12` 2mm extrapolation is +153% on the peak, worse than at `-i 25` (+18%). The correction then extrapolates beyond its training range.
+- **Cost scales with the sampled fraction, on top of a fixed floor.** Going from `-i 3` to `-i 5` saves 31%, and to `-i 8` 53%. At `-i 25` and `-i 50` a run still costs 9–12% of a full trace.
+- Per kernel, MAPE / error of peak:
+
+  | Kernel | `-i 5` extrap. | `-i 5` interp. | `-i 8` extrap. | `-i 8` interp. |
+  |---|---|---|---|---|
+  | 2mm | 5 / +4 | 7 / +11 | 27 / +40 | 11 / +17 |
+  | gemm | 4 / +3 | 4 / +6 | 9 / +10 | 9 / +14 |
+  | jacobi-2d | 4 / +0 | 7 / −6 | 12 / −1 | 7 / −6 |
+  | atax | 10 / +3 | 5 / +8 | 9 / +29 | 12 / +29 |
+
+- The `-i 3` and `-i 25` rows are close to the earlier results (3.8–5.3 / 3.9–4.2 and 24.3 / 8.7 MAPE). The sampler runs at 3, 8, 25, 50, 100 and 250 are the earlier ones; the splitter runs and the `-i 5` and `-i 12` sampler runs are new.
+
 ## What we learned
 
 1. **A single bin cannot see reuse.** Each bin holds 0.1–10% of the footprint and almost never samples an address twice. So a model working from one bin, like the α model, can't tell new memory from memory being touched again: on a plateau its estimate keeps rising.
@@ -361,7 +469,11 @@ Re-measured with `OMP_NUM_THREADS=4 OMP_WAIT_POLICY=passive`, using the f1/f2-on
 
 ## Open questions / next steps
 
-- **Cost vs density:** measure the hybrid between `-i 3` and `-i 25` (e.g. 5, 8, 12) to find where it falls off, and its overhead at each.
+- **Windowed density:** windows underestimate density because it accumulates over the run (GAP, darknet, Lua, Perl: 20–30% low at the peak at 5% watched). Options: model a block's density as a function of the time it was watched and extrapolate to the whole run, or keep a cheap per-block record of access widths and offsets outside windows.
+- **Ground truth:** stop counting allocator metadata (free-list links in freed chunks, chunk headers) as live memory, e.g. by ignoring accesses from allocator code outside live blocks; then re-score miniVite and the interpreters.
+- **Footprint definition:** decide whether overlapping accesses should count (SQLite's footprint is 3.2× the bytes it touches).
+- **Windowed cost on allocation-heavy programs:** the allocator hooks and soft-dirty clears around `mmap` dominate (cc1 runs 3–4× slower windowed than fully traced).
+- **Hybrid below `-i 5`:** the correction overshoots once it extrapolates past its training range (`-i 8` and sparser); constraining it might move the fall-off.
 - **Generalisation:** the correction is trained per workload on its smaller sizes, like the paper's α model. It has not been tested across workloads, or on miniVite.
 - **Reuse model:** a two-class mixture (touched-once plus reused) instead of one negative binomial might transfer between sizes and allow sparser sampling.
 - **miniVite:** build against spack openmpi-5.0.5 and re-measure with all three estimators.
