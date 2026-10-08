@@ -195,7 +195,7 @@ The scripts are in the session's scratch space, not in the repository.
 Three things go wrong, in order of size:
 
 1. **Density accumulates, as in GAP.** Lua's reused blocks have a density of 1.36 over the run, and windows at 5% measure 1.11. Perl: 1.21 against 1.07.
-2. **The ground truth counts allocator metadata as live memory.** The splitter removes `[ptr, ptr + size)` when a block is freed. glibc then writes into the freed chunk (free-list links), and every allocation writes a chunk header just below its block. Those writes are counted again and never released.
+2. **The ground truth counted allocator metadata as live memory** (now fixed, see below). The splitter removes `[ptr, ptr + size)` when a block is freed. glibc then writes into the freed chunk (free-list links), and every allocation writes a chunk header just below its block. Those writes are counted again and never released.
    - A test program that does 3 rounds of allocating, writing and freeing 200,000 blocks of 32–64 bytes leave 5.7 MB "live" at the end, and the peak reads 23.4 MB against about 14.4 MB of program data.
    - Lua ends its run with 16.7 MB "live" and 0.1 MB allocated. SQLite ends with 104 MB against 16.5 MB, though part of that is the overlap described in 3.
    - The windowed estimate sees this memory only as memory outside blocks, and only inside windows: 1.0 MB for Lua at 5% watched against 7.0 MB when watching all the time.
@@ -207,7 +207,27 @@ Three things go wrong, in order of size:
 **What this means:**
 - Heap reuse as such is handled: written pages track reused blocks in every program tried.
 - The weak point is density. Windows underestimate it whenever a block's access patterns change over the run, which is the normal case in real programs (GAP, darknet, Lua, Perl), and by 20–30% at the peak at 5% watched.
-- The ground truth should not count allocator metadata. One option is to ignore accesses made inside the allocator's own code when they fall outside a live block.
+- The ground truth should not count allocator metadata. This is now fixed (below).
+
+**Ground truth fixed: the allocator's own accesses no longer count.** With `-track_frees` or windows, the tool finds glibc's `malloc.c` code by symbol name, both the public functions and internal ones such as `_int_free`. Memory accesses made by that code count as time but go into no footprint. memset and memcpy called by `calloc` and `realloc` still count. Default splitter and sampler outputs are byte-identical to before (checked with address randomisation off), and the test suite passes.
+- The test program above now peaks at 14.45 MB, against about 14.4 MB of program data (was 23.4), and ends at 1.7 MB, its 1.6 MB static array (was 7.3).
+- Re-scored with the fixed tool: new truth for every run, single thread, mean error / peak error, %:
+
+  | Run | True peak, old → new | Live at the end, old → new | 5% | 5%, allocation windows | Watching all the time |
+  |---|---|---|---|---|---|
+  | miniVite 65536 | 36.1 → 35.5 MB | 3.5 → 2.8 MB | 4.6 / −4.2 | 2.6 / −4.7 | 5.2 / −1.0 |
+  | miniVite 32768 | 19.9 → 19.3 MB | 3.5 → 2.8 MB | 6.3 / −8.0 | 4.3 / −4.1 | 5.8 / +0.0 |
+  | GAP bfs | 102.7 → 102.7 MB | 0.5 → 0.5 MB | 3.8 / −26.5 | 3.7 / −26.7 | 2.6 / −3.6 |
+  | darknet AlexNet | 400.3 → 399.4 MB | 390 → 390 MB | 16.8 / −25.5 | 15.7 / −23.8 | 3.7 / +4.8 |
+  | python | 123.7 → 125.9 MB | 6.2 → 6.2 MB | 16.5 / −16.6 | 16.6 / −18.8 | 3.7 / −2.8 |
+  | lua | 83.0 → 70.9 MB | 16.7 → 0.4 MB | 9.4 / −15.2 | 12.2 / −18.9 | 6.4 / −2.9 |
+  | perl | 69.0 → 64.5 MB | 50.0 → 42.2 MB | 7.5 / −11.9 | 7.6 / −5.4 | 2.8 / +3.2 |
+  | sqlite | 312.6 → 263.2 MB | 103.9 → 103.4 MB | 37.9 / −58.7 | 41.3 / −60.6 | 17.1 / −24.9 |
+
+- Metadata made up 15% of Lua's peak, 7% of Perl's and 16% of SQLite's. For miniVite, GAP and darknet the truth moved by at most 3%, so the earlier results on them stand within a few points.
+- Python's truth went up by 2 MB, which the fix cannot cause. Python randomises string hashing per run, so its runs differ slightly.
+- With the fixed truth, watching all the time is within 5% of the peak everywhere except SQLite. At 5% watched the peak is still 4–27% low, apart from SQLite: density remains the main error.
+- SQLite still ends with 103 MB "live" against 16.5 MB allocated. That remainder is overlap (point 3), not metadata.
 - Whether footprint should count overlapping accesses at all is worth deciding: for byte-oriented programs like SQLite it is several times the memory touched.
 
 **darknet exposed a bug.** The tool recorded 53 KB of darknet's 513 MB. glibc's `calloc`, the first time the allocator is used, calls `malloc` through an initialization function and leaves with a jump to `memset`, so its exit is never seen. The tool then treated every later allocation made from deeper in the stack as nested inside it and recorded none. A call now counts as nested only if it comes from inside an instrumented allocation function and runs deeper in the stack, and a block returned by a call nested in a malloc-like call is recorded at once. `tests/pintool/first_calloc.c` checks this; default outputs are unchanged. miniVite, GAP and PolyBench were not affected, because their first allocation is a `malloc`.
@@ -470,7 +490,7 @@ Re-measured with `OMP_NUM_THREADS=4 OMP_WAIT_POLICY=passive`, using the f1/f2-on
 ## Open questions / next steps
 
 - **Windowed density:** windows underestimate density because it accumulates over the run (GAP, darknet, Lua, Perl: 20–30% low at the peak at 5% watched). Options: model a block's density as a function of the time it was watched and extrapolate to the whole run, or keep a cheap per-block record of access widths and offsets outside windows.
-- **Ground truth:** stop counting allocator metadata (free-list links in freed chunks, chunk headers) as live memory, e.g. by ignoring accesses from allocator code outside live blocks; then re-score miniVite and the interpreters.
+- **Ground truth:** allocator accesses are now excluded for glibc. Other allocators (jemalloc, tcmalloc, pymalloc's arenas inside Python) are neither tracked as blocks nor excluded.
 - **Footprint definition:** decide whether overlapping accesses should count (SQLite's footprint is 3.2× the bytes it touches).
 - **Windowed cost on allocation-heavy programs:** the allocator hooks and soft-dirty clears around `mmap` dominate (cc1 runs 3–4× slower windowed than fully traced).
 - **Hybrid below `-i 5`:** the correction overshoots once it extrapolates past its training range (`-i 8` and sparser); constraining it might move the fall-off.

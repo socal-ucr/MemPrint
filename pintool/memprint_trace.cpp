@@ -439,8 +439,29 @@ static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 r
 static VOID RecordSelected(THREADID tid, ADDRINT address, UINT32 size);
 static VOID ApplyRelease(ADDRINT lo, ADDRINT hi);
 
+// The allocator's own code (glibc malloc.c, found by ImageLoad with -track_frees or -window).
+// Its accesses are chunk headers and free-list links, which land outside live blocks and
+// would never be released, so they count as time but not toward any footprint.
+ADDRINT mallocCodeLo = 0, mallocCodeHi = 0;
+const UINT32 MALLOC_REF = ~0u; // buffered size of an allocator reference
+
+static BOOL InMallocCode(INS ins) { return INS_Address(ins) >= mallocCodeLo && INS_Address(ins) < mallocCodeHi; }
+
+// spatial: count a reference made by the allocator (never selected)
+static VOID PIN_FAST_ANALYSIS_CALL CountReference(THREADID tid) { threads[tid].refs++; }
+
 static VOID InsertRecord(INS ins, UINT32 memOp, UINT32 refSize, BOOL isRead)
 {
+    if (InMallocCode(ins))
+    {
+        // time only: buffered modes record the size MALLOC_REF, which BufferFull counts but does not add
+        if (mode == SPATIAL)
+        {
+            INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(CountReference), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID, IARG_END);
+            return;
+        }
+        refSize = MALLOC_REF;
+    }
     if (mode == SPATIAL)
     {
         INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectAddress), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID,
@@ -503,7 +524,7 @@ static VOID TraceWindowed(TRACE trace)
         if (!watch) continue;
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
         {
-            if (MemoryReferences(ins) == 0) continue;
+            if (MemoryReferences(ins) == 0 || InMallocCode(ins)) continue; // counted by CountRefs only
             for (UINT32 memOp = 0; memOp < INS_MemoryOperandCount(ins); memOp++)
             {
                 UINT32 refSize = INS_MemoryOperandSize(ins, memOp);
@@ -851,8 +872,9 @@ static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
 }
 
 // free(ptr): released at entry, because glibc's free leaves through a tail
-// jump that Pin cannot see. Free's own bookkeeping writes into small blocks
-// (16 bytes of tcache links) are therefore counted again.
+// jump that Pin cannot see. Free's own bookkeeping writes into the block
+// (free-list links) come after that, but they are made by the allocator's
+// code, which no footprint counts (InMallocCode).
 static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
 {
     ADDRINT size = ForgetAllocation(ptr);
@@ -933,8 +955,44 @@ static IARGLIST EnterArgs(INT32 sizeArg, INT32 ptrArg, INT32 outArg)
     return list;
 }
 
+// glibc's malloc.c is one compilation unit, so its code is contiguous: the range spanned by
+// its routines (public and internal, e.g. _int_free) is the allocator's code. Internal names
+// need the library's symbol table; without one only the public functions are covered.
+static VOID FindMallocCode(IMG img)
+{
+    // names without leading underscores and "libc_" (aliases such as __libc_malloc)
+    static const std::set< string > names = {
+        "malloc", "free", "cfree", "realloc", "calloc", "memalign", "valloc", "pvalloc", "aligned_alloc", "posix_memalign",
+        "malloc_trim", "malloc_usable_size", "int_malloc", "int_free", "int_realloc", "int_memalign", "mid_memalign",
+        "sysmalloc", "systrim", "malloc_consolidate", "unlink_chunk", "tcache_init", "ptmalloc_init", "malloc_init_state",
+        "arena_get2", "arena_get_retry", "get_free_list", "new_heap", "munmap_chunk", "mremap_chunk"};
+    static BOOL haveInternals = FALSE;
+    ADDRINT lo = ~(ADDRINT)0, hi = 0;
+    BOOL internals = FALSE, any = FALSE;
+    for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+    {
+        if (SEC_Name(sec).find(".plt") == 0) continue;
+        for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn))
+        {
+            string name = RTN_Name(rtn);
+            name        = name.substr(0, name.find('.')); // e.g. tcache_init.part.7
+            name.erase(0, name.find_first_not_of('_'));
+            if (name.compare(0, 5, "libc_") == 0) name.erase(0, 5);
+            if (!names.count(name)) continue;
+            any |= name == "malloc";
+            internals |= name == "int_free";
+            lo = std::min(lo, RTN_Address(rtn));
+            hi = std::max(hi, RTN_Address(rtn) + RTN_Size(rtn));
+        }
+    }
+    // the first image with malloc, or a later one that has the internals when it did not
+    if (!any || hi <= lo || haveInternals || (mallocCodeHi != 0 && !internals)) return;
+    mallocCodeLo = lo, mallocCodeHi = hi, haveInternals = internals;
+}
+
 VOID ImageLoad(IMG img, VOID* v)
 {
+    FindMallocCode(img);
     IARGLIST ret = Args({{IARG_FUNCRET_EXITPOINT_VALUE, 0}});
     IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
 
@@ -1327,7 +1385,9 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
         if (address == 0) continue;
 
         ++observations;
-        if (mode == SPLITTER)
+        if (size == MALLOC_REF)
+            ; // made by the allocator: time only (see InMallocCode)
+        else if (mode == SPLITTER)
             SplitReference(tid, address, size);
         else
             BootstrapReference(tid, address, size);

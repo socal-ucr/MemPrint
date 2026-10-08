@@ -150,7 +150,8 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
   - Time counts memory references executed. The sampler estimates it as sampled references × `-i`, which comes within 0.4% of the true count on jacobi-2d SMALL.
 - **`-track_frees 1`:** `free`, `realloc` (the moved block or the shrunk tail) and `munmap` remove the released range from every footprint, so the footprint is live memory.
   - Releases are applied in program order relative to the buffered accesses of the same thread.
-  - `free` is handled at its entry, because glibc's `free` exits through a tail jump. The 16 bytes of tcache links that free writes into a small block are counted again.
+  - `free` is handled at its entry, because glibc's `free` exits through a tail jump.
+  - Accesses made by the allocator's own code (glibc's `malloc.c`: chunk headers, free-list links) count as time but not toward any footprint, since they land outside live blocks and would never be released. Without this, a program that allocates and frees 600,000 small blocks keeps 5.7 MB of them "live". The code is found by symbol name; if libc has no symbol table, only its public allocation functions are covered.
   - Not tracked: `mremap`, `brk`, and stack frames. Ordering across threads is the order in which their buffers are processed.
   - The page index this needs roughly doubles the tool's memory use. miniVite 8192 uses about 14 GB.
 - **Overhead** on 2mm SMALL:
