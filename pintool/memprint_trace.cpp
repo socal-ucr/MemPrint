@@ -39,9 +39,10 @@
  *   -footprint bytes|starts  the bytes touched (union of every access's byte
  *                   range), or the paper's sum of the largest access size per
  *                   start address. Default: bytes with -track_frees or
- *                   -window, else starts. Spatial sampling with bytes selects
- *                   64-byte chunks and keeps the bytes of each access inside
- *                   selected chunks, so selected bytes x i is unbiased.
+ *                   -window, else starts. Spatial and windowed sampling with
+ *                   bytes select aligned 8-byte words and keep the bytes of
+ *                   each access inside selected words, so selected bytes x i
+ *                   is unbiased.
  *   -snapshot N     every N memory references (time), append the current
  *                   footprints to a timeline CSV.
  *   -stop N         after N references, write all outputs and detach.
@@ -73,10 +74,11 @@
  * overlapping accesses (e.g. unaligned copies) count more than the bytes they
  * touch; density is that ratio for reused blocks, measured in the windows.
  * With -footprint bytes (the default here) the footprint is the bytes touched
- * and density is 1. Windows select 1-in-i
+ * and density is 1. With starts, windows select 1-in-i
  * 64-byte chunks and see every access in them, so they know both the
  * footprint and the bytes covered in the selected chunks; the ratio does not
- * depend on how much of the run the windows covered. Memory outside blocks
+ * depend on how much of the run the windows covered. With bytes, they select
+ * 8-byte words, like spatial sampling. Memory outside blocks
  * (stack, globals) is only seen in windows.
  *
  * Each snapshot is a row of <prefix>_windowed.csv: Time, Watching (in a
@@ -511,24 +513,66 @@ static inline UINT64 Mix(UINT64 z)
     return z ^ (z >> 31);
 }
 
-// Bytes are selected in 64-byte chunks (windows always, spatial with countBytes): a chunk is
-// selected with probability 1/i, so selected bytes x i estimates the bytes touched.
+// With countBytes, bytes are selected in aligned 8-byte words: a word is selected with
+// probability 1/i, so selected bytes x i estimates the bytes touched. (Windows select 64-byte
+// chunks to measure density, which countBytes does not need.) An access selects if any word it
+// covers does. The tests are chosen by access size at instrumentation time and are branch-free,
+// so that Pin inlines them: up to 8 bytes cover at most 2 words, up to 16 bytes at most 3; wider
+// accesses loop (not inlined, and rare).
 #define CHUNK_BITS 6
+#define WORD_BITS 3
 static inline BOOL ChunkSelected(ADDRINT chunk) { return Mix(chunk ^ salt) < spatialThreshold; }
+static inline BOOL WordSelected(ADDRINT word) { return Mix(word ^ salt) < spatialThreshold; }
 
-// An access selects if its first or last chunk does (accesses span at most two chunks,
-// except rare long ones, whose middle chunks are then missed).
-static inline BOOL AccessSelected(ADDRINT ea, UINT32 size)
+static inline ADDRINT Words8Selected(ADDRINT ea, UINT32 size)
 {
-    ADDRINT first = ea >> CHUNK_BITS, last = (ea + size - 1) >> CHUNK_BITS;
-    return ChunkSelected(first) || (last != first && ChunkSelected(last));
+    return (Mix((ea >> WORD_BITS) ^ salt) < spatialThreshold) | (Mix(((ea + size - 1) >> WORD_BITS) ^ salt) < spatialThreshold);
 }
 
-// spatial: count every reference, record those to selected addresses (countBytes: chunks).
-static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectAddress(THREADID tid, ADDRINT ea, UINT32 size)
+static inline ADDRINT Words16Selected(ADDRINT ea, UINT32 size)
+{
+    return (Mix((ea >> WORD_BITS) ^ salt) < spatialThreshold) | (Mix(((ea >> WORD_BITS) + 1) ^ salt) < spatialThreshold) |
+           (Mix(((ea + size - 1) >> WORD_BITS) ^ salt) < spatialThreshold);
+}
+
+static BOOL LongAccessSelected(ADDRINT ea, UINT32 size)
+{
+    for (ADDRINT word = ea >> WORD_BITS; word <= (ea + size - 1) >> WORD_BITS; word++)
+        if (WordSelected(word)) return TRUE;
+    return FALSE;
+}
+
+// spatial: count every reference, record those to selected start addresses (-footprint starts)
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectAddress(THREADID tid, ADDRINT ea)
 {
     threads[tid].refs++;
-    return countBytes ? AccessSelected(ea, size) : Mix(ea ^ salt) < spatialThreshold;
+    return Mix(ea ^ salt) < spatialThreshold;
+}
+
+// spatial, countBytes: count every reference, record those that touch a selected word
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectBytes8(THREADID tid, ADDRINT ea, UINT32 size)
+{
+    threads[tid].refs++;
+    return Words8Selected(ea, size);
+}
+
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectBytes16(THREADID tid, ADDRINT ea, UINT32 size)
+{
+    threads[tid].refs++;
+    return Words16Selected(ea, size);
+}
+
+static ADDRINT PIN_FAST_ANALYSIS_CALL SelectLong(THREADID tid, ADDRINT ea, UINT32 size)
+{
+    threads[tid].refs++;
+    return LongAccessSelected(ea, size);
+}
+
+// The selection test for an access of refSize bytes (spatial mode)
+static AFUNPTR SpatialSelector(UINT32 refSize)
+{
+    if (!countBytes) return AFUNPTR(SelectAddress);
+    return refSize <= 8 ? AFUNPTR(SelectBytes8) : refSize <= 16 ? AFUNPTR(SelectBytes16) : AFUNPTR(SelectLong);
 }
 
 static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 rate)
@@ -568,8 +612,12 @@ static VOID InsertRecord(INS ins, UINT32 memOp, UINT32 refSize, BOOL isRead)
     }
     if (mode == SPATIAL)
     {
-        INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectAddress), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID,
-                         IARG_MEMORYOP_EA, memOp, IARG_UINT32, refSize, IARG_END);
+        if (countBytes)
+            INS_InsertIfCall(ins, IPOINT_BEFORE, SpatialSelector(refSize), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID,
+                             IARG_MEMORYOP_EA, memOp, IARG_UINT32, refSize, IARG_END);
+        else
+            INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectAddress), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID,
+                             IARG_MEMORYOP_EA, memOp, IARG_END);
         INS_InsertThenCall(ins, IPOINT_BEFORE, AFUNPTR(RecordSelected), IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp, IARG_UINT32,
                            refSize, IARG_END);
     }
@@ -599,13 +647,13 @@ static ADDRINT PIN_FAST_ANALYSIS_CALL CountRefs(THREADID tid, UINT32 n)
 
 static VOID CheckTime(THREADID tid, CONTEXT* ctxt);
 
-// windowed: select 1-in-i 64-byte chunks (every address in a selected chunk),
-// without counting (CountRefs counts). Seeing whole chunks gives the bytes the
+// windowed: select 1-in-i 64-byte chunks (every address in a selected chunk; with
+// countBytes, 8-byte words), without counting (CountRefs counts). Seeing whole chunks gives the bytes the
 // selected accesses cover as well as their footprint.
-static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea, UINT32 size)
-{
-    return countBytes ? AccessSelected(ea, size) : ChunkSelected(ea >> CHUNK_BITS);
-}
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched(ADDRINT ea) { return ChunkSelected(ea >> CHUNK_BITS); }
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched8(ADDRINT ea, UINT32 size) { return Words8Selected(ea, size); }
+static inline ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatched16(ADDRINT ea, UINT32 size) { return Words16Selected(ea, size); }
+static ADDRINT PIN_FAST_ANALYSIS_CALL SelectWatchedLong(ADDRINT ea, UINT32 size) { return LongAccessSelected(ea, size); }
 
 static UINT32 MemoryReferences(INS ins)
 {
@@ -636,8 +684,15 @@ static VOID TraceWindowed(TRACE trace)
                 UINT32 refSize = INS_MemoryOperandSize(ins, memOp);
                 for (int k = INS_MemoryOperandIsRead(ins, memOp) + INS_MemoryOperandIsWritten(ins, memOp); k > 0; k--)
                 {
-                    INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectWatched), IARG_FAST_ANALYSIS_CALL, IARG_MEMORYOP_EA,
-                                     memOp, IARG_UINT32, refSize, IARG_END);
+                    if (!countBytes)
+                        INS_InsertIfCall(ins, IPOINT_BEFORE, AFUNPTR(SelectWatched), IARG_FAST_ANALYSIS_CALL, IARG_MEMORYOP_EA,
+                                         memOp, IARG_END);
+                    else
+                        INS_InsertIfCall(ins, IPOINT_BEFORE,
+                                         refSize <= 8    ? AFUNPTR(SelectWatched8)
+                                         : refSize <= 16 ? AFUNPTR(SelectWatched16)
+                                                         : AFUNPTR(SelectWatchedLong),
+                                         IARG_FAST_ANALYSIS_CALL, IARG_MEMORYOP_EA, memOp, IARG_UINT32, refSize, IARG_END);
                     INS_InsertThenCall(ins, IPOINT_BEFORE, AFUNPTR(RecordSelected), IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp,
                                        IARG_UINT32, refSize, IARG_END);
                 }
@@ -1273,13 +1328,13 @@ static VOID SpatialReference(ADDRINT address, UINT32 size)
         ++binObservations[bucket];
         return;
     }
-    // bytes: only the part of the access inside each selected chunk; the chunk picks the bucket
-    for (ADDRINT chunk = address >> CHUNK_BITS; chunk <= (address + size - 1) >> CHUNK_BITS; chunk++)
+    // bytes: only the part of the access inside each selected word; the word picks the bucket
+    for (ADDRINT word = address >> WORD_BITS; word <= (address + size - 1) >> WORD_BITS; word++)
     {
-        if (!ChunkSelected(chunk)) continue;
-        ADDRINT lo = std::max(address, chunk << CHUNK_BITS), hi = std::min(address + size, (chunk + 1) << CHUNK_BITS);
+        if (!WordSelected(word)) continue;
+        ADDRINT lo = std::max(address, word << WORD_BITS), hi = std::min(address + size, (word + 1) << WORD_BITS);
         footprint.Record(lo, (UINT32)(hi - lo));
-        UINT32 bucket = Mix(chunk ^ salt) % numBins;
+        UINT32 bucket = Mix(word ^ salt) % numBins;
         bins[bucket].Record(lo, (UINT32)(hi - lo));
         ++binObservations[bucket];
     }
