@@ -34,53 +34,53 @@
 \contentsline {subsection}{\numberline {5.2}Ground truth and error metrics}{11}{subsection.5.2}
 \contentsline {paragraph}{Training and testing.}{11}{section*.21}
 \contentsline {subsection}{\numberline {5.3}Validation of the ground truth}{12}{subsection.5.3}
-\contentsline {section}{\numberline {6}Estimating from sampled references}{12}{section.6}
+\contentsline {section}{\numberline {6}Estimating from sampled references}{13}{section.6}
 \contentsline {subsection}{\numberline {6.1}The $\alpha $ model at every snapshot}{13}{subsection.6.1}
 \contentsline {subsection}{\numberline {6.2}Estimators of unseen species}{13}{subsection.6.2}
-\contentsline {subsection}{\numberline {6.3}An estimator that uses the known sampling rate}{13}{subsection.6.3}
-\contentsline {subsection}{\numberline {6.4}A hybrid of the known-rate estimate and a learned correction}{14}{subsection.6.4}
-\contentsline {paragraph}{Where the hybrid falls off.}{14}{section*.23}
-\contentsline {paragraph}{Forecasting.}{15}{section*.27}
-\contentsline {section}{\numberline {7}Sampling words}{15}{section.7}
-\contentsline {subsection}{\numberline {7.1}Method}{15}{subsection.7.1}
-\contentsline {paragraph}{Implementation.}{16}{section*.28}
-\contentsline {subsection}{\numberline {7.2}Results}{17}{subsection.7.2}
-\contentsline {paragraph}{PolyBench.}{17}{section*.29}
-\contentsline {paragraph}{miniVite and threads.}{17}{section*.30}
-\contentsline {paragraph}{Cost on large inputs.}{17}{section*.31}
-\contentsline {section}{\numberline {8}Windowed sampling}{17}{section.8}
-\contentsline {subsection}{\numberline {8.1}Counting time between windows}{18}{subsection.8.1}
-\contentsline {subsection}{\numberline {8.2}Switching between watching and not watching}{19}{subsection.8.2}
-\contentsline {subsection}{\numberline {8.3}Tracking live blocks}{19}{subsection.8.3}
-\contentsline {subsection}{\numberline {8.4}Page residency}{20}{subsection.8.4}
-\contentsline {subsection}{\numberline {8.5}Written pages of reused blocks}{20}{subsection.8.5}
-\contentsline {subsection}{\numberline {8.6}Word sampling inside windows}{21}{subsection.8.6}
-\contentsline {paragraph}{Density, under the start-address footprint.}{21}{section*.34}
-\contentsline {subsection}{\numberline {8.7}The estimate}{21}{subsection.8.7}
-\contentsline {subsection}{\numberline {8.8}Windows opened by large allocations}{22}{subsection.8.8}
-\contentsline {subsection}{\numberline {8.9}Approaches that did not work}{22}{subsection.8.9}
-\contentsline {section}{\numberline {9}Evaluation of windowed sampling}{22}{section.9}
-\contentsline {subsection}{\numberline {9.1}PolyBench}{23}{subsection.9.1}
-\contentsline {subsection}{\numberline {9.2}miniVite}{23}{subsection.9.2}
-\contentsline {paragraph}{Windows opened by large allocations.}{23}{section*.38}
-\contentsline {subsection}{\numberline {9.3}Heap churn}{24}{subsection.9.3}
-\contentsline {subsection}{\numberline {9.4}Programs that reuse their heap}{24}{subsection.9.4}
-\contentsline {subsection}{\numberline {9.5}Cost}{25}{subsection.9.5}
-\contentsline {section}{\numberline {10}Discussion and limitations}{26}{section.10}
-\contentsline {paragraph}{Why each part is needed.}{26}{section*.43}
-\contentsline {paragraph}{The definition of the footprint.}{26}{section*.44}
-\contentsline {paragraph}{Limitations of written pages.}{27}{section*.45}
-\contentsline {paragraph}{Limitations of the allocator handling.}{27}{section*.46}
-\contentsline {paragraph}{Other limitations.}{27}{section*.47}
-\contentsline {paragraph}{Generality of the evaluation.}{27}{section*.48}
-\contentsline {section}{\numberline {11}Related work}{28}{section.11}
-\contentsline {paragraph}{Measuring memory use.}{28}{section*.49}
-\contentsline {paragraph}{Hardware sampling of memory accesses.}{28}{section*.50}
-\contentsline {paragraph}{Page-level tracking by the operating system.}{28}{section*.51}
-\contentsline {paragraph}{Sampling locations in caches and simulation.}{28}{section*.52}
-\contentsline {paragraph}{Sampling over time.}{28}{section*.53}
-\contentsline {paragraph}{Estimating unseen elements.}{29}{section*.54}
-\contentsline {section}{\numberline {12}Next steps}{29}{section.12}
-\contentsline {section}{\numberline {13}Conclusion}{29}{section.13}
-\contentsline {section}{\numberline {A}Options of the Pin tool}{33}{appendix.A}
-\contentsline {section}{\numberline {B}Output files}{34}{appendix.B}
+\contentsline {subsection}{\numberline {6.3}An estimator that uses the known sampling rate}{14}{subsection.6.3}
+\contentsline {subsection}{\numberline {6.4}A hybrid of the known-rate estimate and a learned correction}{15}{subsection.6.4}
+\contentsline {paragraph}{Where the hybrid falls off.}{16}{section*.25}
+\contentsline {paragraph}{Forecasting.}{16}{section*.29}
+\contentsline {section}{\numberline {7}Sampling words}{17}{section.7}
+\contentsline {subsection}{\numberline {7.1}Method}{17}{subsection.7.1}
+\contentsline {paragraph}{Implementation.}{18}{section*.30}
+\contentsline {subsection}{\numberline {7.2}Results}{18}{subsection.7.2}
+\contentsline {paragraph}{PolyBench.}{18}{section*.31}
+\contentsline {paragraph}{miniVite and threads.}{18}{section*.32}
+\contentsline {paragraph}{Cost on large inputs.}{18}{section*.33}
+\contentsline {section}{\numberline {8}Windowed sampling}{19}{section.8}
+\contentsline {subsection}{\numberline {8.1}Counting time between windows}{20}{subsection.8.1}
+\contentsline {subsection}{\numberline {8.2}Switching between watching and not watching}{20}{subsection.8.2}
+\contentsline {subsection}{\numberline {8.3}Tracking live blocks}{21}{subsection.8.3}
+\contentsline {subsection}{\numberline {8.4}Page residency}{21}{subsection.8.4}
+\contentsline {subsection}{\numberline {8.5}Written pages of reused blocks}{21}{subsection.8.5}
+\contentsline {subsection}{\numberline {8.6}Word sampling inside windows}{22}{subsection.8.6}
+\contentsline {paragraph}{Density, under the start-address footprint.}{22}{section*.36}
+\contentsline {subsection}{\numberline {8.7}The estimate}{23}{subsection.8.7}
+\contentsline {subsection}{\numberline {8.8}Windows opened by large allocations}{23}{subsection.8.8}
+\contentsline {subsection}{\numberline {8.9}Approaches that did not work}{23}{subsection.8.9}
+\contentsline {section}{\numberline {9}Evaluation of windowed sampling}{24}{section.9}
+\contentsline {subsection}{\numberline {9.1}PolyBench}{24}{subsection.9.1}
+\contentsline {subsection}{\numberline {9.2}miniVite}{24}{subsection.9.2}
+\contentsline {paragraph}{Windows opened by large allocations.}{25}{section*.40}
+\contentsline {subsection}{\numberline {9.3}Heap churn}{25}{subsection.9.3}
+\contentsline {subsection}{\numberline {9.4}Programs that reuse their heap}{26}{subsection.9.4}
+\contentsline {subsection}{\numberline {9.5}Cost}{26}{subsection.9.5}
+\contentsline {section}{\numberline {10}Discussion and limitations}{28}{section.10}
+\contentsline {paragraph}{Why each part is needed.}{28}{section*.45}
+\contentsline {paragraph}{The definition of the footprint.}{28}{section*.46}
+\contentsline {paragraph}{Limitations of written pages.}{28}{section*.47}
+\contentsline {paragraph}{Limitations of the allocator handling.}{28}{section*.48}
+\contentsline {paragraph}{Other limitations.}{29}{section*.49}
+\contentsline {paragraph}{Generality of the evaluation.}{29}{section*.50}
+\contentsline {section}{\numberline {11}Related work}{29}{section.11}
+\contentsline {paragraph}{Measuring memory use.}{29}{section*.51}
+\contentsline {paragraph}{Hardware sampling of memory accesses.}{29}{section*.52}
+\contentsline {paragraph}{Page-level tracking by the operating system.}{29}{section*.53}
+\contentsline {paragraph}{Sampling locations in caches and simulation.}{29}{section*.54}
+\contentsline {paragraph}{Sampling over time.}{30}{section*.55}
+\contentsline {paragraph}{Estimating unseen elements.}{30}{section*.56}
+\contentsline {section}{\numberline {12}Next steps}{30}{section.12}
+\contentsline {section}{\numberline {13}Conclusion}{31}{section.13}
+\contentsline {section}{\numberline {A}Options of the Pin tool}{35}{appendix.A}
+\contentsline {section}{\numberline {B}Output files}{35}{appendix.B}

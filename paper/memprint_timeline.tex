@@ -251,6 +251,22 @@ heap churn & 1.3 & 4.8 & 4.9 & 4.9 & 11.6 & 6.2 \\
 
 The true peak never exceeds the resident memory (it is 21\% to 97\% of it), as it should not, because resident memory counts whole pages, code and libraries, and memory that was freed but not returned to the operating system. Where a program touches everything it allocates, as PolyBench and GAP do, the true peak is 95\% to 97\% of the resident memory. The live allocations that the tool tracks agree with Massif and DHAT to within 0.1\,MB on PolyBench, GAP, darknet and Lua, and to within 1 to 3\,MB on Perl and SQLite, where Massif reports the exact peak whereas the tool reports the largest snapshot. They are larger where a program maps memory itself, which Massif's heap mode does not count: GCC's garbage collector (98\,MB), miniVite's MPI library (7 to 9\,MB) and Python's small-object allocator (3.8\,MB). Allocated is not touched: darknet allocates 532\,MB and touches 270\,MB, miniVite touches about half of what it allocates, and the churn test a quarter, so heap profilers overstate the footprint of such programs by 1.5$\times$ to 4$\times$. DHAT also counts accesses per byte offset, but only for blocks of up to 1\,KB, which cover too little of these heaps to check the bytes touched directly.
 
+\figref{fig:vgpeaks} puts these peaks side by side, as ratios to the true peak, together with the windowed estimate of \secref{sec:windowed} at 5\% watched. Massif's heap peak and DHAT's heap at its global maximum agree within 0.4\% on every workload. The windowed estimate is within $-4\%$ to $+6\%$ of the true peak everywhere except the churn test ($+23\%$, from whole pages), whereas the heap profilers agree with the truth only where a program touches what it allocates: they are 1.5$\times$ to 3.8$\times$ too high on miniVite, darknet and the churn test, and 0.15$\times$ on GCC, whose garbage collector maps its own pages. \figref{fig:vgcurves} shows the same comparison over time. Massif's heap rises in a step as soon as an array is allocated, whereas the truth rises as the array is touched (2mm fills its second array halfway through the run); it stays at the allocation on darknet and the churn test, and it follows the truth on Lua and SQLite, which touch what they allocate. DHAT reports its maximum at the same moment as Massif.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.68\linewidth]{figures/timeline_peaks_vs_valgrind.pdf}
+\caption{Peaks relative to the true live peak (bytes touched, complete recording, given in brackets): the windowed estimate at 5\% watched, Massif's heap peak, DHAT's heap at its global maximum, and the native peak resident memory. Workloads are sorted by true peak; the markers of each workload are spread vertically so that equal values stay visible.}
+\label{fig:vgpeaks}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/timeline_curves_vs_valgrind.pdf}
+\caption{Live footprint over the run: the truth (bytes touched), the windowed estimate at 5\% watched, Massif's heap, and DHAT's heap at its global maximum, placed at the moment it occurs. Time is a fraction of the run, counted in memory references for MemPrint and in instructions for Valgrind.}
+\label{fig:vgcurves}
+\end{figure}
+
 %=====================================================================
 \section{Estimating from sampled references}
 \label{sec:reference}

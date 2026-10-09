@@ -55,6 +55,33 @@ Every workload's true peak (full trace, bytes touched) and the tool's tracked li
 - **Allocated is not touched.** darknet allocates 532 MB and touches 270 MB; miniVite touches about half of its heap; the churn test a quarter. Massif and DHAT measure allocation, so they over-state those programs' footprint by 1.5–4×, while the tool's truth stays below the RSS.
 - DHAT's per-offset access counts (kept only for blocks of up to 1 KB) cover too little of these heaps to check bytes touched directly.
 
+### MemPrint against Massif and DHAT: figures
+
+`paper/valgrind_figures.py --scratch <dir>` draws three figures (`paper/figures/*_vs_valgrind.pdf`). Massif's heap peak and DHAT's heap at its global maximum were identical in all 189 PolyBench runs and within 0.7 MB (0.4%) in the other 16, so the figures draw them side by side.
+
+**Static (source-only) footprints** (`static_vs_valgrind.pdf`): the static predictor of the `static-generalization` work (source spectrum plus a runtime baseline fitted on the other kernels, leave one workload out) against the splitter's whole-run footprint (paper's definition, `data/*_allData.csv`), for all 27 kernels at all 7 sizes, with Massif, DHAT and peak RSS run on the same binaries:
+- **Static** is within a median of 0.09% at MEDIUM and 0.30% over all sizes (0.994–1.002× at MEDIUM).
+- **Massif and DHAT** see only the arrays: 0.89–0.93× of the footprint at MEDIUM (a median 107 KB short, the loader, libc and stack that the static runtime baseline models), and 0.07–0.20× at MINI, where that runtime memory dominates.
+- **They overshoot where a kernel allocates more than it touches:** trisolv (1.70×) and trmm (1.08×) allocate full N×N matrices and use one triangle.
+- **Peak RSS** is 1.3–2.9× at MEDIUM (a median 1.2 MB above the footprint over all sizes): code, libraries and whole pages.
+- Depends on the static code and spectra in the working tree (`analysis/memprint/lowo.py`, `static/`, `data/static/`), which are not committed on this branch; the prediction script is in the scratch space (`cmp/static_pred.py`).
+
+**Timeline peaks** (`timeline_peaks_vs_valgrind.pdf`): the 16 workloads of the validation table, peak / true live peak (bytes touched):
+
+| Workload | MemPrint windowed, 5% | Massif = DHAT | Peak RSS | Massif pages |
+|---|---|---|---|---|
+| 2mm / gemm / jacobi-2d LARGE | 1.00 | 1.00 | 1.03–1.04 | 1.17–1.23 |
+| GAP bfs / pr / cc / sssp | 1.00–1.01 | 1.00–1.01 | 1.04–1.05 | 1.18–1.32 |
+| miniVite 65536 / 32768 | 1.01–1.02 | 1.53 | 1.68–2.31 | 7.3–13.4 |
+| darknet | 1.04 | 1.97 | 1.06 | 2.03 |
+| Python / Lua / Perl / SQLite | 0.96–1.04 | 0.94–1.03 | 1.08–1.19 | 1.35–5.54 |
+| GCC cc1 | 1.06 | 0.15 | 1.27 | 3.65 |
+| heap churn | 1.23 | 3.84 | 4.83 | 9.07 |
+
+- The windowed estimate is within −4% to +6% of the true peak everywhere except the churn test (+23%, page granularity).
+- Heap profilers agree with the truth only where a program touches what it allocates. They are 1.5–3.8× too high on miniVite, darknet and the churn test, and 0.15× on GCC, whose collector maps its own pages.
+- **Over time** (`timeline_curves_vs_valgrind.pdf`; Massif's time axis is instructions, the truth's memory references, both as fractions of the run): Massif's heap is a step above the truth as soon as an array is allocated (2mm's second array is touched halfway through), stays at the allocation on darknet and the churn test, and follows the truth on Lua and SQLite. DHAT's maximum lands at the same moment as Massif's: 25% into darknet's run, 88% into miniVite's, 49% into Lua's.
+
 ### Why
 
 Spatial sampling still checks every memory access, even when it records only 1 in 100 words. On 2mm LARGE that alone takes 284 s against 8.0 s native, and Pin itself costs almost nothing (8.2 s). For long real workloads that overhead is the obstacle, not the sampling rate.
