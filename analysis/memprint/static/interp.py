@@ -41,7 +41,7 @@ from . import clangast as ca
 from .clangast import K
 
 CHUNK = 1 << 21  # iteration points per batch
-MAX_ITERATIONS = 100_000  # iterations of a loop run one at a time
+MAX_ITERATIONS = 1 << 24  # iterations of a loop run one at a time (a guard against runaway loops)
 MAX_DEPTH = 64
 FRAME_BYTES = 8192  # stack frame size; frames at the same call depth share addresses
 STACK_ARRAY_LIMIT = 1024  # larger local arrays get their own object

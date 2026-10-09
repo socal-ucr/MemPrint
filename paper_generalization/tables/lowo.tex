@@ -1,0 +1,22 @@
+\begin{tabular}{llrrrr}
+\toprule
+Method & Uses & \multicolumn{2}{c}{EXTRA} & \multicolumn{2}{c}{INTER} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+ & & median & mean & median & mean \\
+\midrule
+Static footprint (source + runtime baseline, no sampling) & source & 0.09 & 0.12 & 0.27 & 0.49 \\
+Static $\alpha$ (moments of the static spectrum) & source & 1.19 & 2.66 & 5.50 & 6.59 \\
+Pooled regression with $\log$ static $\alpha$ as a feature & source + known traces & 4.10 & 6.83 & 6.13 & 7.33 \\
+\addlinespace
+Nearest known model by $\hat z$ & source + known models & 12.24 & 16.97 & 11.11 & 15.09 \\
+RBF mixture of known models by $\hat z$ & source + known models & 14.07 & 19.34 & 12.11 & 15.43 \\
+Nearest known model by measured $z$ & $C$'s traces (upper bound) & 13.84 & 19.45 & 11.19 & 16.01 \\
+RBF mixture by measured $z$ & $C$'s traces (upper bound) & 14.05 & 18.57 & 11.53 & 15.61 \\
+Nearest known model by AST node counts & source + known models & 26.01 & 144.61 & 17.44 & 34.83 \\
+\addlinespace
+Uniform mixture of known models & known models & 92.03 & 154.16 & 43.99 & 79.80 \\
+\addlinespace
+$C$'s own model, trained on its other inputs & $C$'s traces & 18.04 & 18.41 & 10.85 & 11.22 \\
+Best known model, chosen after scoring & $C$'s traces (oracle) & 8.89 & 11.72 & 6.05 & 9.20 \\
+\bottomrule
+\end{tabular}

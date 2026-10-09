@@ -274,12 +274,31 @@ It was tested on two C programs written for this, `tests/static/csr_pr.c` and `c
   - Pointer values stored in memory are not tracked.
   - Loops that run one iteration at a time are slow: csr_bfs at scale 14 took 6 minutes.
 
+### Step 6: the C++ interpreter runs GAP's own source (committed `0d2a100` … this commit)
+
+`static/interp_cpp.py` and `static/containers.py` run GAP's unmodified C++ source from `main()`: objects, references, templates, lambdas, function values, `std::vector` / `unordered_map` / `pair`, the library calls GAP uses (sort, unique, shuffle, Mersenne Twister, …), atomics in iteration order, floating-point scalars, and `-O3` counting (registers for objects ≤ 64 B, redundant-load elimination keyed by base-pointer provenance). The only program-specific input is a table of command-line values.
+
+| Kernel (uniform / Kronecker) | scales | interpreter α MAPE | hand skeleton α MAPE | interpreter footprint |
+|---|---|---|---|---|
+| pr | 10–18 | 0.8–4.9 / 2.1–6.2 | 0.6–4.9 / 1.3–5.8 | ≤ 0.32% |
+| bfs | 10–18 | 2.1–7.5 / 3.6–7.9 | 1.4–6.6 / 1.9–7.4 | ≤ 0.48% |
+| cc, sssp | 10–12 | within 1–3 points of the skeleton | | ≤ 1.3% |
+| tc | 10–12 | 15.6–18.1 / 11.9–12.7 | 8.8–8.9 / 8.4–9.0 | ≤ 2.2% |
+| bc | 10–12 | 11.4–12.9 / 6.4–14.5 | 5.4–5.8 / 4.5–6.4 | ≤ 1.6% |
+
+- Scales 13–18 of pr and bfs were not used while developing the interpreter: α 0.8–4.7% against the skeleton's 0.6–4.1%, footprint within 0.44%.
+- tc and bc charge 8–36% more references than the skeleton (OrderedCount's neighbour array and index): the load cache is per batch, so `-O3` register reuse inside a per-point while loop and loop-invariant hoisting are not captured.
+- Fixed on the way (all found by comparing heap blocks with the skeleton): `vector::reference` typedefs treated as values (sssp hung), `0.57*max` unknown (no Kronecker graph), function values not callable (tc's kernel never ran), variables declared in a batch subset dropped, and a 100,000-iteration guard that GAP's prefix sum exceeds from scale 17 (raised to 2^24).
+- Cost: about 10 s at scale 10, doubling per scale; 67–78 min and 4.1–4.7 GB at scale 18.
+
+The write-up of the whole generalisation work, with every figure regenerated from `data/`, is in `paper_generalization/` (`compute.py`, `make_figures.py`, `make_tables.py`, `main.tex`).
+
 ### What generalises, and what was specific
 
 - **Generic, reusable for other programs:** the allocator model, the per-unit counting, the Mersenne Twister, std::sort and libc rand costs, and the moment formulas.
 - **Written for GAP:** the skeletons themselves (`static/gap.py`, `static/gap_kernels.py`), about 900 lines written by reading the source.
 
-Step 5 shows the automatic route for C. Doing the same for GAP needs a C++ object model in the interpreter, which is not done.
+Step 5 shows the automatic route for C; step 6 does the same for GAP's C++.
 
 ### Reproduce
 
