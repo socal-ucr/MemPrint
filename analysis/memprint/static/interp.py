@@ -54,6 +54,34 @@ SEQUENTIAL_LIMIT = 2_000_000  # iterations a loop carrying values through memory
 SENTINEL = np.iinfo(np.int64).min + 0x5A3C96E1
 
 
+_UNSIGNED = None
+
+
+def wrap_int(value, type_):
+    """An integer value converted to the C type: wrapped to its width and signedness (bool: 0/1).
+    64-bit values stay int64 (unsigned ones keep their bits)."""
+    global _UNSIGNED
+    if _UNSIGNED is None:
+        tk = ca.ci.TypeKind
+        _UNSIGNED = {tk.UINT, tk.ULONG, tk.ULONGLONG, tk.USHORT, tk.UCHAR, tk.CHAR_U, tk.UINT128, tk.CHAR16, tk.CHAR32}
+    if value is UNK or isinstance(value, Ptr):
+        return value
+    t = type_.get_canonical()
+    if t.kind == ca.ci.TypeKind.BOOL:
+        return _SCALAR((np.asarray(value) != 0).astype(np.int64)) if np.ndim(value) else int(value != 0)
+    size = ca.type_size(t)
+    if size is None or size >= 8 or not (t.kind in _UNSIGNED or t.kind in (
+            ca.ci.TypeKind.INT, ca.ci.TypeKind.SHORT, ca.ci.TypeKind.SCHAR, ca.ci.TypeKind.CHAR_S, ca.ci.TypeKind.LONG)):
+        return value
+    bits = 8 * size
+    if t.kind in _UNSIGNED:
+        return _SCALAR(np.asarray(value) & ((1 << bits) - 1)) if np.ndim(value) else int(value) & ((1 << bits) - 1)
+    half = 1 << (bits - 1)
+    if np.ndim(value):
+        return _SCALAR(((np.asarray(value) + half) & ((1 << bits) - 1)) - half)
+    return ((int(value) + half) & ((1 << bits) - 1)) - half
+
+
 def _wrap64(x):
     """A Python integer as the int64 with the same low 64 bits (unsigned 64-bit values)."""
     return ((int(x) + 2 ** 63) % 2 ** 64) - 2 ** 63
@@ -648,8 +676,16 @@ class Interpreter:
         if kind in (K.UNEXPOSED_EXPR, K.PAREN_EXPR):
             kids = ca.children(c)
             if len(kids) == 1:
+                if ca.is_float(kids[0].type) and not (ca.is_float(c.type) or ca.is_pointer(c.type)):
+                    folded = ca.evaluate(c)                            # a constant float -> int (0.57*max)
+                    if isinstance(folded, int):
+                        return wrap_int(folded, c.type)
                 v = self.eval(kids[0])
-                return UNK if ca.is_float(c.type) and not isinstance(v, Ptr) else v
+                if ca.is_float(c.type) and not isinstance(v, Ptr):
+                    return UNK
+                if not isinstance(v, (int, np.integer, np.ndarray)):
+                    return v
+                return wrap_int(v, c.type)
             for kid in kids:
                 self.eval(kid)
             return UNK
@@ -678,7 +714,7 @@ class Interpreter:
             v = self.eval(ca.children(c)[-1])
             if ca.is_float(c.type):
                 return UNK
-            return v
+            return wrap_int(v, c.type) if isinstance(v, (int, np.integer, np.ndarray)) else v
         if kind == K.UNARY_OPERATOR:
             return self._unary(c)
         if kind == K.BINARY_OPERATOR:

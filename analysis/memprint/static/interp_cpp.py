@@ -33,6 +33,7 @@ import numpy as np
 from . import clangast as ca
 from .clangast import K
 from .interp import (FREE, SENTINEL, UNK, Frame, Interpreter, Loc, Obj, Ptr, _as_int, _is_unk, _key, _SCALAR)
+from .containers import Containers, element_type
 from .skeleton import sort_refs
 
 REGISTER_BYTES = 64
@@ -69,11 +70,12 @@ def _record(type_):
 
 
 def _reference(type_):
-    return type_.kind in (ca.ci.TypeKind.LVALUEREFERENCE, ca.ci.TypeKind.RVALUEREFERENCE)
+    """A reference type, also behind a typedef (std::vector<T>::reference)."""
+    return type_.get_canonical().kind in (ca.ci.TypeKind.LVALUEREFERENCE, ca.ci.TypeKind.RVALUEREFERENCE)
 
 
 def _referee(type_):
-    return type_.get_pointee() if _reference(type_) else type_
+    return type_.get_canonical().get_pointee() if _reference(type_) else type_
 
 
 def _system(cursor):
@@ -145,7 +147,7 @@ def _body(fdef):
     return None
 
 
-class CppInterpreter(Interpreter):
+class CppInterpreter(Containers, Interpreter):
     def __init__(self, tu, seed=0, stubs=None, opt=3):
         super().__init__(tu, seed)
         self.stubs = stubs or {}
@@ -161,6 +163,7 @@ class CppInterpreter(Interpreter):
         self.probes = []
         self._caches = {}
         self.loop_flags = []  # (break key, continue key) of the loops being run one iteration at a time
+        self._maps = {}
 
     # ------------------------------------------------------------ objects and pointers in memory
 
@@ -787,7 +790,10 @@ class CppInterpreter(Interpreter):
                 return UNK
             if ca.is_pointer(c.type) and isinstance(v, Ptr):
                 return v
-            return v if not isinstance(v, (Str, Closure)) else v
+            if isinstance(v, (int, np.integer, np.ndarray)):
+                from .interp import wrap_int
+                return wrap_int(v, c.type)
+            return v
         if kind == K.CXX_NEW_EXPR:
             return self._new(c)
         if kind == K.CXX_DELETE_EXPR:
@@ -998,7 +1004,16 @@ class CppInterpreter(Interpreter):
                 self.scopes[-1].append((decl, dest, t))
             return
         if ca.is_array(t):
-            return super()._exec_decl(decl)
+            super()._exec_decl(decl)
+            if init is not None and _strip(init).kind == K.INIT_LIST_EXPR:
+                slot = self._lookup(decl)[0]                           # {a, b, ...}: store the elements
+                et = t.get_canonical().element_type
+                esize = ca.type_size(et) or 4
+                for i, e in enumerate(k for k in ca.children(_strip(init)) if k.kind.is_expression()):
+                    loc = Loc(slot.obj, slot.off + i * esize, esize)
+                    self.access(loc, write=True)
+                    self._mem_store(loc, et, self.eval(e))
+            return
         value = self.eval(init) if init is not None and init.kind != K.INIT_LIST_EXPR else UNK
         if ca.is_float(t) and not isinstance(value, Ptr):
             value = UNK
@@ -1131,6 +1146,11 @@ class CppInterpreter(Interpreter):
                 args_c = list(c.get_arguments())
             else:                                                      # operator call: object, then args
                 exprs = list(c.get_arguments())
+                nparams = len([p for p in ref.get_children() if p.kind == K.PARM_DECL]) or \
+                    len(list(ref.type.argument_types()))
+                if len(exprs) == nparams:                              # the object is not among them
+                    first = [k for k in kids if k.kind.is_expression() and not self._is_callee(k)]
+                    exprs = first[:1] + exprs
                 obj_c = exprs[0]
                 closure = self._closure_of(obj_c)
                 if closure is not None:
@@ -1177,6 +1197,11 @@ class CppInterpreter(Interpreter):
 
     def _closure_of(self, c):
         e = _strip(c)
+        while e.kind == K.CALL_EXPR and e.referenced is not None and e.referenced.kind == K.CONSTRUCTOR:
+            args = list(e.get_arguments())                             # a copy / move of the closure
+            if len(args) != 1:
+                return None
+            e = _strip(args[0])
         if e.kind == K.DECL_REF_EXPR and e.referenced is not None:
             entry = self._lookup(e.referenced)
             if entry is not None and isinstance(entry[1], Closure):
@@ -1292,6 +1317,15 @@ class CppInterpreter(Interpreter):
             size = ca.type_size(rtype.get_canonical()) or 0
             return rng, Ptr(rng.obj, rng.off + size) if isinstance(rng, Ptr) else Ptr(UNK, UNK), \
                 ca.type_size(rtype.get_canonical().element_type) or 4
+        cname = rtype.get_canonical().spelling
+        if cname.startswith("std::vector<") or cname.startswith("std::unordered_map<"):
+            if not isinstance(rng, Ptr):
+                return Ptr(UNK, UNK), Ptr(UNK, UNK), 4
+            if cname.startswith("std::vector<"):
+                et = element_type(rtype)
+                return self._vfield(rng, 0), self._vfield(rng, 1), \
+                    (ca.type_size(et.get_canonical()) if et is not None else None) or 8
+            return self._map_method("begin", rng, [], rtype), self._map_method("end", rng, [], rtype), 16
         begin = end = None
         for m in _class_members(rtype):
             if m.kind == K.CXX_METHOD and m.spelling == "begin" and begin is None:
@@ -1418,6 +1452,8 @@ class CppInterpreter(Interpreter):
 
     def _library_construct(self, call, dest, args_c):
         name = call.type.get_canonical().spelling
+        if name.startswith("std::vector<"):
+            return self._vector_construct(dest, args_c, call.type)
         if "mersenne_twister_engine" in name:
             words = 312 if "unsigned long, 64" in name or ", 64," in name else 624
             self._engine(dest, words, seed=True)
@@ -1447,6 +1483,12 @@ class CppInterpreter(Interpreter):
             self._forget_loads()
         name = ref.spelling
         ptype = ref.semantic_parent.type.get_canonical().spelling if ref.semantic_parent is not None else ""
+        if ptype.startswith("std::vector<") and obj is not None:
+            return self._vector_method(name, obj, args_c, ref.semantic_parent.type, c.type)
+        if ptype.startswith("std::unordered_map<") and obj is not None:
+            return self._map_method(name, obj, args_c, ref.semantic_parent.type)
+        if name == "max_element" and len(args_c) >= 2:
+            return self._max_element(args_c)
         if "mersenne_twister_engine" in ptype:
             words = 312 if ", 64," in ptype else 624
             if name == "seed":
@@ -1461,7 +1503,7 @@ class CppInterpreter(Interpreter):
                     if words == 312 else self.rng.integers(0, hi + 1, self.L, dtype=np.int64)
                 return int(draws[0]) if self.L == 1 else draws
             if name in ("max", "min"):
-                return (2 ** 63 - 1 if words == 312 else 2 ** 32 - 1) if name == "max" else 0
+                return (-1 if words == 312 else 2 ** 32 - 1) if name == "max" else 0   # 2^64 - 1 as int64
         if "uniform_int_distribution" in ptype and name == "operator()":
             if args_c:
                 gen = self.lvalue(args_c[0])
@@ -1623,10 +1665,50 @@ class CppInterpreter(Interpreter):
             else:
                 value[key] = c
         keys = np.array(list(value.keys()), dtype=np.int64)
-        self._mem_store(Loc(target.obj, _SCALAR(keys) if len(keys) > 1 else int(keys[0]), target.size), t,
-                        _SCALAR(np.array(list(value.values()), dtype=np.int64)) if len(keys) > 1
-                        else int(list(value.values())[0]))
+        if self.charging:
+            target.obj.store(keys, np.array(list(value.values()), dtype=np.int64),
+                             ca.type_size(t.get_canonical()) or 4)
         return _SCALAR(ok) if self.L > 1 else int(ok[0])
+
+    def _max_element(self, args_c):
+        """std::max_element(first, last[, comp]): walks the range calling the comparator (a lambda of
+        the program, or <) on the values; returns a pointer to the largest."""
+        b, e = self.eval(args_c[0]), self.eval(args_c[1])
+        esize = ca.pointee_size(args_c[0].type) or 16
+        if not (isinstance(b, Ptr) and isinstance(e, Ptr)) or _is_unk(b.obj, b.off, e.off) or self.L > 1:
+            return Ptr(UNK, UNK)
+        n = (int(e.off) - int(b.off)) // esize
+        if n <= 0:
+            return e
+        comp = self._closure_of(args_c[2]) if len(args_c) > 2 else None
+        best = int(b.off)
+        for i in range(1, n):
+            cur = int(b.off) + esize * i
+            if comp is not None:
+                less = self._invoke_lambda_ptrs(comp, [Ptr(b.obj, best), Ptr(b.obj, cur)])
+            else:
+                x, y = b.obj.load(best), b.obj.load(cur)
+                self.access(Loc(b.obj, best, esize))
+                self.access(Loc(b.obj, cur, esize))
+                less = int(x < y)
+            if _as_int(less) is not UNK and _as_int(less):
+                best = cur
+        return Ptr(b.obj, best)
+
+    def _invoke_lambda_ptrs(self, closure, ptrs):
+        """Call a lambda whose parameters are references, binding them to the given addresses."""
+        lam = closure.lambda_cursor
+        params = [p for p in lam.get_children() if p.kind == K.PARM_DECL]
+        bound = [("ref", p, v) for p, v in zip(params, ptrs)]
+        self._enter(lam, bound, None, None, None, parent=closure.frame)
+        try:
+            body = _body(lam)
+            if body is not None:
+                self.exec(body)
+            return self.frames[-1].vars["__ret__"][1]
+        finally:
+            self.frames.pop()
+            self.this_types.pop()
 
     # ------------------------------------------------------------ algorithms on ranges
 
@@ -1654,18 +1736,64 @@ class CppInterpreter(Interpreter):
         offs = np.repeat(starts, lengths) + esize * (np.arange(total) - np.repeat(np.cumsum(lengths) - lengths, lengths))
         return offs, obj.load(offs)
 
+    def _move_elements(self, src_obj, src, dst_obj, dst, esize):
+        """Copy whole elements (every 4-byte unit, pointers and per-byte values) between offsets."""
+        src, dst = np.asarray(src, dtype=np.int64), np.asarray(dst, dtype=np.int64)
+        if src.size == 0:
+            return
+        for u in range(0, max(esize, 4), 4):
+            vals = src_obj.load(src + u)
+            dst_obj.store(dst + u, vals)
+            sp = getattr(src_obj, "ptrs", None)
+            if sp is not None and int((src + u).max()) // 4 < len(sp):
+                uids = sp[(src + u) // 4]
+                dvals = dst_obj._value_units(int((dst + u).max()) // 4 + 1)
+                if getattr(dst_obj, "ptrs", None) is None or len(dst_obj.ptrs) < len(dvals):
+                    ptrs = np.full(len(dvals), -1, dtype=np.int64)
+                    if getattr(dst_obj, "ptrs", None) is not None:
+                        ptrs[: len(dst_obj.ptrs)] = dst_obj.ptrs
+                    dst_obj.ptrs = ptrs
+                dst_obj.ptrs[(dst + u) // 4] = uids
+        if getattr(src_obj, "bytevals", None) is not None:
+            for u in range(esize):
+                dst_obj.store(dst + u, src_obj.load(src + u, 1), 1)
+
     def _sort(self, b, e, c, args_c):
+        """std::sort on memory values: elements are compared field by field (pairs, NodeWeight: first,
+        then second), descending with std::greater; the elements move with all their bytes."""
         esize = ca.pointee_size(args_c[0].type) or 4
         seg = self._segments(b, e, esize)
         if seg is None:
             return
         starts, lengths = seg
         self._charge_range(b.obj, starts, lengths, esize, sort_refs(lengths))
-        offs, vals = self._gather(b.obj, starts, lengths, esize)
-        if len(vals) and not np.any(vals == SENTINEL):
-            group = np.repeat(np.arange(len(lengths)), lengths)
-            order = np.lexsort((vals, group))
-            b.obj.store(offs, vals[order])
+        total = int(lengths.sum())
+        if total == 0:
+            return
+        et = args_c[0].type.get_pointee().get_canonical()
+        fields = []
+        if et.kind == ca.ci.TypeKind.RECORD:
+            for f in et.get_fields():
+                fo = et.get_offset(f.spelling)
+                if fo is not None and fo >= 0:
+                    fields.append((fo // 8, ca.type_size(f.type.get_canonical()) or 4))
+        if not fields:
+            fields = [(0, esize)]
+        offs = np.repeat(starts, lengths) + esize * (np.arange(total) - np.repeat(np.cumsum(lengths) - lengths, lengths))
+        keys = [b.obj.load(offs + fo, fs if fs < 4 else 4) for fo, fs in fields]
+        if any(np.any(k == SENTINEL) for k in keys):
+            return
+        group = np.repeat(np.arange(len(lengths)), lengths)
+        descending = len(args_c) > 2 and "greater" in args_c[2].type.get_canonical().spelling
+        sort_keys = [(-k if descending else k) for k in reversed(keys)] + [group]
+        order = np.lexsort(sort_keys)
+        for u in range(0, esize, 4):                                   # move every 4-byte unit
+            vals = b.obj.load(offs + u)
+            b.obj.store(offs, vals[order]) if u == 0 else b.obj.store(offs + u, vals[order])
+        if getattr(b.obj, "bytevals", None) is not None:
+            for u in range(esize):
+                vals = b.obj.load(offs + u, 1)
+                b.obj.store(offs + u, vals[order], 1)
 
     def _compact(self, b, e, name, value, args_c):
         """std::unique (adjacent duplicates) or std::remove (a value): compacted in place; returns the
@@ -1693,7 +1821,7 @@ class CppInterpreter(Interpreter):
         moved = keep & (dest != offs)
         if moved.any() and self.charging:
             b.obj.add(dest[moved], esize, np.repeat(self.w, lengths)[moved])
-        b.obj.store(dest[keep], vals[keep])
+        self._move_elements(b.obj, offs[keep], b.obj, dest[keep], esize)
         new_end = starts + esize * kept
         return Ptr(b.obj, _SCALAR(new_end) if self.L > 1 else int(new_end[0]))
 
@@ -1706,11 +1834,9 @@ class CppInterpreter(Interpreter):
         self._charge_range(b.obj, starts, lengths, esize, 1.0)
         ostarts = np.broadcast_to(np.asarray(out.off, dtype=np.int64), (self.L,))
         self._charge_range(out.obj, ostarts, lengths, esize, 1.0)
-        offs, vals = self._gather(b.obj, starts, lengths, esize)
+        offs, _ = self._gather(b.obj, starts, lengths, esize)
         doffs = np.repeat(ostarts, lengths) + (offs - np.repeat(starts, lengths))
-        out.obj.store(doffs, vals)
-        if getattr(b.obj, "ptrs", None) is not None:
-            pass
+        self._move_elements(b.obj, offs, out.obj, doffs, esize)
         end = ostarts + esize * lengths
         return Ptr(out.obj, _SCALAR(end) if self.L > 1 else int(end[0]))
 
