@@ -8,7 +8,12 @@ A Pin tool records the footprint of a program at several sampling intervals. A l
 pintool/     memprint_trace Pin tool (splitter and sampler modes)
 workloads/   one directory per workload: upstream commit, patches, build/run hooks
 scripts/     setup.sh (fetch + patch workloads), run.sh (trace and time runs)
-analysis/    Python package: traces -> training data -> models -> figures
+analysis/    Python package: traces -> training data -> models -> figures;
+             static/ predicts footprint and alpha from source code
+tests/       pintool/ (live-footprint checks), static/ (interpreter tests and C graph programs)
+paper/                 report: footprint over time (reference, spatial and windowed sampling)
+paper_generalization/  report: predicting models for unseen programs from source code
+FINDINGS.md  every experiment, its results and how to reproduce it
 ```
 
 ## Requirements
@@ -80,10 +85,14 @@ Total,<bytes>,<unique addresses>,<references>,<interval>
 ## Running workloads
 
 ```
-scripts/run.sh <workload> --mode splitter|sampler|instr|native
+scripts/run.sh <workload> --mode splitter|sampler|spatial|instr|native
                [--bench "2mm gemm"] [--configs "MINI SMALL"] [--runs 5] [--pin-runs N]
                [--massif] [-i 1000 -s 100 -r 10] [--intervals LIST] [--bins N]
+               [--footprint bytes|starts] [--snapshot N] [--track-frees] [--stop N]
+               [--window W --period P]
 ```
+
+The options after `--bins` pass the Pin knobs of the same name (`--track-frees` sets `-track_frees 1`).
 
 - Traces go to `traces/<bench>/`.
 - Timings go to `results/<bench>/overhead_<mode>.csv`, with these columns: native, Pin and massif times and overheads, averaged over the runs.
@@ -94,6 +103,7 @@ scripts/run.sh <workload> --mode splitter|sampler|instr|native
 |---|---|---|
 | `polybench` | the 30 PolyBench/C 4.2.1 kernels | MINI, MINI2, MINI3, SMALL, SMALL2, SMALL3, MEDIUM |
 | `minivite` | miniVite | 1024 … 16384 vertices (`-n`) |
+| `gapbs` | GAP (b5e3e19, `-O3`): `gap_<k>` (uniform graph, `-u`) and `gap_<k>_kron` (Kronecker, `-g`) for k = bfs, pr (20 iterations), prc (pr to convergence), cc, sssp, tc, bc; `gap_{bfs,pr}[_kron]_t4` with 4 OpenMP threads | scale 10 … 16 by default (2^scale vertices, degree 16); the results use 10 … 18 |
 
 ### Adding a workload
 
@@ -141,16 +151,55 @@ When run on the original traces and data, all 16 figures come out pixel-identica
 
 ## Unseen workloads from source (experimental)
 
-`python -m memprint static ...` predicts a workload's footprint and α from its C source, with no traces of it. It does this by running the source through an abstract interpreter (`analysis/memprint/static/`) that counts the references to each address an `-O0` build makes, the access-count spectrum. The splitter's bin statistics then follow in closed form. The commands:
+`python -m memprint static ...` predicts a workload's footprint and α from its source, with no traces of it. It runs the source through an abstract interpreter (`analysis/memprint/static/`) that counts the references made to each address (the access-count spectrum). Under the splitter's Bernoulli sampling, the bins' mean footprint, spread and unique addresses at every interval then follow in closed form (`static/spectrum.py`). A small runtime baseline (loader, libc, allocator), fitted by NNLS on other workloads' traces, is added.
+
+- **C** (`static/interp.py`): counts what an `-O0` build references. It runs counted loops as numpy batches and tracks integers exactly, including integer values stored in memory. It draws `rand()` from its distribution and places heap blocks as glibc does. Coverage is the share of references it placed exactly.
+- **C++** (`static/interp_cpp.py`, `static/containers.py`): counts as `-O3` does, keeping small objects in registers and eliminating redundant loads. It models objects, references, templates, lambdas, `std::vector` / `unordered_map` / `pair` and the standard-library calls GAP uses. It runs GAP's unmodified source for all seven kernels on both graph families.
+
+The commands:
 
 | Command | What it does | Output |
 |---|---|---|
 | `static spectra --polybench DIR [--footprint bytes\|starts]` | computes each PolyBench kernel's spectrum at every config, for the footprint definition of the traces it is compared with (default bytes touched) | `data/static/<wl>-<config>.npz` |
 | `static idioms --polybench DIR [--program name=root:files]` | classifies the access idioms of code the interpreter cannot run, and decides whether the static route applies | `data/static_idioms.csv` |
 | `static lowo [--ast CSV] [--transfer miniVite]` | evaluates leave one workload out: each kernel is predicted from its source and the other kernels' traces | `data/lowo_*.csv`, `figures/static/` |
-| `static gap [--borrow DIR]` | GAP pilot: predicts `gap_pr` and `gap_bfs` from a skeleton of their code and the input graph's distribution | `data/gap_pilot_*.csv` |
+| `static gap [--borrow DIR]` | GAP pilot: predicts every GAP workload from a hand-written skeleton of its code (`static/gap.py`, `static/gap_kernels.py`) and the input graph's distribution, and scores it against its own model and borrowed PolyBench models | `data/gap_pilot_*.csv` |
+| `static programs [--borrow DIR]` | runs the C interpreter on the irregular C programs `tests/static/csr_{pr,bfs}.c` and scores them | `data/programs_*.csv` |
 
-Trace with `scripts/run.sh ... --footprint bytes` to compare against bytes touched. The parser is libclang (`pip install libclang`), so no clang binary is needed. Results are in FINDINGS.md, section "Unseen workloads from source code alone".
+The C++ interpreter has no command yet. Call it from Python; command-line accessors come from a table of stub values:
+
+```python
+from memprint.static import interp_cpp
+from memprint.static.skeleton import HEAP_TOP_AT_START
+
+cli = {"scale": 8, "degree": 16, "uniform": 1, "symmetrize": 1, "in_place": 0,
+       "filename": interp_cpp.Str(""), "num_trials": 1, "max_iters": 20, "tolerance": 0,
+       "logging_en": 0, "do_analysis": 0, "do_verify": 0, "start_vertex": -1,
+       "ParseArgs": 1, "num_iters": 1, "delta": 1}
+spec, result, errors, seconds = interp_cpp.analyze(
+    "workloads/src/gapbs/src/pr.cc", heap_top=HEAP_TOP_AT_START, stubs={"__CL__": cli})
+print(spec.footprint, result.coverage)    # 75845.0 1.0, in about 3 s
+```
+
+A GAP program takes about 10 s at scale 10, doubling with every scale (about 70 minutes and 4–5 GB at scale 18). `python tests/static/test_cpp.py` checks the C++ features on `tests/static/cpp_features.cc`.
+
+Trace with `scripts/run.sh ... --footprint bytes` to compare against bytes touched. The parser is libclang (`pip install libclang`), so no clang binary is needed.
+
+**Results** (FINDINGS.md, "Unseen workloads from source code alone" and "GAP pilot"):
+- **PolyBench**, each of 27 kernels held out in turn:
+  - footprint within a median of 0.09% (largest input held out) / 0.27% (middle input);
+  - α within 1.2% / 5.5%. The kernel's own model gets 18.0% / 10.9%; the best borrowed model, chosen after the fact, 8.9% / 6.1%.
+- **Choosing a model to borrow:** a descriptor predicted from source ranks which known model transfers best (median Spearman ρ 0.83–0.85), as well as the measured descriptor.
+- **GAP pr and bfs from their C++ source**, scales 13–18: α within 0.8–4.7%, footprint within 0.44%. tc and bc are less accurate than the hand skeleton (12–18% against about 9% and 5%).
+
+`paper_generalization/` is a detailed report of this work. To regenerate its data, figures and tables from `data/`:
+
+```bash
+python paper_generalization/compute.py <dir of interpreter *.time files>
+python paper_generalization/make_figures.py
+python paper_generalization/make_tables.py
+cd paper_generalization && pdflatex main && bibtex main && pdflatex main && pdflatex main
+```
 
 ## Footprint over time (experimental)
 
