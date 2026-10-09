@@ -190,9 +190,12 @@ class Obj:
             off, w = off[~bad], w[~bad]
         if len(off) == 0:
             return
-        hi = int(off.max()) + 1
+        lo, hi = int(off.min()), int(off.max()) + 1
         arr = self._grow(size, hi)
-        arr[:hi] += np.bincount(off, weights=w, minlength=hi)
+        if 8 * len(off) < hi - lo:                                     # few offsets over a wide range
+            np.add.at(arr, off, w)
+        else:
+            arr[lo:hi] += np.bincount(off - lo, weights=w, minlength=hi - lo)
 
     def addresses(self, footprint="starts"):
         """(counts, sizes) of the object's footprint units.
@@ -286,7 +289,10 @@ class Frame:
 
 
 def _key(decl):
-    return (decl.spelling, decl.location.offset, str(decl.location.file))
+    k = decl.__dict__.get("_memprint_key")
+    if k is None:
+        k = decl._memprint_key = (decl.spelling, decl.location.offset, str(decl.location.file))
+    return k
 
 
 def _as_int(v):

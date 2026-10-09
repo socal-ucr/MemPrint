@@ -26,6 +26,49 @@ FLOAT_TYPES = (ci.TypeKind.FLOAT, ci.TypeKind.DOUBLE, ci.TypeKind.LONGDOUBLE, ci
 
 _lib = None
 
+# The interpreters ask libclang the same questions about the same nodes many times (every iteration of a
+# loop that runs one point at a time). Each answer is a ctypes call, and get_children builds new cursor
+# objects through a callback, so caching answers per cursor object only pays if the same objects come
+# back: child lists are therefore cached (on the cursor, and by hash for cursors created elsewhere, checked
+# for equality), and kinds and canonical types are cached on the objects that computed them.
+_CHILDREN = {}
+_get_children = ci.Cursor.get_children
+_kind = ci.Cursor.kind.fget
+_canonical = ci.Type.get_canonical
+
+
+def _cached_children(self):
+    lst = self.__dict__.get("_children")
+    if lst is None:
+        key = (ci.conf.lib.clang_hashCursor(self), self._kind_id)
+        hit = _CHILDREN.get(key)
+        if hit is not None and hit[0] == self:
+            lst = hit[1]
+        else:
+            lst = list(_get_children(self))
+            _CHILDREN[key] = (self, lst)
+        self._children = lst
+    return iter(lst)
+
+
+def _cached_kind(self):
+    k = self.__dict__.get("_kind_cached")
+    if k is None:
+        k = self._kind_cached = _kind(self)
+    return k
+
+
+def _cached_canonical(self):
+    c = self.__dict__.get("_canonical")
+    if c is None:
+        c = self._canonical = _canonical(self)
+    return c
+
+
+ci.Cursor.get_children = _cached_children
+ci.Cursor.kind = property(_cached_kind)
+ci.Type.get_canonical = _cached_canonical
+
 
 def lib():
     global _lib

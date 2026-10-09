@@ -386,6 +386,69 @@ class CppInterpreter(Containers, Interpreter):
 
     # ------------------------------------------------------------ loops: pointers and reductions
 
+    def _scans(self, body):
+        """Integer scalars the body updates exactly once, unconditionally, as v += x, v -= x, v++ or v--,
+        with x not reading v, and otherwise only reads ({key: decl}), in a body that allocates nothing:
+        a prefix sum. The loop runs as one batch in which iteration j sees v0 + the sum of the earlier
+        iterations' increments (_run_scans)."""
+        from .interp import _decl_ref
+        from .idioms import ALLOCATING
+
+        stmts = list(body.get_children()) if body.kind == K.COMPOUND_STMT else [body]
+        updates = {}
+        for st in stmts:
+            n = _strip(st)
+            d = None
+            if n.kind == K.COMPOUND_ASSIGNMENT_OPERATOR and ca.compound_op(n) in ("+", "-"):
+                lhs, rhs = ca.children(n)
+                d = _decl_ref(lhs)
+                if d is not None and any(_decl_ref(r) is not None and _key(_decl_ref(r)) == _key(d)
+                                         for r in _walk(rhs)):
+                    d = None
+            elif n.kind == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "pre++", "post--", "pre--"):
+                d = _decl_ref(ca.children(n)[0])
+            if d is not None and not (ca.is_float(d.type) or ca.is_pointer(d.type)):
+                k = _key(d)
+                updates[k] = None if k in updates else (d, st)
+        if not updates:
+            return {}
+        writes = {}
+        for n in _walk(body):                                          # every write to those scalars
+            if n.kind in (K.CXX_NEW_EXPR,) or (n.kind == K.CALL_EXPR and n.spelling in ALLOCATING):
+                return {}
+            target = None
+            if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=" or n.kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
+                target = _decl_ref(ca.children(n)[0])
+            elif n.kind == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "pre++", "post--", "pre--", "&"):
+                target = _decl_ref(ca.children(n)[0])
+            if target is not None:
+                writes[_key(target)] = writes.get(_key(target), 0) + 1
+        return {k: u[0] for k, u in updates.items() if u is not None and writes.get(k) == 1}
+
+    def _run_scans(self, entries, body, point, n, v0s, n_outer):
+        """Scans in a batch of n iterations (point: their enclosing batch point). A first pass, which
+        charges and stores nothing, gives each iteration's increment (v starts at 0); each iteration then
+        starts from v0 plus the increments of the earlier iterations of its enclosing point. Returns the
+        values after the loop."""
+        live = {k: self._lookup_key(k) for k in entries}               # the batch's own copies
+        for e in live.values():
+            e[1] = np.zeros(n, dtype=np.int64)
+        self.no_charge(lambda: self.exec(body))
+        incs = {k: np.broadcast_to(np.asarray(_as_int(e[1]) if _as_int(e[1]) is not UNK else 0), (n,))
+                for k, e in live.items()}
+        first = np.searchsorted(point, point, side="left")             # the first iteration of each point
+        final = {}
+        for k, e in live.items():
+            v0 = np.broadcast_to(np.asarray(v0s[k]), (n_outer,))
+            excl = np.cumsum(incs[k]) - incs[k]
+            excl = excl - excl[first]
+            e[1] = v0[point] + excl
+            total = np.zeros(n_outer, dtype=np.int64)
+            np.add.at(total, point, incs[k])
+            out = v0 + total
+            final[k] = int(out[0]) if n_outer == 1 else out
+        return final
+
     def _reductions(self, body):
         """Integer scalars the body only updates as v = std::max(v, x), v = std::min(v, x), v += x,
         v -= x or v++: {key: op}. Such a loop can still run all iterations at once."""
@@ -477,9 +540,10 @@ class CppInterpreter(Containers, Interpreter):
             return super()._for(c)
         reductions = self._reductions(body)
         first, written = _events(body)
-        carried = [k for k in written if first.get(k) == "r" and k not in reductions]
+        scans = {k: d for k, d in self._scans(body).items() if k not in reductions}
+        carried = [k for k in written if first.get(k) == "r" and k not in reductions and k not in scans]
         pointer = ca.is_pointer(var.type)
-        if (not pointer and not reductions) or carried or _key(var) in written or \
+        if (not pointer and not reductions and not scans) or carried or _key(var) in written or \
                 any(_key(d) in written for d in _refs(bound_c)):
             return super()._for(c)
         if init is not None:
@@ -509,6 +573,15 @@ class CppInterpreter(Containers, Interpreter):
             finally:
                 self.sequential_depth -= 1
         total = int(trips.sum())
+        scan_entries = {}
+        for fr in self.frames[::-1]:
+            for k in scans:
+                if k in fr.vars and k not in scan_entries:
+                    scan_entries[k] = fr.vars[k]
+        if scans and (total > CHUNK or len(scan_entries) != len(scans)
+                      or any(_as_int(e[1]) is UNK for e in scan_entries.values())):
+            return self._loop_general(None, cond, inc, body)          # a scan we cannot run as a batch
+        scan_v0 = {k: _as_int(e[1]) for k, e in scan_entries.items()}
         red_entries = {}
         for fr in self.frames[::-1]:
             for k in reductions:
@@ -530,7 +603,12 @@ class CppInterpreter(Containers, Interpreter):
                     self._lookup(var)[1] = Ptr(start.obj, base[point] + step * esize * within) if pointer \
                         else base[point] + step * within
                     initial = {k: _as_int(e[1]) for k, e in red_entries.items()}
+                    scan_final = self._run_scans(scan_entries, body, point, len(g), scan_v0, len(saved_w)) \
+                        if scan_entries else None
                     self.exec(body)
+                    if scan_final is not None:
+                        for k, e in scan_entries.items():
+                            e[1] = scan_final[k]
                     for k, e in red_entries.items():                    # combine the reductions
                         here = self._lookup_key(k)
                         vals, v0 = _as_int(here[1] if here else UNK), initial[k]
@@ -2095,6 +2173,15 @@ class CppInterpreter(Containers, Interpreter):
         if len(vals) and not np.any(vals == SENTINEL):
             b.obj.store(offs, self.rng.permutation(vals))
         return UNK
+
+
+def _walk(node):
+    """All nodes of a subtree, the node first."""
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        yield n
+        stack.extend(n.get_children())
 
 
 def _breaks(body):
