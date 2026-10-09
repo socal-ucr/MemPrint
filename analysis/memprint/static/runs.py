@@ -118,7 +118,7 @@ def unity(name, sources, cache_dir):
     unity file and the include directories."""
     import shutil
 
-    cache_dir = Path(cache_dir)
+    cache_dir = Path(cache_dir).resolve()
     work = cache_dir / f"{name}__src"
     work.mkdir(parents=True, exist_ok=True)
     dirs = sorted({x.resolve().parent for x in sources})

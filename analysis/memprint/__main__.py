@@ -361,7 +361,9 @@ def cmd_static(args, paths):
         if not args.workloads or not args.source_file:
             raise SystemExit("static cpp NAME --source FILE --configs C1 C2 ... [--args ARG ...]")
         name = args.workloads[0]
-        spectra, meta = runs.program_spectra(name, args.source_file, args.configs, args.args or [],
+        import shlex
+        cmdline = shlex.split(args.argline) if args.argline else (args.args or [])
+        spectra, meta = runs.program_spectra(name, args.source_file, args.configs, cmdline,
                                              args.define or [], args.include or [], heap_top=args.heap_top,
                                              cache_dir=paths.data / "static_cpp", n_jobs=args.jobs)
         base_root = Path(args.baseline_root or paths.data)
@@ -512,6 +514,7 @@ def main(argv=None):
                    help="cpp: the program's source file, or several comma-separated (compiled as one unity file)")
     p.add_argument("--configs", nargs="*", default=[], help="cpp: input configs")
     p.add_argument("--args", nargs="*", help="cpp: command line after the program name; {config} is replaced")
+    p.add_argument("--argline", help="cpp: the same as one string (for arguments that start with '-')")
     p.add_argument("--define", nargs="*", help="cpp: preprocessor definitions (NAME=VALUE); {config} is replaced")
     p.add_argument("--heap-top", dest="heap_top", type=int, default=0,
                    help="cpp: free bytes in glibc's top chunk at the first large allocation")
