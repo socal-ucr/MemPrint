@@ -25,6 +25,7 @@ from . import similarity as sim
 from .dataset import prepare
 from .model import Model, features
 from .static import gap
+from .static import gap_kernels as gk
 from .static.spectrum import Baseline, Spectrum, moments
 
 KERNELS = {
@@ -32,6 +33,16 @@ KERNELS = {
     "gap_bfs": gap.bfs,
     "gap_pr_kron": lambda scale: gap.pagerank(scale, uniform=False),
     "gap_bfs_kron": lambda scale: gap.bfs(scale, uniform=False),
+    "gap_prc": gk.pagerank_converge,
+    "gap_prc_kron": lambda scale: gk.pagerank_converge(scale, uniform=False),
+    "gap_cc": gk.cc,
+    "gap_cc_kron": lambda scale: gk.cc(scale, uniform=False),
+    "gap_sssp": gk.sssp,
+    "gap_sssp_kron": lambda scale: gk.sssp(scale, uniform=False),
+    "gap_tc": gk.tc,
+    "gap_tc_kron": lambda scale: gk.tc(scale, uniform=False),
+    "gap_bc": gk.bc,
+    "gap_bc_kron": lambda scale: gk.bc(scale, uniform=False),
 }
 BASELINE_FROM = {
     "gap_pr": ["gap_bfs"],
@@ -39,6 +50,10 @@ BASELINE_FROM = {
     "gap_pr_kron": ["gap_pr", "gap_bfs"],
     "gap_bfs_kron": ["gap_pr", "gap_bfs"],
 }
+# The step-2 kernels (blind): the runtime baseline comes from the four pr / bfs workloads.
+for _k in ("prc", "cc", "sssp", "tc", "bc"):
+    for _suffix in ("", "_kron"):
+        BASELINE_FROM[f"gap_{_k}{_suffix}"] = ["gap_pr", "gap_bfs", "gap_pr_kron", "gap_bfs_kron"]
 SPLITS = {"EXTRA": "last_config", "INTER": "middle_config"}
 
 

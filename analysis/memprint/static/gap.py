@@ -8,11 +8,19 @@ single-threaded (SERIAL=1). A generated graph is always symmetrised
 (command_line.h: `if (scale_ != -1) symmetrize_ = true`): one CSR holds both
 directions of every edge and serves as in- and out-graph. Element sizes:
 NodeID 4 B, Edge 8 B, offsets and index pointers 8 B, ScoreT (float) 4 B.
+Weighted graphs (sssp, WeightedBuilder) have 12-byte edges (u, v, w) and
+8-byte neighbours (v, w); weights are uniform in 1..255 (InsertWeights).
 """
+
+from collections import namedtuple
 
 import numpy as np
 
 from .skeleton import Process, mt19937_refs, sort_refs
+
+# A squished CSR: its neighbour and index blocks, degrees, offsets into nbr, the neighbours
+# (sorted per vertex) and, for a weighted graph, their weights.
+CSR = namedtuple("CSR", "neighs index deg off nbr w")
 
 
 def uniform_edges(scale, degree, seed=0):
@@ -41,16 +49,17 @@ def rmat_edges(scale, degree, seed=0):
     return n, perm[u], perm[v], perm
 
 
-def _generate(p, scale, degree, seed, uniform):
-    """GenerateEL: the edge list, the generators' random state and, for -g, PermuteIDs."""
+def _generate(p, scale, degree, seed, uniform, edge=8):
+    """GenerateEL: the edge list, the generators' random state and, for -g, PermuteIDs.
+    edge: bytes per edge (8, or 12 with a weight)."""
     if uniform:
         n, u, v = uniform_edges(scale, degree, seed)
     else:
         n, u, v, _ = rmat_edges(scale, degree, seed)
     m = len(u)
     blocks = -(-m // (1 << 18))
-    el = p.new(8 * m)
-    p.touch_all(el, 8)                                                 # el[e] = Edge(...)
+    el = p.new(edge * m)
+    p.touch_all(el, edge)                                              # el[e] = Edge(...)
     rng = p.local(624 * 8)                                             # std::mt19937, reseeded every 2^18 edges
     if uniform:
         mt19937_refs(p, rng, 624, 2 * m, seeds=blocks)                 # two UniDist draws per edge
@@ -66,7 +75,7 @@ def _generate(p, scale, degree, seed, uniform):
         harmonic = np.cumsum(1.0 / np.arange(1, n + 1))                # H_1 .. H_n
         partner = 2.0 * (harmonic[-1] - harmonic)                      # expected times picked as j by a later i
         p.touch(perm, np.arange(n), 4, np.where(i > 0, 2.0, 0.0) + partner)
-        p.touch_all(el, 8, 2.0)                                        # read, rewrite with the new IDs
+        p.touch_all(el, edge, 2.0)                                     # read, rewrite with the new IDs
         p.touch(perm, np.arange(n), 4, np.bincount(np.concatenate([u, v]), minlength=n).astype(float))
         p.delete(perm)
     return n, u, v, el
@@ -95,22 +104,22 @@ def _gen_index(p, offsets, n):
     return index
 
 
-def _make_csr(p, el, src, dst, n):
+def _make_csr(p, el, src, dst, n, edge=8, dest=4):
     """MakeCSR: count degrees of src, prefix sum, fill neighbours with dst. For a symmetrised
     graph src and dst hold both directions of every edge; each edge list entry is still read
-    once per pass."""
+    once per pass. edge / dest: bytes per edge and per neighbour."""
     degrees = p.new(4 * n)
     p.touch_all(degrees, 4)                                            # fill(0)
-    p.touch_all(el, 8)                                                 # Edge e = *it
+    p.touch_all(el, edge)                                              # Edge e = *it
     deg = np.bincount(src, minlength=n)
     p.touch(degrees, np.arange(n), 4, 2.0 * deg)                       # fetch_and_add
     offsets = _prefix_sum(p, degrees, n)
     m = len(src)
-    neighs = p.new(4 * m)
+    neighs = p.new(dest * m)
     index = _gen_index(p, offsets, n)
-    p.touch_all(el, 8)
+    p.touch_all(el, edge)
     p.touch(offsets, np.arange(n), 8, 2.0 * deg)                       # fetch_and_add per edge
-    p.touch_all(neighs, 4)                                             # one write per slot
+    p.touch_all(neighs, dest)                                          # one write per slot
     p.delete(offsets)
     p.delete(degrees)
     return neighs, index, deg
@@ -126,43 +135,63 @@ def _ranges(starts, lengths):
     return np.repeat(np.asarray(starts, dtype=np.int64), lengths) + np.arange(total) - offs
 
 
-def _squish(p, neighs, index, src, dst, n):
+def _squish(p, neighs, index, src, dst, n, w=None):
     """SquishCSR: sort, unique and drop self loops per vertex, then copy into a new CSR.
-    Returns (sq_neighs block, sq_index block, squished degrees, squished CSR offsets, neighbours)."""
+    With weights w, neighbours are (v, w) pairs: sorted by v then w, so unique (which compares
+    v only) keeps the lightest copy of an edge. Returns a CSR."""
+    dest = 4 if w is None else 8
     deg = np.bincount(src, minlength=n)
     starts = np.cumsum(deg) - deg
     diffs = p.new(4 * n)
     p.touch(index, np.arange(n + 1), 8, 2.0)                          # begin/end per vertex
     per_edge = np.repeat(sort_refs(deg) + 2.0 + 1.0, deg)            # sort, unique (2 reads), remove (1)
-    p.touch(neighs, np.arange(int(deg.sum())), 4, per_edge)
-    pairs = np.unique(src * n + dst)
-    pairs = pairs[pairs // n != pairs % n]                           # self loops removed
+    p.touch(neighs, np.arange(int(deg.sum())), dest, per_edge)
+    key = src * n + dst
+    if w is None:
+        pairs = np.unique(key)
+        sq_w = None
+    else:
+        order = np.lexsort((w, key))
+        first = np.concatenate([[True], key[order][1:] != key[order][:-1]])
+        pairs, sq_w = key[order][first], w[order][first]
+    keep = pairs // n != pairs % n                                   # self loops removed
+    pairs = pairs[keep]
+    sq_w = None if sq_w is None else sq_w[keep]
     sq_src, sq_dst = pairs // n, pairs % n
     kept = np.bincount(sq_src, minlength=n)
     p.touch_all(diffs, 4)
     offsets = _prefix_sum(p, diffs, n)
-    sq_neighs = p.new(4 * len(pairs))
+    sq_neighs = p.new(dest * len(pairs))
     sq_index = _gen_index(p, offsets, n)
     p.touch(index, np.arange(n), 8)                                    # begin for the copy
     p.touch(diffs, np.arange(n), 4)
     p.touch(sq_index, np.arange(n), 8)
-    p.touch(neighs, _ranges(starts, kept), 4)                          # copy reads
-    p.touch_all(sq_neighs, 4)                                          # copy writes
+    p.touch(neighs, _ranges(starts, kept), dest)                       # copy reads
+    p.touch_all(sq_neighs, dest)                                       # copy writes
     p.delete(offsets)
     p.delete(diffs)
-    return sq_neighs, sq_index, kept, np.concatenate([[0], np.cumsum(kept)]), sq_dst
+    return CSR(sq_neighs, sq_index, kept, np.concatenate([[0], np.cumsum(kept)]), sq_dst, sq_w)
 
 
-def build(p, scale, degree, seed=0, uniform=True):
+def build(p, scale, degree, seed=0, uniform=True, weighted=False):
     """Builder::MakeGraph for -u (uniform) or -g (Kronecker) scale -k degree: returns the squished
-    CSR (as out- and in-graph)."""
-    n, u, v, el = _generate(p, scale, degree, seed, uniform)
-    p.touch_all(el, 8)                                                 # FindMaxNodeID (num_nodes_ starts at -1)
+    CSR (as out- and in-graph). weighted: WeightedBuilder, as sssp uses."""
+    edge, dest = (12, 8) if weighted else (8, 4)
+    n, u, v, el = _generate(p, scale, degree, seed, uniform, edge)
+    p.touch_all(el, edge)                                              # FindMaxNodeID (num_nodes_ starts at -1)
     n = int(max(u.max(), v.max())) + 1
+    w = None
+    if weighted:                                                       # InsertWeights: w = UniDist(254)() + 1
+        m = len(u)
+        wrng = p.local(624 * 8)                                        # rng_t_, default-seeded, reseeded per block
+        mt19937_refs(p, wrng, 624, m, seeds=-(-m // (1 << 18)) + 1)
+        p.touch(el, np.arange(m), edge)                                # writes el[e].v.w
+        w = np.random.default_rng(seed + 7).integers(1, 256, m)
+        w = np.concatenate([w, w])                                     # both directions carry the weight
     src, dst = np.concatenate([u, v]), np.concatenate([v, u])
-    neighs, index, _ = _make_csr(p, el, src, dst, n)
+    neighs, index, _ = _make_csr(p, el, src, dst, n, edge, dest)
     p.delete(el)                                                       # end of MakeGraph's scope
-    sq = _squish(p, neighs, index, src, dst, n)
+    sq = _squish(p, neighs, index, src, dst, n, w)
     p.delete(index)                                                    # the unsquished graph
     p.delete(neighs)
     return n, sq, sq                                                   # out- and in-graph are the same
@@ -175,7 +204,8 @@ def pagerank(scale, degree=16, iterations=20, seed=0, uniform=True):
     register), and outgoing_contrib[v] is read once per in-edge of every u, i.e.
     out-degree(v) times."""
     p = Process()
-    n, (_, out_index, out_kept, _, _), (in_neighs, in_index, _, _, _) = build(p, scale, degree, seed, uniform)
+    n, out, inn = build(p, scale, degree, seed, uniform)
+    out_index, out_kept, in_neighs, in_index = out.index, out.deg, inn.neighs, inn.index
     scores = p.new(4 * n)
     contrib = p.new(4 * n)
     p.touch_all(scores, 4)                                             # fill(init_score)
@@ -245,8 +275,9 @@ class _Queue:
 def bfs(scale, degree=16, seed=0, alpha=15, beta=18, uniform=True):
     """bfs -u|-g scale -k degree -n 1: direction-optimising BFS from a random source with out-edges."""
     p = Process()
-    n, (out_neighs, out_index, out_deg, out_off, out_nbr), (in_neighs, in_index, in_deg, in_off, in_nbr) = \
-        build(p, scale, degree, seed, uniform)
+    n, out, inn = build(p, scale, degree, seed, uniform)
+    out_neighs, out_index, out_deg, out_off, out_nbr = out[:5]
+    in_neighs, in_index, in_deg, in_off, in_nbr = inn[:5]
     picker = p.local(312 * 8)                                          # SourcePicker's std::mt19937_64
     rng = np.random.default_rng(seed + 1)
     draws = 0
