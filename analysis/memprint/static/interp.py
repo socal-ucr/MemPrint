@@ -254,6 +254,22 @@ class Ptr:
     src: object = None  # where the pointer itself was loaded from (its provenance), if from memory
 
 
+@dataclass(eq=False)
+class Real:
+    """A floating-point value (scalar or one per batch point), kept only in scalar variables
+    (Interpreter.REALS): enough for decisions computed from integers (a ratio against a
+    threshold). Floats in memory stay unknown."""
+    v: object
+
+
+def _real(v):
+    """v as a float (Real), or UNK."""
+    if isinstance(v, Real):
+        return v
+    v = _as_int(v)
+    return UNK if v is UNK else Real(np.asarray(v, dtype=float) if np.ndim(v) else float(v))
+
+
 @dataclass
 class Loc:
     obj: object
@@ -334,6 +350,8 @@ class Result:
 
 
 class Interpreter:
+    REALS = False  # track floating-point scalars (Real)
+
     def __init__(self, tu, seed=0):
         self.tu = tu
         self.w = np.ones(1)
@@ -383,6 +401,24 @@ class Interpreter:
                     continue
                 old, new = entry[1], sub.vars[k][1]
                 entry[1] = self._merge_value(old, new, idx, L)
+            for k, entry in sub.vars.items():                          # declared in the subset
+                if k not in fr.vars:
+                    fr.vars[k] = [entry[0], self._expand(entry[1], idx, L)]
+
+    @staticmethod
+    def _expand(new, idx, L):
+        """A value of the points idx as a value of all L points (the others, not running, get the
+        first point's value)."""
+        def full(a):
+            out = np.empty(L, dtype=np.asarray(a).dtype)
+            out[:] = np.ravel(a)[0] if np.size(a) else 0
+            out[idx] = a
+            return out
+        if isinstance(new, Ptr):
+            return new if not isinstance(new.off, np.ndarray) else Ptr(new.obj, full(new.off), new.src)
+        if isinstance(new, Real):
+            return new if np.ndim(new.v) == 0 else Real(full(new.v))
+        return full(new) if isinstance(new, np.ndarray) else new
 
     @staticmethod
     def _merge_value(old, new, idx, L):
@@ -395,6 +431,10 @@ class Interpreter:
                 return Ptr(UNK, UNK)
             off = Interpreter._merge_value(old.off, new.off, idx, L)
             return Ptr(old.obj, off)
+        if isinstance(old, Real) and isinstance(new, Real):
+            full = np.array(np.broadcast_to(old.v, L), dtype=float)
+            full[idx] = new.v
+            return Real(full)
         o, n = _as_int(old), _as_int(new)
         if _is_unk(o, n):
             return UNK if not (old is UNK and new is UNK) else UNK
@@ -595,7 +635,7 @@ class Interpreter:
         if target.kind == K.DECL_REF_EXPR and target.referenced is not None:
             entry = self._lookup(target.referenced)
             if entry is not None:
-                entry[1] = value if (isinstance(value, Ptr) or not ca.is_float(target.type)) else UNK
+                entry[1] = value if (isinstance(value, (Ptr, Real)) or not ca.is_float(target.type)) else UNK
         else:
             self._mem_store(loc, target.type, value)
         return loc
@@ -682,7 +722,9 @@ class Interpreter:
                         return wrap_int(folded, c.type)
                 v = self.eval(kids[0])
                 if ca.is_float(c.type) and not isinstance(v, Ptr):
-                    return UNK
+                    return _real(v) if self.REALS else UNK
+                if isinstance(v, Real):
+                    v = self._truncate(v)
                 if not isinstance(v, (int, np.integer, np.ndarray)):
                     return v
                 return wrap_int(v, c.type)
@@ -696,7 +738,7 @@ class Interpreter:
             v = ca.evaluate(c)
             if v:
                 self.access(self._rodata(v))
-            return UNK
+            return Real(float(v)) if self.REALS and v is not None else UNK
         if kind == K.STRING_LITERAL:
             return Ptr(UNK, UNK)
         if kind == K.DECL_REF_EXPR:
@@ -713,7 +755,9 @@ class Interpreter:
         if kind == K.CSTYLE_CAST_EXPR:
             v = self.eval(ca.children(c)[-1])
             if ca.is_float(c.type):
-                return UNK
+                return _real(v) if self.REALS else UNK
+            if isinstance(v, Real):
+                v = self._truncate(v)
             return wrap_int(v, c.type) if isinstance(v, (int, np.integer, np.ndarray)) else v
         if kind == K.UNARY_OPERATOR:
             return self._unary(c)
@@ -777,11 +821,33 @@ class Interpreter:
         if target.kind == K.DECL_REF_EXPR and target.referenced is not None:
             entry = self._lookup(target.referenced)
             if entry is not None:
-                entry[1] = value if (isinstance(value, Ptr) or not ca.is_float(target.type)) else UNK
+                entry[1] = value if (isinstance(value, (Ptr, Real)) or not ca.is_float(target.type)) else UNK
+
+    @staticmethod
+    def _truncate(v):
+        """A Real converted to an integer type (towards zero), or UNK if not finite."""
+        x = np.asarray(v.v, dtype=float)
+        if not np.all(np.isfinite(x)):
+            return UNK
+        t = np.trunc(x).astype(np.int64)
+        return _SCALAR(t) if np.ndim(t) else int(t)
 
     def _arith(self, op, a, b, c):
         if isinstance(a, Ptr) or isinstance(b, Ptr):
             return self._ptr_arith(op, a, b, c)
+        if isinstance(a, Real) or isinstance(b, Real):
+            a, b = _real(a), _real(b)
+            if _is_unk(a, b) or op not in ("+", "-", "*", "/", "<", ">", "<=", ">=", "==", "!="):
+                return UNK
+            x, y = a.v, b.v
+            if op == "/":
+                if np.any(np.asarray(y) == 0):
+                    return UNK
+                return Real(np.asarray(x) / y if np.ndim(x) or np.ndim(y) else x / y)
+            r = ARITH[op](np.asarray(x) if np.ndim(x) else x, y)
+            if op in ("+", "-", "*"):
+                return Real(r)
+            return _SCALAR(np.asarray(r).astype(np.int64)) if np.ndim(r) else int(r)
         a, b = _as_int(a), _as_int(b)
         if _is_unk(a, b) or op not in ARITH:
             return UNK
@@ -832,7 +898,10 @@ class Interpreter:
             return Ptr(loc.obj, loc.off)
         if op == "*":
             return self._load_lvalue(c)
-        v = _as_int(self.eval(kid))
+        v = self.eval(kid)
+        if isinstance(v, Real):
+            return Real(-v.v) if op == "-" else v if op == "+" else UNK
+        v = _as_int(v)
         if v is UNK:
             return UNK
         if op == "-":
@@ -1024,7 +1093,7 @@ class Interpreter:
             return
         init = self._initializer(decl)
         value = self.eval(init) if init is not None and init.kind != K.INIT_LIST_EXPR else UNK
-        if ca.is_float(decl.type) and not isinstance(value, Ptr):
+        if ca.is_float(decl.type) and not isinstance(value, (Ptr, Real)):
             value = UNK
         slot = self._declare_local(decl, value if not ca.is_array(decl.type) else UNK)
         if init is not None and not ca.is_array(decl.type):

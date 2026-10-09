@@ -32,7 +32,7 @@ import numpy as np
 
 from . import clangast as ca
 from .clangast import K
-from .interp import (FREE, SENTINEL, UNK, Frame, Interpreter, Loc, Obj, Ptr, _as_int, _is_unk, _key, _SCALAR)
+from .interp import (FREE, SENTINEL, UNK, Frame, Interpreter, Loc, Obj, Ptr, Real, _as_int, _is_unk, _key, _SCALAR, _real)
 from .containers import Containers, element_type
 from .skeleton import sort_refs
 
@@ -51,6 +51,12 @@ NULL_UID = -2
 class Closure:
     lambda_cursor: object
     frame: object
+
+
+@dataclass
+class Func:
+    """A function used as a value (passed to a template's callable parameter)."""
+    decl: object
 
 
 @dataclass
@@ -148,6 +154,7 @@ def _body(fdef):
 
 
 class CppInterpreter(Containers, Interpreter):
+    REALS = True
     def __init__(self, tu, seed=0, stubs=None, opt=3):
         super().__init__(tu, seed)
         self.stubs = stubs or {}
@@ -743,6 +750,8 @@ class CppInterpreter(Containers, Interpreter):
 
     def eval(self, c):
         kind = c.kind
+        if kind == K.DECL_REF_EXPR and c.referenced is not None and c.referenced.kind == K.FUNCTION_DECL:
+            return Func(c.referenced)
         if kind == K.COMPOUND_ASSIGNMENT_OPERATOR and self._is_ref_var(ca.children(c)[0]):
             lhs, rhs = ca.children(c)                                  # through a reference: memory
             loc = self.lvalue(lhs)
@@ -787,7 +796,9 @@ class CppInterpreter(Containers, Interpreter):
                 return self.eval(kids[-1])
             v = self.eval(kids[-1])
             if ca.is_float(c.type) and not isinstance(v, Ptr):
-                return UNK
+                return _real(v)
+            if isinstance(v, Real):
+                v = self._truncate(v)
             if ca.is_pointer(c.type) and isinstance(v, Ptr):
                 return v
             if isinstance(v, (int, np.integer, np.ndarray)):
@@ -1015,7 +1026,7 @@ class CppInterpreter(Containers, Interpreter):
                     self._mem_store(loc, et, self.eval(e))
             return
         value = self.eval(init) if init is not None and init.kind != K.INIT_LIST_EXPR else UNK
-        if ca.is_float(t) and not isinstance(value, Ptr):
+        if ca.is_float(t) and not isinstance(value, (Ptr, Real)):
             value = UNK
         slot = self._declare_scalar(decl, value)
         if init is not None:
@@ -1123,6 +1134,14 @@ class CppInterpreter(Containers, Interpreter):
         if ref.kind == K.CONSTRUCTOR:
             dest = sret if sret is not None else self._new_storage(c.type)
             return self._construct_call(c, dest)
+        if ref.kind in (K.PARM_DECL, K.VAR_DECL) and kids:              # f(args) through a variable
+            f = self.eval(kids[0])
+            fdef = f.decl.get_definition() if isinstance(f, Func) else None
+            if fdef is None or _body(fdef) is None:
+                for a in c.get_arguments():
+                    self.eval(a)
+                return UNK
+            return self._invoke(fdef, list(c.get_arguments()), sret=sret)
         parent = ref.semantic_parent
         stub = self._stub(ref)
         if stub is not None:
@@ -1454,6 +1473,12 @@ class CppInterpreter(Containers, Interpreter):
         name = call.type.get_canonical().spelling
         if name.startswith("std::vector<"):
             return self._vector_construct(dest, args_c, call.type)
+        if name.startswith("std::pair<"):
+            if len(args_c) == 2:
+                self._pair_store(dest, call.type, [self.eval(a) for a in args_c])
+            elif len(args_c) == 1 and isinstance(src := self.eval(args_c[0]), Ptr):
+                self._copy_object(dest, src, ca.type_size(call.type.get_canonical()) or 16)
+            return dest
         if "mersenne_twister_engine" in name:
             words = 312 if "unsigned long, 64" in name or ", 64," in name else 624
             self._engine(dest, words, seed=True)
@@ -1462,6 +1487,18 @@ class CppInterpreter(Containers, Interpreter):
             self._mem_store(Loc(dest.obj, dest.off, 8), call.type, lo)
             self._mem_store(Loc(dest.obj, dest.off + 8, 8), call.type, hi)
         return dest
+
+    def _pair_store(self, dest, type_, values):
+        """Store (first, second) into a std::pair object."""
+        t = type_.get_canonical()
+        for f, v in zip(t.get_fields(), values):
+            fo = t.get_offset(f.spelling)
+            if fo is None or fo < 0 or not isinstance(dest, Ptr) or _is_unk(dest.obj, dest.off):
+                continue
+            loc = Loc(dest.obj, _SCALAR(np.asarray(dest.off) + fo // 8) if np.ndim(dest.off) else dest.off + fo // 8,
+                      ca.type_size(f.type.get_canonical()) or 4)
+            self.access(loc, write=True)
+            self._mem_store(loc, f.type, v)
 
     def _engine(self, obj, words, seed=False, draws=0):
         """Charge a Mersenne Twister object's state words (8 bytes each): seeding writes every word
@@ -1487,6 +1524,15 @@ class CppInterpreter(Containers, Interpreter):
             return self._vector_method(name, obj, args_c, ref.semantic_parent.type, c.type)
         if ptype.startswith("std::unordered_map<") and obj is not None:
             return self._map_method(name, obj, args_c, ref.semantic_parent.type)
+        if ptype.startswith("std::pair<") and name == "operator=" and isinstance(obj, Ptr) and args_c:
+            src = self.eval(args_c[0])                                 # trivially copyable: copy it
+            if isinstance(src, Ptr):
+                self._copy_object(obj, src, ca.type_size(ref.semantic_parent.type.get_canonical()) or 16)
+            return obj
+        if name == "make_pair" and len(args_c) == 2:
+            dest = sret if sret is not None else self._new_storage(c.type)
+            self._pair_store(dest, c.type, [self.eval(a) for a in args_c])
+            return dest
         if name == "max_element" and len(args_c) >= 2:
             return self._max_element(args_c)
         if "mersenne_twister_engine" in ptype:
