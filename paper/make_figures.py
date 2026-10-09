@@ -4,7 +4,7 @@
 
 DIR holds the experiment outputs this paper reports (not in the repository):
 
-    tld5/data/timeline_curves.csv      reference-sampling estimates over time (timeline build)
+    tld5/data/timeline_curves.csv      reference-sampling estimates over time (timeline build, exact-rate unions)
     tld12/traces/2mm/                   2mm MEDIUM splitter and spatial timelines
     tld12/data/spatial_eval.csv         spatial sampling on PolyBench (held-out runs)
     tld11/spatial_eval.csv              spatial sampling on miniVite, 1/4/16 threads
@@ -111,9 +111,11 @@ def fig_spatial_rate(scratch, out):
 
 
 def windowed_run(directory, rate, watched):
-    for f in glob.glob(f"{directory}/Spatial_*_{rate}_*_windowed.csv"):
+    """A periodic-only run (no window opened by an allocation) watching `watched` of the run."""
+    for f in sorted(glob.glob(f"{directory}/Spatial_*_{rate}_*_windowed.csv")):
         w = pd.read_csv(f)
-        if abs(w["Window"].iloc[0] / w["Period"].iloc[0] - watched) < 1e-6:
+        periodic = "TriggeredWindows" not in w or w["TriggeredWindows"].iloc[-1] == 0
+        if periodic and abs(w["Window"].iloc[0] / w["Period"].iloc[0] - watched) < 1e-3:
             return f, w
     raise FileNotFoundError(f"{directory}: no 1/{rate} run watching {watched}")
 
@@ -130,7 +132,7 @@ def fig_windowed_curves(scratch, out):
         own = own[own["Bin"] == -1].set_index("Time")["MemUsageObs"] * 100
         truth(ax, tx, ty / MB)
         series(ax, x, w["Estimate"] / MB, 0, "Windowed estimate")
-        series(ax, x, (w["FreshResident"] + w["ReusedResident"] + w["OtherEst"]) / MB, 1, "Resident pages, no density")
+        series(ax, x, (w["FreshResident"] + w["ReusedResident"] + w["OtherEst"]) / MB, 1, "Resident pages only")
         series(ax, x, own.reindex(w["Time"]).to_numpy() / MB, 2, "Windows' sample alone")
         series(ax, x, w["AllocatedBytes"] / MB, 3, "Live allocated bytes")
         # windows (each 0.25% of the run) as ticks along the top edge
@@ -164,6 +166,8 @@ def fig_windowed_fraction(scratch, out):
     """miniVite: error against the watched fraction."""
     r = pd.read_csv(os.path.join(scratch, EVAL + "/results.csv"))
     r = r[(r["sample_rate"] == 100) & r["workload"].str.startswith("miniVite")]
+    if "kind" in r:  # periodic windows and nothing watched only (not allocation windows or full watching)
+        r = r[r["kind"].isin(["periodic", "none"])]
     runs = [("miniVite1t", "65536", "65536, 1 thread"), ("miniVite", "65536", "65536, 4 threads"),
             ("miniVite1t", "32768", "32768, 1 thread"), ("miniVite", "32768", "32768, 4 threads")]
     fig, axes = plt.subplots(1, 2, figsize=(6.8, 2.1))
@@ -181,7 +185,7 @@ def fig_windowed_fraction(scratch, out):
         ax.set_title(title, loc="left")
     axes[0].set_ylim(bottom=0)
     axes[1].axhline(0, color=MUTED, linewidth=0.6)
-    axes[0].plot([], [], color=MUTED, marker="x", linestyle="none", alpha=0.6, label="faded: without density")
+    axes[0].plot([], [], color=MUTED, marker="x", linestyle="none", alpha=0.6, label="faded: resident pages only")
     axes[0].legend(loc="upper right")
     fig.savefig(os.path.join(out, "windowed_fraction.pdf"))
     plt.close(fig)

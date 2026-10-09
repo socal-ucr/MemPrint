@@ -49,19 +49,25 @@ python -m memprint paper-figures         # figures/paper/*.pdf
 ## Pin tool
 
 ```
-pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler [knobs] -- <program> <args>
+pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler|spatial [knobs] -- <program> <args>
 ```
 
 | Knob | Default | Meaning |
 |---|---|---|
-| `-mode` | `splitter` | `splitter`: trace every memory reference; write the exact footprint and, for each interval in `-intervals`, `-bins` disjoint bins each holding a 1-in-interval subsample. `sampler`: sample 1-in-`i` references and Poisson-bootstrap them into `-s` bins. |
+| `-mode` | `splitter` | `splitter`: trace every memory reference; write the exact footprint and, for each interval in `-intervals`, `-bins` disjoint bins each holding a 1-in-interval subsample. `sampler`: sample 1-in-`i` references and Poisson-bootstrap them into `-s` bins. `spatial`: select 1-in-`i` 8-byte words (start addresses with `-footprint starts`) by a salted hash and record every access to them, split into `-s` hash buckets. |
 | `-intervals` | `100,250,...,100000` | splitter sampling intervals (13 by default) |
 | `-bins` | 20 | splitter bins per interval |
-| `-i` | 100 | sampler interval (`4294967295` = instrumentation only) |
+| `-i` | 100 | sampler interval (`4294967295` = instrumentation only); spatial selection interval |
 | `-s`, `-r` | 100, 10 | sampler bins and replication; λ = s/r, so each bin is about a 1-in-(i·r) subsample |
 | `-outdir` | `traces` | output directory (created if missing) |
 | `-name` | binary name | trace name, `<workload>-<config>` (run.sh sets it) |
 | `-seed` | process id | RNG seed base |
+| `-track_frees` | 0 | remove freed ranges (malloc family, munmap) from every footprint; see "Footprint over time" |
+| `-snapshot` | 0 | append every footprint to `*_timeline.csv` every N memory references |
+| `-stop` | 0 | write the outputs after N references and detach |
+| `-window`, `-period` | 0 | spatial: watch accesses only for W of every P references, tracking allocations and page residency in between (needs `-snapshot`) |
+| `-window_alloc` | 1048576 | windowed: an allocation of at least N bytes opens a window (0: off) |
+| `-dirty_every` | 10 snapshots | windowed: clear soft-dirty bits every N references (0: residency only) |
 | `-footprint` | see text | `bytes`: bytes touched, the union of every access's byte range. `starts`: the paper's definition, the sum of the largest access size at each start address. Default: `bytes` with `-track_frees` or `-window`, else `starts` |
 
 The tool writes one CSV per footprint: `Buffered_<name>_1_<pid>.csv` (splitter, exact) or `Sampled_<name>_<i>_<pid>.csv` (sampler), plus `..._SubSample_<interval>_bin_<j>.csv` for every bin. Each file contains a single row:
@@ -156,10 +162,10 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
   - Accesses made by the allocator's own code (glibc's `malloc.c`: chunk headers, free-list links) count as time but not toward any footprint, since they land outside live blocks and would never be released. Without this, a program that allocates and frees 600,000 small blocks keeps 5.7 MB of them "live". The code is found by symbol name; if libc has no symbol table, only its public allocation functions are covered.
   - Not tracked: `mremap`, `brk`, and stack frames. Ordering across threads is the order in which their buffers are processed.
   - The page index this needs roughly doubles the tool's memory use. miniVite 8192 uses about 14 GB.
-- **Footprint definition.** With `-track_frees` or `-window`, footprints count bytes touched (`-footprint bytes`). The paper's definition (`-footprint starts`, the default otherwise) adds up the largest access at each start address, so accesses that overlap count more than once: an 8-byte read at every byte offset of a 1 MB buffer gives 8.5 MB, against 1.15 MB of bytes touched. Spatial sampling in bytes mode selects 64-byte chunks rather than start addresses.
+- **Footprint definition.** With `-track_frees` or `-window`, footprints count bytes touched (`-footprint bytes`). The paper's definition (`-footprint starts`, the default otherwise) adds up the largest access at each start address, so accesses that overlap count more than once: an 8-byte read at every byte offset of a 1 MB buffer gives 8.5 MB, against 1.15 MB of bytes touched. Spatial and windowed sampling in bytes mode select aligned 8-byte words rather than start addresses, and keep the bytes of each access inside selected words, so selected bytes × i is unbiased.
 - **Overhead** on 2mm SMALL:
-  - splitter: 1.47 s plain, 1.57 s with `-snapshot 32000` (200 snapshots), 1.77 s adding `-track_frees`;
-  - sampler: 1.45 s plain, 1.61 s with both.
+  - splitter: 1.48 s plain, 1.61 s with `-snapshot 32000` (200 snapshots), 2.17 s adding `-track_frees` (bytes touched);
+  - sampler: 1.47 s plain, 1.57 s with both.
 - **`-stop N`:** write all outputs after N references and detach, which gives a partial trace.
 - `tests/pintool/run_tests.sh` checks the live footprint over time for malloc/free, posix_memalign, realloc (shrink in place and move), calloc and new/delete, mmap with partial munmap, cross-thread frees, and `-stop`.
 
@@ -167,15 +173,11 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
 - **Reconstruction:** the paper's α model applied at every snapshot, fitted on all snapshots of the training configs, to both the held-out config's splitter bins and a real sampler run.
 - **Forecasting:** from 10–75% prefixes of the run, by fitting scaled versions of the training configs' curves.
 
-**Current results** (2mm, gemm, jacobi-2d, atax, all 7 sizes; miniVite 1024–8192; sampler `-s 20 -r 20`):
-- **PolyBench:** reconstructing the held-out config's curve gives about 25–55% MAPE over snapshots, from splitter bins and from a sampler run alike. Adding log time or the reuse feature does not help.
-- **miniVite:** 8% from splitter bins and 31–35% from the sampler. This build's curve is a flat ~168 MB for both 4096 and 8192 vertices, so it is dominated by runtime memory (OpenMP threads, OpenMPI), unlike the 7–14 MB in the paper's runs. Pin these with `OMP_NUM_THREADS` before drawing conclusions.
-- **Forecasting** from the first 10–50% of a run: peak within about 10–20% for interpolation, but unreliable for extrapolation (peak and run length are off by far more than 100%).
-- **Time axis:** the sampler's estimated time is within 0.5% of the true reference count for single-threaded programs. miniVite's runs differ by up to ±50% in references executed, because OpenMP threads spin while waiting and Pin slows the splitter far more than the sampler. Sampler curves are therefore compared to the truth on the fraction of their own run.
-
-The cause is fundamental, not a tuning problem. A single bin is so sparse (0.1–10% of the footprint) that it almost never samples an address twice, so it can't tell new memory from re-touched memory. Once the true footprint plateaus, the observed footprint keeps rising. A per-snapshot occupancy (Poisson) estimate gives about −95% error for the same reason.
-
-The evidence that is still available is across bins: how many addresses were seen in exactly one, two, … bins. It would support capture–recapture estimators such as Chao1. The tool does not output it yet.
+**Results.** FINDINGS.md has the full results and `paper/memprint_timeline.tex` a detailed report. In short, with bytes touched and full traces as the truth:
+- **Reference sampling** (α model per snapshot, Chao1/iChao1, a known-rate estimator and a hybrid with a learned correction) does not reach low error at sparse rates: the best, the hybrid, has 4–6% mean error at 1-in-3 references but 24% at 1-in-25 on the largest PolyBench size. A sample of references cannot tell new memory from memory touched again.
+- **Spatial sampling** (`-mode spatial`) needs no training: 1.6–4.9% mean error on PolyBench at 1-in-100 words or denser, 0.3–6.8% on miniVite with 1, 4 and 16 threads. It still tests every access.
+- **Windowed sampling** (`-window`, `-period`) tests accesses only in windows and tracks allocations, resident pages and (for reused heap blocks) soft-dirty written pages all the time. At 5% watched the peak is within 0.1% on PolyBench LARGE, within +1.8% on miniVite, and within −3.7% to +6.7% on GAP, darknet, Python, Lua, Perl, SQLite and GCC's cc1. `python -m memprint timeline windowed <wl>` scores such runs.
+- The true peaks never exceed the peak RSS, and the tool's tracked allocations agree with Valgrind's Massif and DHAT where both see the same memory.
 
 ## Differences from the original tooling
 
