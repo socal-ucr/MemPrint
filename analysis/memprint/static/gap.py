@@ -157,6 +157,8 @@ def build(p, scale, degree, seed=0, uniform=True):
     """Builder::MakeGraph for -u (uniform) or -g (Kronecker) scale -k degree: returns the squished
     CSR (as out- and in-graph)."""
     n, u, v, el = _generate(p, scale, degree, seed, uniform)
+    p.touch_all(el, 8)                                                 # FindMaxNodeID (num_nodes_ starts at -1)
+    n = int(max(u.max(), v.max())) + 1
     src, dst = np.concatenate([u, v]), np.concatenate([v, u])
     neighs, index, _ = _make_csr(p, el, src, dst, n)
     p.delete(el)                                                       # end of MakeGraph's scope
