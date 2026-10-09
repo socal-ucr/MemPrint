@@ -10,7 +10,7 @@ On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This b
 
 Summary: across the 27 PolyBench kernels we tested, an unseen workload's footprint and α can be predicted from its source code alone, more accurately than with its own trained model. Each kernel was held out in turn and predicted from its source and the other 26. All numbers here use the bytes-touched footprint (`-footprint bytes`); PolyBench and miniVite were retraced for it (see "Footprint definition" below).
 - **Footprint.** Static analysis plus a runtime baseline fitted on the other kernels predicts the footprint within a median of 0.09% when the largest input is held out (EXTRA), and 0.27% when the middle input is held out (INTER).
-- **α.** The α this implies is within a median of 1.2% (EXTRA) and 5.5% (INTER). The kernel's own α model, trained on its own smaller inputs, gets 18.0% and 10.9%.
+- **α.** The α this implies is within a median of 1.2% (EXTRA) and 5.5% (INTER); mean 2.7% / 6.6%. The kernel's own α model, trained on its own smaller inputs, gets 18.0% and 10.9%.
 - **Similarity.** A memory-behaviour descriptor z, predicted from source, ranks which known model transfers best (median Spearman ρ = 0.83–0.85). This is as well as the measured z does (0.84–0.85), and much better than clang AST node counts (0.27–0.31).
 - **Irregular code.** On miniVite, GAP and darknet a static access-idiom check flags the code as outside what this covers. On miniVite even the best borrowed PolyBench model is 46% off, so those workloads should use training-free sampling.
 
@@ -63,10 +63,10 @@ The memory-behaviour descriptor, for every interval k, has two parts:
 | Method | EXTRA median | INTER median | EXTRA mean | INTER mean |
 |---|---|---|---|---|
 | static footprint (source + baseline, no sampling) | 0.09 | 0.27 | 0.12 | 0.49 |
-| static α (spectrum moments) | 1.19 | 5.50 | 2.99 | 6.97 |
-| pooled regression + log static α as a feature | 3.86 | 6.97 | 7.42 | 7.95 |
+| static α (spectrum moments) | 1.19 | 5.50 | 2.66 | 6.59 |
+| pooled regression + log static α as a feature | 4.10 | 6.13 | 6.83 | 7.33 |
 | nearest known model by z predicted from source (ẑ) | 12.24 | 11.11 | 16.97 | 15.09 |
-| RBF mixture of known models by ẑ | 14.06 | 12.29 | 19.28 | 15.46 |
+| RBF mixture of known models by ẑ | 14.07 | 12.11 | 19.34 | 15.43 |
 | nearest by measured z (upper bound for ẑ) | 13.84 | 11.19 | 19.45 | 16.01 |
 | mixture by measured z | 14.05 | 11.53 | 18.57 | 15.61 |
 | nearest by AST node counts | 26.01 | 17.44 | 144.61 | 34.83 |
@@ -86,7 +86,10 @@ The memory-behaviour descriptor, for every interval k, has two parts:
 | measured z | 0.843 | 0.854 |
 | AST node counts | 0.268 | 0.307 |
 
-- **Worst static-α cases.** These are floyd-warshall (16.0% / 19.5%) and nussinov (20.1% / 22.5%), the two kernels with data-dependent min/max ternaries. Their interpreter coverage is 0.77; their footprint is still within 0.7% because both arms touch the same arrays. Every other kernel is within 5.5% (EXTRA) and 10.7% (INTER).
+- **Worst static-α cases.** These are floyd-warshall (12.8% / 15.6%) and nussinov (14.3% / 16.3%), the two kernels with data-dependent min/max ternaries. Every other kernel is within 5.5% (EXTRA) and 10.7% (INTER).
+  - Since step 5 of the GAP pilot, the interpreter remembers integer values in memory. Their branches now resolve from the values the program computes, so coverage is 1.0 (it was 0.77), and their errors fell from 16.0% / 19.5% and 20.1% / 22.5%.
+  - Their outermost k / i loops now run one iteration at a time. The inner loops stay vectorised, so the path values that decide the branches may differ from a sequential run.
+  - The table above is from that rerun. The pre-step-5 spectra and results are in `data/polybench-bytes/pre5/`.
 - **Worst static footprints** are correlation, gramschmidt and cholesky at their INTER size (1.7–2.6%); everything else is within 0.6%.
 
 ### Irregular workloads: the gate
