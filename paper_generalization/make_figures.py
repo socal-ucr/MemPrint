@@ -589,27 +589,50 @@ def fig_gap_arrays():
 
 def fig_interp_cost():
     t = pd.read_csv(D / "interp_cost.csv")
-    fig, axes = plt.subplots(1, 2, figsize=(W2, 2.3))
-    i = 0
-    for k in ["pr", "bfs"]:
-        for g, mk in (("uniform", "o"), ("kron", "s")):
-            s = t[(t.kernel == k) & (t.graph == g)].sort_values("scale")
-            axes[0].plot(s.scale, s.seconds, color=C[i], marker=mk, ms=2.5, label=f"{k}, {g}")
-            p = s.dropna(subset=["peak_mb"])
-            axes[1].plot(p.scale, p.peak_mb, color=C[i], marker=mk, ms=2.5)
-            i += 1
-    others = t[~t.kernel.isin(["pr", "bfs"])]
-    axes[0].scatter(others.scale, others.seconds, s=5, color=GRAY, label="cc, bc, tc, sssp")
-    axes[0].set_yscale("log")
-    axes[0].set_xlabel("scale")
-    axes[0].set_ylabel("wall time (s), 12–16 runs in parallel")
-    axes[0].legend(fontsize=6)
-    axes[0].set_title("(a) Interpreter time", loc="left")
-    axes[1].set_xlabel("scale")
-    axes[1].set_ylabel("peak resident memory (MB)")
-    axes[1].set_title("(b) Interpreter memory", loc="left")
-    fig.tight_layout()
+    fig, ax = plt.subplots(figsize=(W1, 2.4))
+    for i, k in enumerate(GK):
+        for g, mk, ls in (("uniform", "o", "-"), ("kron", "s", "--")):
+            s_ = t[(t.kernel == k) & (t.graph == g)].sort_values("scale")
+            ax.plot(s_.scale, s_.seconds, color=C[i], marker=mk, ms=2.2, lw=0.9, ls=ls,
+                    label=k if g == "uniform" else None)
+    ax.set_yscale("log")
+    ax.set_xlabel("scale")
+    ax.set_ylabel("interpreter time (s), 6 runs in parallel")
+    ax.legend(ncol=3, loc="upper left", fontsize=6)
+    ax.set_title("C++ interpreter cost (solid uniform, dashed Kronecker)", loc="left")
     save(fig, "interp_cost")
+
+
+def fig_blind():
+    t = pd.read_csv(D / "blind_curves.csv")
+    sc = pd.read_csv(HERE / "blind" / "scores.csv")
+    ph = pd.read_csv(HERE / "blind" / "posthoc_scores.csv")
+    fig, axes = plt.subplots(1, 3, figsize=(W2, 2.4), gridspec_kw={"width_ratios": [1, 1, 1.15]})
+    for ax, prog, configs in ((axes[0], "hpccg", (10, 16, 28)), (axes[1], "lulesh", (5, 12, 20))):
+        for i, c in enumerate(configs):
+            s_ = t[(t.program == prog) & (t.config == c)].sort_values("k")
+            ax.plot(s_.k, s_.alpha_meas, color=C[i], marker="o", ms=2.5, lw=1.1, label=f"{c}")
+            ax.plot(s_.k, s_.alpha_pred, color=C[i], ls="--", lw=1.0)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("$k$")
+        ax.set_title(f"{'HPCCG (grid n)' if prog == 'hpccg' else 'LULESH (mesh s)'}", loc="left")
+        ax.legend(title="solid Pin, dashed predicted", fontsize=6, title_fontsize=6, loc="upper left")
+    axes[0].set_ylabel("α")
+    ax = axes[2]
+    for i, (prog, d, name) in enumerate((("hpccg", sc, "HPCCG, blind"), ("lulesh", sc, "LULESH, blind"),
+                                         ("lulesh", ph, "LULESH, post hoc"))):
+        s_ = d[d.program == prog].sort_values("config")
+        x = np.arange(len(s_))
+        ax.plot(x, s_.alpha_mape, color=C[i], marker="o", ms=3, lw=1.1, ls="-" if "blind" in name else ":",
+                label=name)
+    ax.set_xticks(range(7), ["1", "2", "3", "4", "5", "6", "7"])
+    ax.set_xlabel("config (smallest to largest)")
+    ax.set_ylabel("α MAPE (%)")
+    ax.legend(fontsize=6)
+    ax.set_title("Error per config", loc="left")
+    fig.tight_layout()
+    save(fig, "blind")
 
 
 def fig_csr():
@@ -651,5 +674,5 @@ if __name__ == "__main__":
               fig_lowo_methods, fig_pb_static_vs_own, fig_pb_footprint, fig_reuse_curves, fig_similarity,
               fig_baseline, fig_pb_interp_cost, fig_idioms, fig_minivite, fig_gap_degrees, fig_gap_skeleton,
               fig_gap_fp, fig_gap_methods, fig_gap_auto, fig_gap_auto_fp, fig_gap_alpha_curves, fig_gap_spectra,
-              fig_gap_arrays, fig_interp_cost, fig_csr, fig_pb_sd_relative]:
+              fig_gap_arrays, fig_interp_cost, fig_csr, fig_pb_sd_relative, fig_blind]:
         f()

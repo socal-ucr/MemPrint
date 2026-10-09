@@ -28,7 +28,7 @@ from memprint.static.spectrum import BASIS, Spectrum, moments, sample_probabilit
 OUT = Path(__file__).resolve().parent / "data"
 PB = ROOT / "data" / "polybench-bytes" / "data"
 GAP = ROOT / "data" / "gap-bytes" / "data"
-SCRATCH_TIMES = Path(sys.argv[1]) if len(sys.argv) > 1 else None  # directory of <k>-<s>-<g>.time files
+HERE_BLIND = Path(__file__).resolve().parent / "blind"
 
 
 def write(df, name):
@@ -190,25 +190,35 @@ def gap():
 
 
 def interpreter_cost():
-    """Seconds and peak memory of the C++ interpreter per GAP kernel and scale."""
+    """Seconds per GAP workload and scale of the final interpreter, from the log of
+    `memprint static gap --source interp --jobs 6` (data/interp_times.txt; 6 runs in parallel)."""
     rows = []
-    if SCRATCH_TIMES is not None:
-        for f in sorted(SCRATCH_TIMES.glob("*.time")):
-            text = f.read_text().split()
-            if len(text) >= 5 and text[2] == "s":
-                k, s, g = text[0].split("-")
-                rows.append({"kernel": k, "scale": int(s), "graph": "kron" if g == "kron" else "uniform",
-                             "seconds": float(text[1]), "peak_mb": float(text[3]) / 1024, "parallel": 16})
-    log = OUT / "interp_times_10_12.txt"
-    if log.exists():
-        for line in log.read_text().splitlines():
-            parts = line.split()
-            if len(parts) >= 7 and parts[1] == "footprint":
-                name, scale = parts[0].rsplit("-", 1)
-                k = name.replace("gap_", "").replace("_kron", "")
-                rows.append({"kernel": k, "scale": int(scale), "graph": "kron" if "_kron" in name else "uniform",
-                             "seconds": float(parts[5]), "peak_mb": np.nan, "parallel": 12})
+    for line in (OUT / "interp_times.txt").read_text().splitlines():
+        parts = line.replace(",", "").split()
+        if len(parts) >= 7 and parts[1] == "footprint" and parts[-1] == "s":
+            name, scale = parts[0].rstrip(":").rsplit("-", 1)
+            k = name.replace("gap_", "").replace("_kron", "")
+            rows.append({"kernel": k, "scale": int(scale), "graph": "kron" if "_kron" in name else "uniform",
+                         "seconds": float(parts[-2]), "coverage": float(parts[5]), "parallel": 6})
     write(pd.DataFrame(rows), "interp_cost.csv")
+
+
+def blind():
+    """The blind test: predicted (committed) against measured alpha per interval and config."""
+    B = ROOT / "data" / "blind" / "data"
+    rows = []
+    for prog in ("hpccg", "lulesh"):
+        pred = pd.read_csv(HERE_BLIND / f"{prog}_predicted.csv").assign(config=lambda d: d.config.astype(str))
+        a = pd.read_csv(B / f"{prog}_allData.csv").assign(Config=lambda d: d.Config.astype(str))
+        P, summary = prepare(a), sim.bin_summary(a)
+        for c in P.configs:
+            s = summary[summary.Config == c].set_index("SamplingInterval")
+            g = pred[pred.config == c].set_index("k")
+            for k in sim.INTERVALS:
+                if k in s.index:
+                    rows.append({"program": prog, "config": int(c), "k": k, "alpha_pred": g.loc[k, "alpha"],
+                                 "alpha_meas": P.truth[c] / s.loc[k, "m"]})
+    write(pd.DataFrame(rows), "blind_curves.csv")
 
 
 def degrees():
@@ -240,4 +250,5 @@ if __name__ == "__main__":
     gap()
     degrees()
     interpreter_cost()
+    blind()
     (OUT / "provenance.json").write_text(json.dumps({"root": str(ROOT)}, indent=1))

@@ -190,23 +190,45 @@ def csr_table():
 
 def cost_table():
     t = pd.read_csv(D / "interp_cost.csv")
-    t = t[t.kernel.isin(["pr", "bfs"])]
-    piv = t.pivot_table(index="scale", columns=["kernel", "graph"], values=["seconds", "peak_mb"])
-    lines = ["\\begin{tabular}{rrrrrrrrr}", "\\toprule",
-             "Scale & \\multicolumn{4}{c}{seconds} & \\multicolumn{4}{c}{peak memory (MB)} \\\\",
-             "\\cmidrule(lr){2-5}\\cmidrule(lr){6-9}",
-             " & pr u & pr K & bfs u & bfs K & pr u & pr K & bfs u & bfs K \\\\", "\\midrule"]
+    piv = t.pivot_table(index="scale", columns=["kernel", "graph"], values="seconds")
+    cols = [(k, g) for k in ("pr", "bfs", "cc", "bc", "tc", "sssp") for g in ("uniform", "kron")]
+    lines = ["\\begin{tabular}{r" + "r" * len(cols) + "}", "\\toprule",
+             "Scale & " + " & ".join(f"{k} {'K' if g == 'kron' else 'u'}" for k, g in cols) + " \\\\", "\\midrule"]
     for sc in piv.index:
         vals = []
-        for q in ("seconds", "peak_mb"):
-            for k in ("pr", "bfs"):
-                for g in ("uniform", "kron"):
-                    v = piv.get((q, k, g))
-                    v = v.loc[sc] if v is not None else np.nan
-                    vals.append("--" if not np.isfinite(v) else f"{v:.0f}")
+        for kg in cols:
+            v = piv.get(kg)
+            v = v.loc[sc] if v is not None and sc in v.index else np.nan
+            vals.append("--" if not np.isfinite(v) else f"{v:.0f}")
         lines.append(f"{sc} & " + " & ".join(vals) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     write("cost", "\n".join(lines) + "\n")
+
+
+def blind_tables():
+    sc = pd.read_csv(HERE / "blind" / "scores.csv")
+    ph = pd.read_csv(HERE / "blind" / "posthoc_scores.csv").set_index("config")
+    lines = ["\\begin{tabular}{lrrrrrr}", "\\toprule",
+             "Program & config & truth (B) & predicted (B) & footprint error & $\\alpha$ MAPE & post hoc $\\alpha$ \\\\",
+             "\\midrule"]
+    prev = None
+    for _, r in sc.iterrows():
+        if prev is not None and r.program != prev:
+            lines.append("\\addlinespace")
+        prev = r.program
+        post = f"{ph.loc[r.config, 'alpha_mape']:.1f}" if r.program == "lulesh" and r.config in ph.index else "--"
+        lines.append(f"{'HPCCG' if r.program == 'hpccg' else 'LULESH'} & {r.config} & {r.truth:,.0f} & "
+                     f"{r.predicted:,.0f} & {r.fp_error:+.2f}\\% & {r.alpha_mape:.2f}\\% & {post} \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    write("blind", "\n".join(lines) + "\n")
+    sp = pd.read_csv(HERE / "blind" / "splits.csv")
+    lines = ["\\begin{tabular}{llrrrr}", "\\toprule",
+             "Program & split & held-out config & static $\\alpha$ (blind) & own model & footprint \\\\", "\\midrule"]
+    for _, r in sp.iterrows():
+        lines.append(f"{'HPCCG' if r.program == 'hpccg' else 'LULESH'} & {r.split} & {r.config} & "
+                     f"{r.static_alpha:.2f} & {r.own_model:.2f} & {r.fp_error:+.2f} \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    write("blind_splits", "\n".join(lines) + "\n")
 
 
 def baseline_table():
@@ -263,7 +285,7 @@ def numbers():
 
 if __name__ == "__main__":
     for fn in (lowo_table, lowo_per_kernel, similarity_table, idioms_table, gap_pilot_table, auto_table,
-               auto_scales_table, csr_table, cost_table, baseline_table):
+               auto_scales_table, csr_table, cost_table, baseline_table, blind_tables):
         fn()
     try:
         numbers()

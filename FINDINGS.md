@@ -293,6 +293,40 @@ It was tested on two C programs written for this, `tests/static/csr_pr.c` and `c
 
 The write-up of the whole generalisation work, with every figure regenerated from `data/`, is in `paper_generalization/` (`compute.py`, `make_figures.py`, `make_tables.py`, `main.tex`).
 
+### Step 7: per-point load cache, speed, and a blind test on unseen programs
+
+**-O3 load cache per point** (`3326722`). Each batch records the offset each point loaded and links to the
+batch it came from, so loads before a loop are hoisted out of it and a while condition's last load is
+reused after the loop. At scale 10, tc went from 15.6 / 11.9% to 9.4 / 9.0% (skeleton 8.8 / 9.0%) and bc
+from 11.7 / 11.2% to 6.6 / 7.9% (skeleton 5.5 / 6.4%).
+
+**Speed** (`3edabd9`):
+- scans: prefix sums and output pointers run as one batch, with a first pass that collects increments;
+- cached libclang answers;
+- counting over the touched range only.
+
+pr and bfs at scale 16 went from about 13 min to 20 s. All 108 (kernel, graph, scale 10-18) runs take
+39 min with 6 in parallel; tc at scale 18 on Kronecker graphs is the slowest, at 18 min. Spectra are unchanged.
+
+**Final GAP numbers** (frozen interpreter, all 12 serial workloads at scales 10-18, baseline fitted on
+interpreter spectra; `data/gap-bytes/data/gap_interp_*.csv`):
+- footprint within 2.9%;
+- pr, bfs and tc are within about a point of the hand skeleton at every scale;
+- cc and bc drift from the skeleton as the scale grows on uniform graphs (cc 8% at scale 18 against the skeleton's 1%).
+
+**Blind test** (`paper_generalization/blind/`).
+
+| Program (never used in development) | footprint error | α MAPE per config | EXTRA α (own model) | INTER α (own model) |
+|---|---|---|---|---|
+| HPCCG, n = 10-28 | +0.09 to +2.1% | 0.5-4.4% | 0.53% (12.2%) | 1.66% (11.1%) |
+| LULESH, s = 5-20 | -4.2 to -0.4% | 4.7-5.2% at s = 8-12; 14.7% at 5; 28-43% at 15-20 | 42.9% (7.9%) | 4.7% (17.0%) |
+
+The protocol:
+- The interpreter was frozen at `20a8d1e` after bringing both programs up without traces. That work added generic support: floats in memory, scans of pointers, `argv` strings, unity builds, default construction of `std::vector` members, and four defect fixes.
+- The predictions were committed at `2757a35`; only after that were the programs traced.
+
+Post hoc, labelled as such: partial values for variables assigned in branches taken by different batch points (LULESH's per-region repetition count) leave GAP unchanged. They improve LULESH at s = 15-20 to 8-25%, but make s = 8-12 worse (23-34%). LULESH's error is therefore not resolved.
+
 ### What generalises, and what was specific
 
 - **Generic, reusable for other programs:** the allocator model, the per-unit counting, the Mersenne Twister, std::sort and libc rand costs, and the moment formulas.

@@ -103,6 +103,8 @@ The options after `--bins` pass the Pin knobs of the same name (`--track-frees` 
 |---|---|---|
 | `polybench` | the 30 PolyBench/C 4.2.1 kernels | MINI, MINI2, MINI3, SMALL, SMALL2, SMALL3, MEDIUM |
 | `minivite` | miniVite | 1024 … 16384 vertices (`-n`) |
+| `hpccg` | HPCCG (Mantevo, serial `-O3`), the blind test | grid edge n = 10 … 28 (`test_HPCCG n n n`) |
+| `lulesh` | LULESH 2.0 (LLNL, serial `-O3`), the blind test | mesh edge s = 5 … 20 (`-q -s s -i 20`) |
 | `gapbs` | GAP (b5e3e19, `-O3`): `gap_<k>` (uniform graph, `-u`) and `gap_<k>_kron` (Kronecker, `-g`) for k = bfs, pr (20 iterations), prc (pr to convergence), cc, sssp, tc, bc; `gap_{bfs,pr}[_kron]_t4` with 4 OpenMP threads | scale 10 … 16 by default (2^scale vertices, degree 16); the results use 10 … 18 |
 
 ### Adding a workload
@@ -165,8 +167,19 @@ The commands:
 | `static lowo [--ast CSV] [--transfer miniVite]` | evaluates leave one workload out: each kernel is predicted from its source and the other kernels' traces | `data/lowo_*.csv`, `figures/static/` |
 | `static gap [--borrow DIR]` | GAP pilot: predicts every GAP workload from a hand-written skeleton of its code (`static/gap.py`, `static/gap_kernels.py`) and the input graph's distribution, and scores it against its own model and borrowed PolyBench models | `data/gap_pilot_*.csv` |
 | `static programs [--borrow DIR]` | runs the C interpreter on the irregular C programs `tests/static/csr_{pr,bfs}.c` and scores them | `data/programs_*.csv` |
+| `static gap --source interp [--scales ...]` | the same evaluation with the C++ interpreter on GAP's own source (serial workloads, all kernels but prc) | `data/static_auto/`, `data/gap_interp_*.csv` |
+| `static cpp NAME --source-file F[,F...] --configs ... --argline "..." [--define ...] [--heap-top N] --baseline-from W... --baseline-root DIR` | any C/C++ program at a list of configs ( `{config}` in the command line is replaced). Several files are compiled as one unity file. Writes predictions before the program is traced, and scores them when traces exist | `data/static_cpp/`, `data/NAME_predicted.csv`, `data/NAME_scored.csv` |
 
-The C++ interpreter has no command yet. Call it from Python; command-line accessors come from a table of stub values:
+For example, the blind test's HPCCG predictions (baseline from the GAP workloads' traces and interpreter spectra):
+
+```bash
+python -m memprint --root data/blind static cpp hpccg --source-file "$(ls workloads/src/hpccg/*.cpp | paste -sd,)" \
+    --configs 10 12 14 16 20 24 28 --argline "{config} {config} {config}" --heap-top 59328 \
+    --baseline-from gap_pr gap_bfs gap_cc gap_bc gap_tc gap_sssp gap_pr_kron gap_bfs_kron gap_cc_kron gap_bc_kron \
+    gap_tc_kron gap_sssp_kron --baseline-root data/gap-bytes/data --baseline-spectra static_auto
+```
+
+From Python, with GAP's command-line accessors given as stub values:
 
 ```python
 from memprint.static import interp_cpp
@@ -181,7 +194,7 @@ spec, result, errors, seconds = interp_cpp.analyze(
 print(spec.footprint, result.coverage)    # 75845.0 1.0, in about 3 s
 ```
 
-A GAP program takes about 10 s at scale 10, doubling with every scale (about 70 minutes and 4–5 GB at scale 18). `python tests/static/test_cpp.py` checks the C++ features on `tests/static/cpp_features.cc`.
+GAP's pr and bfs take about 20 s at scale 16 and 1–2 minutes at scale 18. All 108 GAP runs take 39 minutes with 6 in parallel. `python tests/static/test_cpp.py`, `test_loops.py` and `test_argv.py` check the C++ features, the loop batching (scans, reductions) and command lines.
 
 Trace with `scripts/run.sh ... --footprint bytes` to compare against bytes touched. The parser is libclang (`pip install libclang`), so no clang binary is needed.
 
@@ -190,7 +203,10 @@ Trace with `scripts/run.sh ... --footprint bytes` to compare against bytes touch
   - footprint within a median of 0.09% (largest input held out) / 0.27% (middle input);
   - α within 1.2% / 5.5%. The kernel's own model gets 18.0% / 10.9%; the best borrowed model, chosen after the fact, 8.9% / 6.1%.
 - **Choosing a model to borrow:** a descriptor predicted from source ranks which known model transfers best (median Spearman ρ 0.83–0.85), as well as the measured descriptor.
-- **GAP pr and bfs from their C++ source**, scales 13–18: α within 0.8–4.7%, footprint within 0.44%. tc and bc are less accurate than the hand skeleton (12–18% against about 9% and 5%).
+- **GAP from its C++ source**, all kernels at scales 10–18: footprint within 2.9%, and α within about a point of the hand skeleton for pr, bfs and tc. pr and bfs at scales 13–18 (never used in development) are within 0.7–4.1%.
+- **Blind test** on two programs never used in development, with predictions committed before tracing (`paper_generalization/blind/`):
+  - HPCCG: footprint within 2.1%, α within 0.5–4.4%, against 11–12% for its own model.
+  - LULESH: footprint within 4.2%; α within 5% at s = 8–12, but 28–43% at s = 15–20.
 
 `paper_generalization/` is a detailed report of this work. To regenerate its data, figures and tables from `data/`:
 

@@ -74,10 +74,13 @@ counts of syntax-tree nodes ($\rho=\numrhoAstExtra$). For irregular programs, wh
 their input, we extend the approach in three steps on the GAP graph benchmarks: a hand-written skeleton that replays
 the program on an input drawn from the distribution of its generator (blind tests on Kronecker graphs, new kernels
 and OpenMP threads pass with 0.6--11\% error), an interpreter that runs irregular C code, and finally a C++
-interpreter that runs GAP's own source for all six kernels on both graph families, predicting the footprint within
-a few percent and $\alpha$ close to the hand-written skeleton. We describe every component in enough detail to
-re-implement it, and we report the limitations, the post-hoc corrections and the parts of the evaluation that are not
-blind.
+interpreter that runs GAP's own source for all six kernels on both graph families at scales 10--18, predicting the
+footprint within 3\% and $\alpha$ within about a point of the hand-written skeleton for pr, bfs and tc. A blind test
+on two programs never used in development, with predictions committed before they were traced, passes clearly on
+HPCCG (footprint within 2.1\%, $\alpha$ within 0.5--4.4\%, against 11--12\% for its own model) and partly on LULESH
+(footprint within 4.2\%, $\alpha$ within 5\% at small and middle meshes but 28--43\% at the largest). We describe
+every component in enough detail to re-implement it, and we report the limitations, the post-hoc corrections and the
+parts of the evaluation that are not blind.
 \end{abstract}
 
 \tableofcontents
@@ -934,10 +937,23 @@ definition.
 
 \subsection{Values}
 \label{sec:cpp-values}
-Floating-point \emph{scalars} are tracked (\code{Real}) through literals, casts, arithmetic and comparisons, so a
-decision such as tc's \code{sample\_average / 1.3 > sample\_median} resolves; floating-point values stored in memory
-stay unknown. A constant floating-point expression converted to an integer is folded by clang
-(\code{const uint32\_t A = 0.57*max}).
+\begin{itemize}
+\item \textbf{Floating-point values} (\code{Real}) are tracked through literals, casts, arithmetic, comparisons and
+the C math functions (\code{pow}, \code{sqrt}, \code{cbrt}, \code{exp}, \code{log}, \code{fabs}, \code{floor},
+\dots), in scalars and in memory: every memory object keeps a float per 4-byte unit beside its integers (NaN when
+unknown; an integer store forgets it, and a unit whose integer value is 0 reads as 0.0). So a decision such as tc's
+\code{sample\_average / 1.3 > sample\_median}, or a problem parameter stored in a struct, resolves. A floating-point
+compound update of memory (\code{f[node[e]] += x}) is applied in iteration order with \code{np.add.at}, so repeated
+indices accumulate as in a sequential loop. A constant floating-point expression converted to an integer is folded
+by clang (\code{const uint32\_t A = 0.57*max}).
+\item \textbf{Per-point values at one address.} A local array in the body of a batched loop has one address for all
+iterations (which is right for counting), but each iteration writes its own values. When a batch stores an array of
+values to a single address, the object keeps them per point, and a load from that address by a batch of the same
+size returns each point's value.
+\item \textbf{Partial values.} A variable assigned in the branches of an \code{if}/\code{else} that different batch
+points take is known per point once every point has been assigned (\code{Partial}); before, it became unknown. (Added
+after the blind test, \secref{sec:blind}.)
+\end{itemize}
 
 \subsection{Counting as \code{-O3} does}
 
@@ -946,10 +962,15 @@ GAP is traced at \code{-O3}, where most scalars never touch memory. The interpre
 \item keeps scalar locals and objects of at most 64 bytes (an \code{Edge}, a \code{Neighborhood}, a
 \code{pvector}'s three pointers) in a per-batch-point register file whose accesses are not charged; taking such an
 object's address or binding it to a reference moves it to memory;
-\item eliminates redundant loads: within a batch, a load of the same location through the same base pointer, with
-no intervening store to that object, is free. The key is (object, offset, size, provenance of the base pointer); a
-store to an object invalidates all entries for it; entries are forgotten at the start of every loop iteration run one
-at a time and at calls into the library that may write memory.
+\item eliminates redundant loads per batch point: a point's load of a location it (or the point it derives from in
+an enclosing batch) already accessed through the same base pointer, with no store to that object since, is free.
+Every batch records, per (object, access size, base-pointer provenance), the offset each point loaded, and links to
+the batch it was derived from: a subset of its points, the iterations of a vectorised loop, or one iteration of a
+loop run one at a time. Loads before a loop are therefore hoisted out of it (loop-invariant code motion), an
+iteration does not reuse what the previous one loaded, and the latest value a \code{while} condition loaded is kept
+for after the loop (tc's \code{while (*it < w) it++;} followed by \code{w == *it}). Provenance is the object a
+pointer was loaded from (and, for a small object, the field), the same in every batch. A store forgets every entry
+of its object; a library call that may write memory forgets everything.
 \end{itemize}
 
 \subsection{The standard library}
@@ -983,7 +1004,22 @@ condition on unknown (floating-point) data is ignored, so the loop runs to its b
 through memory.
 \item When only some batch points run a statement (after a partial \code{break}), the statement runs on that subset;
 variables it declares are merged back to the full batch.
+\item \textbf{Reductions and scans.} A loop whose carried scalar is only summed, or set to \code{min}/\code{max} of
+itself, runs as one batch and combines the iterations per enclosing point. A loop whose carried integer or pointer
+is only changed by increments that do not read it (\code{v += x}, \code{v++}, \code{*p++ = x}), anywhere in the
+body including branches and nested loops, and that no condition reads, is a \term{scan}: a first pass that charges
+and stores nothing (and restores every variable) gives each iteration's increment, and each iteration then starts
+from $v_0$ plus the increments of the earlier iterations of its enclosing point. GAP's prefix sum and HPCCG's
+row-by-row matrix generation run this way instead of one iteration at a time.
+\item \textbf{Loop conditions.} In a conjunction (\code{k < max\_iter \&\& normr > tolerance}), a part that compares
+floating-point values and is unknown is taken as true when the other parts are known, so the loop runs to its
+integer bound, consistent with the rule for \code{break}.
 \end{itemize}
+
+Programs of several source files are compiled as one unity file (headers without an include guard get
+\code{\#pragma once}); the command line is given as strings (\code{argv}; \code{atoi}, \code{strtol},
+\code{std::stoi}, \code{strcmp} and \code{strlen} read them); class-type fields without an initialiser are
+default-constructed (\code{std::vector} members start empty).
 
 \subsection{Bugs found by comparing against the hand skeleton}
 
@@ -1014,6 +1050,13 @@ sssp weights lost & \code{copy}/\code{unique} moved only the first 4 bytes of 8-
 \code{break} in pr's convergence test stopped the loop & a break under an unknown condition is now ignored. \\
 load elimination too aggressive (10--12\% error) & loads through different base pointers were merged; provenance
 added to the key. \\
+tc and bc 6--9 points worse than the skeleton & the load cache was per batch; made per point with parent batches
+(above). \\
+nested sums multiplied by the outer trip count & an inner reduction was combined over all points instead of per
+enclosing point. \\
+pointer increments lost & \code{p++} was summed as an integer reduction; pointers advance as scans. \\
+two out-parameters shared a slot & a scalar whose address is taken in an inner block was given scoped scratch
+space; it now gets its own region. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1031,17 +1074,17 @@ MAPE over the scales computed, for the hand skeleton and the interpreter, and th
 
 \tabref{tab:auto} and \figref{fig:gap-auto} compare the interpreter with the hand skeleton against Pin, with the same
 runtime baselines. All six kernels run on both graph families with coverage of 1.0 (sssp at scale 12: 0.9999).
-The footprint is within a few percent everywhere (\figref{fig:gap-auto-fp}). For pr, bfs, cc and sssp, $\alpha$ is
-within one or two points of the hand skeleton. For pr and bfs we computed scales 13--18, which were not used while
-the interpreter was developed: $\alpha$ is within \numbigAutoAlphaMin--\numbigAutoAlphaMax\% there, against
-\numbigHandAlphaMin--\numbigHandAlphaMax\% for the hand skeleton, and the footprint within \numbigAutoFpMax\%
-(\tabref{tab:auto-scales}). tc and bc are less accurate than the skeleton (12--17\% and 11--12\%, against 9\% and
-5.5\%). The interpreter charges them 8--36\% more references (\tabref{tab:auto}, last column); the per-block
-comparison (\figref{fig:gap-arrays}) locates the excess in the neighbour array and the CSR index of OrderedCount.
-The cause is the \code{-O3} register reuse that the load cache does not capture: the cache is per batch, so the value
-loaded by the condition of \code{while (*it < w) it++} is not reused by the following \code{w == *it} when the loop's
-points leave at different iterations, and loop-invariant loads (\code{g.out\_neigh(u)}'s index entries) are not
-hoisted out of the inner loop. A per-point load cache would fix both but costs time on every access.
+The footprint is within \numautoFpMax\% everywhere (\figref{fig:gap-auto-fp}), and the total reference count
+within 9\% of the skeleton's for every kernel (\tabref{tab:auto}, last column). All six kernels were computed at all
+nine scales. For pr, bfs and tc, $\alpha$ is within about a point of the hand skeleton at every scale. At scales
+13--18 of pr and bfs, which were never used while the interpreter was developed, $\alpha$ is within
+\numbigAutoAlphaMin--\numbigAutoAlphaMax\%, against \numbigHandAlphaMin--\numbigHandAlphaMax\% for the hand
+skeleton, and the footprint within \numbigAutoFpMax\% (\tabref{tab:auto-scales}). The per-point load cache closed the
+gap the per-batch cache left on tc (15.6\% to 9.4\% at scale 10; skeleton 8.8\%) and bc (11.7\% to 6.6\%; 5.5\%):
+the per-block comparison (\figref{fig:gap-arrays}) now matches the skeleton within 0.3\% of tc's references. Two
+gaps remain: on uniform graphs, cc and bc drift away from the skeleton as the scale grows (cc reaches 8\% at scale
+18 where the skeleton has 1\%), and sssp is better than the skeleton on uniform graphs (7.2\% against 9.3\% mean),
+which is not explained either.
 
 \begin{figure}[!htbp]
 \centering
@@ -1089,25 +1132,97 @@ interpreter.}
 
 \subsection{Cost}
 
-The interpreter runs a GAP program at scale 10 in about 10\,s and doubles its time with every scale
-(\figref{fig:interp-cost}, \tabref{tab:cost}): about 13 minutes at scale 16 and 67--78 minutes at scale 18 (8 runs in parallel on a 32-core node), with a peak
-of 4.1--4.7~GB. The time is dominated by the sequential loops
-of the builder (the prefix sum, \code{SquishCSR}'s per-vertex lists) and by the loops with \code{break}, which run one
-iteration at a time in Python. A vectorised scan for prefix sums and compiled sequential loops would remove most of it.
+The first version of the interpreter took about 13 minutes at scale 16 and 67--78 minutes at scale 18, almost all
+of it in GAP's prefix sum, which ran one vertex at a time. With scans, cached libclang answers (child lists, kinds
+and canonical types are cached on the cursor and type objects, declaration keys on the declaration) and counting
+over the touched range only, pr and bfs take about 20\,s at scale 16 and 1--2 minutes at scale 18; all 108
+(kernel, graph, scale) runs took 39 minutes with 6 in parallel (\figref{fig:interp-cost}, \tabref{tab:cost}),
+peaking at 12~GB in total. tc remains the slowest (18 minutes at scale 18 on Kronecker graphs): its merge loops
+break per point and run one iteration at a time.
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/interp_cost.pdf}
-\caption[Cost of the C++ interpreter]{Wall time and peak memory of the C++ interpreter per scale.}
+\caption[Cost of the C++ interpreter]{Wall time of the C++ interpreter per kernel, graph and scale.}
 \label{fig:interp-cost}
 \end{figure}
 
 \begin{table}[!htbp]
 \centering\small
-\caption{C++ interpreter time and peak memory, pr and bfs (u: uniform, K: Kronecker).}
+\caption{C++ interpreter seconds per kernel and scale (u: uniform, K: Kronecker; 6 runs in parallel).}
 \label{tab:cost}
 \fittable{tables/cost.tex}
 \end{table}
+
+%=====================================================================
+\clearpage
+\section{A blind test on programs never seen in development}
+\label{sec:blind}
+
+Everything so far was developed against the workloads it was scored on, or (GAP's large scales) against the same
+programs. To test whether the interpreter generalises to code it was not built for, we chose two programs that
+generate their input from their command line and were never used in development, ran them in the interpreter
+without any trace of them, committed the predictions, and only then traced them
+(\code{paper\_generalization/blind/PROTOCOL.md}):
+\begin{itemize}
+\item \textbf{HPCCG} (Mantevo, \code{80dd2f1}): conjugate gradient on a 27-point stencil matrix generated for an
+$n^3$ grid; 150 CG iterations (tolerance 0); serial, \code{-O3}; $n = 10, 12, 14, 16, 20, 24, 28$.
+\item \textbf{LULESH 2.0} (LLNL, \code{3e01c40}): Lagrangian shock hydrodynamics on an $s^3$ hexahedral mesh, 11
+material regions with load-imbalance repetitions, 20 cycles; serial, \code{-O3}; $s = 5, 8, 10, 12, 15, 18, 20$.
+\end{itemize}
+
+\paragraph{Protocol.} Bringing the two programs up in the interpreter, before any trace, exposed generic gaps
+(floating-point values in memory, scans of pointers, command-line strings, unity builds, default construction of
+\code{std::vector} members, and four defects); they were fixed and the interpreter frozen at commit
+\code{20a8d1e}. The runtime baseline was fitted on the 12 serial GAP workloads (same compiler, libstdc++ and glibc),
+the heap started from GAP's measured state, and the predictions were committed at \code{2757a35}. Only then were the
+programs traced and scored; the predictions were not changed. The interpreter takes 11--48\,s per HPCCG input and
+39\,s--5 minutes per LULESH input; coverage is 1.0 for HPCCG and 0.954 for LULESH.
+
+\begin{table}[!htbp]
+\centering\small
+\caption[Blind test per config]{Blind test: predicted against traced footprint and $\alpha$ MAPE per config. The last
+column is LULESH after the post-hoc fix (partial values).}
+\label{tab:blind}
+\fittable{tables/blind.tex}
+\end{table}
+
+\begin{table}[!htbp]
+\centering\small
+\caption[Blind test against the own model]{Blind test against each program's own MemPrint model (trained on its other
+six configs), $\alpha$ MAPE (\%) at the held-out config.}
+\label{tab:blind-splits}
+\fittable{tables/blind_splits.tex}
+\end{table}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/blind.pdf}
+\caption[Blind test]{Blind test. Left and middle: $\alpha$ against the interval, traced (solid) and predicted before
+tracing (dashed), for three configs of each program. Right: $\alpha$ MAPE per config.}
+\label{fig:blind}
+\end{figure}
+
+\paragraph{Results.} (\tabref{tab:blind}, \tabref{tab:blind-splits}, \figref{fig:blind}.)
+\begin{itemize}
+\item \textbf{HPCCG passes clearly.} The footprint is within $+0.09$ to $+2.1\%$ and $\alpha$ within 0.5--4.4\% at
+every grid size, improving with size as the runtime baseline becomes a smaller share. With the largest grid held out,
+the prediction from source is 0.53\% off against 12.2\% for the program's own model trained on its six other traced
+sizes; with the middle grid held out, 1.66\% against 11.1\%.
+\item \textbf{LULESH passes partly.} The footprint is within $-4.2$ to $-0.4\%$ at every mesh size, and $\alpha$
+within 4.7--5.2\% at $s = 8, 10, 12$ (INTER: 4.74\% against the own model's 17.0\%). At $s = 15, 18, 20$, however,
+$\alpha$ is 28--43\% off (EXTRA: 42.9\% against 7.9\%): the predicted spectrum has too few heavily referenced bytes
+(at $k = 10^5$, $\alpha$ is 758 predicted and 467 measured at $s = 20$).
+\end{itemize}
+
+\paragraph{Post hoc.} Looking for the cause after the traces existed, we found that a variable assigned in the
+branches of an \code{if}/\code{else} taken by different regions (LULESH's \code{rep}, how many times a region's
+equation of state is evaluated: 1, 2 or 20) stayed unknown, so those loops were charged one trip. Partial values fix
+this (GAP is unchanged by it), and LULESH's error at $s = 15$--$20$ falls to 8--25\%, but at $s = 8$--$12$ it rises to
+23--34\% (\tabref{tab:blind}, last column). The good middle sizes of the blind run therefore benefited from errors that
+cancelled, and LULESH's remaining error has more than one cause; the strongest candidate is that local coordinate
+arrays filled by a nested loop do not keep per-iteration values across the nested batch, so some floating-point
+time-step and cut-off decisions stay unknown (coverage 0.95--0.98). We report the blind numbers as the result.
 
 %=====================================================================
 \clearpage
@@ -1135,8 +1250,10 @@ to GAP; the C++ interpreter replaces them.
 \paragraph{Threats to validity.}
 \begin{itemize}
 \item The uniform-graph pr and bfs skeleton results were tuned on their own traces; the Kronecker, new-kernel and
-thread tests were blind. The interpreter results were compared with Pin while the interpreter was being developed
-(scales 10--12 for all kernels); its pr and bfs results at scales 13--18 were not used during development.
+thread tests were blind. The interpreter results on GAP were compared with Pin while the interpreter was being
+developed (scales 10--12 for all kernels); its pr and bfs results at scales 13--18 were not used during development.
+HPCCG and LULESH (\secref{sec:blind}) are the only fully blind test of the interpreter, and two programs are a small
+sample.
 \item The \code{rand()} cost and the floyd-warshall/nussinov sequential execution were added after their errors were
 seen.
 \item One runtime per suite: the baseline is shared because the programs share a compiler, C library and harness. A
@@ -1151,8 +1268,9 @@ the bins.
 would make affine spectra independent of input size; the interpreter enumerates instead, in time proportional to the
 references charged.
 \item Inputs read from files are outside the approach; only inputs generated from a known distribution are.
-\item Floating-point data in memory is unknown, so programs whose control depends on it (converging PageRank, sorting
-floats) need bounds or the skeleton's numerics.
+\item Floating-point values are tracked in scalars and memory but not across every batching path (a nested batch that
+fills a local array), and values computed differently from the compiled code (vectorised sums, fused multiply-add) can
+take a different branch near a tie. Converging PageRank (prc) is left out of the interpreter route.
 \item Code that the interpreter does not model (other library containers, I/O-driven control, MPI) falls to the gate.
 \end{itemize}
 
@@ -1195,7 +1313,7 @@ benchmark's own source.
 \paragraph{Reproducibility.}
 Everything in this report is regenerated by
 \begin{lstlisting}
-python paper_generalization/compute.py <dir of interpreter timings>   # data/*.csv
+python paper_generalization/compute.py                                # data/*.csv
 python paper_generalization/make_figures.py                           # figures/*.pdf
 python paper_generalization/make_tables.py                            # tables/*.tex
 \end{lstlisting}
