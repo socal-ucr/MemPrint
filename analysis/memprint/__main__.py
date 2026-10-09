@@ -286,6 +286,7 @@ def cmd_static(args, paths):
         all_data = {k: paths.read_all_data(k) for k in kernels}
         spectra = {k: irregular.skeleton_spectra(k, sorted(all_data[k]["Config"].astype(str).unique(), key=int),
                                                  paths.data / "static_gap") for k in kernels}
+        kernels = [k for k in kernels if all(b in all_data for b in irregular.BASELINE_FROM[k])]
         borrow = {}
         if args.borrow:
             borrow = {w: pd.read_csv(Path(args.borrow) / f"{w}_allData.csv")

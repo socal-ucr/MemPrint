@@ -1,7 +1,9 @@
 """Skeletons of GAP benchmark kernels (src/builder.h, pr.cc, bfs.cc at b5e3e19).
 
 The graph is sampled from the generator's distribution: -u SCALE -k DEGREE
-draws DEGREE * 2^SCALE edges with uniform endpoints. Builds are
+draws DEGREE * 2^SCALE edges with uniform endpoints; -g SCALE draws them
+from the Kronecker (R-MAT, A=0.57, B=C=0.19) generator and relabels the
+vertices with a random permutation. Builds are
 single-threaded (SERIAL=1). A generated graph is always symmetrised
 (command_line.h: `if (scale_ != -1) symmetrize_ = true`): one CSR holds both
 directions of every edge and serves as in- and out-graph. Element sizes:
@@ -18,6 +20,56 @@ def uniform_edges(scale, degree, seed=0):
     n = 1 << scale
     m = n * degree
     return n, rng.integers(0, n, m, dtype=np.int64), rng.integers(0, n, m, dtype=np.int64)
+
+
+def rmat_edges(scale, degree, seed=0):
+    """Edges of MakeRMatEL: at every depth one 32-bit draw picks a quadrant (A, B, C, D), then
+    PermuteIDs relabels every vertex. Returns n, u, v and the permutation used."""
+    rng = np.random.default_rng(seed)
+    n = 1 << scale
+    m = n * degree
+    big = 2 ** 32 - 1
+    a, b, c = int(0.57 * big), int(0.19 * big), int(0.19 * big)
+    u = np.zeros(m, dtype=np.int64)
+    v = np.zeros(m, dtype=np.int64)
+    for _ in range(scale):
+        r = rng.integers(0, 2 ** 32, m, dtype=np.int64)
+        low = r < a + b
+        u = (u << 1) + (~low)
+        v = (v << 1) + np.where(low, r > a, r > a + b + c)
+    perm = rng.permutation(n)
+    return n, perm[u], perm[v], perm
+
+
+def _generate(p, scale, degree, seed, uniform):
+    """GenerateEL: the edge list, the generators' random state and, for -g, PermuteIDs."""
+    if uniform:
+        n, u, v = uniform_edges(scale, degree, seed)
+    else:
+        n, u, v, _ = rmat_edges(scale, degree, seed)
+    m = len(u)
+    blocks = -(-m // (1 << 18))
+    el = p.new(8 * m)
+    p.touch_all(el, 8)                                                 # el[e] = Edge(...)
+    rng = p.local(624 * 8)                                             # std::mt19937, reseeded every 2^18 edges
+    if uniform:
+        mt19937_refs(p, rng, 624, 2 * m, seeds=blocks)                 # two UniDist draws per edge
+    else:
+        mt19937_refs(p, rng, 624, scale * m, seeds=blocks + 1)         # one draw per depth; default-seeded first
+        perm = p.new(4 * n)                                            # PermuteIDs
+        p.touch_all(perm, 4)                                           # permutation[n] = n
+        prng = p.local(624 * 8)                                        # rng_t_ (std::mt19937 for 32-bit IDs)
+        # std::shuffle (libstdc++ 8): swap(a[i], a[j]), j uniform in [0, i]; two positions per draw
+        # when n * n fits in the generator's range, else one
+        mt19937_refs(p, prng, 624, n // 2 if n <= (1 << 16) else n, seeds=1)
+        i = np.arange(n, dtype=float)
+        harmonic = np.cumsum(1.0 / np.arange(1, n + 1))                # H_1 .. H_n
+        partner = 2.0 * (harmonic[-1] - harmonic)                      # expected times picked as j by a later i
+        p.touch(perm, np.arange(n), 4, np.where(i > 0, 2.0, 0.0) + partner)
+        p.touch_all(el, 8, 2.0)                                        # read, rewrite with the new IDs
+        p.touch(perm, np.arange(n), 4, np.bincount(np.concatenate([u, v]), minlength=n).astype(float))
+        p.delete(perm)
+    return n, u, v, el
 
 
 def _prefix_sum(p, degrees, n):
@@ -101,14 +153,10 @@ def _squish(p, neighs, index, src, dst, n):
     return sq_neighs, sq_index, kept, np.concatenate([[0], np.cumsum(kept)]), sq_dst
 
 
-def build(p, scale, degree, seed=0):
-    """Builder::MakeGraph for -u scale -k degree: returns the squished CSR (as out- and in-graph)."""
-    n, u, v = uniform_edges(scale, degree, seed)
-    m = len(u)
-    el = p.new(8 * m)
-    p.touch_all(el, 8)                                                 # generated
-    rng = p.local(624 * 8)                                             # std::mt19937, reseeded every 2^18 edges
-    mt19937_refs(p, rng, 624, 2 * m, seeds=-(-m // (1 << 18)))
+def build(p, scale, degree, seed=0, uniform=True):
+    """Builder::MakeGraph for -u (uniform) or -g (Kronecker) scale -k degree: returns the squished
+    CSR (as out- and in-graph)."""
+    n, u, v, el = _generate(p, scale, degree, seed, uniform)
     src, dst = np.concatenate([u, v]), np.concatenate([v, u])
     neighs, index, _ = _make_csr(p, el, src, dst, n)
     p.delete(el)                                                       # end of MakeGraph's scope
@@ -118,14 +166,14 @@ def build(p, scale, degree, seed=0):
     return n, sq, sq                                                   # out- and in-graph are the same
 
 
-def pagerank(scale, degree=16, iterations=20, seed=0):
+def pagerank(scale, degree=16, iterations=20, seed=0, uniform=True):
     """pr -u scale -k degree -n 1 -i iterations -t 0 (fixed iterations, pull, Gauss-Seidel).
 
     At -O3 scores[u] is read and written once per iteration (the error uses the
     register), and outgoing_contrib[v] is read once per in-edge of every u, i.e.
     out-degree(v) times."""
     p = Process()
-    n, (_, out_index, out_kept, _, _), (in_neighs, in_index, _, _, _) = build(p, scale, degree, seed)
+    n, (_, out_index, out_kept, _, _), (in_neighs, in_index, _, _, _) = build(p, scale, degree, seed, uniform)
     scores = p.new(4 * n)
     contrib = p.new(4 * n)
     p.touch_all(scores, 4)                                             # fill(init_score)
@@ -192,11 +240,11 @@ class _Queue:
         return self.items[self.start:self.end]
 
 
-def bfs(scale, degree=16, seed=0, alpha=15, beta=18):
-    """bfs -u scale -k degree -n 1: direction-optimising BFS from a random source with out-edges."""
+def bfs(scale, degree=16, seed=0, alpha=15, beta=18, uniform=True):
+    """bfs -u|-g scale -k degree -n 1: direction-optimising BFS from a random source with out-edges."""
     p = Process()
     n, (out_neighs, out_index, out_deg, out_off, out_nbr), (in_neighs, in_index, in_deg, in_off, in_nbr) = \
-        build(p, scale, degree, seed)
+        build(p, scale, degree, seed, uniform)
     picker = p.local(312 * 8)                                          # SourcePicker's std::mt19937_64
     rng = np.random.default_rng(seed + 1)
     draws = 0

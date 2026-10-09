@@ -1,10 +1,12 @@
 """GAP pilot: predict an irregular workload's footprint and alpha from a skeleton of its code and the
 distribution of its input, without tracing it.
 
-For each kernel (pr, bfs), the skeleton (static.gap) gives the access-count
-spectrum at every scale; the runtime baseline (libstdc++ start-up, stack) is
-fitted on the *other* kernel's traces, so nothing of the predicted kernel's
-traces is used. Methods, scored on the kernel's splitter bins:
+For each kernel (pr, bfs on uniform graphs; pr_kron, bfs_kron on Kronecker
+graphs), the skeleton (static.gap) gives the access-count spectrum at every
+scale. The runtime baseline (libstdc++ start-up, stack) is fitted on other
+workloads' traces (BASELINE_FROM), so nothing of the predicted workload's
+traces is used: the other uniform kernel for a uniform one, both uniform
+kernels for a Kronecker one (the blind test). Methods, scored on the kernel's splitter bins:
 
     skeleton-fp     skeleton footprint + baseline (no sampling at all)
     skeleton-alpha  alpha from the spectrum's bin moments
@@ -25,7 +27,18 @@ from .model import Model, features
 from .static import gap
 from .static.spectrum import Baseline, Spectrum, moments
 
-KERNELS = {"gap_pr": gap.pagerank, "gap_bfs": gap.bfs}
+KERNELS = {
+    "gap_pr": gap.pagerank,
+    "gap_bfs": gap.bfs,
+    "gap_pr_kron": lambda scale: gap.pagerank(scale, uniform=False),
+    "gap_bfs_kron": lambda scale: gap.bfs(scale, uniform=False),
+}
+BASELINE_FROM = {
+    "gap_pr": ["gap_bfs"],
+    "gap_bfs": ["gap_pr"],
+    "gap_pr_kron": ["gap_pr", "gap_bfs"],
+    "gap_bfs_kron": ["gap_pr", "gap_bfs"],
+}
 SPLITS = {"EXTRA": "last_config", "INTER": "middle_config"}
 
 
@@ -50,15 +63,17 @@ def _rows(prepared, config=None):
     return data if config is None else data[data["Config"] == config]
 
 
-def fit_baseline(prepared, spectra, summary):
+def fit_baseline(sources):
+    """sources: (prepared, spectra, summary) of the workloads the baseline is fitted on."""
     rows = []
-    for _, r in summary.iterrows():
-        spec = spectra.get(str(r["Config"]))
-        if spec is not None and r["SamplingInterval"] in sim.INTERVALS:
-            rows.append((spec, r["SamplingInterval"], r["m"], r["u"]))
-    for config, truth in prepared.truth.items():
-        if str(config) in spectra:
-            rows.append((spectra[str(config)], 1, truth, truth / 4))
+    for prepared, spectra, summary in sources:
+        for _, r in summary.iterrows():
+            spec = spectra.get(str(r["Config"]))
+            if spec is not None and r["SamplingInterval"] in sim.INTERVALS:
+                rows.append((spec, r["SamplingInterval"], r["m"], r["u"]))
+        for config, truth in prepared.truth.items():
+            if str(config) in spectra:
+                rows.append((spectra[str(config)], 1, truth, truth / 4))
     return Baseline.fit(rows)
 
 
@@ -80,8 +95,8 @@ def evaluate(all_data, spectra, polybench=None):
 
     errors, footprints = [], []
     for kernel in all_data:
-        others = [k for k in all_data if k != kernel]
-        baseline = fit_baseline(prepared[others[0]], spectra[others[0]], summaries[others[0]])
+        sources = [k for k in BASELINE_FROM[kernel] if k in all_data]
+        baseline = fit_baseline([(prepared[k], spectra[k], summaries[k]) for k in sources])
         P = prepared[kernel]
         for config in P.configs:
             spec = spectra[kernel][config]
