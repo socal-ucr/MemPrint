@@ -145,11 +145,12 @@ When run on the original traces and data, all 16 figures come out pixel-identica
 
 | Command | What it does | Output |
 |---|---|---|
-| `static spectra --polybench DIR` | computes each PolyBench kernel's spectrum at every config | `data/static/<wl>-<config>.npz` |
+| `static spectra --polybench DIR [--footprint bytes\|starts]` | computes each PolyBench kernel's spectrum at every config, for the footprint definition of the traces it is compared with (default bytes touched) | `data/static/<wl>-<config>.npz` |
 | `static idioms --polybench DIR [--program name=root:files]` | classifies the access idioms of code the interpreter cannot run, and decides whether the static route applies | `data/static_idioms.csv` |
 | `static lowo [--ast CSV] [--transfer miniVite]` | evaluates leave one workload out: each kernel is predicted from its source and the other kernels' traces | `data/lowo_*.csv`, `figures/static/` |
+| `static gap [--borrow DIR]` | GAP pilot: predicts `gap_pr` and `gap_bfs` from a skeleton of their code and the input graph's distribution | `data/gap_pilot_*.csv` |
 
-The parser is libclang (`pip install libclang`), so no clang binary is needed. Results are in FINDINGS.md, section "Unseen workloads from source code alone".
+Trace with `scripts/run.sh ... --footprint bytes` to compare against bytes touched. The parser is libclang (`pip install libclang`), so no clang binary is needed. Results are in FINDINGS.md, section "Unseen workloads from source code alone".
 
 ## Footprint over time (experimental)
 

@@ -237,10 +237,10 @@ def cmd_plot(args, paths):
             paper.FIGURES[name](out)
 
 
-def _spectrum_job(polybench, workload, config, out):
+def _spectrum_job(polybench, workload, config, out, footprint):
     from . import static
 
-    spec, result, errors, seconds = static.analyze_polybench(polybench, workload, config)
+    spec, result, errors, seconds = static.analyze_polybench(polybench, workload, config, footprint)
     static.save(out, spec, result, errors, seconds)
     return f"{workload} {config}: {seconds:.1f}s footprint {spec.footprint:.0f} B, coverage {result.coverage:.3f}"
 
@@ -257,7 +257,8 @@ def cmd_static(args, paths):
         jobs = [(w, c) for w in workloads for c in static.POLYBENCH_CONFIGS
                 if args.force or not (out / f"{w}-{c}.npz").exists()]
         with ProcessPoolExecutor(args.jobs) as pool:
-            futures = [pool.submit(_spectrum_job, args.polybench, w, c, out / f"{w}-{c}.npz") for w, c in jobs]
+            futures = [pool.submit(_spectrum_job, args.polybench, w, c, out / f"{w}-{c}.npz", args.footprint)
+                       for w, c in jobs]
             for (w, c), f in zip(jobs, futures):
                 try:
                     print(f.result(), flush=True)
@@ -276,6 +277,25 @@ def cmd_static(args, paths):
         table["out_of_distribution"] = [idioms.out_of_distribution(r) for _, r in table.iterrows()]
         write(table, paths.data / "static_idioms.csv")
         print(table.round(3).to_string())
+        return
+
+    if args.action == "gap":
+        from . import irregular
+
+        kernels = [k for k in irregular.KERNELS if paths.all_data(k).exists()]
+        all_data = {k: paths.read_all_data(k) for k in kernels}
+        spectra = {k: irregular.skeleton_spectra(k, sorted(all_data[k]["Config"].astype(str).unique(), key=int),
+                                                 paths.data / "static_gap") for k in kernels}
+        borrow = {}
+        if args.borrow:
+            borrow = {w: pd.read_csv(Path(args.borrow) / f"{w}_allData.csv")
+                      for w in default_workloads() if w != "miniVite" and (Path(args.borrow) / f"{w}_allData.csv").exists()}
+        errors, footprints = irregular.evaluate(all_data, spectra, borrow)
+        write(errors, paths.data / "gap_pilot_errors.csv", index=False)
+        write(footprints, paths.data / "gap_pilot_footprints.csv", index=False)
+        pd.set_option("display.width", 200)
+        print(footprints.round(2).to_string())
+        print(errors.pivot_table(index=["kernel", "split"], columns="method", values="mape").round(2).to_string())
         return
 
     # lowo: leave one workload out
@@ -380,18 +400,22 @@ def main(argv=None):
     p.set_defaults(func=cmd_timeline)
 
     p = sub.add_parser("static", help="static analysis of workload sources and leave-one-workload-out evaluation")
-    p.add_argument("action", choices=["spectra", "idioms", "lowo"],
+    p.add_argument("action", choices=["spectra", "idioms", "lowo", "gap"],
                    help="spectra: PolyBench access-count spectra -> data/static/<wl>-<config>.npz; "
                         "idioms: access-idiom features -> data/static_idioms.csv; "
-                        "lowo: predict each workload from its source and the others -> data/lowo_*.csv")
+                        "lowo: predict each workload from its source and the others -> data/lowo_*.csv; "
+                        "gap: GAP pilot, predict gap_pr/gap_bfs from skeletons -> data/gap_pilot_*.csv")
     p.add_argument("workloads", nargs="*", help="default: the PolyBench kernels in workloads.txt")
     p.add_argument("--polybench", help="PolyBench/C source tree (spectra, idioms)")
     p.add_argument("--jobs", type=int, default=8, help="spectra: parallel processes")
     p.add_argument("--force", action="store_true", help="spectra: recompute existing spectra")
+    p.add_argument("--footprint", choices=["bytes", "starts"], default="bytes",
+                   help="spectra: footprint definition of the traces they are compared with (default bytes)")
     p.add_argument("--program", nargs="*", help="idioms: more programs as name=root:file[,file...]")
     p.add_argument("--include", nargs="*", help="idioms: include directories for --program")
     p.add_argument("--ast", help="lowo: clang AST node counts per kernel (CSV) for the AST-similarity baseline")
     p.add_argument("--transfer", nargs="*", help="lowo: workloads without a spectrum to check borrowed models on")
+    p.add_argument("--borrow", help="gap: directory of PolyBench allData tables whose models are borrowed")
     p.set_defaults(func=cmd_static)
 
     p = sub.add_parser("paper-figures", help="regenerate the paper's data figures into figures/paper/")

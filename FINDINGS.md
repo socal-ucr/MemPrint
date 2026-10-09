@@ -8,11 +8,23 @@ On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This b
 
 ## Unseen workloads from source code alone (branch `static-generalization`)
 
-Summary: across the 27 PolyBench kernels we tested, an unseen workload's footprint and α can be predicted from its source code alone, more accurately than with its own trained model. Each kernel was held out in turn and predicted from its source and the other 26.
-- **Footprint.** Static analysis plus a runtime baseline fitted on the other kernels predicts the footprint within a median of 0.09% when the largest input is held out (EXTRA), and 0.28% when the middle input is held out (INTER).
-- **α.** The α this implies is within a median of 4.5% (EXTRA) and 8.0% (INTER). The kernel's own α model, trained on its own smaller inputs, gets 19.4% and 12.3%.
-- **Similarity.** A memory-behaviour descriptor z, predicted from source, ranks which known model transfers best (median Spearman ρ = 0.85). This is as well as the measured z does (0.85), and much better than clang AST node counts (0.31).
-- **Irregular code.** On miniVite, GAP and darknet a static access-idiom check flags the code as outside what this covers. On miniVite even the best borrowed PolyBench model is 53% off, so those workloads should use training-free sampling.
+Summary: across the 27 PolyBench kernels we tested, an unseen workload's footprint and α can be predicted from its source code alone, more accurately than with its own trained model. Each kernel was held out in turn and predicted from its source and the other 26. All numbers here use the bytes-touched footprint (`-footprint bytes`); PolyBench and miniVite were retraced for it (see "Footprint definition" below).
+- **Footprint.** Static analysis plus a runtime baseline fitted on the other kernels predicts the footprint within a median of 0.09% when the largest input is held out (EXTRA), and 0.27% when the middle input is held out (INTER).
+- **α.** The α this implies is within a median of 1.2% (EXTRA) and 5.5% (INTER). The kernel's own α model, trained on its own smaller inputs, gets 18.0% and 10.9%.
+- **Similarity.** A memory-behaviour descriptor z, predicted from source, ranks which known model transfers best (median Spearman ρ = 0.83–0.85). This is as well as the measured z does (0.84–0.85), and much better than clang AST node counts (0.27–0.31).
+- **Irregular code.** On miniVite, GAP and darknet a static access-idiom check flags the code as outside what this covers. On miniVite even the best borrowed PolyBench model is 46% off, so those workloads should use training-free sampling.
+
+### Footprint definition
+
+The first version of these results used the PolyBench and miniVite tables in `~/memory_estimator/tools/data`, traced by the old tool with its default footprint, the largest access per start address. They were retraced here with the current definition, bytes touched:
+
+```
+TRACE_DIR=$PWD/data/polybench-bytes/traces RESULTS_DIR=$PWD/data/polybench-bytes/results \
+  scripts/run.sh polybench --mode splitter --footprint bytes --runs 1 --bench <kernel>    # 27 kernels, 7 sizes
+scripts/run.sh minivite --mode splitter --footprint bytes --runs 1                       # OpenMPI 5.0.5, 1 thread
+```
+
+The static spectra are computed for bytes too (`static spectra --footprint bytes`, the default): an access counts once on every byte it covers. For PolyBench, whose accesses are aligned and do not overlap, the two definitions give the same true footprint to within 0.1% (gemm MEDIUM: 1,264,351 B against 1,264,851 B), so the change mostly shows in the bins. The earlier results are kept in `data/polybench-starts/` and `figures/static-starts/`. Under start addresses, static α was 4.5% / 8.0% (EXTRA / INTER median), against 1.2% / 5.5% now; every conclusion below holds under both.
 
 ### Why α is decided by the access-count spectrum
 
@@ -37,7 +49,7 @@ The memory-behaviour descriptor, for every interval k, has two parts:
    - gemm MEDIUM's arrays come out exact (1,158,400 B). Its reference count is 86% of Pin's; the gap is extra `-O0` stack traffic on addresses that are always sampled.
    - A kernel and config takes 0.1–34 s.
 2. **Runtime baseline.** What the loader, libc and malloc touch is not in the program text. It is modelled as a shared spectrum: non-negative bytes and addresses at counts 2^0 … 2^26, fitted by NNLS to the known workloads' bin footprints.
-   - Fitted on all 27 kernels: 106 KB over 22.6K addresses referenced once each, plus 1.8 KB referenced 128–256 times.
+   - Fitted on all 27 kernels: 104 KB referenced once, plus 2.9 KB referenced 32–512 times (107 KB in all).
    - In the evaluation it is refitted without the held-out kernel every time.
 3. **Idioms for code the interpreter cannot run** (`static/idioms.py`).
    - **References** are classed as affine, indirect (`A[B[i]]`, hash-map lookups), pointer, or other.
@@ -50,31 +62,32 @@ The memory-behaviour descriptor, for every interval k, has two parts:
 
 | Method | EXTRA median | INTER median | EXTRA mean | INTER mean |
 |---|---|---|---|---|
-| static footprint (source + baseline, no sampling) | 0.09 | 0.28 | 0.13 | 0.53 |
-| static α (spectrum moments) | 4.48 | 7.96 | 5.54 | 8.59 |
-| pooled regression + log static α as a feature | 6.34 | 8.17 | 9.51 | 8.91 |
-| nearest known model by z predicted from source (ẑ) | 13.98 | 14.81 | 19.36 | 18.17 |
-| RBF mixture of known models by ẑ | 15.45 | 13.00 | 18.59 | 18.28 |
-| nearest by measured z (upper bound for ẑ) | 14.96 | 12.44 | 18.40 | 19.05 |
-| mixture by measured z | 12.52 | 11.30 | 17.78 | 16.82 |
-| nearest by AST node counts | 23.57 | 17.51 | 147.21 | 36.69 |
-| uniform mixture (no similarity) | 80.84 | 44.39 | 144.66 | 81.34 |
-| C's own model (needs C's traces) | 19.40 | 12.29 | 19.59 | 12.19 |
-| best borrowed model, chosen after the fact | 8.35 | 6.68 | 11.63 | 9.23 |
+| static footprint (source + baseline, no sampling) | 0.09 | 0.27 | 0.12 | 0.49 |
+| static α (spectrum moments) | 1.19 | 5.50 | 2.99 | 6.97 |
+| pooled regression + log static α as a feature | 3.86 | 6.97 | 7.42 | 7.95 |
+| nearest known model by z predicted from source (ẑ) | 12.24 | 11.11 | 16.97 | 15.09 |
+| RBF mixture of known models by ẑ | 14.06 | 12.29 | 19.28 | 15.46 |
+| nearest by measured z (upper bound for ẑ) | 13.84 | 11.19 | 19.45 | 16.01 |
+| mixture by measured z | 14.05 | 11.53 | 18.57 | 15.61 |
+| nearest by AST node counts | 26.01 | 17.44 | 144.61 | 34.83 |
+| uniform mixture (no similarity) | 92.03 | 43.99 | 154.16 | 79.80 |
+| C's own model (needs C's traces) | 18.04 | 10.85 | 18.41 | 11.22 |
+| best borrowed model, chosen after the fact | 8.89 | 6.05 | 11.72 | 9.20 |
 
 ![errors](figures/static/lowo_errors.pdf)
 
-- **Predicting α beats borrowing a model.** Even the best borrowed model, picked after seeing the error, is worse (8.4%) than predicting α from C's spectrum (4.5%).
-- **Similarity does help when borrowing.** Picking a model by ẑ halves to quarters the error of a uniform mixture (14–15% against 44–81%).
-- **ẑ is as good as measuring z.** It matches measured z to a reuse RMSE of 0.006–0.007 ([curves](figures/static/lowo_reuse_curves.pdf)), and it predicts transfer error as well as the measured z does ([ρ](figures/static/lowo_similarity_validity.pdf)):
+- **Predicting α beats borrowing a model.** Even the best borrowed model, picked after seeing the error, is worse (8.9%) than predicting α from C's spectrum (1.2%).
+- **Similarity does help when borrowing.** Picking a model by ẑ cuts the error of a uniform mixture by a factor of 4–8 (11–14% against 44–92%).
+- **ẑ is as good as measuring z.** It matches measured z to a median reuse RMSE of 0.0014, at most 0.032 ([curves](figures/static/lowo_reuse_curves.pdf)), and it predicts transfer error as well as the measured z does ([ρ](figures/static/lowo_similarity_validity.pdf)):
 
 | Distance used | ρ EXTRA (median) | ρ INTER (median) |
 |---|---|---|
-| ẑ | 0.854 | 0.817 |
-| measured z | 0.853 | 0.830 |
-| AST node counts | 0.307 | 0.293 |
+| ẑ | 0.826 | 0.849 |
+| measured z | 0.843 | 0.854 |
+| AST node counts | 0.268 | 0.307 |
 
-- **Worst static-α cases.** These are floyd-warshall (14.8% / 17.6%) and nussinov (18.4% / 19.9%), the two kernels with data-dependent min/max ternaries. Their interpreter coverage is 0.77; the footprint is still within 0.7% because both arms touch the same arrays.
+- **Worst static-α cases.** These are floyd-warshall (16.0% / 19.5%) and nussinov (20.1% / 22.5%), the two kernels with data-dependent min/max ternaries. Their interpreter coverage is 0.77; their footprint is still within 0.7% because both arms touch the same arrays. Every other kernel is within 5.5% (EXTRA) and 10.7% (INTER).
+- **Worst static footprints** are correlation, gramschmidt and cholesky at their INTER size (1.7–2.6%); everything else is within 0.6%.
 
 ### Irregular workloads: the gate
 
@@ -86,9 +99,9 @@ The memory-behaviour descriptor, for every interval k, has two parts:
 | darknet | 0.79 | 0.22 | out |
 
 On miniVite (largest config, 16384), the gate's call is right:
-- Its own model gets 11.6%.
-- The nearest PolyBench model by measured z (nussinov) gets 73.5%. The best PolyBench model chosen after the fact gets 53.1%, and the median PolyBench model 84.4%.
-- Its measured z is 4.25 from the nearest PolyBench kernel. PolyBench kernels' own nearest-neighbour distances have a median of 0.81 and a maximum of 2.50.
+- Its own model gets 11.4%.
+- The nearest PolyBench model by measured z (3mm) gets 64.5%. The best PolyBench model chosen after the fact gets 46.3%, and the median PolyBench model 80.0%.
+- Its measured z is 4.30 from the nearest PolyBench kernel. PolyBench kernels' own nearest-neighbour distances have a median of 0.79 and a maximum of 1.84.
 
 ### Limitations
 
@@ -102,12 +115,75 @@ On miniVite (largest config, 16384), the gate's call is right:
 ```
 pip install -r analysis/requirements.txt    # now includes libclang
 export PYTHONPATH=$PWD/analysis
-P=~/memory_estimator/workloads/PolyBenchC-4.2.1   # data/<wl>_allData.csv as for `build`
-python -m memprint static spectra --polybench $P --jobs 12          # data/static/<wl>-<config>.npz
-python -m memprint static idioms --polybench $P \
-    --program miniVite=<dir>:<dir>/main.cpp --include <mpi include>  # data/static_idioms.csv
-python -m memprint static lowo --ast ~/memory_estimator/tools/ast_features.csv --transfer miniVite
-                                                                     # data/lowo_*.csv, figures/static/
+R=data/polybench-bytes          # traces from the retrace above
+python -m memprint --root $R preprocess                              # $R/data/<wl>_allData.csv
+python -m memprint --root $R static spectra --polybench workloads/src/polybench --jobs 12
+python -m memprint --root $R static idioms --polybench workloads/src/polybench \
+    --program miniVite=<dir>:<dir>/main.cpp --include <mpi include>  # $R/data/static_idioms.csv
+python -m memprint --root $R static lowo --ast ~/memory_estimator/tools/ast_features.csv --transfer miniVite
+                                                                     # $R/data/lowo_*.csv, $R/figures/static/
+```
+
+## GAP pilot: irregular code from a skeleton and the input's distribution
+
+Summary: for GAP `pr` and `bfs` on uniform random graphs (`-u 10` … `-u 18`, average degree 16), α is predicted within 2.8–8.8% without tracing the kernel. Its own MemPrint model, trained on its other scales, gets 7.3–9.0%; borrowed PolyBench models (bytes-touched traces) get 33–96%. The footprint is predicted within 0.0–1.8%.
+
+**Not a blind test yet.** The skeleton's two largest corrections were found by comparing against these same traces:
+- generated graphs are always symmetrized;
+- the random-number state uses 8-byte words.
+
+A held-out test, for example Kronecker graphs (`-g`) with no further changes, is still to do.
+
+### Method
+
+- **Workload.** `workloads/gapbs/workload.sh` builds GAP at b5e3e19 single-threaded with its default `-O3`.
+  - Benchmarks are `gap_pr` (`-i 20 -t 0`, so exactly 20 iterations) and `gap_bfs`, one trial each.
+  - Traced with `scripts/run.sh gapbs --mode splitter --footprint bytes`. The new `--footprint` option selects the bytes-touched footprint.
+  - Bytes touched is used rather than start addresses. Under start addresses, GAP's 32-byte vector copies overlapping its 4-byte reads made the footprint 1.7× the bytes touched, which would require modelling instruction widths.
+- **Skeleton** (`analysis/memprint/static/skeleton.py`, `static/gap.py`). A numpy replay of `builder.h`, `pr.cc` and `bfs.cc`:
+  - The graph is sampled from the generator's distribution, not GAP's actual edges.
+  - Each array element is charged its reads and writes. Counts are kept per 4-byte unit, so an access counts once per unit it covers, whatever its width.
+  - BFS runs on the sampled graph: top-down claims, bottom-up scans to the first frontier neighbour, and the direction switches.
+  - std::sort is costed per neighbour list. A microbenchmark of sort, unique and remove on the same list sizes under Pin measured 68 B of references per entry; the model gives 62.
+- **Allocator** (part of the skeleton). glibc-like: a best-fit heap, mappings above a dynamic mmap threshold, and munmap holes not reused. Under Pin, the tool's own mappings take those holes; GAP bfs at scale 18 shows no reuse of its 33.5 MB edge list's addresses.
+- **Runtime baseline.** libstdc++, the loader and other runtime memory (about 0.47 MB). It is fitted on the other kernel's traces, so nothing from the predicted kernel is used.
+
+### What the traces showed
+
+| Finding | Effect on the skeleton |
+|---|---|
+| `command_line.h` sets `symmetrize_ = true` for any generated graph | One CSR of 2M entries shared as in- and out-graph, not two directed CSRs. PR then matches Pin's references per iteration (1.16M vs 1.23M at scale 14), and the footprint error falls from 3.6% to below 0.1% at large scales |
+| libstdc++'s `std::mt19937` keeps 624 `uint_fast32_t` state words, 8 bytes each | The state is referenced about 4 × draws / 624 times per word. That is neither rare nor always sampled, so it matters at large k: generation went from 470 to 712 B at k = 10^5, against Pin's 744 B |
+| The runtime alone (scale 2) adds 56 B at k = 10^5 | Small at large scales |
+
+After these, the builder phases agree with Pin, phase by phase, to within 4–10% of bin footprint at k = 10^5. Pin's figures come from runs that exit after each phase. The largest remaining miss is degree counting (254 vs 372 B), most likely how Pin counts `lock xadd`.
+
+### Accuracy (MAPE %, EXTRA = scale 18 held out, INTER = scale 14)
+
+| Kernel | split | skeleton footprint | skeleton α | own model | PolyBench nearest by ẑ | PolyBench mean | best PolyBench (oracle) |
+|---|---|---|---|---|---|---|---|
+| bfs | EXTRA | 0.00 | 5.29 | 7.68 | 93.14 | 93.02 | 54.53 |
+| bfs | INTER | 1.65 | 8.78 | 7.28 | 32.82 | 86.61 | 32.82 |
+| pr | EXTRA | 0.00 | 2.75 | 8.96 | 95.69 | 85.23 | 84.64 |
+| pr | INTER | 1.84 | 4.36 | 8.35 | 80.07 | 78.25 | 60.01 |
+
+α error per scale (all bins at k = 100 … 100000) is 2.8–5.3% for pr and 5.3–8.8% for bfs. The footprint error is at most 0.42% except at scale 14 (1.7–1.8%), where arrays of (N+1) × 8 = 131 KB sit at glibc's 128 KB mmap threshold.
+
+### What generalises, and what was specific
+
+- **Generic, reusable for other programs:** the allocator model, the per-unit counting, the Mersenne Twister and std::sort costs, and the moment formulas.
+- **Written for GAP:** the skeleton itself. It is about 250 lines, written by reading the source.
+
+Automating it means extending the interpreter so that loads from input arrays become random variables with a known distribution. The skeleton is the target that such an extension has to reproduce.
+
+### Reproduce
+
+```
+PIN_ROOT=... scripts/setup.sh gapbs
+TRACE_DIR=$PWD/data/gap-bytes/traces RESULTS_DIR=$PWD/data/gap-bytes/results \
+  scripts/run.sh gapbs --mode splitter --footprint bytes --runs 1 --configs "10 11 12 13 14 15 16 17 18"
+python -m memprint --root data/gap-bytes preprocess gap_pr gap_bfs
+python -m memprint --root data/gap-bytes static gap --borrow data/polybench-bytes/data   # data/gap-bytes/data/gap_pilot_*.csv
 ```
 
 ## Windowed sampling: watching part of a run (branch `windowed`)

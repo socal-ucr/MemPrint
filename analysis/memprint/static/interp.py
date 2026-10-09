@@ -85,10 +85,16 @@ class Obj:
         arr = self._grow(size, hi)
         arr[:hi] += np.bincount(off, weights=w, minlength=hi)
 
-    def addresses(self):
-        """(counts, sizes) per start address with at least one reference."""
+    def addresses(self, footprint="starts"):
+        """(counts, sizes) of the object's footprint units.
+
+        starts: one unit per start address, sized by its largest access (the paper's footprint).
+        bytes: bytes touched; an access counts once on every byte it covers. Bytes are grouped
+        into aligned 8-byte units where all eight have the same count, else counted singly."""
         if not self.by_size:
             return np.zeros(0), np.zeros(0)
+        if footprint == "bytes":
+            return self._bytes()
         length = max(len(a) for a in self.by_size.values())
         total = np.zeros(length)
         size = np.zeros(length)
@@ -99,6 +105,25 @@ class Obj:
         counts, sizes = total[touched], size[touched]
         if self.unresolved and len(counts):
             counts = counts + self.unresolved / len(counts)
+        return counts, sizes
+
+
+    def _bytes(self):
+        length = max(len(a) + s for s, a in self.by_size.items())
+        length = (length + 7) // 8 * 8
+        cover = np.zeros(length)
+        for s, arr in self.by_size.items():
+            c = np.convolve(arr, np.ones(s))
+            cover[: len(c)] += c
+        touched = cover > 0
+        if self.unresolved and touched.any():
+            cover[touched] += self.unresolved / touched.sum()
+        words = cover.reshape(-1, 8)
+        uniform = (words == words[:, :1]).all(axis=1) & (words[:, 0] > 0)
+        rest = words[~uniform].ravel()
+        rest = rest[rest > 0]
+        counts = np.concatenate([words[uniform, 0], rest])
+        sizes = np.concatenate([np.full(int(uniform.sum()), 8.0), np.ones(len(rest))])
         return counts, sizes
 
 
@@ -1022,8 +1047,8 @@ def _events(body):
 # ---------------------------------------------------------------- entry point
 
 
-def run(tu, entry="main", argc=1):
-    """Run the program from `entry` and return its access-count spectrum."""
+def run(tu, entry="main", argc=1, footprint="starts"):
+    """Run the program from `entry` and return its access-count spectrum (footprint: starts or bytes)."""
     interp = Interpreter(tu)
     fdef = interp.functions.get(entry)
     if fdef is None:
@@ -1039,7 +1064,7 @@ def run(tu, entry="main", argc=1):
             interp.exec(kid)
     counts, sizes, objects = [], [], []
     for obj in interp.objects:
-        c, s = obj.addresses()
+        c, s = obj.addresses(footprint)
         if len(c):
             counts.append(c)
             sizes.append(s)
