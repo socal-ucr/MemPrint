@@ -299,6 +299,36 @@ def cmd_static(args, paths):
         print(errors.pivot_table(index=["kernel", "split"], columns="method", values="mape").round(2).to_string())
         return
 
+    if args.action == "programs":
+        # C programs the interpreter runs by itself (tests/static/*.c, traced as <name>-<SCALE>);
+        # the runtime baseline is fitted on the PolyBench traces and spectra under --borrow's root.
+        from . import irregular
+
+        programs = args.workloads or ["csr_pr", "csr_bfs"]
+        all_data = {k: paths.read_all_data(k) for k in programs}
+        spectra = {}
+        for k in programs:
+            spectra[k] = {}
+            for config in sorted(all_data[k]["Config"].astype(str).unique(), key=int):
+                path = out / f"{k}-{config}.npz"
+                if not path.exists():
+                    spec, result, errors, seconds = static.analyze(
+                        Path(__file__).resolve().parents[2] / "tests" / "static" / f"{k}.c", [f"SCALE={config}"],
+                        footprint="bytes")
+                    static.save(path, spec, result, errors, seconds)
+                spectra[k][config] = static.load(path)[0]
+        pb = Path(args.borrow)
+        pb_spectra = {tuple(f.stem.rsplit("-", 1)): static.load(f)[0] for f in sorted((pb / "static").glob("*.npz"))}
+        pb_data = {w: pd.read_csv(pb / f"{w}_allData.csv") for w in sorted({w for w, _ in pb_spectra})}
+        baseline = lowo.fit_baseline(list(lowo.load(pb_data, pb_spectra).values()))
+        errors, footprints = irregular.evaluate(all_data, spectra, pb_data, {k: baseline for k in programs})
+        write(errors, paths.data / "programs_errors.csv", index=False)
+        write(footprints, paths.data / "programs_footprints.csv", index=False)
+        pd.set_option("display.width", 200)
+        print(footprints.round(2).to_string())
+        print(errors.pivot_table(index=["kernel", "split"], columns="method", values="mape").round(2).to_string())
+        return
+
     # lowo: leave one workload out
     spectra = {}
     for f in sorted(out.glob("*.npz")):
@@ -401,11 +431,12 @@ def main(argv=None):
     p.set_defaults(func=cmd_timeline)
 
     p = sub.add_parser("static", help="static analysis of workload sources and leave-one-workload-out evaluation")
-    p.add_argument("action", choices=["spectra", "idioms", "lowo", "gap"],
+    p.add_argument("action", choices=["spectra", "idioms", "lowo", "gap", "programs"],
                    help="spectra: PolyBench access-count spectra -> data/static/<wl>-<config>.npz; "
                         "idioms: access-idiom features -> data/static_idioms.csv; "
                         "lowo: predict each workload from its source and the others -> data/lowo_*.csv; "
-                        "gap: GAP pilot, predict gap_pr/gap_bfs from skeletons -> data/gap_pilot_*.csv")
+                        "gap: GAP pilot, predict the GAP workloads from skeletons -> data/gap_pilot_*.csv; "
+                        "programs: C programs in tests/static run by the interpreter -> data/programs_*.csv")
     p.add_argument("workloads", nargs="*", help="default: the PolyBench kernels in workloads.txt")
     p.add_argument("--polybench", help="PolyBench/C source tree (spectra, idioms)")
     p.add_argument("--jobs", type=int, default=8, help="spectra: parallel processes")
@@ -416,7 +447,7 @@ def main(argv=None):
     p.add_argument("--include", nargs="*", help="idioms: include directories for --program")
     p.add_argument("--ast", help="lowo: clang AST node counts per kernel (CSV) for the AST-similarity baseline")
     p.add_argument("--transfer", nargs="*", help="lowo: workloads without a spectrum to check borrowed models on")
-    p.add_argument("--borrow", help="gap: directory of PolyBench allData tables whose models are borrowed")
+    p.add_argument("--borrow", help="gap, programs: directory of PolyBench allData tables (and static/ spectra)")
     p.set_defaults(func=cmd_static)
 
     p = sub.add_parser("paper-figures", help="regenerate the paper's data figures into figures/paper/")

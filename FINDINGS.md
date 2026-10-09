@@ -126,7 +126,19 @@ python -m memprint --root $R static lowo --ast ~/memory_estimator/tools/ast_feat
 
 ## GAP pilot: irregular code from a skeleton and the input's distribution
 
-Summary: for GAP `pr` and `bfs` on uniform random graphs (`-u 10` … `-u 18`, average degree 16), α is predicted within 2.8–8.8% without tracing the kernel. Its own MemPrint model, trained on its other scales, gets 7.3–9.0%; borrowed PolyBench models (bytes-touched traces) get 33–96%. The footprint is predicted within 0.0–1.8%.
+Summary: 18 GAP workloads are predicted without tracing them: pr, converging pr, bfs, cc, sssp, tc and bc on uniform and Kronecker graphs, plus pr and bfs with 4 OpenMP threads. Each is predicted from a skeleton of GAP's code and the input graph's distribution, scored at scales 10–18. The skeleton beats each workload's own MemPrint model (trained on its other scales) in 28 of 36 held-out tests; borrowed PolyBench models are 16–98% off. The footprint is predicted within 0.0–2.9% at every scale. The models for cc, sssp, tc, bc, converging pr, the threaded runs and the Kronecker graphs were each committed before their workloads were traced (blind). The source interpreter can now run irregular C code by itself (step 5); on two C graph programs it predicts α within 1.3–6.0%.
+
+| Workloads (EXTRA / INTER α MAPE %) | skeleton | own model | blind? |
+|---|---|---|---|
+| pr, uniform / Kronecker | 0.6 / 1.9, 1.3 / 1.6 | 9.0 / 8.4, 10.1 / 6.9 | no (tuned on uniform; Kronecker re-scored after step 3) |
+| bfs, uniform / Kronecker | 1.6 / 3.1, 2.3 / 2.7 | 7.7 / 7.3, 16.0 / 9.7 | no |
+| cc, uniform / Kronecker | 1.1 / 3.3, 2.2 / 2.5 | 7.1 / 7.5, 16.9 / 8.6 | yes |
+| bc, uniform / Kronecker | 4.5 / 5.4, 3.1 / 5.0 | 10.3 / 5.9, 15.3 / 8.1 | yes |
+| pr until convergence, uniform / Kronecker | 0.7 / 3.0, 7.1 / 8.3 | 9.0 / 8.2, 15.3 / 14.7 | partly (see step 2) |
+| sssp, uniform / Kronecker | 11.3 / 8.9, 10.3 / 7.3 | 6.3 / 4.6, 10.1 / 6.5 | yes |
+| tc, uniform / Kronecker | 11.2 / 9.3, 9.8 / 9.0 | 6.6 / 9.1, 8.7 / 3.4 | yes |
+| pr, 4 threads, uniform / Kronecker | 0.8 / 2.3, 1.3 / 1.6 | 10.1 / 8.2, 7.6 / 4.8 | yes |
+| bfs, 4 threads, uniform / Kronecker | 1.8 / 4.5, 2.1 / 2.5 | 9.0 / 5.6, 10.1 / 3.5 | yes |
 
 **The uniform-graph results are not blind.** The skeleton's two largest corrections were found by comparing against those same traces:
 - generated graphs are always symmetrized;
@@ -193,12 +205,78 @@ After these, the builder phases agree with Pin, phase by phase, to within 4–10
 
 α error per scale (all bins at k = 100 … 100000) is 2.8–5.3% for pr and 5.3–8.8% for bfs. The footprint error is at most 0.42% except at scale 14 (1.7–1.8%), where arrays of (N+1) × 8 = 131 KB sit at glibc's 128 KB mmap threshold.
 
+### Step 3: calibration (committed `f1eba97`, before steps 2 and 4)
+
+All three corrections were measured outside GAP or read from its source:
+- **std::sort** costs references per element along a measured curve: lists of 2–16384 random ints under Pin, g++ 8.5 `-O3`, about 3 at 2 elements up to 31 at 16384. This replaced the formula.
+- **`lock xadd`** costs a read and a write, as modelled before. A microbenchmark gives 3.0 references per increment, including the index load.
+- **`MakeGraphFromEL`** reads the edge list once more (`FindMaxNodeID`, since `num_nodes_` starts at -1), and the vertex count is max ID + 1.
+- **The heap model follows glibc 2.28:**
+  - free chunks are used first, then the top chunk;
+  - the mmap threshold is consulted only when the top chunk is too small;
+  - the heap grows with a 128 KB pad and is trimmed above the trim threshold.
+  - The top chunk's free bytes when GAP makes its first large allocation (59,328) were measured once with `mallinfo()` from an `LD_PRELOAD` shim.
+  - At scale 14 a 131 KB array lands on the heap or in a mapping by a margin of about 2 KB. With this model the footprint error there fell from 1.8% to under 0.4%.
+
+### Step 2: more kernels (blind, committed `a5ddf2c` before tracing)
+
+`static/gap_kernels.py` replays each kernel on the sampled graph (sequential parts in numba) and charges each element's reads and writes:
+- **cc:** Afforest union-find (Link, Compress, 1024-sample guess of the largest component).
+- **sssp:** delta-stepping with per-bin vectors, on the weighted builder (12-byte edges, 8-byte neighbours, one weight draw per edge).
+- **tc:** `WorthRelabelling` from 1000 sampled degrees, then `RelabelByDegree` and `OrderedCount`.
+- **bc:** Brandes from one source.
+- **converging pr:** pr with its default `-t 1e-4`; the iteration count comes from running the float32 update on the sampled graph.
+
+The runtime baseline is fitted on the four pr / bfs workloads.
+
+Results:
+- **Good, and better than each kernel's own model:** cc (1.1–3.3%) and bc (3.1–5.4%), on both graph types.
+- **Worse than their own models:** sssp (7.3–11.3%, footprint about 1% high) and tc (9.0–11.2%). The likely culprits are the parts modelled coarsely: sssp's per-bin vectors are charged to one block and buffer growth is approximated, and tc's merge loops depend on how `-O3` keeps the iterator. Neither has been diagnosed against traces.
+- **Converging pr:** matches native iteration counts on uniform graphs at scales 14 and 18 (5 and 4), but predicts 9 and 10 at scales 14 and 18 on Kronecker graphs against 13 and 8 natively. α is 7–8% there, still better than its own model (15%).
+- **Disclosure:** those native iteration counts were printed before the freeze commit. The replay was not changed.
+
+### Step 4: 4 OpenMP threads (blind, committed `a0e9e81` before tracing)
+
+From the source:
+- every array access is the same as in the serial run;
+- each thread constructs its own Mersenne Twister in the generators and reseeds it for the blocks it takes (static schedule);
+- each thread pushes through its own 64 KB QueueBuffer, which glibc serves from that thread's arena.
+
+The runtime baseline, now including libgomp, is fitted on the other kernel's threaded traces.
+
+Results:
+- α is within 0.8–4.5%, better than the own models (3.5–10.1%).
+- The footprint is within 1.2%; the threaded runtime is less regular than the serial one.
+- Threads did not make prediction harder for these kernels, because what the model counts is per element, not per thread.
+
+### Step 5: the interpreter runs irregular C code by itself (prototype, committed `613922d`)
+
+The source interpreter (`static/interp.py`) gained:
+- remembered integer contents of memory, so loops bounded by loaded values and loaded subscripts resolve;
+- `rand()` / `random()` / `lrand48()` as draws from their distribution;
+- sequential semantics for `a[i]++` / `a[i] += x` with repeated indices in a vectorised loop;
+- one-at-a-time execution for the outermost loop that both reads and writes an integer array;
+- glibc placement of heap blocks, so reused addresses are counted once.
+
+It was tested on two C programs written for this, `tests/static/csr_pr.c` and `csr_bfs.c`. Both build a random CSR graph from `rand()`; one runs PageRank, the other a queue-driven BFS. They were built with `cc -O0` and traced at scales 8–16 (pr) and 8–14 (bfs). The runtime baseline was fitted on PolyBench.
+
+| | footprint | α EXTRA / INTER (blind) | α EXTRA / INTER (with libc rand cost, post hoc) | own model |
+|---|---|---|---|---|
+| csr_pr | ≤ 0.34% | 2.3 / 11.2 | 1.3 / 3.6 | 12.4 / 12.0 |
+| csr_bfs | ≤ 0.54% | 14.5 / 33.1 | 3.2 / 6.0 | 20.3 / 14.2 |
+
+- **The blind run** missed what `rand()` does inside libc. A microbenchmark measured about 27 references per call: about 24 to some 120 bytes of hot state and 3 to its 31-word table. Those moderately hot bytes dominate large-interval bins of small runs. Adding that cost brought α to 1.3–6.0%.
+- **Limits:**
+  - This is C only; GAP itself (C++ classes, templates, `std::sort`) still needs its hand-written skeleton.
+  - Pointer values stored in memory are not tracked.
+  - Loops that run one iteration at a time are slow: csr_bfs at scale 14 took 6 minutes.
+
 ### What generalises, and what was specific
 
-- **Generic, reusable for other programs:** the allocator model, the per-unit counting, the Mersenne Twister and std::sort costs, and the moment formulas.
-- **Written for GAP:** the skeleton itself. It is about 250 lines, written by reading the source.
+- **Generic, reusable for other programs:** the allocator model, the per-unit counting, the Mersenne Twister, std::sort and libc rand costs, and the moment formulas.
+- **Written for GAP:** the skeletons themselves (`static/gap.py`, `static/gap_kernels.py`), about 900 lines written by reading the source.
 
-Automating it means extending the interpreter so that loads from input arrays become random variables with a known distribution. The skeleton is the target that such an extension has to reproduce.
+Step 5 shows the automatic route for C. Doing the same for GAP needs a C++ object model in the interpreter, which is not done.
 
 ### Reproduce
 
@@ -209,6 +287,10 @@ TRACE_DIR=$PWD/data/gap-bytes/traces RESULTS_DIR=$PWD/data/gap-bytes/results \
                     # gap_bfs, gap_pr (-u) and gap_bfs_kron, gap_pr_kron (-g)
 python -m memprint --root data/gap-bytes preprocess gap_pr gap_bfs gap_pr_kron gap_bfs_kron
 python -m memprint --root data/gap-bytes static gap --borrow data/polybench-bytes/data   # data/gap-bytes/data/gap_pilot_*.csv
+# step 4: OMP_NUM_THREADS=4 scripts/run.sh gapbs ... --bench "gap_pr_t4 gap_bfs_t4 gap_pr_kron_t4 gap_bfs_kron_t4"
+# step 5: cc -O0 -DSCALE=<s> tests/static/csr_{pr,bfs}.c, traced as csr_{pr,bfs}-<s> under data/csr-bytes/traces, then
+python -m memprint --root data/csr-bytes preprocess csr_pr csr_bfs
+python -m memprint --root data/csr-bytes static programs --borrow data/polybench-bytes/data
 ```
 
 ## Windowed sampling: watching part of a run (branch `windowed`)

@@ -103,9 +103,10 @@ def _mape(pred, truth):
     return float(np.mean(np.abs(pred - truth) / truth) * 100)
 
 
-def evaluate(all_data, spectra, polybench=None):
+def evaluate(all_data, spectra, polybench=None, baselines=None):
     """all_data / spectra: kernel -> allData table / {config: Spectrum}. polybench: name -> allData
-    (its models are borrowed). Returns (errors, footprints)."""
+    (its models are borrowed). baselines: kernel -> Baseline to use instead of fitting one on
+    BASELINE_FROM. Returns (errors, footprints)."""
     prepared = {k: prepare(d.assign(Config=d["Config"].astype(str))) for k, d in all_data.items()}
     summaries = {k: sim.bin_summary(d.assign(Config=d["Config"].astype(str))) for k, d in all_data.items()}
     pb_models, pb_z = {}, {}
@@ -117,8 +118,11 @@ def evaluate(all_data, spectra, polybench=None):
 
     errors, footprints = [], []
     for kernel in all_data:
-        sources = [k for k in BASELINE_FROM[kernel] if k in all_data]
-        baseline = fit_baseline([(prepared[k], spectra[k], summaries[k]) for k in sources])
+        if baselines and kernel in baselines:
+            baseline = baselines[kernel]
+        else:
+            sources = [k for k in BASELINE_FROM[kernel] if k in all_data]
+            baseline = fit_baseline([(prepared[k], spectra[k], summaries[k]) for k in sources])
         P = prepared[kernel]
         for config in P.configs:
             spec = spectra[kernel][config]

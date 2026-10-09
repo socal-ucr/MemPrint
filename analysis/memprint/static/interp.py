@@ -245,6 +245,11 @@ ALLOC = {"malloc": (0,), "xmalloc": (0,), "calloc": (0, 1), "polybench_alloc_dat
          "aligned_alloc": (1,), "realloc": (1,), "valloc": (0,), "pvalloc": (0,)}
 FREE = {"free", "polybench_free_data"}
 RANDOM = {"rand": 2 ** 31 - 1, "random": 2 ** 31 - 1, "lrand48": 2 ** 31 - 1}  # name -> largest value
+# Inside glibc 2.28, rand() makes about 27 references per call (Pin, a loop of 10^6 calls at -O0):
+# about 24 to some 120 bytes of hot state (lock, the random_data fields, its call frame) and 3 to
+# the 31-word additive table. Measured after csr_pr / csr_bfs had been scored without it.
+RAND_HOT_BYTES, RAND_HOT_REFS = 120, 24.0
+RAND_TABLE_WORDS, RAND_TABLE_REFS = 31, 3.0
 
 
 @dataclass
@@ -861,6 +866,7 @@ class Interpreter:
             self.heap_events.append(("free", args[0].obj))
             return UNK
         if name in RANDOM:                                             # input drawn from its distribution
+            self._libc_random()
             draws = self.rng.integers(0, RANDOM[name] + 1, self.L, dtype=np.int64)
             return int(draws[0]) if self.L == 1 else draws
         if name in ("memset", "memcpy", "memmove") and len(args) == 3:
@@ -875,6 +881,20 @@ class Interpreter:
                     self.access(Loc(p.obj if isinstance(p, Ptr) else UNK, UNK, 8), write=write)
             return args[0]
         return UNK
+
+    def _libc_random(self):
+        """Charge the references a rand() call makes inside the C library (once per batch point)."""
+        if not self.charging:
+            return
+        if not hasattr(self, "libc_random"):
+            self.libc_random = Obj("libc.random", "global", RAND_HOT_BYTES + 4 * RAND_TABLE_WORDS)
+            self.objects.append(self.libc_random)
+        weight = float(self.w.sum())
+        hot = np.arange(0, RAND_HOT_BYTES, 4)
+        table = RAND_HOT_BYTES + 4 * np.arange(RAND_TABLE_WORDS)
+        self.libc_random.add(hot, 4, np.full(len(hot), weight * RAND_HOT_REFS / len(hot)))
+        self.libc_random.add(table, 4, np.full(len(table), weight * RAND_TABLE_REFS / len(table)))
+        self.total += weight * (RAND_HOT_REFS + RAND_TABLE_REFS)
 
     # ------------------------------------------------------------ statements
 
