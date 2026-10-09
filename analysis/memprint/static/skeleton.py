@@ -145,19 +145,26 @@ class Block:
 class Process:
     """Allocator plus per-unit reference counts of one run."""
 
-    def __init__(self, reuse_mmap=False, heap_top=HEAP_TOP_AT_START):
+    def __init__(self, reuse_mmap=False, heap_top=HEAP_TOP_AT_START, threads=1):
+        """threads: OpenMP threads. Threads other than the main one allocate from their own
+        glibc arena (a separate heap that starts empty); their locals live on their own stacks."""
         self.spaces = {"heap": Heap(heap_top), "mmap": Space(best_fit=False), "stack": Space(best_fit=False)}
-        self.reuse_mmap = reuse_mmap
         self.counts = {"heap": np.zeros(0), "mmap": np.zeros(0), "stack": np.zeros(0)}
+        for t in range(1, threads):
+            self.spaces[f"arena{t}"] = Heap(0)
+            self.counts[f"arena{t}"] = np.zeros(0)
+        self.threads = threads
+        self.reuse_mmap = reuse_mmap
         self.threshold = MMAP_THRESHOLD
         self.references = 0.0
 
-    def new(self, nbytes):
+    def new(self, nbytes, thread=0):
         nbytes = max(int(nbytes), 1)
         nb = max(MINSIZE, _align(nbytes + 8, 16))                    # request2size
-        chunk = self.spaces["heap"].alloc(nb, self.threshold)
+        space = "heap" if thread == 0 else f"arena{thread}"
+        chunk = self.spaces[space].alloc(nb, self.threshold)
         if chunk is not None:
-            return Block("heap", chunk, nb, chunk + 16, nbytes)
+            return Block(space, chunk, nb, chunk + 16, nbytes)
         size = _align(nb + 8, PAGE)
         chunk = self.spaces["mmap"].alloc(size)
         return Block("mmap", chunk, size, chunk + 16, nbytes)
@@ -171,7 +178,7 @@ class Process:
     def delete(self, block):
         if block.space == "stack":
             return
-        if block.space == "heap" or self.reuse_mmap:
+        if block.space != "mmap" or self.reuse_mmap:
             self.spaces[block.space].release(block.chunk, block.chunk_size)
         if block.space == "mmap" and self.threshold < block.chunk_size <= MMAP_THRESHOLD_MAX:
             self.threshold = block.chunk_size

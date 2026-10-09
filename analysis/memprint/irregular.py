@@ -50,6 +50,13 @@ BASELINE_FROM = {
     "gap_pr_kron": ["gap_pr", "gap_bfs"],
     "gap_bfs_kron": ["gap_pr", "gap_bfs"],
 }
+# Step 4 (blind): OpenMP builds with 4 threads; the baseline (now with libgomp) comes from the
+# other kernel's threaded traces.
+for _k, _other in (("pr", "bfs"), ("bfs", "pr")):
+    for _uniform, _suffix in ((True, ""), (False, "_kron")):
+        _f = gap.pagerank if _k == "pr" else gap.bfs
+        KERNELS[f"gap_{_k}{_suffix}_t4"] = (lambda f, u: lambda scale: f(scale, uniform=u, threads=4))(_f, _uniform)
+        BASELINE_FROM[f"gap_{_k}{_suffix}_t4"] = [f"gap_{_other}_t4", f"gap_{_other}_kron_t4"]
 # The step-2 kernels (blind): the runtime baseline comes from the four pr / bfs workloads.
 for _k in ("prc", "cc", "sssp", "tc", "bc"):
     for _suffix in ("", "_kron"):

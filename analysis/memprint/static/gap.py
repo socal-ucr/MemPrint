@@ -49,6 +49,17 @@ def rmat_edges(scale, degree, seed=0):
     return n, perm[u], perm[v], perm
 
 
+def _thread_rngs(p, words, blocks, m, draws_per_edge):
+    """OpenMP generators: every thread constructs its own Mersenne Twister (seeded once) and
+    reseeds it for each 2^18-edge block it takes; blocks are split statically in contiguous
+    chunks of ceil(blocks / threads)."""
+    chunk = -(-blocks // p.threads)
+    for t in range(p.threads):
+        mine = range(t * chunk, min(blocks, (t + 1) * chunk))
+        edges = sum(min((b + 1) << 18, m) - (b << 18) for b in mine)
+        mt19937_refs(p, p.local(words * 8), words, draws_per_edge * edges, seeds=1 + len(mine))
+
+
 def _generate(p, scale, degree, seed, uniform, edge=8):
     """GenerateEL: the edge list, the generators' random state and, for -g, PermuteIDs.
     edge: bytes per edge (8, or 12 with a weight)."""
@@ -60,11 +71,16 @@ def _generate(p, scale, degree, seed, uniform, edge=8):
     blocks = -(-m // (1 << 18))
     el = p.new(edge * m)
     p.touch_all(el, edge)                                              # el[e] = Edge(...)
-    rng = p.local(624 * 8)                                             # std::mt19937, reseeded every 2^18 edges
-    if uniform:
-        mt19937_refs(p, rng, 624, 2 * m, seeds=blocks)                 # two UniDist draws per edge
+    if p.threads > 1:
+        _thread_rngs(p, 624, blocks, m, 2 if uniform else scale)
     else:
-        mt19937_refs(p, rng, 624, scale * m, seeds=blocks + 1)         # one draw per depth; default-seeded first
+        rng = p.local(624 * 8)                                         # std::mt19937, reseeded every 2^18 edges
+    if uniform:
+        if p.threads == 1:
+            mt19937_refs(p, rng, 624, 2 * m, seeds=blocks)             # two UniDist draws per edge
+    else:
+        if p.threads == 1:
+            mt19937_refs(p, rng, 624, scale * m, seeds=blocks + 1)     # one draw per depth; default-seeded first
         perm = p.new(4 * n)                                            # PermuteIDs
         p.touch_all(perm, 4)                                           # permutation[n] = n
         prng = p.local(624 * 8)                                        # rng_t_ (std::mt19937 for 32-bit IDs)
@@ -197,13 +213,14 @@ def build(p, scale, degree, seed=0, uniform=True, weighted=False):
     return n, sq, sq                                                   # out- and in-graph are the same
 
 
-def pagerank(scale, degree=16, iterations=20, seed=0, uniform=True):
+def pagerank(scale, degree=16, iterations=20, seed=0, uniform=True, threads=1):
     """pr -u scale -k degree -n 1 -i iterations -t 0 (fixed iterations, pull, Gauss-Seidel).
 
     At -O3 scores[u] is read and written once per iteration (the error uses the
     register), and outgoing_contrib[v] is read once per in-edge of every u, i.e.
-    out-degree(v) times."""
-    p = Process()
+    out-degree(v) times. With OpenMP threads every array access is the same; only the
+    generators' states are per thread."""
+    p = Process(threads=threads)
     n, out, inn = build(p, scale, degree, seed, uniform)
     out_index, out_kept, in_neighs, in_index = out.index, out.deg, inn.neighs, inn.index
     scores = p.new(4 * n)
@@ -253,16 +270,21 @@ class _Queue:
         self.fill += 1
 
     def push(self, values):
-        """Push values through a QueueBuffer: written locally, copied into the queue on flush."""
-        local = self.p.new(4 * self.LOCAL)
+        """Push values through a QueueBuffer: written locally, copied into the queue on flush.
+        With OpenMP every thread has its own QueueBuffer (in its own arena) and pushes about an
+        equal share of the values."""
         k = len(values)
+        threads = self.p.threads
+        shares = [k // threads + (1 if t < k % threads else 0) for t in range(threads)]
+        for t, share in enumerate(shares):
+            local = self.p.new(4 * self.LOCAL, thread=t)
+            if share:
+                self.p.touch(local, np.arange(share) % self.LOCAL, 4, 2.0)  # write, then read by the copy
+            self.p.delete(local)
         if k:
-            slots = np.arange(k) % self.LOCAL
-            self.p.touch(local, slots, 4, 2.0)                       # write, then read by the copy
             self.p.touch(self.block, np.arange(self.fill, self.fill + k), 4)
             self.items[self.fill:self.fill + k] = values
             self.fill += k
-        self.p.delete(local)
 
     def slide(self):
         self.start, self.end = self.end, self.fill
@@ -272,9 +294,11 @@ class _Queue:
         return self.items[self.start:self.end]
 
 
-def bfs(scale, degree=16, seed=0, alpha=15, beta=18, uniform=True):
-    """bfs -u|-g scale -k degree -n 1: direction-optimising BFS from a random source with out-edges."""
-    p = Process()
+def bfs(scale, degree=16, seed=0, alpha=15, beta=18, uniform=True, threads=1):
+    """bfs -u|-g scale -k degree -n 1: direction-optimising BFS from a random source with out-edges.
+    threads: OpenMP threads (per-thread generators and queue buffers; the traversal's accesses
+    are counted as in the serial run)."""
+    p = Process(threads=threads)
     n, out, inn = build(p, scale, degree, seed, uniform)
     out_neighs, out_index, out_deg, out_off, out_nbr = out[:5]
     in_neighs, in_index, in_deg, in_off, in_nbr = inn[:5]
