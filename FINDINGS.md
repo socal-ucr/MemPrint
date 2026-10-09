@@ -128,11 +128,35 @@ python -m memprint --root $R static lowo --ast ~/memory_estimator/tools/ast_feat
 
 Summary: for GAP `pr` and `bfs` on uniform random graphs (`-u 10` … `-u 18`, average degree 16), α is predicted within 2.8–8.8% without tracing the kernel. Its own MemPrint model, trained on its other scales, gets 7.3–9.0%; borrowed PolyBench models (bytes-touched traces) get 33–96%. The footprint is predicted within 0.0–1.8%.
 
-**Not a blind test yet.** The skeleton's two largest corrections were found by comparing against these same traces:
+**The uniform-graph results are not blind.** The skeleton's two largest corrections were found by comparing against those same traces:
 - generated graphs are always symmetrized;
 - the random-number state uses 8-byte words.
 
-A held-out test, for example Kronecker graphs (`-g`) with no further changes, is still to do.
+**The Kronecker test is blind, and it passes.** For `-g 10` … `-g 18` (power-law degrees, maximum degree about 11,000 at scale 14), α is within 1.2–2.2% and the footprint within 0.0–0.3%. The kernels' own models get 6.9–16.0%. See "Blind test: Kronecker graphs" below.
+
+### Blind test: Kronecker graphs
+
+The protocol:
+1. The skeleton gained `MakeRMatEL` and `PermuteIDs`, written from GAP's source alone (`static/gap.py`, `rmat_edges` and `_generate`):
+   - one 32-bit draw per depth chooses a quadrant (A = 0.57, B = C = 0.19);
+   - `std::mt19937` is default-seeded, then reseeded every 2^18 edges;
+   - `PermuteIDs` fills a permutation and shuffles it with libstdc++ 8's `std::shuffle`, which takes two swap positions per draw when n² fits in 32 bits and one otherwise;
+   - then every edge is read and rewritten with the new IDs.
+2. The skeleton was committed (`abf3545`) before any `-g` run existed.
+3. `gap_pr_kron` and `gap_bfs_kron` were traced at scales 10–18 and scored once.
+
+The runtime baseline was fitted on the two uniform-graph kernels' traces only. Nothing was changed after scoring.
+
+| Kernel | split | skeleton footprint | skeleton α | own model | PolyBench nearest by ẑ | PolyBench mean | best PolyBench (oracle) |
+|---|---|---|---|---|---|---|---|
+| bfs, Kronecker | EXTRA | 0.00 | 1.96 | 16.00 | 92.43 | 92.07 | 63.51 |
+| bfs, Kronecker | INTER | 0.33 | 2.18 | 9.71 | 84.74 | 83.12 | 18.96 |
+| pr, Kronecker | EXTRA | 0.00 | 1.21 | 10.10 | 95.73 | 85.73 | 85.54 |
+| pr, Kronecker | INTER | 0.01 | 1.66 | 6.89 | 79.43 | 77.27 | 56.34 |
+
+- **Per scale**, α error is 1.2–7.1% for pr and 1.8–9.1% for bfs. It is largest at scales 10–11, where the runtime baseline is half the footprint. The footprint error is at most 0.16% for pr and 0.33% for bfs.
+- **Kronecker comes out more accurate than uniform** (1.2–2.2% against 2.8–8.8%). The likely reason: R-MAT's skewed degrees move more of the footprint into hub vertices and long neighbour lists, which the replay on the sampled graph gets right. The uniform graphs, by contrast, put the remaining sort and atomic-increment miscounts in every vertex. This explanation is not tested.
+- **The skeleton's structure transfers to an input distribution it was not tuned on.** What changed between the two tests is only what the source says about the generator. The model of the builder, the kernels and the allocator, and the runtime baseline, stayed fixed.
 
 ### Method
 
@@ -182,7 +206,8 @@ Automating it means extending the interpreter so that loads from input arrays be
 PIN_ROOT=... scripts/setup.sh gapbs
 TRACE_DIR=$PWD/data/gap-bytes/traces RESULTS_DIR=$PWD/data/gap-bytes/results \
   scripts/run.sh gapbs --mode splitter --footprint bytes --runs 1 --configs "10 11 12 13 14 15 16 17 18"
-python -m memprint --root data/gap-bytes preprocess gap_pr gap_bfs
+                    # gap_bfs, gap_pr (-u) and gap_bfs_kron, gap_pr_kron (-g)
+python -m memprint --root data/gap-bytes preprocess gap_pr gap_bfs gap_pr_kron gap_bfs_kron
 python -m memprint --root data/gap-bytes static gap --borrow data/polybench-bytes/data   # data/gap-bytes/data/gap_pilot_*.csv
 ```
 
