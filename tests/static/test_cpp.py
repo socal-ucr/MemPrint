@@ -7,7 +7,7 @@ from memprint.static import clangast as ca  # noqa: E402
 from memprint.static.interp_cpp import CppInterpreter  # noqa: E402
 from memprint.static import interp  # noqa: E402
 
-EXPECTED = [-1, 0, 5, 9, 10, 16, 5, 2, 20, 9, 14]
+EXPECTED = [-1, 0, 5, 9, 10, 16, 5, 2, 20, 9, 14, 666]
 
 tu = ca.parse(Path(__file__).with_name("cpp_features.cc"), cplusplus=True)
 made = []

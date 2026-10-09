@@ -160,6 +160,7 @@ class CppInterpreter(Interpreter):
         self.engines = {}
         self.probes = []
         self._caches = {}
+        self.loop_flags = []  # (break key, continue key) of the loops being run one iteration at a time
 
     # ------------------------------------------------------------ objects and pointers in memory
 
@@ -247,6 +248,32 @@ class CppInterpreter(Interpreter):
         return {k: op for k, op in found.items() if op is not None and uses.get(k, 0) == 0}
 
     def _for(self, c):
+        """Every loop gets its own break / continue flags (continue skips the rest of the body for
+        the points that hit it; in a vectorised pass that is per iteration point)."""
+        tag = object()
+        keys = (("__break__", id(tag)), ("__continue__", id(tag)))
+        frame = self.frames[-1]
+        for k in keys:
+            frame.vars[k] = [None, 0]
+        self.loop_flags.append(keys)
+        try:
+            body = ca.for_parts(c)[3]
+            if _breaks(body):
+                self.loop_flags.pop()                                  # the break-aware driver has its own
+                try:
+                    init, cond, inc, body = ca.for_parts(c)
+                    if init is not None:
+                        self.exec(init) if init.kind == K.DECL_STMT else self.eval(init)
+                    return self._loop_with_break(cond, inc, body)
+                finally:
+                    self.loop_flags.append(keys)
+            return self._for_inner(c)
+        finally:
+            self.loop_flags.pop()
+            for k in keys:
+                frame.vars.pop(k, None)
+
+    def _for_inner(self, c):
         """Counted loops over pointers (iterators) and loops with reductions run vectorised; the
         rest as in the C interpreter."""
         from .interp import (CHUNK, SEQUENTIAL_LIMIT, _FLIP, _decl_ref, _events, _map_frames_with, _memory_carried,
@@ -343,6 +370,76 @@ class CppInterpreter(Interpreter):
         entry = self._lookup(var)
         entry[1] = Ptr(start.obj, final) if pointer else final
 
+    def _active_points(self):
+        """Batch points still running the current iteration (None: all of them)."""
+        if not self.loop_flags:
+            return None
+        frame = self.frames[-1]
+        stop = None
+        for key in self.loop_flags[-1]:
+            entry = frame.vars.get(key)
+            if entry is not None and not (np.ndim(entry[1]) == 0 and not entry[1]):
+                flag = np.broadcast_to(np.asarray(entry[1]) != 0, (self.L,))
+                stop = flag if stop is None else (stop | flag)
+        if stop is None or not stop.any():
+            return None
+        return np.nonzero(~stop)[0]
+
+    def _loop_with_break(self, cond, inc, body, var_step=None):
+        """A loop whose body may break: one iteration at a time for all batch points still in it;
+        a point leaves when its condition fails or it breaks."""
+        tag = object()
+        bkey, ckey = ("__break__", id(tag)), ("__continue__", id(tag))
+        self.loop_flags.append((bkey, ckey))
+        frame = self.frames[-1]
+        frame.vars[bkey] = [None, 0]
+        frame.vars[ckey] = [None, 0]
+        idx = np.arange(self.L)
+        from .interp import MAX_ITERATIONS
+        try:
+            for _ in range(MAX_ITERATIONS):
+                if cond is not None:
+                    value = self.run_subset(idx, lambda: _as_int(self.eval(cond)))
+                    if value is UNK:
+                        self.data_loops += 1
+                        self.uncertainly(lambda: self.run_subset(idx, lambda: self._iteration(body, inc)))
+                        return
+                    keep = np.broadcast_to(np.asarray(value) != 0, (len(idx),))
+                    idx = idx[keep]
+                    if len(idx) == 0:
+                        return
+                self.frames[-1].vars[ckey] = [None, 0]
+
+                def one():
+                    self._forget_loads()
+                    self.exec(body)
+                    active_inc = self._active_points_break_only(bkey)
+                    if inc is not None:
+                        if active_inc is None:
+                            self.eval(inc)
+                        elif len(active_inc):
+                            self.run_subset(active_inc, lambda: self.eval(inc))
+                self.run_subset(idx, one)
+                broke = self.frames[-1].vars.get(bkey, [None, 0])[1]
+                if np.ndim(broke) == 0:
+                    if broke:
+                        return
+                else:
+                    idx = idx[np.asarray(broke)[idx] == 0] if len(broke) == self.L else idx
+                    if len(idx) == 0:
+                        return
+        finally:
+            self.loop_flags.pop()
+            frame.vars.pop(bkey, None)
+            frame.vars.pop(ckey, None)
+
+    def _active_points_break_only(self, bkey):
+        entry = self.frames[-1].vars.get(bkey)
+        if entry is None or (np.ndim(entry[1]) == 0 and not entry[1]):
+            return None
+        flag = np.broadcast_to(np.asarray(entry[1]) != 0, (self.L,))
+        return np.nonzero(~flag)[0] if flag.any() else None
+
     def _lookup_key(self, k):
         frame = self.frames[-1]
         while frame is not None:
@@ -356,6 +453,8 @@ class CppInterpreter(Interpreter):
 
     def _iteration(self, body, inc):
         self._forget_loads()
+        if self.loop_flags:
+            self.frames[-1].vars[self.loop_flags[-1][1]] = [None, 0]  # continue applies to one iteration
         super()._iteration(body, inc)
 
     def _ptr_store(self, loc, value):
@@ -937,7 +1036,13 @@ class CppInterpreter(Interpreter):
                 for kid in c.get_children():
                     if getattr(self.frames[-1], "returned", False):
                         break
-                    self.exec(kid)
+                    active = self._active_points()
+                    if active is None:
+                        self.exec(kid)
+                    elif len(active):
+                        self.run_subset(active, lambda k=kid: self.exec(k))
+                    else:
+                        break
             finally:
                 scope = self.scopes.pop()
                 for decl, dest, t in reversed(scope):
@@ -952,6 +1057,20 @@ class CppInterpreter(Interpreter):
             return
         if kind == K.CXX_FOR_RANGE_STMT:
             return self._for_range(c)
+        if kind in (K.WHILE_STMT, K.DO_STMT) and _breaks(ca.children(c)[-1 if kind == K.WHILE_STMT else 0]):
+            kids = ca.children(c)
+            cond, body = (kids[0], kids[-1]) if kind == K.WHILE_STMT else (kids[-1], kids[0])
+            if kind == K.DO_STMT:
+                self.exec(body)
+            return self._loop_with_break(cond, None, body)
+        if kind in (K.BREAK_STMT, K.CONTINUE_STMT) and self.loop_flags:
+            if self.uncertain_depth:
+                # under a condition on unknown (floating-point) data: assume the loop goes on, so it
+                # runs to its bound (exact for pr -t 0; an upper bound when it would converge)
+                return
+            key = self.loop_flags[-1][0 if kind == K.BREAK_STMT else 1]
+            self.frames[-1].vars[key] = [None, np.ones(self.L, dtype=np.int64) if self.L > 1 else 1]
+            return
         if kind == K.RETURN_STMT:
             kids = ca.children(c)
             fn = frame.func
@@ -1200,6 +1319,8 @@ class CppInterpreter(Interpreter):
         total = int(trips.sum())
         if not total:
             return
+        if _breaks(body):
+            return self._range_with_break(var, b, esize, trips, body)
         if self._carried(body, var):
             start = np.broadcast_to(np.asarray(b.off), (self.L,))
             for i in range(int(trips.max())):
@@ -1236,6 +1357,41 @@ class CppInterpreter(Interpreter):
         first, written = _events(body)
         own = _key(var)
         return any(first.get(k) == "r" for k in written if k != own)
+
+    def _range_with_break(self, var, b, esize, trips, body):
+        """Range-for whose body may break: position by position for all batch points still in it."""
+        tag = object()
+        bkey, ckey = ("__break__", id(tag)), ("__continue__", id(tag))
+        self.loop_flags.append((bkey, ckey))
+        frame = self.frames[-1]
+        frame.vars[bkey] = [None, 0]
+        start = np.broadcast_to(np.asarray(b.off), (self.L,))
+        live = np.ones(self.L, bool)
+        try:
+            for i in range(int(trips.max())):
+                idx = np.nonzero(live & (trips > i))[0]
+                if len(idx) == 0:
+                    break
+                frame.vars[ckey] = [None, 0]
+                saved_top = self.scratch_top
+
+                def one(i=i, idx=idx):
+                    self._forget_loads()
+                    it = Ptr(b.obj, _SCALAR(start[idx] + esize * i) if self.L > 1 or len(idx) > 1
+                             else int(start[idx][0]) + esize * i)
+                    self._range_iteration(var, it, body)
+                self.run_subset(idx, one)
+                self.scratch_top = saved_top
+                broke = frame.vars.get(bkey, [None, 0])[1]
+                if np.ndim(broke) == 0:
+                    if broke:
+                        break
+                else:
+                    live &= np.broadcast_to(np.asarray(broke) == 0, (self.L,))
+        finally:
+            self.loop_flags.pop()
+            frame.vars.pop(bkey, None)
+            frame.vars.pop(ckey, None)
 
     def _range_iteration(self, var, it, body):
         if _reference(var.type):
@@ -1355,6 +1511,18 @@ class CppInterpreter(Interpreter):
         if name == "copy" and len(args_c) == 3:
             b, e, out = (self.eval(x) for x in args_c)
             return self._copy_range(b, e, out, args_c)
+        if name == "fill" and len(args_c) == 3:
+            b, e, value = self.eval(args_c[0]), self.eval(args_c[1]), self._value(args_c[2])
+            esize = ca.pointee_size(args_c[0].type) or 4
+            seg = self._segments(b, e, esize)
+            if seg is not None:
+                starts, lengths = seg
+                offs = self._charge_range(b.obj, starts, lengths, esize, 1.0)
+                if offs is not None:
+                    v = _as_int(value)
+                    b.obj.store(offs, UNK if v is UNK else np.repeat(np.broadcast_to(np.asarray(v), (self.L,)),
+                                                                         lengths), max(esize, 1) if esize < 4 else 4)
+            return UNK
         if name in ("fill", "fill_n"):
             for x in args_c:
                 self.eval(x)
@@ -1392,10 +1560,17 @@ class CppInterpreter(Interpreter):
                 self._mem_store(loc, pt, _SCALAR(merged) if np.ndim(merged) else int(merged))
             return _SCALAR(ok.astype(np.int64)) if np.ndim(ok) else int(ok)
         if name in ("swap", "iter_swap") and len(args_c) == 2:
-            for x in args_c:
-                loc = self.lvalue(x)
+            a, b = (self.lvalue(x) for x in args_c)
+            t = _referee(args_c[0].type)
+            for loc in (a, b):
                 self.access(loc)
                 self.access(loc, write=True)
+            if not _is_unk(a.obj, a.off, b.obj, b.off):
+                size = ca.type_size(t.get_canonical()) or 8
+                tmp = self._new_storage(t)
+                self._copy_object(tmp, Ptr(a.obj, a.off), size, charge=False)
+                self._copy_object(Ptr(a.obj, a.off), Ptr(b.obj, b.off), size, charge=False)
+                self._copy_object(Ptr(b.obj, b.off), tmp, size, charge=False)
             return UNK
         if name in ("move", "forward") and len(args_c) == 1:
             return self.eval(args_c[0])
@@ -1566,6 +1741,19 @@ class CppInterpreter(Interpreter):
         if len(vals) and not np.any(vals == SENTINEL):
             b.obj.store(offs, self.rng.permutation(vals))
         return UNK
+
+
+def _breaks(body):
+    """Does the loop body break out of this loop (not out of a nested loop or switch)?"""
+    stack = list(body.get_children()) if body.kind == K.COMPOUND_STMT else [body]
+    while stack:
+        n = stack.pop()
+        if n.kind == K.BREAK_STMT:
+            return True
+        if n.kind in (K.FOR_STMT, K.WHILE_STMT, K.DO_STMT, K.CXX_FOR_RANGE_STMT, K.SWITCH_STMT, K.LAMBDA_EXPR):
+            continue
+        stack.extend(n.get_children())
+    return False
 
 
 def _tdiv_floor(a, b):

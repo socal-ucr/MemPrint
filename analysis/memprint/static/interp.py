@@ -49,7 +49,14 @@ GUESS_TRIPS = 1  # trips charged for a loop whose trip count depends on data
 SEQUENTIAL_LIMIT = 2_000_000  # iterations a loop carrying values through memory may run one at a time
 
 
-SENTINEL = np.iinfo(np.int64).min  # an unknown integer in memory
+# An unknown integer in memory: an arbitrary bit pattern (not INT64_MIN, which a bitmap word with
+# only bit 63 set equals).
+SENTINEL = np.iinfo(np.int64).min + 0x5A3C96E1
+
+
+def _wrap64(x):
+    """A Python integer as the int64 with the same low 64 bits (unsigned 64-bit values)."""
+    return ((int(x) + 2 ** 63) % 2 ** 64) - 2 ** 63
 
 
 class _Unknown:
@@ -124,8 +131,10 @@ class Obj:
         units = offs
         v = SENTINEL if value is UNK else value
         if np.ndim(units) == 0:
-            vals[int(units)] = int(np.asarray(v).ravel()[-1]) if np.ndim(v) else v
+            vals[int(units)] = _wrap64(np.asarray(v).ravel()[-1] if np.ndim(v) else v)
         else:
+            if not isinstance(v, np.ndarray):
+                v = _wrap64(v)
             vals[units] = np.broadcast_to(np.asarray(v, dtype=np.int64), units.shape)
 
     def _grow(self, size, length):
@@ -689,6 +698,17 @@ class Interpreter:
                 old = self._mem_load(loc, lhs.type)
                 new = self._arith(op, old, r, c)
                 repeated = np.ndim(loc.off) and len(np.unique(loc.off)) < np.size(loc.off)
+                if repeated and op in ("|", "&", "^") and not _is_unk(old, _as_int(r)):
+                    # commutative bit updates: combine every point's operand per location
+                    offs = np.broadcast_to(np.asarray(loc.off), (self.L,))
+                    rv = np.broadcast_to(np.asarray(_as_int(r), dtype=np.int64), (self.L,))
+                    uniq, inv = np.unique(offs, return_inverse=True)
+                    base = np.asarray(loc.obj.load(uniq, ca.type_size(lhs.type.get_canonical()) or 4))
+                    ufunc = {"|": np.bitwise_or, "&": np.bitwise_and, "^": np.bitwise_xor}[op]
+                    acc = base.copy()
+                    ufunc.at(acc, inv.ravel(), rv)
+                    loc.obj.store(uniq, acc, ca.type_size(lhs.type.get_canonical()) or 4)
+                    return _SCALAR(acc[inv.ravel()])
                 self._mem_store(loc, lhs.type, UNK if repeated else new)
                 return new
             old = self._value_of(lhs)

@@ -66,5 +66,18 @@ int main() {
   for (int i = 0; i < 4; i++) c[i] = 4 - i;
   std::sort(c.begin(), c.end());
   probe(c[0] * 10 + c[3]);        // 14: std::sort on values
+  int breaks();
+  return breaks();
+}
+// (appended) break and continue
+int breaks() {
+  Vec<int> d(8);
+  for (int i = 0; i < 8; i++) d[i] = i;
+  long first_big = -1, odd = 0;
+  for (int x : d) { if (x > 4) { first_big = x; break; } }
+  for (int i = 0; i < 8; i++) { if (d[i] % 2 == 0) continue; odd += d[i]; }
+  int k = 0;
+  while (true) { k++; if (k == 6) break; }
+  probe(first_big * 100 + odd * 10 + k);  // 5*100 + 16*10 + 6 = 666
   return 0;
 }
