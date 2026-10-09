@@ -85,14 +85,20 @@ def gap_spectra(kernels, scales, gapbs, cache_dir, n_jobs=4):
 
 def program_spectra(name, source, configs, args, defines=(), includes=(), cplusplus=None, heap_top=0,
                     cache_dir="data/static_cpp", n_jobs=4):
-    """Spectra of a program at each config. args: the command line after the program name, with
+    """Spectra of a program at each config. source: a file, or several (a list, or comma-separated),
+    which are compiled together as one unity file. args: the command line after the program name, with
     {config} replaced by the config; defines may contain {config} too."""
-    source = Path(source)
-    cplusplus = source.suffix in (".cc", ".cpp", ".cxx", ".C") if cplusplus is None else cplusplus
+    sources = [Path(x) for x in (source if isinstance(source, (list, tuple)) else str(source).split(","))]
+    cplusplus = sources[0].suffix in (".cc", ".cpp", ".cxx", ".C") if cplusplus is None else cplusplus
     cache_dir = Path(cache_dir)
+    if len(sources) > 1:                                               # a unity build of all the files
+        source, extra = unity(name, sources, cache_dir)
+        includes = list(includes) + extra
+    else:
+        source = sources[0]
     jobs = []
     for c in configs:
-        argv = [source.stem] + [a.replace("{config}", str(c)) for a in args]
+        argv = [sources[0].stem] + [a.replace("{config}", str(c)) for a in args]
         d = [x.replace("{config}", str(c)) for x in defines]
         jobs.append((_program_job, (str(source), argv, d, list(includes), cplusplus, heap_top,
                                     str(cache_dir / f"{name}-{c}.npz"))))
@@ -103,6 +109,40 @@ def program_spectra(name, source, configs, args, defines=(), includes=(), cplusp
         if p.exists():
             out[str(c)], meta[str(c)] = load(p)
     return out, meta
+
+
+def unity(name, sources, cache_dir):
+    """One translation unit for a program of several source files. The files of their directories are
+    copied to cache_dir/<name>__src, and headers without an include guard get `#pragma once` (a unity
+    build includes them once per source file; the guard does not change the program). Returns the
+    unity file and the include directories."""
+    import shutil
+
+    cache_dir = Path(cache_dir)
+    work = cache_dir / f"{name}__src"
+    work.mkdir(parents=True, exist_ok=True)
+    dirs = sorted({x.resolve().parent for x in sources})
+    for d in dirs:
+        for f in d.iterdir():
+            if f.is_file() and f.suffix in (".h", ".hh", ".hpp", ".hxx", ".c", ".cc", ".cpp", ".cxx", ".C", ".inc"):
+                text = f.read_text(errors="replace")
+                if f.suffix in (".h", ".hh", ".hpp", ".hxx", ".inc") and not _guarded(text):
+                    text = "#pragma once\n" + text
+                target = work / f.name
+                if not target.exists() or target.read_text(errors="replace") != text:
+                    target.write_text(text)
+    out = cache_dir / f"{name}__unity{sources[0].suffix}"
+    out.write_text("".join(f'#include "{work / x.name}"\n' for x in sources))
+    del shutil
+    return out, [str(work)]
+
+
+def _guarded(text):
+    """Does a header protect itself from a second inclusion (#pragma once or an #ifndef guard)?"""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("//")]
+    if any(ln.startswith("#pragma once") for ln in lines[:20]):
+        return True
+    return len(lines) > 1 and lines[0].startswith("#ifndef") and lines[1].startswith("#define")
 
 
 def predictions(name, spectra, meta, baseline):

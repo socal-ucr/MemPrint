@@ -143,9 +143,83 @@ class Obj:
         vals = self._value_units(int(np.max(units)) + 1 if units.size else 1)
         return vals[units]
 
+    def point_values(self, unit, kind, n):
+        """Per-point values a batch of n points stored at one 4-byte unit (a local array written by every
+        iteration of a batched loop: one address, one value per iteration), or None."""
+        pp = getattr(self, "pp", None)
+        if not pp:
+            return None
+        v = pp.get((kind, int(unit)))
+        return v if v is not None and len(v) == n else None
+
+    def _forget_points(self, units):
+        pp = getattr(self, "pp", None)
+        if not pp:
+            return
+        us = np.unique(np.asarray(units, dtype=np.int64).ravel())
+        for key in [k for k in pp if np.isin(k[1], us)]:
+            del pp[key]
+
+    def _keep_points(self, unit, kind, values):
+        if getattr(self, "pp", None) is None:
+            self.pp = {}
+        self.pp[(kind, int(unit))] = np.array(values)
+
+    def _float_units(self, hi):
+        fv = getattr(self, "fvals", None)
+        if fv is None or len(fv) < hi:
+            new = np.full(max(hi, (self.nbytes + 3) // 4, 1), np.nan)
+            if fv is not None:
+                new[: len(fv)] = fv
+            self.fvals = fv = new
+        return fv
+
+    def fload(self, off, size=8):
+        """Floating-point value(s) at byte offset(s), NaN where unknown. A value never stored as a
+        float reads as 0.0 where its integer units hold 0 (zeroed memory, value-initialised elements)."""
+        units = np.asarray(off, dtype=np.int64) // 4
+        if units.size == 0 or np.any(units < 0):
+            return np.full(np.shape(units), np.nan)
+        hi = int(np.max(units)) + (2 if size == 8 else 1)
+        out = self._float_units(hi)[units].copy()
+        missing = np.isnan(out)
+        if np.any(missing):
+            ints = self._value_units(hi)
+            zero = ints[units] == 0
+            if size == 8:
+                zero &= ints[units + 1] == 0
+            out = np.where(missing & zero, 0.0, out)
+        return out
+
+    def fstore(self, off, value, size=8):
+        """Store floating-point value(s) (NaN: unknown). Repeated offsets keep the last value."""
+        units = np.asarray(off, dtype=np.int64) // 4
+        if units.size == 0 or np.any(units < 0):
+            return
+        fv = self._float_units(int(np.max(units)) + (2 if size == 8 else 1))
+        v = np.asarray(value, dtype=float)
+        self._forget_points(units)
+        if np.ndim(units) == 0:
+            fv[int(units)] = v.ravel()[-1] if v.ndim else float(v)
+            if v.ndim and v.size > 1:
+                self._keep_points(units, "f", v.ravel())
+        else:
+            fv[units] = np.broadcast_to(v, units.shape)
+        ints = self._value_units(len(fv))                              # the integer view is not known
+        ints[units] = SENTINEL
+        if size == 8:
+            ints[units + 1] = SENTINEL
+
     def store(self, off, value, size=4):
         """Store integer value(s) at byte offset(s); UNK stores unknown. Repeated offsets keep the
         last value, as a sequential loop would."""
+        fv = getattr(self, "fvals", None)
+        if fv is not None and size >= 4:                               # an integer replaces a float there
+            u = np.asarray(off, dtype=np.int64) // 4
+            if u.size and np.all(u >= 0):
+                u = u[u < len(fv)] if np.ndim(u) else (u if u < len(fv) else None)
+                if u is not None and np.size(u):
+                    fv[u] = np.nan
         if size < 4:
             offs = np.asarray(off, dtype=np.int64)
             if offs.size == 0 or np.any(offs < 0):
@@ -158,6 +232,10 @@ class Obj:
             vals = self._value_units(int(np.max(offs)) + 1)
         units = offs
         v = SENTINEL if value is UNK else value
+        if size >= 4:
+            self._forget_points(units)
+            if np.ndim(units) == 0 and np.ndim(v) and np.size(v) > 1:
+                self._keep_points(units, "i", np.asarray(v, dtype=np.int64).ravel())
         if np.ndim(units) == 0:
             vals[int(units)] = _wrap64(np.asarray(v).ravel()[-1] if np.ndim(v) else v)
         else:
@@ -667,7 +745,12 @@ class Interpreter:
     def _mem_load(self, loc, type_):
         if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK:
             return UNK
-        vals = loc.obj.load(loc.off, ca.type_size(type_.get_canonical()) or 4)
+        size = ca.type_size(type_.get_canonical()) or 4
+        vals = loc.obj.load(loc.off, size)
+        if np.ndim(loc.off) == 0 and size >= 4 and self.L > 1:          # one address, a value per point
+            pp = loc.obj.point_values(int(loc.off) // 4, "i", self.L)
+            if pp is not None:
+                vals = pp
         if np.any(vals == SENTINEL):
             return UNK
         return _SCALAR(vals) if np.ndim(vals) else int(vals)
@@ -789,6 +872,8 @@ class Interpreter:
             if ca.strip(lhs).kind != K.DECL_REF_EXPR:                  # an element in memory
                 r = self.eval(rhs)
                 self.access(loc, write=True)
+                if self.REALS and ca.is_float(lhs.type) and isinstance(loc.obj, Obj) and loc.off is not UNK:
+                    return self._float_update(loc, lhs.type, op, r)
                 if op in ("+", "-") and not isinstance(r, Ptr):
                     r = _as_int(r)
                     _, new = self._rmw_add(loc, lhs.type, r if op == "+" or r is UNK else _SCALAR(-r))
@@ -812,6 +897,10 @@ class Interpreter:
             old = self._value_of(lhs)
             r = self.eval(rhs)
             new = self._arith(op, old, r, c)
+            if isinstance(new, Real) and not ca.is_float(lhs.type):      # int += double: converted back
+                new = self._truncate(new)
+                if new is not UNK:
+                    new = wrap_int(new, lhs.type)
             self.access(loc, write=True)
             self._set_value(lhs, new)
             return new
@@ -880,6 +969,8 @@ class Interpreter:
                 return _SCALAR(_tdiv(np.asarray(a.off - b.off), size))
             if op in ("<", ">", "<=", ">=", "==", "!=") and a.obj is b.obj and not _is_unk(a.off, b.off):
                 return _SCALAR(ARITH[op](a.off, b.off))
+            if op in ("==", "!=") and isinstance(a.obj, Obj) and isinstance(b.obj, Obj) and a.obj is not b.obj:
+                return int(op == "!=")                                 # distinct objects never compare equal
             return UNK
         if op in ("+", "-"):
             p, n = (a, b) if isinstance(a, Ptr) else (b, a)
@@ -1220,6 +1311,7 @@ class Interpreter:
                 self.frames, self.w = saved_frames, saved_w
         entry = self._lookup(var)
         entry[1] = _SCALAR(start + step * trips) if np.ndim(start) or np.ndim(trips) else start + step * trips
+        self._forget_float_writes(body)
 
     def _loop_general(self, init, cond, inc, body, do=False):
         """Run a loop one iteration at a time for all batch points still in it."""
@@ -1242,6 +1334,20 @@ class Interpreter:
             self.run_subset(idx, lambda: self._iteration(body, inc))
         self.data_loops += 1  # gave up: too many iterations
 
+    def _forget_float_writes(self, body, keep=()):
+        """After a loop run as a batch: floating-point scalars the body assigns keep no value (their
+        updates in the batch are not carried from one iteration to the next)."""
+        if not self.REALS:
+            return
+        for n in _walk_nodes(body):
+            if n.kind in (K.BINARY_OPERATOR, K.COMPOUND_ASSIGNMENT_OPERATOR) and \
+                    (n.kind == K.COMPOUND_ASSIGNMENT_OPERATOR or ca.binary_op(n) == "="):
+                d = _decl_ref(ca.children(n)[0])
+                if d is not None and ca.is_float(d.type) and _key(d) not in keep:
+                    entry = self._lookup(d)
+                    if entry is not None and isinstance(entry[1], Real):
+                        entry[1] = UNK
+
     def _eval_condition(self, idx, cond):
         return self.run_subset(idx, lambda: _as_int(self.eval(cond)))
 
@@ -1249,6 +1355,14 @@ class Interpreter:
         self.exec(body)
         if inc is not None:
             self.eval(inc)
+
+
+def _walk_nodes(node):
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        yield n
+        stack.extend(n.get_children())
 
 
 def _map_frames_with(frames, f):
@@ -1519,6 +1633,8 @@ def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=N
     interp.frames.append(frame)
     for p in [p for p in fdef.get_children() if p.kind == K.PARM_DECL]:
         value = argc if p.spelling == "argc" else (Ptr(UNK, UNK) if ca.is_pointer(p.type) else UNK)
+        if p.spelling == "argv" and argv is not None and hasattr(interp, "_argv_array"):
+            value = interp._argv_array()
         interp.access(interp._declare_local(p, value, pointer=ca.is_array(p.type)), write=True)
     frame.vars["__ret__"] = [None, UNK]
     for kid in fdef.get_children():

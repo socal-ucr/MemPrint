@@ -26,6 +26,7 @@ What C++ adds, and how it is run:
 """
 
 import ctypes
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,6 +46,13 @@ ATOMIC_IDIOMS = {"fetch_and_add", "compare_and_swap", "atomic_fetch_add"}
 PURE = {"fabs", "abs", "sqrt", "exp", "log", "pow", "floor", "ceil", "min", "max", "numeric_limits", "size",
         "begin", "end", "move", "forward", "operator==", "operator!=", "operator<", "operator>"}
 NULL_UID = -2
+# C math functions evaluated on floating-point scalars: name -> (arguments, function)
+MATH = {"pow": (2, np.power), "sqrt": (1, np.sqrt), "cbrt": (1, np.cbrt), "exp": (1, np.exp), "exp2": (1, np.exp2),
+        "log": (1, np.log), "log2": (1, np.log2), "log10": (1, np.log10), "fabs": (1, np.abs), "abs": (1, np.abs),
+        "labs": (1, np.abs), "llabs": (1, np.abs), "floor": (1, np.floor), "ceil": (1, np.ceil),
+        "round": (1, np.round), "trunc": (1, np.trunc), "fmin": (2, np.fmin), "fmax": (2, np.fmax),
+        "sin": (1, np.sin), "cos": (1, np.cos), "tan": (1, np.tan), "atan": (1, np.arctan),
+        "atan2": (2, np.arctan2), "hypot": (2, np.hypot), "fmod": (2, np.fmod)}
 
 
 @dataclass
@@ -386,67 +394,123 @@ class CppInterpreter(Containers, Interpreter):
 
     # ------------------------------------------------------------ loops: pointers and reductions
 
+    @staticmethod
+    def _combine_real(op, vals, v0, point, n, n_out):
+        """A floating-point reduction over a batch: per enclosing point, its start value combined with
+        its iterations' (each iteration started from that value)."""
+        vals, v0 = _real(vals), _real(v0) if v0 is not None else UNK
+        if _is_unk(vals, v0):
+            return UNK
+        vv = np.broadcast_to(np.asarray(vals.v, dtype=float), (n,))
+        start = np.array(np.broadcast_to(np.asarray(v0.v, dtype=float), (n_out,)))
+        if op == "max":
+            np.maximum.at(start, point, vv)
+            out = start
+        elif op == "min":
+            np.minimum.at(start, point, vv)
+            out = start
+        else:
+            delta = np.zeros(n_out)
+            np.add.at(delta, point, vv - start[point])
+            out = start + delta
+        return Real(float(out[0]) if n_out == 1 else out)
+
     def _scans(self, body):
-        """Integer scalars the body updates exactly once, unconditionally, as v += x, v -= x, v++ or v--,
-        with x not reading v, and otherwise only reads ({key: decl}), in a body that allocates nothing:
-        a prefix sum. The loop runs as one batch in which iteration j sees v0 + the sum of the earlier
-        iterations' increments (_run_scans)."""
+        """Integer or pointer scalars that the body (nested loops and branches included) only changes by
+        increments that do not read them (v += x, v -= x, v++, v--), that no condition reads, in a body
+        that allocates nothing ({key: decl}): prefix sums, and output pointers that advance as rows are
+        filled (*p++ = x). The loop runs as one batch in which iteration j starts from v0 plus the
+        increments of the earlier iterations (_run_scans)."""
         from .interp import _decl_ref
         from .idioms import ALLOCATING
 
-        stmts = list(body.get_children()) if body.kind == K.COMPOUND_STMT else [body]
-        updates = {}
-        for st in stmts:
-            n = _strip(st)
-            d = None
-            if n.kind == K.COMPOUND_ASSIGNMENT_OPERATOR and ca.compound_op(n) in ("+", "-"):
-                lhs, rhs = ca.children(n)
-                d = _decl_ref(lhs)
-                if d is not None and any(_decl_ref(r) is not None and _key(_decl_ref(r)) == _key(d)
-                                         for r in _walk(rhs)):
-                    d = None
-            elif n.kind == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "pre++", "post--", "pre--"):
-                d = _decl_ref(ca.children(n)[0])
-            if d is not None and not (ca.is_float(d.type) or ca.is_pointer(d.type)):
-                k = _key(d)
-                updates[k] = None if k in updates else (d, st)
-        if not updates:
-            return {}
-        writes = {}
-        for n in _walk(body):                                          # every write to those scalars
-            if n.kind in (K.CXX_NEW_EXPR,) or (n.kind == K.CALL_EXPR and n.spelling in ALLOCATING):
+        incs, bad = {}, set()
+        for n in _walk(body):
+            if n.kind == K.CXX_NEW_EXPR or (n.kind == K.CALL_EXPR and n.spelling in ALLOCATING):
                 return {}
-            target = None
-            if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=" or n.kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
+            target, increment = None, False
+            if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
                 target = _decl_ref(ca.children(n)[0])
+            elif n.kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
+                lhs, rhs = ca.children(n)
+                target = _decl_ref(lhs)
+                increment = target is not None and ca.compound_op(n) in ("+", "-") and not any(
+                    _decl_ref(r) is not None and _key(_decl_ref(r)) == _key(target) for r in _walk(rhs))
             elif n.kind == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "pre++", "post--", "pre--", "&"):
                 target = _decl_ref(ca.children(n)[0])
-            if target is not None:
-                writes[_key(target)] = writes.get(_key(target), 0) + 1
-        return {k: u[0] for k, u in updates.items() if u is not None and writes.get(k) == 1}
+                increment = ca.unary_op(n) != "&"
+            if target is None:
+                continue
+            if increment:
+                incs[_key(target)] = target
+            else:
+                bad.add(_key(target))
+        for n in _walk(body):                                          # conditions must not read them
+            cond = None
+            if n.kind in (K.IF_STMT, K.WHILE_STMT, K.SWITCH_STMT, K.CONDITIONAL_OPERATOR):
+                cond = ca.children(n)[0] if ca.children(n) else None
+            elif n.kind == K.FOR_STMT:
+                cond = ca.for_parts(n)[1]
+            elif n.kind == K.DO_STMT:
+                cond = ca.children(n)[-1]
+            if cond is not None:
+                for r in _walk(cond):
+                    d = _decl_ref(r)
+                    if d is not None:
+                        bad.add(_key(d))
+        return {k: d for k, d in incs.items() if k not in bad and not ca.is_float(d.type)}
 
     def _run_scans(self, entries, body, point, n, v0s, n_outer):
         """Scans in a batch of n iterations (point: their enclosing batch point). A first pass, which
-        charges and stores nothing, gives each iteration's increment (v starts at 0); each iteration then
-        starts from v0 plus the increments of the earlier iterations of its enclosing point. Returns the
-        values after the loop."""
+        charges and stores nothing, gives each iteration's increment (v starts at 0, or at offset 0 of its
+        object for a pointer); each iteration then starts from v0 plus the increments of the earlier
+        iterations of its enclosing point. Returns the values after the loop."""
         live = {k: self._lookup_key(k) for k in entries}               # the batch's own copies
-        for e in live.values():
-            e[1] = np.zeros(n, dtype=np.int64)
+        for k, e in live.items():
+            v0 = v0s[k]
+            e[1] = Ptr(v0.obj, np.zeros(n, dtype=np.int64), v0.src) if isinstance(v0, Ptr) \
+                else np.zeros(n, dtype=np.int64)
+        # the first pass must leave every other variable as it was (sums it adds to, nested scans, locals)
+        snapshot = [(fr, {k: (e, e[0], e[1]) for k, e in fr.vars.items()}) for fr in self.frames]
+        saved_top, saved_probes = self.scratch_top, len(self.probes)
         self.no_charge(lambda: self.exec(body))
-        incs = {k: np.broadcast_to(np.asarray(_as_int(e[1]) if _as_int(e[1]) is not UNK else 0), (n,))
-                for k, e in live.items()}
+        incs = {}
+        for k, e in live.items():
+            v = e[1]
+            v = v.off if isinstance(v, Ptr) else _as_int(v)
+            if v is UNK:
+                incs = None                                            # increments unknown: not a usable scan
+                break
+            incs[k] = np.broadcast_to(np.asarray(v, dtype=np.int64), (n,))
+        for fr, entries in snapshot:
+            for k in [k for k in fr.vars if k not in entries]:
+                del fr.vars[k]
+            for k, (e, slot, value) in entries.items():
+                e[0], e[1] = slot, value
+                fr.vars[k] = e
+        self.scratch_top = saved_top
+        del self.probes[saved_probes:]
+        if incs is None:                                               # the values after the loop are unknown
+            final = {}
+            for k, e in live.items():
+                v0 = v0s[k]
+                e[1] = Ptr(v0.obj, UNK) if isinstance(v0, Ptr) else UNK
+                final[k] = e[1]
+            return final
         first = np.searchsorted(point, point, side="left")             # the first iteration of each point
         final = {}
         for k, e in live.items():
-            v0 = np.broadcast_to(np.asarray(v0s[k]), (n_outer,))
+            v0 = v0s[k]
+            base = np.broadcast_to(np.asarray(v0.off if isinstance(v0, Ptr) else v0), (n_outer,))
             excl = np.cumsum(incs[k]) - incs[k]
             excl = excl - excl[first]
-            e[1] = v0[point] + excl
+            start = base[point] + excl
+            e[1] = Ptr(v0.obj, start, v0.src) if isinstance(v0, Ptr) else start
             total = np.zeros(n_outer, dtype=np.int64)
             np.add.at(total, point, incs[k])
-            out = v0 + total
-            final[k] = int(out[0]) if n_outer == 1 else out
+            out = base + total
+            out = int(out[0]) if n_outer == 1 else out
+            final[k] = Ptr(v0.obj, out, v0.src) if isinstance(v0, Ptr) else out
         return final
 
     def _reductions(self, body):
@@ -456,8 +520,12 @@ class CppInterpreter(Containers, Interpreter):
 
         found, uses = {}, {}
 
+        nonint = set()                                                 # pointers advance by scans (_scans)
+
         def note(decl, op, n_refs):
             k = _key(decl)
+            if ca.is_pointer(decl.type):
+                nonint.add(k)
             if found.get(k, op) != op:
                 found[k] = None
             else:
@@ -490,7 +558,7 @@ class CppInterpreter(Containers, Interpreter):
                 walk(kid)
 
         walk(body)
-        return {k: op for k, op in found.items() if op is not None and uses.get(k, 0) == 0}
+        return {k: op for k, op in found.items() if op is not None and uses.get(k, 0) == 0 and k not in nonint}
 
     def _for(self, c):
         """Every loop gets its own break / continue flags (continue skips the rest of the body for
@@ -579,9 +647,10 @@ class CppInterpreter(Containers, Interpreter):
                 if k in fr.vars and k not in scan_entries:
                     scan_entries[k] = fr.vars[k]
         if scans and (total > CHUNK or len(scan_entries) != len(scans)
-                      or any(_as_int(e[1]) is UNK for e in scan_entries.values())):
+                      or any((e[1].off is UNK or e[1].obj is UNK) if isinstance(e[1], Ptr) else _as_int(e[1]) is UNK
+                             for e in scan_entries.values())):
             return self._loop_general(None, cond, inc, body)          # a scan we cannot run as a batch
-        scan_v0 = {k: _as_int(e[1]) for k, e in scan_entries.items()}
+        scan_v0 = {k: e[1] if isinstance(e[1], Ptr) else _as_int(e[1]) for k, e in scan_entries.items()}
         red_entries = {}
         for fr in self.frames[::-1]:
             for k in reductions:
@@ -603,6 +672,7 @@ class CppInterpreter(Containers, Interpreter):
                     self._lookup(var)[1] = Ptr(start.obj, base[point] + step * esize * within) if pointer \
                         else base[point] + step * within
                     initial = {k: _as_int(e[1]) for k, e in red_entries.items()}
+                    initial_real = {k: e[1] for k, e in red_entries.items() if isinstance(e[1], Real)}
                     scan_final = self._run_scans(scan_entries, body, point, len(g), scan_v0, len(saved_w)) \
                         if scan_entries else None
                     self.exec(body)
@@ -611,17 +681,32 @@ class CppInterpreter(Containers, Interpreter):
                             e[1] = scan_final[k]
                     for k, e in red_entries.items():                    # combine the reductions
                         here = self._lookup_key(k)
+                        if isinstance(here[1] if here else None, Real) or isinstance(initial_real.get(k), Real):
+                            e[1] = self._combine_real(reductions[k], here[1] if here else UNK, initial_real.get(k),
+                                                      point, len(g), len(saved_w))
+                            continue
                         vals, v0 = _as_int(here[1] if here else UNK), initial[k]
                         if _is_unk(vals, v0):
                             e[1] = UNK
                             continue
-                        vals = np.broadcast_to(vals, (len(g),))
+                        # per enclosing point: its iterations' values combined with its own start value
+                        vals = np.broadcast_to(np.asarray(vals, dtype=np.int64), (len(g),))
+                        n_out = len(saved_w)
+                        start0 = np.array(np.broadcast_to(np.asarray(v0, dtype=np.int64), (n_out,)))
                         if reductions[k] == "max":
-                            e[1] = int(max(np.max(vals), np.max(v0)))
+                            np.maximum.at(start0, point, vals)
+                            out = start0
                         elif reductions[k] == "min":
-                            e[1] = int(min(np.min(vals), np.min(v0)))
+                            np.minimum.at(start0, point, vals)
+                            out = start0
                         else:
-                            e[1] = int(np.max(v0) + np.sum(vals - v0))
+                            # each iteration started from its point's value (the batch copy), so its change
+                            # is vals minus that start
+                            delta = np.zeros(n_out, dtype=np.int64)
+                            np.add.at(delta, point, vals - start0[point])
+                            out = start0 + delta
+                        e[1] = int(out[0]) if n_out == 1 else out
+                        initial[k] = e[1]
                     self.scratch_top = saved_top
             finally:
                 self.frames, self.w = saved_frames, saved_w
@@ -630,6 +715,7 @@ class CppInterpreter(Containers, Interpreter):
         final = _SCALAR(final) if np.ndim(final) else int(final)
         entry = self._lookup(var)
         entry[1] = Ptr(start.obj, final) if pointer else final
+        self._forget_float_writes(body, keep=set(reductions) | set(scans))
 
     def _active_points(self):
         """Batch points still running the current iteration (None: all of them)."""
@@ -719,7 +805,31 @@ class CppInterpreter(Containers, Interpreter):
         self._fresh(lambda: Interpreter._iteration(self, body, inc))
 
     def _eval_condition(self, idx, cond):
-        return self.run_subset(idx, lambda: _as_int(self.eval(cond)), propagate=True)
+        return self.run_subset(idx, lambda: self._condition(cond), propagate=True)
+
+    def _condition(self, cond):
+        """A loop condition. In a conjunction (a && b && ...), a part that compares floating-point values
+        and is unknown is taken as true when the other parts are known: the loop runs to its integer
+        bound, as for a break under an unknown floating-point test (a convergence test with tolerance 0,
+        or a simulated time that does not end the run before the cycle limit)."""
+        v = _as_int(self.eval(cond))
+        if v is not UNK:
+            return v
+        parts = _conjuncts(cond)
+        if len(parts) < 2:
+            return UNK
+        out = None
+        for part in parts:
+            pv = _as_int(self.no_charge(lambda: self.eval(part)))
+            if pv is UNK:
+                if not _float_test(part):
+                    return UNK
+                continue
+            pv = (np.asarray(pv) != 0).astype(np.int64)
+            out = pv if out is None else out & pv
+        if out is None:
+            return UNK
+        return _SCALAR(out) if np.ndim(out) else int(out)
 
     def _ptr_store(self, loc, value):
         obj = loc.obj
@@ -738,7 +848,10 @@ class CppInterpreter(Containers, Interpreter):
             obj.ptrs[units] = -1
             return
         uid = NULL_UID if value.obj is self.null else self._uid(value.obj)
-        vals[units] = np.broadcast_to(np.asarray(value.off, dtype=np.int64), np.shape(units))
+        offs = np.asarray(value.off, dtype=np.int64)
+        if np.ndim(units) == 0 and offs.ndim:                          # every point writes one place: the
+            offs = offs[-1]                                            # last iteration's value stays
+        vals[units] = np.broadcast_to(offs, np.shape(units))
         obj.ptrs[units] = uid
 
     def _ptr_load(self, loc):
@@ -757,20 +870,68 @@ class CppInterpreter(Containers, Interpreter):
         return Ptr(target, _SCALAR(offs) if np.ndim(offs) else int(offs), src)
 
     def _mem_load(self, loc, type_):
+        type_ = _referee(type_)
         if not isinstance(loc.obj, Obj) or loc.off is UNK:
             return UNK if not ca.is_pointer(type_) else Ptr(UNK, UNK)
         if ca.is_pointer(type_):
             return self._ptr_load(loc)
+        if ca.is_float(type_):                                         # floating-point values in memory
+            size = ca.type_size(type_.get_canonical()) or 8
+            v = loc.obj.fload(loc.off, size)
+            if np.ndim(loc.off) == 0 and self.L > 1:                   # one address, a value per point
+                pp = loc.obj.point_values(int(loc.off) // 4, "f", self.L)
+                if pp is not None:
+                    v = pp
+            if np.any(np.isnan(v)):
+                return UNK
+            if size == 4:
+                v = v.astype(np.float32).astype(float)
+            return Real(v if np.ndim(v) else float(v))
         return super()._mem_load(loc, type_)
 
     def _mem_store(self, loc, type_, value):
+        type_ = _referee(type_)
         if not isinstance(loc.obj, Obj) or loc.off is UNK:
             return
         if ca.is_pointer(type_) or isinstance(value, Ptr):
             if self.charging:
                 self._ptr_store(loc, value)
             return
+        if ca.is_float(type_):
+            if self.charging:
+                size = ca.type_size(type_.get_canonical()) or 8
+                r = _real(value) if value is not UNK else UNK
+                v = np.nan if r is UNK else (np.asarray(r.v, dtype=np.float32).astype(float) if size == 4 else r.v)
+                offs = np.broadcast_to(loc.off, (self.L,)) if np.ndim(loc.off) else loc.off
+                loc.obj.fstore(offs, v, size)
+            return
         super()._mem_store(loc, type_, value)
+
+    def _float_update(self, loc, type_, op, r):
+        """a[i] op= x on floating-point memory: every batch point in order, so repeated offsets
+        accumulate (a scatter-add of element forces onto nodes) as in a sequential loop."""
+        size = ca.type_size(type_.get_canonical()) or 8
+        r = _real(r) if r is not UNK else UNK
+        offs = np.broadcast_to(np.asarray(loc.off, dtype=np.int64), (self.L,))
+        if r is UNK or not self.charging:
+            if self.charging:
+                loc.obj.fstore(offs, np.nan, size)
+            return UNK
+        rv = np.broadcast_to(np.asarray(r.v, dtype=float), (self.L,))
+        old = loc.obj.fload(offs, size)
+        if op in ("+", "-") and len(np.unique(offs)) < len(offs):
+            uniq, inv = np.unique(offs, return_inverse=True)
+            acc = loc.obj.fload(uniq, size)
+            np.add.at(acc, inv.ravel(), rv if op == "+" else -rv)
+            loc.obj.fstore(uniq, acc, size)
+            new = acc[inv.ravel()]
+        else:
+            with np.errstate(all="ignore"):
+                new = {"+": old + rv, "-": old - rv, "*": old * rv, "/": old / rv}.get(op, np.full(self.L, np.nan))
+            loc.obj.fstore(offs, new, size)
+        if np.any(np.isnan(new)):
+            return UNK
+        return Real(new if self.L > 1 or np.ndim(loc.off) else float(new[0]))
 
     def _copy_object(self, dest, src, size, charge=True):
         """Memberwise copy of `size` bytes (trivial copy / move): values and pointers, 4-byte units,
@@ -789,6 +950,13 @@ class CppInterpreter(Containers, Interpreter):
                 self.access(Loc(dest.obj, dest.off + u, 8), write=True)
             vals = s.obj.load(s.off)
             d.obj.store(np.broadcast_to(d.off, np.shape(vals)) if np.ndim(vals) else d.off, vals)
+            if getattr(s.obj, "fvals", None) is not None:
+                fv = s.obj.fload(s.off, 4)
+                if not np.all(np.isnan(fv)):
+                    dst = np.broadcast_to(d.off, np.shape(fv)) if np.ndim(fv) else d.off
+                    keep = d.obj.load(dst)                             # fstore marks the ints unknown; keep them
+                    d.obj.fstore(dst, fv, 4)
+                    d.obj._value_units(int(np.max(np.asarray(dst) // 4)) + 1)[np.asarray(dst, dtype=np.int64) // 4] = keep
             sp = getattr(s.obj, "ptrs", None)
             if sp is not None:
                 su = np.asarray(s.off, dtype=np.int64) // 4
@@ -799,7 +967,10 @@ class CppInterpreter(Containers, Interpreter):
                         if getattr(d.obj, "ptrs", None) is not None:
                             ptrs[: len(d.obj.ptrs)] = d.obj.ptrs
                         d.obj.ptrs = ptrs
-                    d.obj.ptrs[np.asarray(d.off, dtype=np.int64) // 4] = sp[su]
+                    du, sv = np.asarray(d.off, dtype=np.int64) // 4, sp[su]
+                    if np.ndim(du) == 0 and np.ndim(sv):                # every point copies into one place:
+                        sv = sv[-1]                                    # the last iteration's value stays
+                    d.obj.ptrs[du] = sv
 
     # ------------------------------------------------------------ storage for objects
 
@@ -940,11 +1111,15 @@ class CppInterpreter(Containers, Interpreter):
         """Give a register scalar its own memory slot (per batch point) and keep its value there."""
         if isinstance(entry[1], InMemory):
             return entry[1].loc
+        # its own region, not the scoped scratch: the variable outlives the block where its address is taken
         size = max(ca.type_size(decl.type.get_canonical()) or 8, 8)
-        base = self.scratch_top
-        self.scratch_top += size * self.L
+        if getattr(self, "spill", None) is None:
+            self.spill = Obj("spilled registers", "register")
+            self.spill_top = 0
+        base = self.spill_top
+        self.spill_top += size * self.L
         off = base + size * np.arange(self.L) if self.L > 1 else base
-        loc = Loc(self.scratch, off, ca.type_size(decl.type.get_canonical()) or 8)
+        loc = Loc(self.spill, off, ca.type_size(decl.type.get_canonical()) or 8)
         value = entry[1]
         if isinstance(value, Ptr) or ca.is_pointer(decl.type):
             self._ptr_store(loc, value if isinstance(value, Ptr) else Ptr(UNK, UNK))
@@ -1177,9 +1352,48 @@ class CppInterpreter(Containers, Interpreter):
                 return dest
             if ctor is not None and _system(ctor):
                 return self._library_construct(call, dest, args_c)
+            if not args_c:                                             # implicit default constructor
+                self._default_fields(dest, call.type)
             return dest
         self._invoke(cdef, args_c, this=dest, this_type=call.type, constructor=True)
         return dest
+
+    def _default_construct(self, dest, type_, depth=0):
+        """Default-construct an object of class type at dest: a library vector is empty; a class runs its
+        default constructor if it has one with code, else default-constructs its own fields."""
+        t = type_.get_canonical()
+        name = t.spelling
+        if name.startswith("std::vector<"):
+            from .containers import element_type
+            et = element_type(t)
+            self._vinit(dest, 0, (ca.type_size(et.get_canonical()) if et is not None else None) or 8, et=et)
+            return
+        if name.startswith("std::"):
+            return
+        for m in _class_members(t):
+            if m.kind == K.CONSTRUCTOR and not [p for p in m.get_children() if p.kind == K.PARM_DECL]:
+                d = m.get_definition()
+                if d is not None and _body(d) is not None:
+                    self._invoke(d, [], this=dest, this_type=type_, constructor=True)
+                    return
+        if depth < 8:
+            self._default_fields(dest, type_, depth + 1)
+
+    def _default_fields(self, dest, type_, depth=0, skip=()):
+        """Default-construct the class-type fields (vectors, nested objects) of the object at dest."""
+        if not isinstance(dest, Ptr) or _is_unk(dest.obj, dest.off):
+            return
+        t = type_.get_canonical()
+        for m in _class_members(t):
+            if m.kind != K.FIELD_DECL or m.spelling in skip or not _record(m.type):
+                continue
+            if [k for k in m.get_children() if k.kind.is_expression()]:   # has a default member initialiser
+                continue
+            offset = t.get_offset(m.spelling)
+            if offset is None or offset < 0:
+                continue
+            off = dest.off + offset // 8
+            self._default_construct(Ptr(dest.obj, _SCALAR(off) if np.ndim(off) else int(off)), m.type, depth)
 
     def _member_inits(self, cdef, this, this_type):
         kids = ca.children(cdef)
@@ -1204,6 +1418,8 @@ class CppInterpreter(Containers, Interpreter):
                 i += 2
                 continue
             i += 1
+        # fields of class type not in the list and without an initialiser: default-constructed
+        self._default_fields(this, this_type, skip=initialised)
         # default member initialisers of the fields not in the list
         for m in _class_members(this_type):
             if m.kind == K.FIELD_DECL and m.spelling not in initialised:
@@ -1381,6 +1597,8 @@ class CppInterpreter(Containers, Interpreter):
     def _call(self, c, sret=None):
         ref = c.referenced
         kids = ca.children(c)
+        if ref is None and c.spelling in MATH:                         # an overloaded name libclang left unresolved
+            return self._std(c, c.spelling, list(c.get_arguments()), sret)
         if ref is None:
             for k in kids:
                 self.eval(k) if k.kind.is_expression() else None
@@ -1828,12 +2046,66 @@ class CppInterpreter(Containers, Interpreter):
             return -(2 ** (8 * size - 1)) if signed else 0
         return self._std(c, name, args_c, sret)
 
+    def _argv_array(self):
+        """argv: an array of pointers to the command-line strings, each an object that knows its text."""
+        arr = Obj("argv", "stack", 8 * (len(self.argv) + 1))
+        self.objects.append(arr)
+        for i, text in enumerate(self.argv):
+            sobj = Obj(f"argv[{i}]", "stack", len(text) + 1)
+            sobj.text = text
+            self.objects.append(sobj)
+            self._ptr_store(Loc(arr, 8 * i, 8), Ptr(sobj, 0))
+        self._ptr_store(Loc(arr, 8 * len(self.argv), 8), Ptr(self.null, 0))
+        return Ptr(arr, 0)
+
+    @staticmethod
+    def _text(v):
+        """The text of a string value: a literal, or a pointer into a command-line string."""
+        if isinstance(v, Str):
+            return v.text
+        if isinstance(v, Ptr) and isinstance(getattr(v.obj, "text", None), str) and np.ndim(v.off) == 0 \
+                and v.off is not UNK:
+            return v.obj.text[int(v.off):]
+        return None
+
     def _std(self, c, name, args_c, sret):
-        from .interp import ATOI
+        from .interp import ATOI, RANDOM
+        if name in RANDOM or name in ("srand", "srandom", "srand48"):  # the C library's generator (interp)
+            return Interpreter._library(self, name, args_c)
         if name in ATOI and args_c:
             v = self._argv_value(args_c[0])
             if v is not UNK:
                 return v
+            text = self._text(self.eval(args_c[0]))
+            for a in args_c[1:]:
+                self.eval(a)
+            if text is not None:
+                base = 10
+                if name.startswith("strto") and len(args_c) > 2:
+                    b = _as_int(self.eval(args_c[2]))
+                    base = b if b is not UNK else 10
+                m = re.match(r"\s*([+-]?(0[xX][0-9a-fA-F]+|[0-9]+))", text)
+                if m:
+                    try:
+                        return int(m.group(1), 0 if base == 0 else base)
+                    except ValueError:
+                        return UNK
+                return 0
+        if name in ("strcmp", "strncmp", "strcasecmp") and len(args_c) >= 2:
+            a, b = (self._text(self.eval(x)) for x in args_c[:2])
+            if a is not None and b is not None:
+                if name == "strncmp":
+                    n = _as_int(self.eval(args_c[2])) if len(args_c) > 2 else UNK
+                    if n is UNK:
+                        return UNK
+                    a, b = a[:n], b[:n]
+                if name == "strcasecmp":
+                    a, b = a.lower(), b.lower()
+                return (a > b) - (a < b)
+        if name == "strlen" and args_c:
+            t = self._text(self.eval(args_c[0]))
+            if t is not None:
+                return len(t)
         if name == "probe":                                            # test hook: record a value
             v = self.eval(args_c[0]) if args_c else UNK
             self.probes.append(v if not isinstance(v, np.ndarray) else v.copy())
@@ -1844,10 +2116,27 @@ class CppInterpreter(Containers, Interpreter):
                 return int((a.text == b.text) == (name == "operator=="))
             return UNK
         if name in ("min", "max") and len(args_c) >= 2:
-            a, b = (_as_int(self._value(x)) for x in args_c[:2])
+            ra, rb = (self._value(x) for x in args_c[:2])
+            if isinstance(ra, Real) or isinstance(rb, Real):
+                ra, rb = _real(ra), _real(rb)
+                if _is_unk(ra, rb):
+                    return UNK
+                return Real(np.minimum(ra.v, rb.v) if name == "min" else np.maximum(ra.v, rb.v))
+            a, b = _as_int(ra), _as_int(rb)
             if _is_unk(a, b):
                 return UNK
             return _SCALAR(np.minimum(a, b) if name == "min" else np.maximum(a, b))
+        if name in MATH and args_c:                                    # on floating-point scalars
+            vals = [self.eval(x) for x in args_c]
+            if name in ("abs", "labs", "llabs") and _as_int(vals[0]) is not UNK:
+                v = _as_int(vals[0])
+                return _SCALAR(np.abs(v)) if np.ndim(v) else abs(v)
+            reals = [_real(v) for v in vals[:MATH[name][0]]]
+            if any(r is UNK for r in reals):
+                return UNK
+            with np.errstate(all="ignore"):
+                out = MATH[name][1](*[np.asarray(r.v, dtype=float) for r in reals])
+            return Real(out if np.ndim(out) else float(out))
         if name in ("sort", "stable_sort") and len(args_c) >= 2:
             b, e = self.eval(args_c[0]), self.eval(args_c[1])
             self._sort(b, e, c, args_c)
@@ -2173,6 +2462,27 @@ class CppInterpreter(Containers, Interpreter):
         if len(vals) and not np.any(vals == SENTINEL):
             b.obj.store(offs, self.rng.permutation(vals))
         return UNK
+
+
+def _conjuncts(cond):
+    """The parts of a && b && ... (the condition itself if it is not a conjunction)."""
+    c = _strip(cond)
+    if c.kind == K.BINARY_OPERATOR and ca.binary_op(c) == "&&":
+        lhs, rhs = ca.children(c)
+        return _conjuncts(lhs) + _conjuncts(rhs)
+    return [cond]
+
+
+def _float_test(cond):
+    """A comparison with a floating-point operand."""
+    c = _strip(cond)
+    if c.kind == K.UNARY_OPERATOR and ca.unary_op(c) == "!":
+        return _float_test(ca.children(c)[0])
+    if c.kind == K.BINARY_OPERATOR and ca.binary_op(c) in ("<", ">", "<=", ">=", "==", "!="):
+        return any(ca.is_float(k.type) for k in ca.children(c))
+    if c.kind == K.CALL_EXPR and c.spelling.startswith("operator"):   # a < b through an operator
+        return any(ca.is_float(k.type) for k in c.get_arguments())
+    return ca.is_float(c.type)
 
 
 def _walk(node):

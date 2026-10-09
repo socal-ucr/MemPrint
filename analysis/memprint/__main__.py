@@ -298,6 +298,11 @@ def cmd_static(args, paths):
             for k in kernels:
                 spectra.update(runs.gap_spectra([k], scales[k], args.gapbs, paths.data / "static_auto", args.jobs))
             all_data = {k: d[d["Config"].astype(str).isin(spectra[k])] for k, d in all_data.items()}
+            missing = [k for k, d in all_data.items() if d.empty]
+            if missing:
+                print("no spectra (interpreter failed) for:", " ".join(missing))
+            all_data = {k: d for k, d in all_data.items() if not d.empty}
+            kernels = [k for k in kernels if k in all_data]
         else:
             spectra = {k: irregular.skeleton_spectra(k, scales[k], paths.data / "static_gap") for k in kernels}
         kernels = [k for k in kernels if all(b in all_data for b in irregular.BASELINE_FROM[k])]
@@ -503,7 +508,8 @@ def main(argv=None):
                         "(data/static_auto; results in data/gap_interp_*.csv)")
     p.add_argument("--gapbs", default="workloads/src/gapbs", help="gap --source interp: GAP source tree")
     p.add_argument("--scales", nargs="*", help="gap: only these scales")
-    p.add_argument("--source-file", dest="source_file", help="cpp: the program's main source file")
+    p.add_argument("--source-file", dest="source_file",
+                   help="cpp: the program's source file, or several comma-separated (compiled as one unity file)")
     p.add_argument("--configs", nargs="*", default=[], help="cpp: input configs")
     p.add_argument("--args", nargs="*", help="cpp: command line after the program name; {config} is replaced")
     p.add_argument("--define", nargs="*", help="cpp: preprocessor definitions (NAME=VALUE); {config} is replaced")
