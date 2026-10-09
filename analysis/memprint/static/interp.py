@@ -12,8 +12,22 @@ elements, floating-point constants (.rodata) and the call frame (return
 address, saved frame pointer). The result is the number of references to each
 address, the spectrum that decides what a 1-in-k sample of the references sees.
 
+Integer values stored in memory are remembered (per 4-byte unit), so loops
+bounded by loaded values (CSR row offsets) and subscripts that load an index
+(A[B[i]]) resolve from the values the program computed. Input that comes from
+the C library's random-number generator (rand, random, lrand48) is drawn
+from its distribution. `a[i]++` and `a[i] += x` keep their sequential meaning
+when a vectorised loop repeats an index (degree counting, `nbr[pos[u]++] = v`);
+a loop that otherwise both reads and writes an integer array (a prefix sum,
+a BFS claiming vertices) runs one iteration at a time if it is not inside
+another such loop and has at most SEQUENTIAL_LIMIT iterations; otherwise it
+stays vectorised and the values it computes may differ from a sequential run
+(floyd-warshall's path lengths), which only matters where they decide
+addresses or control.
+
 References the interpreter cannot place are counted, not guessed: an address
-that depends on data (indirect subscript, pointer chasing) is unresolved, and
+that depends on data it does not know (floating-point values, pointers stored
+in memory, files) is unresolved, and
 references inside a loop with a data-dependent trip count or under a
 data-dependent branch are uncertain. Coverage is the share of references that
 are neither.
@@ -32,6 +46,10 @@ MAX_DEPTH = 64
 FRAME_BYTES = 8192  # stack frame size; frames at the same call depth share addresses
 STACK_ARRAY_LIMIT = 1024  # larger local arrays get their own object
 GUESS_TRIPS = 1  # trips charged for a loop whose trip count depends on data
+SEQUENTIAL_LIMIT = 2_000_000  # iterations a loop carrying values through memory may run one at a time
+
+
+SENTINEL = np.iinfo(np.int64).min  # an unknown integer in memory
 
 
 class _Unknown:
@@ -55,6 +73,37 @@ class Obj:
     nbytes: int = 0
     by_size: dict = field(default_factory=dict)
     unresolved: float = 0.0
+    zeroed: bool = False  # calloc and static storage start as zeros
+    values: object = None  # integer contents per 4-byte unit (SENTINEL: unknown)
+
+    def _value_units(self, hi):
+        if self.values is None or len(self.values) < hi:
+            fill = 0 if self.zeroed else SENTINEL
+            new = np.full(max(hi, (self.nbytes + 3) // 4, 1), fill, dtype=np.int64)
+            if self.values is not None:
+                new[: len(self.values)] = self.values
+            self.values = new
+        return self.values
+
+    def load(self, off):
+        units = np.asarray(off, dtype=np.int64) // 4
+        if np.any(units < 0):
+            return np.full(np.shape(units), SENTINEL, dtype=np.int64)
+        vals = self._value_units(int(np.max(units)) + 1 if units.size else 1)
+        return vals[units]
+
+    def store(self, off, value):
+        """Store integer value(s) at byte offset(s); UNK stores unknown. Repeated offsets keep the
+        last value, as a sequential loop would."""
+        units = np.asarray(off, dtype=np.int64) // 4
+        if units.size == 0 or np.any(units < 0):
+            return
+        vals = self._value_units(int(np.max(units)) + 1)
+        v = SENTINEL if value is UNK else value
+        if np.ndim(units) == 0:
+            vals[int(units)] = int(np.asarray(v).ravel()[-1]) if np.ndim(v) else v
+        else:
+            vals[units] = np.broadcast_to(np.asarray(v, dtype=np.int64), units.shape)
 
     def _grow(self, size, length):
         arr = self.by_size.get(size)
@@ -108,23 +157,34 @@ class Obj:
         return counts, sizes
 
 
-    def _bytes(self):
+    def coverage(self):
+        """References covering each byte (bytes touched)."""
+        if not self.by_size:
+            return np.zeros(0)
         length = max(len(a) + s for s, a in self.by_size.items())
-        length = (length + 7) // 8 * 8
-        cover = np.zeros(length)
+        cover = np.zeros((length + 7) // 8 * 8)
         for s, arr in self.by_size.items():
             c = np.convolve(arr, np.ones(s))
             cover[: len(c)] += c
         touched = cover > 0
         if self.unresolved and touched.any():
             cover[touched] += self.unresolved / touched.sum()
-        words = cover.reshape(-1, 8)
-        uniform = (words == words[:, :1]).all(axis=1) & (words[:, 0] > 0)
-        rest = words[~uniform].ravel()
-        rest = rest[rest > 0]
-        counts = np.concatenate([words[uniform, 0], rest])
-        sizes = np.concatenate([np.full(int(uniform.sum()), 8.0), np.ones(len(rest))])
-        return counts, sizes
+        return cover
+
+    def _bytes(self):
+        return group_words(self.coverage())
+
+
+def group_words(cover):
+    """Bytes with references, as aligned 8-byte units where all eight have the same count, else singly."""
+    cover = np.concatenate([cover, np.zeros(-len(cover) % 8)])
+    words = cover.reshape(-1, 8)
+    uniform = (words == words[:, :1]).all(axis=1) & (words[:, 0] > 0)
+    rest = words[~uniform].ravel()
+    rest = rest[rest > 0]
+    counts = np.concatenate([words[uniform, 0], rest])
+    sizes = np.concatenate([np.full(int(uniform.sum()), 8.0), np.ones(len(rest))])
+    return counts, sizes
 
 
 @dataclass
@@ -184,6 +244,7 @@ _SCALAR = lambda v: v if np.ndim(v) else int(v)  # noqa: E731
 ALLOC = {"malloc": (0,), "xmalloc": (0,), "calloc": (0, 1), "polybench_alloc_data": (0, 1),
          "aligned_alloc": (1,), "realloc": (1,), "valloc": (0,), "pvalloc": (0,)}
 FREE = {"free", "polybench_free_data"}
+RANDOM = {"rand": 2 ** 31 - 1, "random": 2 ** 31 - 1, "lrand48": 2 ** 31 - 1}  # name -> largest value
 
 
 @dataclass
@@ -207,11 +268,11 @@ class Result:
 
 
 class Interpreter:
-    def __init__(self, tu):
+    def __init__(self, tu, seed=0):
         self.tu = tu
         self.w = np.ones(1)
         self.stack = Obj("stack", "stack", MAX_DEPTH * FRAME_BYTES)
-        self.globals_obj = Obj("globals", "global")
+        self.globals_obj = Obj("globals", "global", zeroed=True)
         self.rodata = Obj("rodata", "rodata")
         self.objects = [self.stack, self.globals_obj, self.rodata]
         self.rodata_slots = {}
@@ -219,10 +280,13 @@ class Interpreter:
         self.frames = [Frame(None, 0)]
         self.charging = True
         self.uncertain_depth = 0
+        self.sequential_depth = 0
+        self.heap_events = []  # ("new" | "free", Obj) in program order
         self.total = self.unresolved = self.uncertain = 0.0
         self.data_loops = self.data_branches = 0
         self.functions = {}
         self._global_off = 0
+        self.rng = np.random.default_rng(seed)
         for c in tu.cursor.get_children():
             if c.kind == K.FUNCTION_DECL and c.is_definition():
                 self.functions[c.spelling] = c
@@ -334,7 +398,7 @@ class Interpreter:
         off = self._global_off
         self._global_off += (size + 7) // 8 * 8
         if ca.is_array(c.type) and size > STACK_ARRAY_LIMIT:
-            obj = Obj(c.spelling, "global", size)
+            obj = Obj(c.spelling, "global", size, zeroed=True)
             self.objects.append(obj)
             slot = Loc(obj, 0, size, True)
             value = Ptr(obj, 0)
@@ -460,7 +524,63 @@ class Interpreter:
             entry = self._lookup(target.referenced)
             if entry is not None:
                 entry[1] = value if (isinstance(value, Ptr) or not ca.is_float(target.type)) else UNK
+        else:
+            self._mem_store(loc, target.type, value)
         return loc
+
+    @staticmethod
+    def _tracked(type_):
+        """Integer contents are remembered in memory; floats and pointers are not."""
+        t = type_.get_canonical()
+        return not (ca.is_float(t) or ca.is_pointer(t) or ca.is_array(t)) and ca.type_size(t) in (1, 2, 4, 8)
+
+    def _mem_load(self, loc, type_):
+        if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK:
+            return UNK
+        vals = loc.obj.load(loc.off)
+        if np.any(vals == SENTINEL):
+            return UNK
+        return _SCALAR(vals) if np.ndim(vals) else int(vals)
+
+    def _mem_store(self, loc, type_, value):
+        if not isinstance(loc.obj, Obj) or loc.off is UNK:
+            return
+        value = _as_int(value) if self._tracked(type_) and not isinstance(value, Ptr) else UNK
+        if self.charging:
+            loc.obj.store(np.broadcast_to(loc.off, (self.L,)) if np.ndim(loc.off) else loc.off,
+                          value if value is UNK or np.ndim(value) or np.ndim(loc.off) == 0
+                          else np.broadcast_to(value, (self.L,)))
+
+    def _rmw_add(self, loc, type_, delta):
+        """a[i] += delta (or ++, --) for every batch point in order: returns (old, new) per point.
+        Repeated offsets see each other's updates as in a sequential loop."""
+        delta = _as_int(delta)
+        if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK or delta is UNK:
+            if isinstance(loc.obj, Obj) and loc.off is not UNK:
+                loc.obj.store(loc.off, UNK)
+            return UNK, UNK
+        L = self.L
+        offs = np.broadcast_to(np.asarray(loc.off, dtype=np.int64), (L,))
+        d = np.broadcast_to(np.asarray(delta, dtype=np.int64), (L,))
+        base = loc.obj.load(offs)
+        order = np.argsort(offs, kind="stable")
+        so, sd = offs[order], d[order]
+        first = np.concatenate([[True], so[1:] != so[:-1]])
+        before = np.cumsum(sd) - sd
+        group = np.cumsum(first) - 1
+        excl = before - before[np.nonzero(first)[0]][group]
+        old = np.empty(L, dtype=np.int64)
+        old[order] = base[order] + excl
+        new = old + d
+        last = np.concatenate([so[1:] != so[:-1], [True]])
+        unknown = base == SENTINEL
+        final = np.where(unknown[order][last], SENTINEL, new[order][last])
+        loc.obj.store(so[last], final)
+        if unknown.any():
+            return UNK, UNK
+        if L == 1 and np.ndim(loc.off) == 0 and np.ndim(delta) == 0:
+            return int(old[0]), int(new[0])
+        return old, new
 
     def _load_lvalue(self, c):
         """Rvalue of an lvalue expression: a load, or a pointer if it is an array."""
@@ -473,7 +593,8 @@ class Interpreter:
             entry = self._lookup(target.referenced)
             if entry is not None:
                 return entry[1]
-        return UNK
+            return UNK
+        return self._mem_load(loc, c.type)
 
     # ------------------------------------------------------------ rvalues
 
@@ -521,9 +642,22 @@ class Interpreter:
             lhs, rhs = ca.children(c)
             loc = self.lvalue(lhs)
             self.access(loc)
+            op = ca.compound_op(c)
+            if ca.strip(lhs).kind != K.DECL_REF_EXPR:                  # an element in memory
+                r = self.eval(rhs)
+                self.access(loc, write=True)
+                if op in ("+", "-") and not isinstance(r, Ptr):
+                    r = _as_int(r)
+                    _, new = self._rmw_add(loc, lhs.type, r if op == "+" or r is UNK else _SCALAR(-r))
+                    return new
+                old = self._mem_load(loc, lhs.type)
+                new = self._arith(op, old, r, c)
+                repeated = np.ndim(loc.off) and len(np.unique(loc.off)) < np.size(loc.off)
+                self._mem_store(loc, lhs.type, UNK if repeated else new)
+                return new
             old = self._value_of(lhs)
             r = self.eval(rhs)
-            new = self._arith(ca.compound_op(c), old, r, c)
+            new = self._arith(op, old, r, c)
             self.access(loc, write=True)
             self._set_value(lhs, new)
             return new
@@ -586,6 +720,10 @@ class Interpreter:
         if op in ("post++", "post--", "pre++", "pre--"):
             loc = self.lvalue(kid)
             self.access(loc)
+            if ca.strip(kid).kind != K.DECL_REF_EXPR and not ca.is_pointer(kid.type):
+                self.access(loc, write=True)
+                old, new = self._rmw_add(loc, kid.type, 1 if "++" in op else -1)
+                return old if op.startswith("post") else new
             old = self._value_of(kid)
             delta = 1 if "++" in op else -1
             if isinstance(old, Ptr):
@@ -715,9 +853,16 @@ class Interpreter:
                 v = _as_int(args[i]) if i < len(args) else UNK
                 size = UNK if (v is UNK or size is UNK) else size * v
             nbytes = int(np.max(size)) if size is not UNK else 0
-            obj = Obj(f"{name}#{len(self.objects)}", "heap", nbytes)
+            obj = Obj(f"{name}#{len(self.objects)}", "heap", nbytes, zeroed=name == "calloc")
             self.objects.append(obj)
+            self.heap_events.append(("new", obj))
             return Ptr(obj, 0)
+        if name in FREE and args and isinstance(args[0], Ptr) and isinstance(args[0].obj, Obj):
+            self.heap_events.append(("free", args[0].obj))
+            return UNK
+        if name in RANDOM:                                             # input drawn from its distribution
+            draws = self.rng.integers(0, RANDOM[name] + 1, self.L, dtype=np.int64)
+            return int(draws[0]) if self.L == 1 else draws
         if name in ("memset", "memcpy", "memmove") and len(args) == 3:
             n = _as_int(args[2])
             for i, write in ((0, True), (1, False)) if name != "memset" else ((0, True),):
@@ -819,6 +964,12 @@ class Interpreter:
         if trips is None:
             return self._loop_general(None, cond, inc, body)
         trips = np.broadcast_to(np.maximum(trips, 0), (self.L,)).astype(np.int64)
+        if self.sequential_depth == 0 and int(trips.sum()) <= SEQUENTIAL_LIMIT and _memory_carried(body):
+            self.sequential_depth += 1                                 # iterations depend on each other
+            try:
+                return self._loop_general(None, cond, inc, body)
+            finally:
+                self.sequential_depth -= 1
         # the condition is tested trips + 1 times, the increment runs trips times
         self.with_weights(self.w * (trips + 1), lambda: self.eval(cond))
         saved = entry[1]
@@ -985,6 +1136,67 @@ def _refs(c):
     return out
 
 
+def _subscript_base(c):
+    """The declaration of the array (or pointer) variable at the root of a subscript chain."""
+    c = ca.strip(c)
+    while c.kind == K.ARRAY_SUBSCRIPT_EXPR:
+        c = ca.strip(ca.children(c)[0])
+    return _decl_ref(c)
+
+
+def _memory_carried(body):
+    """Does the loop body write an integer array (other than by += / ++) that it also reads, or
+    read one it updates? Then iterations depend on each other through memory and the loop must
+    run one iteration at a time."""
+    written, updated, read = set(), set(), set()
+
+    def integer(c):
+        return Interpreter._tracked(c.type)
+
+    def walk(n, role=None):
+        kind = n.kind
+        if kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
+            lhs, rhs = ca.children(n)
+            target = ca.strip(lhs)
+            if target.kind == K.ARRAY_SUBSCRIPT_EXPR:
+                base = _subscript_base(target)
+                if base is not None and integer(target):
+                    written.add(_key(base))
+                for kid in ca.children(target)[1:]:
+                    walk(kid)
+                walk(ca.children(target)[0], "base")
+            else:
+                walk(lhs, "lhs")
+            walk(rhs)
+            return
+        if kind == K.COMPOUND_ASSIGNMENT_OPERATOR or (
+                kind == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "post--", "pre++", "pre--")):
+            kids = ca.children(n)
+            target = ca.strip(kids[0])
+            if target.kind == K.ARRAY_SUBSCRIPT_EXPR:
+                base = _subscript_base(target)
+                if base is not None and integer(target):
+                    updated.add(_key(base))
+                for kid in ca.children(target)[1:]:
+                    walk(kid)
+                for kid in kids[1:]:
+                    walk(kid)
+                return
+        if kind == K.ARRAY_SUBSCRIPT_EXPR and role != "base":
+            base = _subscript_base(n)
+            if base is not None and integer(n):
+                read.add(_key(base))
+            for kid in ca.children(n)[1:]:
+                walk(kid)
+            walk(ca.children(n)[0], "base")
+            return
+        for kid in n.get_children():
+            walk(kid)
+
+    walk(body)
+    return bool((written | updated) & read) or bool(written & updated)
+
+
 def _events(body):
     """First event ('r' or 'w') of each integer or pointer scalar in evaluation order, and
     the set of scalars written. Writes through subscripts or pointers are not scalar writes."""
@@ -1047,9 +1259,25 @@ def _events(body):
 # ---------------------------------------------------------------- entry point
 
 
-def run(tu, entry="main", argc=1, footprint="starts"):
-    """Run the program from `entry` and return its access-count spectrum (footprint: starts or bytes)."""
-    interp = Interpreter(tu)
+def _place_heap(events, heap_top):
+    """Addresses of the heap objects under glibc's allocator (skeleton.Process): {Obj: Block}."""
+    from .skeleton import Process
+
+    process, blocks = Process(heap_top=heap_top), {}
+    for event, obj in events:
+        if event == "new":
+            blocks[obj] = process.new(obj.nbytes)
+        elif obj in blocks:
+            process.delete(blocks[obj])
+    return blocks
+
+
+def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0):
+    """Run the program from `entry` and return its access-count spectrum (footprint: starts or bytes).
+    seed: for the values drawn in place of the C library's random numbers. With bytes, heap blocks
+    are placed by glibc's allocator (skeleton.Process, starting with heap_top free bytes), so a
+    block that reuses a freed block's addresses adds no new bytes."""
+    interp = Interpreter(tu, seed)
     fdef = interp.functions.get(entry)
     if fdef is None:
         raise ValueError(f"no definition of {entry}")
@@ -1063,13 +1291,29 @@ def run(tu, entry="main", argc=1, footprint="starts"):
         if kid.kind == K.COMPOUND_STMT:
             interp.exec(kid)
     counts, sizes, objects = [], [], []
+    placed = _place_heap(interp.heap_events, heap_top) if footprint == "bytes" else {}
+    spaces = {}
     for obj in interp.objects:
         c, s = obj.addresses(footprint)
         if len(c):
-            counts.append(c)
-            sizes.append(s)
             objects.append({"name": obj.name, "kind": obj.kind, "addresses": len(c), "bytes": float(s.sum()),
                             "references": float(c.sum())})
+            if obj in placed:                                          # merged by address below
+                block = placed[obj]
+                cover = obj.coverage()
+                space = spaces.setdefault(block.space, np.zeros(0))
+                end = block.user + len(cover)
+                if len(space) < end:
+                    space = np.concatenate([space, np.zeros(end - len(space))])
+                space[block.user:end] += cover
+                spaces[block.space] = space
+                continue
+            counts.append(c)
+            sizes.append(s)
+    for space in spaces.values():
+        c, s = group_words(space)
+        counts.append(c)
+        sizes.append(s)
     return Result(np.concatenate(counts) if counts else np.zeros(0),
                   np.concatenate(sizes) if sizes else np.zeros(0), objects, interp.total, interp.unresolved,
                   interp.uncertain, interp.data_loops, interp.data_branches)

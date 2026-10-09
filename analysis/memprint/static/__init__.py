@@ -20,13 +20,13 @@ def polybench_sources(root):
     return {Path(line).stem: root / line for line in lines}
 
 
-def analyze(source, defines=(), includes=(), cplusplus=False, footprint="starts"):
+def analyze(source, defines=(), includes=(), cplusplus=False, footprint="starts", seed=0):
     """Run the interpreter on one program. Returns (Spectrum, interp.Result, parse errors, seconds).
     footprint: starts (largest access per start address) or bytes (bytes touched)."""
     start = time.time()
     tu = clangast.parse(source, defines, includes, cplusplus=cplusplus)
     errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
-    result = interp.run(tu, footprint=footprint)
+    result = interp.run(tu, footprint=footprint, seed=seed)
     spec = Spectrum.from_addresses(result.counts, result.sizes, result.total)
     return spec, result, errors, time.time() - start
 
