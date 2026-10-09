@@ -85,20 +85,43 @@ class Obj:
             self.values = new
         return self.values
 
-    def load(self, off):
+    def _byte_values(self, hi):
+        if getattr(self, "bytevals", None) is None or len(self.bytevals) < hi:
+            fill = 0 if self.zeroed else SENTINEL
+            new = np.full(max(hi, self.nbytes, 1), fill, dtype=np.int64)
+            if getattr(self, "bytevals", None) is not None:
+                new[: len(self.bytevals)] = self.bytevals
+            self.bytevals = new
+        return self.bytevals
+
+    def load(self, off, size=4):
+        """Integer value(s) at byte offset(s). Values of 4 bytes and more are kept per 4-byte unit,
+        smaller ones (bool, char, short fields packed together) per byte."""
+        if size < 4:
+            offs = np.asarray(off, dtype=np.int64)
+            if np.any(offs < 0):
+                return np.full(np.shape(offs), SENTINEL, dtype=np.int64)
+            return self._byte_values(int(np.max(offs)) + 1 if offs.size else 1)[offs]
         units = np.asarray(off, dtype=np.int64) // 4
         if np.any(units < 0):
             return np.full(np.shape(units), SENTINEL, dtype=np.int64)
         vals = self._value_units(int(np.max(units)) + 1 if units.size else 1)
         return vals[units]
 
-    def store(self, off, value):
+    def store(self, off, value, size=4):
         """Store integer value(s) at byte offset(s); UNK stores unknown. Repeated offsets keep the
         last value, as a sequential loop would."""
-        units = np.asarray(off, dtype=np.int64) // 4
-        if units.size == 0 or np.any(units < 0):
-            return
-        vals = self._value_units(int(np.max(units)) + 1)
+        if size < 4:
+            offs = np.asarray(off, dtype=np.int64)
+            if offs.size == 0 or np.any(offs < 0):
+                return
+            vals = self._byte_values(int(np.max(offs)) + 1)
+        else:
+            offs = np.asarray(off, dtype=np.int64) // 4
+            if offs.size == 0 or np.any(offs < 0):
+                return
+            vals = self._value_units(int(np.max(offs)) + 1)
+        units = offs
         v = SENTINEL if value is UNK else value
         if np.ndim(units) == 0:
             vals[int(units)] = int(np.asarray(v).ravel()[-1]) if np.ndim(v) else v
@@ -191,6 +214,7 @@ def group_words(cover):
 class Ptr:
     obj: object  # Obj or UNK
     off: object  # int, int array or UNK (bytes)
+    src: object = None  # where the pointer itself was loaded from (its provenance), if from memory
 
 
 @dataclass
@@ -491,13 +515,17 @@ class Interpreter:
                 return Loc(UNK, UNK, size, array)
             if _is_unk(idx, base.off):
                 return Loc(base.obj, UNK, size, array)
-            return Loc(base.obj, base.off + idx * size, size, array)
+            loc = Loc(base.obj, base.off + idx * size, size, array)
+            loc.src = base.src
+            return loc
         if kind == K.UNARY_OPERATOR and ca.unary_op(c) == "*":
             p = self.eval(ca.children(c)[0])
             size = ca.type_size(c.type) or 8
             if not isinstance(p, Ptr):
                 return Loc(UNK, UNK, size, ca.is_array(c.type))
-            return Loc(p.obj, p.off, size, ca.is_array(c.type))
+            loc = Loc(p.obj, p.off, size, ca.is_array(c.type))
+            loc.src = p.src
+            return loc
         if kind == K.MEMBER_REF_EXPR:
             kids = ca.children(c)
             fld = c.referenced
@@ -511,7 +539,9 @@ class Interpreter:
                 p = self.eval(base_c)
                 if not isinstance(p, Ptr) or _is_unk(p.obj, p.off):
                     return Loc(p.obj if isinstance(p, Ptr) else UNK, UNK, size, array)
-                return Loc(p.obj, p.off + fo, size, array)
+                loc = Loc(p.obj, p.off + fo, size, array)
+                loc.src = p.src
+                return loc
             b = self.lvalue(base_c)
             if _is_unk(b.obj, b.off):
                 return Loc(b.obj, UNK, size, array)
@@ -542,7 +572,7 @@ class Interpreter:
     def _mem_load(self, loc, type_):
         if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK:
             return UNK
-        vals = loc.obj.load(loc.off)
+        vals = loc.obj.load(loc.off, ca.type_size(type_.get_canonical()) or 4)
         if np.any(vals == SENTINEL):
             return UNK
         return _SCALAR(vals) if np.ndim(vals) else int(vals)
@@ -554,7 +584,7 @@ class Interpreter:
         if self.charging:
             loc.obj.store(np.broadcast_to(loc.off, (self.L,)) if np.ndim(loc.off) else loc.off,
                           value if value is UNK or np.ndim(value) or np.ndim(loc.off) == 0
-                          else np.broadcast_to(value, (self.L,)))
+                          else np.broadcast_to(value, (self.L,)), ca.type_size(type_.get_canonical()) or 4)
 
     def _rmw_add(self, loc, type_, delta):
         """a[i] += delta (or ++, --) for every batch point in order: returns (old, new) per point.
@@ -562,12 +592,13 @@ class Interpreter:
         delta = _as_int(delta)
         if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK or delta is UNK:
             if isinstance(loc.obj, Obj) and loc.off is not UNK:
-                loc.obj.store(loc.off, UNK)
+                loc.obj.store(loc.off, UNK, ca.type_size(type_.get_canonical()) or 4)
             return UNK, UNK
         L = self.L
         offs = np.broadcast_to(np.asarray(loc.off, dtype=np.int64), (L,))
         d = np.broadcast_to(np.asarray(delta, dtype=np.int64), (L,))
-        base = loc.obj.load(offs)
+        size = ca.type_size(type_.get_canonical()) or 4
+        base = loc.obj.load(offs, size)
         order = np.argsort(offs, kind="stable")
         so, sd = offs[order], d[order]
         first = np.concatenate([[True], so[1:] != so[:-1]])
@@ -580,7 +611,7 @@ class Interpreter:
         last = np.concatenate([so[1:] != so[:-1], [True]])
         unknown = base == SENTINEL
         final = np.where(unknown[order][last], SENTINEL, new[order][last])
-        loc.obj.store(so[last], final)
+        loc.obj.store(so[last], final, size)
         if unknown.any():
             return UNK, UNK
         if L == 1 and np.ndim(loc.off) == 0 and np.ndim(delta) == 0:
@@ -716,7 +747,7 @@ class Interpreter:
             size = ca.pointee_size(c.type) or 1
             if _is_unk(n, p.off):
                 return Ptr(p.obj, UNK)
-            return Ptr(p.obj, _SCALAR(p.off + n * size if op == "+" else p.off - n * size))
+            return Ptr(p.obj, _SCALAR(p.off + n * size if op == "+" else p.off - n * size), p.src)
         return UNK
 
     def _unary(self, c):
@@ -1292,12 +1323,13 @@ def _place_heap(events, heap_top):
     return blocks
 
 
-def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0):
+def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=None):
     """Run the program from `entry` and return its access-count spectrum (footprint: starts or bytes).
     seed: for the values drawn in place of the C library's random numbers. With bytes, heap blocks
     are placed by glibc's allocator (skeleton.Process, starting with heap_top free bytes), so a
-    block that reuses a freed block's addresses adds no new bytes."""
-    interp = Interpreter(tu, seed)
+    block that reuses a freed block's addresses adds no new bytes. make: a factory for the
+    interpreter (the C++ one), called with (tu, seed)."""
+    interp = (make or Interpreter)(tu, seed)
     fdef = interp.functions.get(entry)
     if fdef is None:
         raise ValueError(f"no definition of {entry}")
