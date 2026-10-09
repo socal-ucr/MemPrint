@@ -1574,6 +1574,11 @@ class CppInterpreter(Containers, Interpreter):
         return self._std(c, name, args_c, sret)
 
     def _std(self, c, name, args_c, sret):
+        from .interp import ATOI
+        if name in ATOI and args_c:
+            v = self._argv_value(args_c[0])
+            if v is not UNK:
+                return v
         if name == "probe":                                            # test hook: record a value
             v = self.eval(args_c[0]) if args_c else UNK
             self.probes.append(v if not isinstance(v, np.ndarray) else v.copy())
@@ -1932,15 +1937,15 @@ def _tdiv_floor(a, b):
     return np.asarray(a) // b
 
 
-def run(tu, entry="main", footprint="bytes", seed=0, heap_top=0, stubs=None, opt=3, argc=1):
+def run(tu, entry="main", footprint="bytes", seed=0, heap_top=0, stubs=None, opt=3, argc=1, argv=None):
     """Run a C++ program from `entry` and return its access-count spectrum (see interp.run)."""
     from . import interp
 
     return interp.run(tu, entry, argc, footprint, seed, heap_top,
-                      make=lambda tu_, seed_: CppInterpreter(tu_, seed_, stubs, opt))
+                      make=lambda tu_, seed_: CppInterpreter(tu_, seed_, stubs, opt), argv=argv)
 
 
-def analyze(source, defines=(), includes=(), footprint="bytes", seed=0, heap_top=0, stubs=None, opt=3):
+def analyze(source, defines=(), includes=(), footprint="bytes", seed=0, heap_top=0, stubs=None, opt=3, argv=None):
     """Parse a C++ source and run it (see static.analyze)."""
     import time
 
@@ -1949,7 +1954,7 @@ def analyze(source, defines=(), includes=(), footprint="bytes", seed=0, heap_top
     start = time.time()
     tu = ca.parse(source, defines, includes, cplusplus=True)
     errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
-    result = run(tu, footprint=footprint, seed=seed, heap_top=heap_top, stubs=stubs, opt=opt)
+    result = run(tu, footprint=footprint, seed=seed, heap_top=heap_top, stubs=stubs, opt=opt, argv=argv)
     spec = Spectrum.from_addresses(result.counts, result.sizes, result.total)
     return spec, result, errors, time.time() - start
 

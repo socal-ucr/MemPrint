@@ -321,6 +321,8 @@ _SCALAR = lambda v: v if np.ndim(v) else int(v)  # noqa: E731
 ALLOC = {"malloc": (0,), "xmalloc": (0,), "calloc": (0, 1), "polybench_alloc_data": (0, 1),
          "aligned_alloc": (1,), "realloc": (1,), "valloc": (0,), "pvalloc": (0,)}
 FREE = {"free", "polybench_free_data"}
+ATOI = {"atoi", "atol", "atoll", "strtol", "strtoul", "strtoll", "strtoull", "stoi", "stol", "stoll", "stoul",
+        "stoull"}
 RANDOM = {"rand": 2 ** 31 - 1, "random": 2 ** 31 - 1, "lrand48": 2 ** 31 - 1}  # name -> largest value
 # Inside glibc 2.28, rand() makes about 27 references per call (Pin, a loop of 10^6 calls at -O0):
 # about 24 to some 120 bytes of hot state (lock, the random_data fields, its call frame) and 3 to
@@ -371,6 +373,7 @@ class Interpreter:
         self.functions = {}
         self._global_off = 0
         self.rng = np.random.default_rng(seed)
+        self.argv = ()  # the command line (strings), argv[0] first
         for c in tu.cursor.get_children():
             if c.kind == K.FUNCTION_DECL and c.is_definition():
                 self.functions[c.spelling] = c
@@ -1006,7 +1009,36 @@ class Interpreter:
         self.access(ret_slot)
         return ret
 
+    def _argv_value(self, expr):
+        """atoi(argv[i]) and friends: the integer value of command-line argument i, or UNK."""
+        e, queue = None, [(expr, 0)]                                   # through std::string(argv[i]) for stoi
+        while queue:
+            n, depth = queue.pop(0)
+            if n.kind == K.ARRAY_SUBSCRIPT_EXPR:
+                e = n
+                break
+            if depth < 8 and n.kind in (K.UNEXPOSED_EXPR, K.CALL_EXPR, K.PAREN_EXPR, K.CSTYLE_CAST_EXPR):
+                queue += [(k, depth + 1) for k in ca.children(n)]
+        if e is None:
+            return UNK
+        base, index = ca.children(e)
+        d = ca.strip(base)
+        if d.kind != K.DECL_REF_EXPR or d.referenced is None or d.referenced.kind != K.PARM_DECL \
+                or d.referenced.spelling != "argv":
+            return UNK
+        i = _as_int(self.eval(index))
+        if i is UNK or np.ndim(i) or not 0 <= i < len(self.argv):
+            return UNK
+        try:
+            return int(str(self.argv[i]).strip(), 0)
+        except ValueError:
+            return UNK
+
     def _library(self, name, args_c):
+        if name in ATOI and args_c:
+            v = self._argv_value(args_c[0])
+            if v is not UNK:
+                return v
         args = [self.eval(a) for a in args_c]
         if name in ALLOC:
             size = 1
@@ -1448,13 +1480,16 @@ def _place_heap(events, heap_top):
     return blocks
 
 
-def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=None):
+def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=None, argv=None):
     """Run the program from `entry` and return its access-count spectrum (footprint: starts or bytes).
     seed: for the values drawn in place of the C library's random numbers. With bytes, heap blocks
     are placed by glibc's allocator (skeleton.Process, starting with heap_top free bytes), so a
     block that reuses a freed block's addresses adds no new bytes. make: a factory for the
     interpreter (the C++ one), called with (tu, seed)."""
     interp = (make or Interpreter)(tu, seed)
+    if argv is not None:                                               # the command line, argv[0] first
+        interp.argv = tuple(str(a) for a in argv)
+        argc = len(interp.argv)
     fdef = interp.functions.get(entry)
     if fdef is None:
         raise ValueError(f"no definition of {entry}")

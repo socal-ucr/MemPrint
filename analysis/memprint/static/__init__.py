@@ -20,13 +20,13 @@ def polybench_sources(root):
     return {Path(line).stem: root / line for line in lines}
 
 
-def analyze(source, defines=(), includes=(), cplusplus=False, footprint="starts", seed=0):
+def analyze(source, defines=(), includes=(), cplusplus=False, footprint="starts", seed=0, argv=None):
     """Run the interpreter on one program. Returns (Spectrum, interp.Result, parse errors, seconds).
     footprint: starts (largest access per start address) or bytes (bytes touched)."""
     start = time.time()
     tu = clangast.parse(source, defines, includes, cplusplus=cplusplus)
     errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
-    result = interp.run(tu, footprint=footprint, seed=seed)
+    result = interp.run(tu, footprint=footprint, seed=seed, argv=argv)
     spec = Spectrum.from_addresses(result.counts, result.sizes, result.total)
     return spec, result, errors, time.time() - start
 
@@ -47,5 +47,5 @@ def save(path, spec, result, errors, seconds):
 
 def load(path):
     d = np.load(path)
-    return Spectrum.from_dict(d), {k: float(d[k]) for k in ("total", "unresolved", "uncertain", "data_loops",
-                                                              "data_branches", "errors", "seconds")}
+    keys = ("total", "unresolved", "uncertain", "data_loops", "data_branches", "errors", "seconds")
+    return Spectrum.from_dict(d), {k: float(d[k]) if k in d.files else float("nan") for k in keys}

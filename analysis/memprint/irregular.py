@@ -103,7 +103,7 @@ def _mape(pred, truth):
     return float(np.mean(np.abs(pred - truth) / truth) * 100)
 
 
-def evaluate(all_data, spectra, polybench=None, baselines=None):
+def evaluate(all_data, spectra, polybench=None, baselines=None, kernels=None):
     """all_data / spectra: kernel -> allData table / {config: Spectrum}. polybench: name -> allData
     (its models are borrowed). baselines: kernel -> Baseline to use instead of fitting one on
     BASELINE_FROM. Returns (errors, footprints)."""
@@ -117,7 +117,7 @@ def evaluate(all_data, spectra, polybench=None, baselines=None):
     pb_z = pd.DataFrame(pb_z).T
 
     errors, footprints = [], []
-    for kernel in all_data:
+    for kernel in kernels or all_data:
         if baselines and kernel in baselines:
             baseline = baselines[kernel]
         else:
