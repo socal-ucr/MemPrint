@@ -283,9 +283,109 @@ def numbers():
     write("numbers", text)
 
 
+OVERHEAD_LABEL = {
+    "native": ("Native run (reference)", "--"),
+    "instrumentation only": ("Pin, instrumentation only (reference)", "--"),
+    "full trace": ("Full trace, Pin splitter (exact footprint)", "the full trace"),
+    "static-fp": ("Static footprint", "interpreter"),
+    "static-alpha": ("Static $\\alpha$", "interpreter + sampled run"),
+    "pooled-static": ("Pooled regression + static $\\alpha$", "interpreter + sampled run"),
+    "nn-static": ("Nearest model by $\\hat z$", "interpreter + sampled run"),
+    "mix-static": ("RBF mixture by $\\hat z$", "interpreter + sampled run"),
+    "nn-ast": ("Nearest model by AST counts", "parse + sampled run"),
+    "mean": ("Uniform mixture", "sampled run"),
+    "own": ("Own model (\\memprint{})", "6 full traces + sampled run"),
+    "nn-measured": ("Nearest model by measured $z$", "full trace + sampled run"),
+    "mix-measured": ("RBF mixture by measured $z$", "full trace + sampled run"),
+    "oracle": ("Best borrowed model (oracle)", "full trace"),
+}
+
+
+def overhead_table():
+    o = pd.read_csv(D / "overhead_methods.csv").set_index(["method", "split"])
+    lines = ["\\begin{tabular}{llrrrrrrrr}", "\\toprule",
+             "Method & Runs of $C$ & \\multicolumn{4}{c}{EXTRA (MEDIUM)} & \\multicolumn{4}{c}{INTER (SMALL2)} \\\\",
+             "\\cmidrule(lr){3-6}\\cmidrule(lr){7-10}",
+             " & & s & $\\times$native & $\\times$trace & MAPE & s & $\\times$native & $\\times$trace & MAPE \\\\",
+             "\\midrule"]
+    for m, (name, runs) in OVERHEAD_LABEL.items():
+        cells = []
+        for split in ("EXTRA", "INTER"):
+            r = o.loc[(m, split)]
+            mape = "--" if not np.isfinite(r.median_mape) else f"{r.median_mape:.2f}"
+            if m in ("native", "full trace", "instrumentation only"):
+                mape = "0" if m == "full trace" else "--"
+            cells += [f"{r.median_s:.2f}" if r.median_s < 10 else f"{r.median_s:.0f}", f"{r.median_x_native:.0f}",
+                      f"{r.median_x_full_trace:.2f}", mape]
+        lines.append(f"{name} & {runs} & " + " & ".join(cells) + " \\\\")
+        if m in ("full trace", "mean"):
+            lines.append("\\addlinespace")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    write("overhead", "\n".join(lines) + "\n")
+
+
+def baseline_sensitivity_tables():
+    s = pd.read_csv(D / "baseline_sensitivity_summary.csv", index_col=0)
+    lines = ["\\begin{tabular}{lrrr}", "\\toprule",
+             "Runtime baseline fitted on & median & 90th percentile & max \\\\", "\\midrule"]
+    for v, r in s.iterrows():
+        lines.append(f"{'no baseline' if v == 'none' else v} & {r['50%']:.2f} & {r['90%']:.2f} & {r['max']:.2f} \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    write("baseline_sensitivity", "\n".join(lines) + "\n")
+    c = pd.read_csv(D / "baseline_sensitivity_by_config.csv", index_col=0)
+    lines = ["\\begin{tabular}{lrrrrr}", "\\toprule",
+             "Config & median truth (KB) & baseline share & error, no baseline & error, 1 kernel & error, 26 \\\\",
+             "\\midrule"]
+    for cfg, r in c.iterrows():
+        lines.append(f"{cfg} & {r.median_truth / 1024:.0f} & {r.baseline_share:.1f}\\% & {r.error_none:.1f}\\% & "
+                     f"{r.error_1:.2f}\\% & {r.error_all:.2f}\\% \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    write("baseline_by_config", "\n".join(lines) + "\n")
+
+
+def overhead_numbers():
+    o = pd.read_csv(D / "overhead_methods.csv").set_index(["method", "split"])
+    f = pd.read_csv(D / "overhead_facts.csv", index_col=0)["value"]
+    s = pd.read_csv(D / "baseline_sensitivity_summary.csv", index_col=0)
+    vals = {
+        "ovStaticS": o.loc[("static-fp", "EXTRA"), "median_s"],
+        "ovStaticX": o.loc[("static-fp", "EXTRA"), "median_x_native"],
+        "ovSampS": o.loc[("mean", "EXTRA"), "median_s"],
+        "ovSampX": o.loc[("mean", "EXTRA"), "median_x_native"],
+        "ovSampXInter": o.loc[("mean", "INTER"), "median_x_native"],
+        "ovFullS": o.loc[("full trace", "EXTRA"), "median_s"],
+        "ovFullX": o.loc[("full trace", "EXTRA"), "median_x_native"],
+        "ovOwnS": o.loc[("own", "EXTRA"), "median_s"],
+        "ovOwnX": o.loc[("own", "EXTRA"), "median_x_native"],
+        "ovOwnInterTrace": o.loc[("own", "INTER"), "median_x_full_trace"],
+        "ovInstrX": o.loc[("instrumentation only", "EXTRA"), "median_x_native"],
+        "ovStaticXmax": f["interp_x_native_max"], "ovOneTime": f["one_time_s"],
+        "ovSmallestTrace": f["smallest_full_trace_s"],
+        "bsNone": s.loc["none", "50%"], "bsNonePninety": s.loc["none", "90%"],
+        "bsOne": s.loc["1 other kernel", "50%"], "bsOnePninety": s.loc["1 other kernel", "90%"],
+        "bsOneMax": s.loc["1 other kernel", "max"], "bsAllPninety": s.loc["all 26 others", "90%"],
+        "bsAllMax": s.loc["all 26 others", "max"],
+    }
+    def fmt(k, v):
+        if k in ("ovOneTime",):
+            return f"{v:,.0f}"
+        if k.endswith("X") or k.endswith("Xmax") or k.endswith("XInter"):
+            return f"{v:.0f}"
+        if k in ("ovOwnInterTrace",):
+            return f"{v:.1f}"
+        if k.startswith("ov"):
+            return f"{v:.1f}" if v >= 10 else f"{v:.2f}"
+        return f"{v:.2f}"
+    text = "".join(f"\\newcommand{{\\num{k}}}{{{fmt(k, v)}}}\n" for k, v in vals.items())
+    text += (f"\\newcommand{{\\numovSlowE}}{{{int(f['interp_slower_than_sampler_extra'])}}}\n"
+             f"\\newcommand{{\\numovSlowI}}{{{int(f['interp_slower_than_sampler_inter'])}}}\n")
+    write("numbers_overhead", text)
+
+
 if __name__ == "__main__":
     for fn in (lowo_table, lowo_per_kernel, similarity_table, idioms_table, gap_pilot_table, auto_table,
-               auto_scales_table, csr_table, cost_table, baseline_table, blind_tables):
+               auto_scales_table, csr_table, cost_table, baseline_table, blind_tables, overhead_table,
+               baseline_sensitivity_tables, overhead_numbers):
         fn()
     try:
         numbers()

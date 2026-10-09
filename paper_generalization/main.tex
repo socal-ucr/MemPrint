@@ -44,6 +44,7 @@
 \newcommand{\zhat}{\hat z}
 \newtheorem{proposition}{Proposition}
 \input{tables/numbers.tex}
+\input{tables/numbers_overhead.tex}
 
 \title{From Source Code to Sampling Correction:\\Predicting Memory-Footprint Models for Unseen Programs}
 \author{Nafis Mustakin\\University of California, Riverside}
@@ -78,7 +79,9 @@ interpreter that runs GAP's own source for all six kernels on both graph familie
 footprint within 3\% and $\alpha$ within about a point of the hand-written skeleton for pr, bfs and tc. A blind test
 on two programs never used in development, with predictions committed before they were traced, passes clearly on
 HPCCG (footprint within 2.1\%, $\alpha$ within 0.5--4.4\%, against 11--12\% for its own model) and partly on LULESH
-(footprint within 4.2\%, $\alpha$ within 5\% at small and middle meshes but 28--43\% at the largest). We describe
+(footprint within 4.2\%, $\alpha$ within 5\% at small and middle meshes but 28--43\% at the largest). Where the interpreter applies, the static
+footprint is cheaper than \memprint{}'s own sampled run and more accurate than its model, but it needs one traced
+program per runtime for its baseline, and programs it cannot run still need sampling. We describe
 every component in enough detail to re-implement it, and we report the limitations, the post-hoc corrections and the
 parts of the evaluation that are not blind.
 \end{abstract}
@@ -669,6 +672,46 @@ times.}
 \end{minipage}
 \end{figure}
 
+\subsection{Dependence on the runtime baseline}
+\label{sec:baseline-dependence}
+
+The static footprint is not purely static: the runtime baseline (\secref{sec:baseline}) is fitted on traces of
+\emph{other} programs that share the compiler, C library and harness. \tabref{tab:baseline-sensitivity} shows how
+much the prediction leans on it and how many traced programs it needs, refitting it, for every held-out kernel, on 1 or 3
+other kernels drawn at random (five draws each) or on all 26 others (\code{baseline\_sensitivity.py}).
+
+\begin{table}[!htbp]
+\centering\small
+\begin{minipage}[t]{0.42\linewidth}
+\centering
+\fittable{tables/baseline_sensitivity.tex}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.55\linewidth}
+\centering
+\fittable{tables/baseline_by_config.tex}
+\end{minipage}
+\caption[Dependence on the runtime baseline]{Static footprint error (\%) over all 27 kernels and seven configs, each
+kernel held out, by what the runtime baseline is fitted on (left), and by input size (right): the median true
+footprint, the baseline's share of it, and the median error without a baseline, with one fitted on one other kernel,
+and on all 26.}
+\label{tab:baseline-sensitivity}
+\end{table}
+
+\begin{itemize}
+\item \textbf{The baseline is essential}: without it the median error is \numbsNone\% (90th percentile
+\numbsNonePninety\%). It is 89\% of the true footprint at MINI, 30\% at SMALL2 and still 8.5\% at MEDIUM, so it matters
+most for small inputs.
+\item \textbf{One traced program nearly suffices}: a baseline fitted on a single other kernel gives a median error of
+\numbsOne\% (90th percentile \numbsOnePninety\%, worst \numbsOneMax\%). More programs mainly shrink the tail (all 26:
+90th percentile \numbsAllPninety\%, worst \numbsAllMax\%); the median is slightly higher with 26, as one fit has to suit
+all of them.
+\item \textbf{The cost is one trace per runtime, not per program.} The smallest full trace (a kernel at MINI) takes
+\numovSmallestTrace\,s. A program with another runtime needs its own calibration traces: libstdc++ at \code{-O3}
+has a baseline of 463~KB (fitted on GAP), and MPI or a language runtime would need theirs. In the blind test
+(\secref{sec:blind}), GAP's baseline transferred to two other C++ programs with footprint errors within 2.1\% and
+4.2\%; their own I/O (iostream, report files) is not part of it.
+\end{itemize}
+
 \subsection{Similarity: does $\zhat$ rank transferable models?}
 
 For each held-out kernel we compute the Spearman rank correlation~\cite{spearman1904} between the distance from $C$
@@ -704,11 +747,54 @@ from source (dotted), for six kernels.}
 \label{fig:reuse}
 \end{figure}
 
-\subsection{Cost}
+\subsection{Cost of each method}
+\label{sec:overhead}
 
 \figref{fig:pb-cost}a shows the interpreter's run time against the number of references it charges: below 0.2\,s up to
-$10^7$ references, then roughly linear, at most \numinterpMaxSeconds\,s. A full Pin trace of the same MEDIUM inputs
-takes minutes.
+$10^7$ references, then roughly linear, at most \numinterpMaxSeconds\,s. To compare the methods of \tabref{tab:lowo} on
+cost as well as accuracy, we measured what each needs for the held-out kernel $C$ at its test config
+(\tabref{tab:overhead}; \code{paper\_generalization/overhead.py}):
+\begin{itemize}
+\item the \term{full trace} (Pin splitter at the test config), which gives the exact footprint;
+\item the \term{sampled run}, the run \memprint{} deploys: Pin's sampler with \code{run.sh}'s defaults (\code{-i 1000
+-s 100 -r 10}). Every method that applies a regression model, its own or a borrowed one, needs it, because the model
+predicts $\alpha$ from that run's bin footprint and spread;
+\item the interpreter (bytes touched, one run at a time) and a clang parse;
+\item for the own model, the full traces of $C$'s six other configs it is trained on.
+\end{itemize}
+The methods that borrow known models, the pooled regression and the runtime baseline also need full traces of other
+programs once: \numovOneTime\,s for all 27 kernels at all seven configs. Sampled and instrumentation-only runs were
+measured with four kernels in parallel on a 32-core node; the full traces and native times are those of the traces
+used throughout.
+
+\begin{table}[!htbp]
+\centering\small
+\caption[Cost of each method]{Cost of each method of \tabref{tab:lowo} for the held-out kernel at its test config:
+median over the 27 kernels of the seconds, of the ratio to the native run, and of the ratio to a full trace, with the
+median MAPE of \tabref{tab:lowo} (\%). ``Runs of $C$'' is what the method needs of the held-out kernel itself.}
+\label{tab:overhead}
+\fittable{tables/overhead.tex}
+\end{table}
+
+\begin{itemize}
+\item \textbf{The static footprint is the cheapest and the most accurate.} It runs nothing of $C$: the interpreter takes
+a median of \numovStaticS\,s at MEDIUM (\numovStaticX$\times$ native, 4\% of a full trace), less than \memprint{}'s one
+sampled run (\numovSampS\,s, \numovSampX$\times$ native). The interpreter is slower than the sampled run for only
+\numovSlowE{} (EXTRA) and \numovSlowI{} (INTER) of the 27 kernels, nussinov and floyd-warshall, the two it predicts least
+accurately.
+\item \textbf{The own model is the most expensive usable method}: its six training traces take a median of
+\numovOwnS\,s for EXTRA (\numovOwnX$\times$ native, 0.78 of a full trace at the test config), and for INTER, whose
+training includes the larger MEDIUM config, \numovOwnInterTrace{} times the full trace it is meant to avoid.
+\item \textbf{Static $\alpha$ is dominated} by the static footprint: it needs the same interpreter run plus a sampled
+run, and is less accurate (\numalphaExtra\% against \numfpExtra\%). Its value is where the footprint itself is not
+the target, e.g.\ in correcting sampled bins, or where a sampled run is taken anyway.
+\item \textbf{Borrowing by measured $z$, and the oracle, cost at least a full trace} of $C$, which already gives the exact
+footprint; they are upper bounds for the descriptor, not methods.
+\item \textbf{The interpreter's cost grows with the program's references}, like the program itself: at
+\numovStaticX$\times$ native (up to \numovStaticXmax$\times$) it is of the order of Pin's instrumentation alone
+(\numovInstrX$\times$ at MEDIUM). PolyBench runs for milliseconds, so this is cheap here; for a run of hours it is not,
+and only symbolic counting (Polly, Barvinok) would make the affine part independent of the input size.
+\end{itemize}
 
 \begin{figure}[!htbp]
 \centering
@@ -1241,6 +1327,26 @@ Once the spectrum is available, borrowing a model is unnecessary: the static $\a
 including the oracle. Similarity in $\zhat$ remains useful where the static prediction is not trusted but some
 program's model must be chosen, and as an out-of-distribution signal (miniVite).
 
+\paragraph{Does the static footprint make \memprint{} unnecessary?}
+Where the interpreter applies, it does: on PolyBench the static footprint is more accurate than \memprint{}'s own
+model (\numfpExtra\% against \numownExtra\%), costs less than \memprint{}'s single sampled run, needs no traces of the
+program, and makes even the static $\alpha$ redundant (\secref{sec:overhead}). It does not replace sampling in general:
+\begin{itemize}
+\item It needs the program's whole input in its source or generated from a known distribution, and code the interpreter
+models. Programs that read data files, use MPI or unmodelled libraries, or whose control depends on data the
+interpreter cannot compute, fall to the gate; miniVite runs with coverage 0.06.
+\item It predicts, it does not measure. When the counts are wrong there is no signal: LULESH's footprint was within
+4.2\%, but its $\alpha$ was 28--43\% off at the largest meshes (\secref{sec:blind}). A sampled run observes the
+execution that actually happens.
+\item It needs traces of other programs with the same runtime for the baseline (\secref{sec:baseline-dependence}), and
+its cost grows with the program's references, of the order of Pin's instrumentation, so long runs need symbolic
+counting.
+\item It gives the whole-run footprint only. The footprint over time and its peak need the address-sampling and
+windowed methods of the companion report~\cite{timeline2026}.
+\end{itemize}
+So the static footprint is the first choice for programs the gate admits, and \memprint{} (or training-free sampling)
+for the rest.
+
 \paragraph{What generalises.}
 Generic and reusable: the moment formulas, the per-unit counting, the glibc model, the library cost curves (sort,
 Mersenne Twister, \code{rand}), the interpreters' batch execution, the \code{-O3} register and load model and the
@@ -1314,6 +1420,8 @@ benchmark's own source.
 Everything in this report is regenerated by
 \begin{lstlisting}
 python paper_generalization/compute.py                                # data/*.csv
+python paper_generalization/overhead.py                               # data/overhead_*.csv
+python paper_generalization/baseline_sensitivity.py                   # data/baseline_sensitivity*.csv
 python paper_generalization/make_figures.py                           # figures/*.pdf
 python paper_generalization/make_tables.py                            # tables/*.tex
 \end{lstlisting}
