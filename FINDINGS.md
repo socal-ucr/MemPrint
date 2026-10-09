@@ -6,6 +6,110 @@ Goal: reconstruct a program's live memory footprint over time from a sparse Pin 
 
 On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This branch adds per-address sample counts to the Pin tool and tries estimators of the memory that was never sampled.
 
+## Unseen workloads from source code alone (branch `static-generalization`)
+
+Summary: across the 27 PolyBench kernels we tested, an unseen workload's footprint and α can be predicted from its source code alone, more accurately than with its own trained model. Each kernel was held out in turn and predicted from its source and the other 26.
+- **Footprint.** Static analysis plus a runtime baseline fitted on the other kernels predicts the footprint within a median of 0.09% when the largest input is held out (EXTRA), and 0.28% when the middle input is held out (INTER).
+- **α.** The α this implies is within a median of 4.5% (EXTRA) and 8.0% (INTER). The kernel's own α model, trained on its own smaller inputs, gets 19.4% and 12.3%.
+- **Similarity.** A memory-behaviour descriptor z, predicted from source, ranks which known model transfers best (median Spearman ρ = 0.85). This is as well as the measured z does (0.85), and much better than clang AST node counts (0.31).
+- **Irregular code.** On miniVite, GAP and darknet a static access-idiom check flags the code as outside what this covers. On miniVite even the best borrowed PolyBench model is 53% off, so those workloads should use training-free sampling.
+
+### Why α is decided by the access-count spectrum
+
+The splitter keeps each reference with probability 1/k, independently, and puts it in a bin. An address referenced c times is therefore in a given bin with probability p = 1 − (1 − 1/k)^c. With s_a the size of address a:
+- E[m] = Σ s_a p_a
+- Var[m] = Σ s_a² p_a (1 − p_a)
+- truth = Σ s_a
+
+So the number of references to each address (the spectrum) determines α_k = truth / E[m] and the bins' spread at every interval k. This holds in expectation, without fitting anything. The per-workload regression learns this function of the spectrum implicitly, for one workload at a time.
+
+The memory-behaviour descriptor, for every interval k, has two parts:
+- reuse(k) = log α_k / log k. It is 1 when no address is sampled twice and falls towards 0 under heavy reuse.
+- spread(k) = log(SD_k / m_k).
+
+### Method
+
+1. **Spectrum from source** (`analysis/memprint/static/interp.py`). A vectorised abstract interpreter runs the program from `main()` over the clang AST, without its data.
+   - It tracks integer variables exactly and runs a counted loop's iterations all at once as numpy arrays.
+   - It charges every reference an unoptimised (`-O0`, as traced) build makes: locals and parameters in stack slots, array elements, `.rodata` constants, and the return address and frame pointer.
+   - Statements under a data-dependent branch are charged half to each arm and counted as uncertain. Addresses that depend on data are counted as unresolved.
+   - Coverage is the share of references that are neither.
+   - gemm MEDIUM's arrays come out exact (1,158,400 B). Its reference count is 86% of Pin's; the gap is extra `-O0` stack traffic on addresses that are always sampled.
+   - A kernel and config takes 0.1–34 s.
+2. **Runtime baseline.** What the loader, libc and malloc touch is not in the program text. It is modelled as a shared spectrum: non-negative bytes and addresses at counts 2^0 … 2^26, fitted by NNLS to the known workloads' bin footprints.
+   - Fitted on all 27 kernels: 106 KB over 22.6K addresses referenced once each, plus 1.8 KB referenced 128–256 times.
+   - In the evaluation it is refitted without the held-out kernel every time.
+3. **Idioms for code the interpreter cannot run** (`static/idioms.py`).
+   - **References** are classed as affine, indirect (`A[B[i]]`, hash-map lookups), pointer, or other.
+   - **Loops** are classed as counted, data-bounded, or while. A loop is data-bounded when its bound is a load that depends on an enclosing loop variable (`row[v+1]`, or an `edge_range(v, e0, e1)` out-parameter).
+   - Each reference is weighted by 10^(loop depth).
+   - **Gate:** fall back to training-free sampling if interpreter coverage is below 0.5, if the affine share is below 0.95, or if more than 5% of loops are data-bounded or while loops.
+4. **Leave one workload out** (`analysis/memprint/lowo.py`). Each held-out kernel C is predicted at its EXTRA (largest) or INTER (middle) config, for every bin at k = 100 … 100000. Only C's source is used; its traces are used only for scoring.
+
+### Accuracy (MAPE of α on the held-out kernel, 27 kernels)
+
+| Method | EXTRA median | INTER median | EXTRA mean | INTER mean |
+|---|---|---|---|---|
+| static footprint (source + baseline, no sampling) | 0.09 | 0.28 | 0.13 | 0.53 |
+| static α (spectrum moments) | 4.48 | 7.96 | 5.54 | 8.59 |
+| pooled regression + log static α as a feature | 6.34 | 8.17 | 9.51 | 8.91 |
+| nearest known model by z predicted from source (ẑ) | 13.98 | 14.81 | 19.36 | 18.17 |
+| RBF mixture of known models by ẑ | 15.45 | 13.00 | 18.59 | 18.28 |
+| nearest by measured z (upper bound for ẑ) | 14.96 | 12.44 | 18.40 | 19.05 |
+| mixture by measured z | 12.52 | 11.30 | 17.78 | 16.82 |
+| nearest by AST node counts | 23.57 | 17.51 | 147.21 | 36.69 |
+| uniform mixture (no similarity) | 80.84 | 44.39 | 144.66 | 81.34 |
+| C's own model (needs C's traces) | 19.40 | 12.29 | 19.59 | 12.19 |
+| best borrowed model, chosen after the fact | 8.35 | 6.68 | 11.63 | 9.23 |
+
+![errors](figures/static/lowo_errors.pdf)
+
+- **Predicting α beats borrowing a model.** Even the best borrowed model, picked after seeing the error, is worse (8.4%) than predicting α from C's spectrum (4.5%).
+- **Similarity does help when borrowing.** Picking a model by ẑ halves to quarters the error of a uniform mixture (14–15% against 44–81%).
+- **ẑ is as good as measuring z.** It matches measured z to a reuse RMSE of 0.006–0.007 ([curves](figures/static/lowo_reuse_curves.pdf)), and it predicts transfer error as well as the measured z does ([ρ](figures/static/lowo_similarity_validity.pdf)):
+
+| Distance used | ρ EXTRA (median) | ρ INTER (median) |
+|---|---|---|
+| ẑ | 0.854 | 0.817 |
+| measured z | 0.853 | 0.830 |
+| AST node counts | 0.307 | 0.293 |
+
+- **Worst static-α cases.** These are floyd-warshall (14.8% / 17.6%) and nussinov (18.4% / 19.9%), the two kernels with data-dependent min/max ternaries. Their interpreter coverage is 0.77; the footprint is still within 0.7% because both arms touch the same arrays.
+
+### Irregular workloads: the gate
+
+| Program | Affine share | Data-bounded or while loops | Gate |
+|---|---|---|---|
+| 30 PolyBench kernels | ≥ 0.986 | 0 | in |
+| miniVite | 0.79 | 0.53 | out (interpreter coverage 0.06) |
+| GAP bfs / pr / tc | 0.72 / 0.68 / 0.20 | 0.53 / 0.63 / 0.90 | out |
+| darknet | 0.79 | 0.22 | out |
+
+On miniVite (largest config, 16384), the gate's call is right:
+- Its own model gets 11.6%.
+- The nearest PolyBench model by measured z (nussinov) gets 73.5%. The best PolyBench model chosen after the fact gets 53.1%, and the median PolyBench model 84.4%.
+- Its measured z is 4.25 from the nearest PolyBench kernel. PolyBench kernels' own nearest-neighbour distances have a median of 0.81 and a maximum of 2.50.
+
+### Limitations
+
+- **One runtime.** The baseline is shared because every PolyBench kernel uses the same harness, libc and compiler. A workload with another runtime (C++, MPI, OpenMP) needs its own baseline, or the gate.
+- **Affine code only.** Irregular workloads get a correct "don't trust this" answer, not a prediction. Predicting their z would need traced irregular workloads to learn from (the plan's synthetic kernels), which this branch does not have.
+- **No Polly or islpy.** Neither is installed here. The interpreter enumerates iteration points exactly instead of counting them symbolically, so very large inputs cost time in proportion to their reference count. MEDIUM needed at most 34 s.
+- **Not the `-O0` stack traffic of gcc exactly.** The interpreter misses about 14% of the references, all on stack addresses that are always sampled. This does not change α.
+
+### Reproduce
+
+```
+pip install -r analysis/requirements.txt    # now includes libclang
+export PYTHONPATH=$PWD/analysis
+P=~/memory_estimator/workloads/PolyBenchC-4.2.1   # data/<wl>_allData.csv as for `build`
+python -m memprint static spectra --polybench $P --jobs 12          # data/static/<wl>-<config>.npz
+python -m memprint static idioms --polybench $P \
+    --program miniVite=<dir>:<dir>/main.cpp --include <mpi include>  # data/static_idioms.csv
+python -m memprint static lowo --ast ~/memory_estimator/tools/ast_features.csv --transfer miniVite
+                                                                     # data/lowo_*.csv, figures/static/
+```
+
 ## Windowed sampling: watching part of a run (branch `windowed`)
 
 Summary: for long runs, the Pin tool can watch memory accesses for a small fraction of the run, as long as it tracks allocations and page residency the whole time. All results below count the footprint as **bytes touched** (see the next section) and were re-measured on 2026-10-08 against new full traces. At 5% watched the live footprint over time is reconstructed:

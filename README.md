@@ -139,6 +139,18 @@ Put changes against the upstream sources in `patches/*.patch`. `scripts/setup.sh
 
 When run on the original traces and data, all 16 figures come out pixel-identical to the published ones, and `build --latex` reproduces every cell of the training and test accuracy tables.
 
+## Unseen workloads from source (experimental)
+
+`python -m memprint static ...` predicts a workload's footprint and α from its C source, with no traces of it. It does this by running the source through an abstract interpreter (`analysis/memprint/static/`) that counts the references to each address an `-O0` build makes, the access-count spectrum. The splitter's bin statistics then follow in closed form. The commands:
+
+| Command | What it does | Output |
+|---|---|---|
+| `static spectra --polybench DIR` | computes each PolyBench kernel's spectrum at every config | `data/static/<wl>-<config>.npz` |
+| `static idioms --polybench DIR [--program name=root:files]` | classifies the access idioms of code the interpreter cannot run, and decides whether the static route applies | `data/static_idioms.csv` |
+| `static lowo [--ast CSV] [--transfer miniVite]` | evaluates leave one workload out: each kernel is predicted from its source and the other kernels' traces | `data/lowo_*.csv`, `figures/static/` |
+
+The parser is libclang (`pip install libclang`), so no clang binary is needed. Results are in FINDINGS.md, section "Unseen workloads from source code alone".
+
 ## Footprint over time (experimental)
 
 The Pin tool can also record how the footprint evolves:

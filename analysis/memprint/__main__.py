@@ -237,6 +237,80 @@ def cmd_plot(args, paths):
             paper.FIGURES[name](out)
 
 
+def _spectrum_job(polybench, workload, config, out):
+    from . import static
+
+    spec, result, errors, seconds = static.analyze_polybench(polybench, workload, config)
+    static.save(out, spec, result, errors, seconds)
+    return f"{workload} {config}: {seconds:.1f}s footprint {spec.footprint:.0f} B, coverage {result.coverage:.3f}"
+
+
+def cmd_static(args, paths):
+    from concurrent.futures import ProcessPoolExecutor
+
+    from . import lowo, static
+    from .static import idioms
+
+    out = paths.data / "static"
+    workloads = args.workloads or [w for w in default_workloads() if w != "miniVite"]
+    if args.action == "spectra":
+        jobs = [(w, c) for w in workloads for c in static.POLYBENCH_CONFIGS
+                if args.force or not (out / f"{w}-{c}.npz").exists()]
+        with ProcessPoolExecutor(args.jobs) as pool:
+            futures = [pool.submit(_spectrum_job, args.polybench, w, c, out / f"{w}-{c}.npz") for w, c in jobs]
+            for (w, c), f in zip(jobs, futures):
+                try:
+                    print(f.result(), flush=True)
+                except Exception as e:  # a config the kernel does not define fails to parse
+                    print(f"{w} {c}: failed ({e})", flush=True)
+        return
+
+    if args.action == "idioms":
+        rows = {k: idioms.features([src], defines=["MEDIUM_DATASET"], includes=[Path(args.polybench) / "utilities"])
+                for k, src in static.polybench_sources(args.polybench).items()}
+        for spec in args.program or []:  # name=root:file[,file...]
+            name, rest = spec.split("=", 1)
+            root, files = rest.split(":", 1)
+            rows[name] = idioms.features(files.split(","), root=root, includes=args.include or [])
+        table = pd.DataFrame(rows).T
+        table["out_of_distribution"] = [idioms.out_of_distribution(r) for _, r in table.iterrows()]
+        write(table, paths.data / "static_idioms.csv")
+        print(table.round(3).to_string())
+        return
+
+    # lowo: leave one workload out
+    spectra = {}
+    for f in sorted(out.glob("*.npz")):
+        w, c = f.stem.rsplit("-", 1)
+        if w in workloads:
+            spectra[(w, c)] = static.load(f)[0]
+    all_data = {w: paths.read_all_data(w) for w in sorted({w for w, _ in spectra})}
+    ast = None
+    if args.ast:
+        ast = pd.read_csv(args.ast)
+        ast.index = ast.pop("file").str.replace(".c.ast.json", "", regex=False)
+        ast = np.log1p(ast.astype(float))
+    known = lowo.load(all_data, spectra)
+    errors, validity, descriptors = lowo.evaluate(known, ast)
+    write(errors, paths.data / "lowo_errors.csv", index=False)
+    write(validity, paths.data / "lowo_validity.csv", index=False)
+    write(descriptors, paths.data / "lowo_descriptors.csv")
+    checks = [lowo.transfer_check(w, paths.read_all_data(w), known) for w in args.transfer or []]
+    if checks:
+        write(pd.DataFrame(checks), paths.data / "lowo_transfer.csv", index=False)
+    pd.set_option("display.width", 200)
+    print("\nMAPE (%) of alpha on the held-out workload's test config:")
+    print(lowo.summarize(errors).round(2).to_string())
+    print("\nSpearman rho between descriptor distance and transfer error (median over held-out workloads):")
+    print(validity.groupby("split")[["rho_static", "rho_measured", "rho_ast", "zhat_reuse_rmse"]].median()
+          .round(3).to_string())
+    for check in checks:
+        print(f"\n{check}")
+    from .plots.static import plot_lowo
+
+    plot_lowo(errors, validity, descriptors, paths.figures / "static")
+
+
 def cmd_paper_figures(args, paths):
     """Every data figure of the paper, under its file name in the paper."""
     from .plots import alpha, massif, paper, sd_config
@@ -304,6 +378,21 @@ def main(argv=None):
     p.add_argument("--run", help="estimate/forecast/windowed: directory with the timelines (default traces/<wl>)")
     p.add_argument("--upto", type=float, help="forecast: use the run up to this many memory references")
     p.set_defaults(func=cmd_timeline)
+
+    p = sub.add_parser("static", help="static analysis of workload sources and leave-one-workload-out evaluation")
+    p.add_argument("action", choices=["spectra", "idioms", "lowo"],
+                   help="spectra: PolyBench access-count spectra -> data/static/<wl>-<config>.npz; "
+                        "idioms: access-idiom features -> data/static_idioms.csv; "
+                        "lowo: predict each workload from its source and the others -> data/lowo_*.csv")
+    p.add_argument("workloads", nargs="*", help="default: the PolyBench kernels in workloads.txt")
+    p.add_argument("--polybench", help="PolyBench/C source tree (spectra, idioms)")
+    p.add_argument("--jobs", type=int, default=8, help="spectra: parallel processes")
+    p.add_argument("--force", action="store_true", help="spectra: recompute existing spectra")
+    p.add_argument("--program", nargs="*", help="idioms: more programs as name=root:file[,file...]")
+    p.add_argument("--include", nargs="*", help="idioms: include directories for --program")
+    p.add_argument("--ast", help="lowo: clang AST node counts per kernel (CSV) for the AST-similarity baseline")
+    p.add_argument("--transfer", nargs="*", help="lowo: workloads without a spectrum to check borrowed models on")
+    p.set_defaults(func=cmd_static)
 
     p = sub.add_parser("paper-figures", help="regenerate the paper's data figures into figures/paper/")
     p.add_argument("--massif-csv", help="CSV path, may contain {workload} (default results/<wl>/massif.csv)")

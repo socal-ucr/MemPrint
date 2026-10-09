@@ -4,3 +4,4 @@ scipy>=1.14
 scikit-learn>=1.5
 matplotlib>=3.9
 seaborn>=0.13
+libclang>=18.1
