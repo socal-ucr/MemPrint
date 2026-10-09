@@ -153,8 +153,51 @@ def _body(fdef):
     return None
 
 
+def _provenance(obj, off):
+    """Where a pointer was loaded from, the same in every batch: a field of a small object (its offset),
+    or an element of an array (which element is not recorded)."""
+    if np.ndim(off) == 0 and (obj.nbytes or 0) <= 256:
+        return (id(obj), int(off))
+    return (id(obj), None)
+
+
+class _Batch:
+    """The load cache of one batch: {object id: {(size, provenance): [offsets per point or scalar]}}."""
+    __slots__ = ("w", "entries", "link", "absorbed")
+    LIMIT = 6
+
+    def __init__(self, w):
+        self.w = w
+        self.entries = {}
+        self.link = None  # (parent weights, index into the parent's points or None)
+        self.absorbed = {}  # (object id, key) -> the entry that subsets' latest loads are written into
+
+    def remember(self, obj_key, key, off):
+        lst = self.entries.setdefault(obj_key, {}).setdefault(key, [])
+        lst.insert(0, np.array(off) if np.ndim(off) else int(off))
+        del lst[self.LIMIT:]
+
+    def absorb(self, child, idx, n):
+        """A subset's latest loads, as this batch's (n points; the subset's are idx). A point keeps one
+        value per pointer, the latest, as a register would: successive subsets (the iterations of a while
+        loop's condition) overwrite one entry instead of adding entries."""
+        for obj_key, d in child.entries.items():
+            for key, lst in d.items():
+                if not lst:
+                    continue
+                lst_here = self.entries.setdefault(obj_key, {}).setdefault(key, [])
+                full = self.absorbed.get((obj_key, key))
+                if full is None or not any(e is full for e in lst_here):
+                    full = np.full(n, -1, dtype=np.int64)
+                    lst_here.insert(0, full)
+                    del lst_here[self.LIMIT:]
+                    self.absorbed[(obj_key, key)] = full
+                full[slice(None) if idx is None else idx] = lst[0]
+
+
 class CppInterpreter(Containers, Interpreter):
     REALS = True
+    LOAD_CACHE = "point"  # "point": per-point load cache with parent batches; "batch": one record per batch
     def __init__(self, tu, seed=0, stubs=None, opt=3):
         super().__init__(tu, seed)
         self.stubs = stubs or {}
@@ -169,6 +212,7 @@ class CppInterpreter(Containers, Interpreter):
         self.engines = {}
         self.probes = []
         self._caches = {}
+        self._batches = {}  # id(w) -> _Batch: per-point load cache of a batch and its parent link
         self.loop_flags = []  # (break key, continue key) of the loops being run one iteration at a time
         self._maps = {}
 
@@ -186,6 +230,8 @@ class CppInterpreter(Containers, Interpreter):
         if getattr(loc, "register", False):
             return
         if self.opt >= 3 and self.charging and isinstance(loc.obj, Obj) and loc.off is not UNK:
+            if self.LOAD_CACHE == "point":
+                return self._access_point(loc, write)
             # -O3 keeps a loaded or stored value in a register: a load of the same location in the
             # same batch of iterations, with no store to that object in between, costs nothing. Each
             # batch has its own record, kept while nested loops run.
@@ -211,6 +257,132 @@ class CppInterpreter(Containers, Interpreter):
             else:
                 cache[key] = True
         super().access(loc, write)
+
+    # ------------------------------------------------------------ the per-point load cache (-O3)
+    #
+    # Every batch of points (loop iterations run together) records, for each (object, access size,
+    # base-pointer provenance), the offsets its points loaded or stored. A point's load costs nothing if
+    # that point, or the point it derives from in an enclosing batch, already accessed the offset
+    # through the same pointer with no store to the object since: values loaded before a loop stay in
+    # registers inside it (loop-invariant loads are hoisted), and a value a while condition loaded is
+    # reused after the loop. Each iteration of a loop run one at a time gets its own batch, so an
+    # iteration does not reuse what the previous one loaded. A store to an object forgets every entry
+    # of that object; a library call that may write memory forgets everything.
+
+    def _record(self, w=None, create=True):
+        w = self.w if w is None else w
+        rec = self._batches.get(id(w))
+        if rec is not None and rec.w is not w:
+            rec = None
+        if rec is None and create:
+            if len(self._batches) > 4096:
+                self._batches.clear()
+            rec = self._batches[id(w)] = _Batch(w)
+        return rec
+
+    def _link(self, child, parent, index):
+        self._record(child).link = (parent, None if index is None else np.asarray(index))
+
+    def _drop(self, w):
+        rec = self._batches.get(id(w))
+        if rec is not None and rec.w is w:
+            del self._batches[id(w)]
+
+    def _access_point(self, loc, write):
+        obj_key = id(loc.obj)
+        key = (loc.size, getattr(loc, "src", None))
+        off = loc.off
+        if write:
+            for rec in self._batches.values():
+                rec.entries.pop(obj_key, None)
+            self._record().remember(obj_key, key, off)
+            return Interpreter.access(self, loc, write)
+        hit = self._hits(obj_key, key, off)
+        self._record().remember(obj_key, key, off)
+        if hit is None or not hit.any():
+            return Interpreter.access(self, loc, write)
+        if hit.all():
+            return
+        miss = ~hit
+        saved = self.w
+        self.w = saved[miss]
+        try:
+            Interpreter.access(self, Loc(loc.obj, np.asarray(off)[miss] if np.ndim(off) else off, loc.size,
+                                         loc.array), write)
+        finally:
+            self.w = saved
+
+    def _hits(self, obj_key, key, off):
+        """Per point of the current batch: was this offset already accessed (through this pointer)?"""
+        L = self.L
+        offs = np.broadcast_to(np.asarray(off), (L,))
+        hit = None
+        rec, index = self._record(create=False), None                  # index: current points -> rec's points
+        for _ in range(12):
+            if rec is None:
+                break
+            for stored in rec.entries.get(obj_key, {}).get(key, ()):
+                s = stored if index is None or np.ndim(stored) == 0 else stored[index]
+                h = np.broadcast_to(np.asarray(s) == offs, (L,))
+                hit = h.copy() if hit is None else (hit | h)
+                if hit.all():
+                    return hit
+            if rec.link is None:
+                break
+            parent, pidx = rec.link
+            if pidx is not None:
+                index = pidx if index is None else pidx[index]
+            rec = self._record(parent, create=False)
+        return hit
+
+    def run_subset(self, idx, fn, scale=1.0, propagate=False):
+        if len(idx) == 0:
+            return None
+        if len(idx) == self.L and scale == 1.0:
+            return fn()
+        parent = self.w
+
+        def inner():
+            child = self.w
+            self._link(child, parent, idx)
+            try:
+                return fn()
+            finally:
+                if propagate:                                          # a loop condition's loads
+                    rec = self._record(child, create=False)
+                    if rec is not None:
+                        self._record(parent).absorb(rec, idx, len(parent))
+                self._drop(child)
+        return super().run_subset(idx, inner, scale)
+
+    def with_weights(self, w, fn):
+        parent = self.w
+
+        def inner():
+            child = self.w
+            self._link(child, parent, None)
+            try:
+                return fn()
+            finally:
+                rec = self._record(child, create=False)
+                if rec is not None:
+                    self._record(parent).absorb(rec, None, len(parent))
+                self._drop(child)
+        return super().with_weights(w, inner)
+
+    def _fresh(self, fn):
+        """Run fn (one loop iteration) in a batch of its own whose parent is the current one."""
+        if self.LOAD_CACHE != "point":
+            self._forget_loads()
+            return fn()
+        parent = self.w
+        self.w = parent.copy()
+        self._link(self.w, parent, None)
+        try:
+            return fn()
+        finally:
+            self._drop(self.w)
+            self.w = parent
 
     # ------------------------------------------------------------ loops: pointers and reductions
 
@@ -354,6 +526,7 @@ class CppInterpreter(Containers, Interpreter):
                     within = g - before[point]
                     self.frames = _map_frames_with(saved_frames, lambda arr: arr[point])
                     self.w = saved_w[point]
+                    self._link(self.w, saved_w, point)
                     self._lookup(var)[1] = Ptr(start.obj, base[point] + step * esize * within) if pointer \
                         else base[point] + step * within
                     initial = {k: _as_int(e[1]) for k, e in red_entries.items()}
@@ -409,7 +582,7 @@ class CppInterpreter(Containers, Interpreter):
         try:
             for _ in range(MAX_ITERATIONS):
                 if cond is not None:
-                    value = self.run_subset(idx, lambda: _as_int(self.eval(cond)))
+                    value = self._eval_condition(idx, cond)
                     if value is UNK:
                         self.data_loops += 1
                         self.uncertainly(lambda: self.run_subset(idx, lambda: self._iteration(body, inc)))
@@ -421,7 +594,6 @@ class CppInterpreter(Containers, Interpreter):
                 self.frames[-1].vars[ckey] = [None, 0]
 
                 def one():
-                    self._forget_loads()
                     self.exec(body)
                     active_inc = self._active_points_break_only(bkey)
                     if inc is not None:
@@ -429,7 +601,7 @@ class CppInterpreter(Containers, Interpreter):
                             self.eval(inc)
                         elif len(active_inc):
                             self.run_subset(active_inc, lambda: self.eval(inc))
-                self.run_subset(idx, one)
+                self.run_subset(idx, lambda: self._fresh(one))
                 broke = self.frames[-1].vars.get(bkey, [None, 0])[1]
                 if np.ndim(broke) == 0:
                     if broke:
@@ -460,12 +632,16 @@ class CppInterpreter(Containers, Interpreter):
 
     def _forget_loads(self):
         self._caches.clear()
+        for rec in self._batches.values():
+            rec.entries.clear()
 
     def _iteration(self, body, inc):
-        self._forget_loads()
         if self.loop_flags:
             self.frames[-1].vars[self.loop_flags[-1][1]] = [None, 0]  # continue applies to one iteration
-        super()._iteration(body, inc)
+        self._fresh(lambda: Interpreter._iteration(self, body, inc))
+
+    def _eval_condition(self, idx, cond):
+        return self.run_subset(idx, lambda: _as_int(self.eval(cond)), propagate=True)
 
     def _ptr_store(self, loc, value):
         obj = loc.obj
@@ -499,7 +675,7 @@ class CppInterpreter(Containers, Interpreter):
             return Ptr(UNK, UNK)
         offs = obj.values[units]
         target = self.null if first == NULL_UID else self.registry[first]
-        src = (id(obj), int(loc.off) if np.ndim(loc.off) == 0 else (np.size(loc.off), int(np.ravel(loc.off)[0])))
+        src = _provenance(obj, loc.off)
         return Ptr(target, _SCALAR(offs) if np.ndim(offs) else int(offs), src)
 
     def _mem_load(self, loc, type_):
@@ -1396,7 +1572,9 @@ class CppInterpreter(Containers, Interpreter):
                 within = g - before[point]
                 self.frames = _map_frames_with(saved_frames, lambda arr: arr[point])
                 self.w = saved_w[point]
+                self._link(self.w, saved_w, point)
                 self._range_iteration(var, Ptr(b.obj, start[point] + esize * within), body)
+                self._drop(self.w)
                 self.scratch_top = saved_top
         finally:
             self.frames, self.w = saved_frames, saved_w
@@ -1429,11 +1607,10 @@ class CppInterpreter(Containers, Interpreter):
                 saved_top = self.scratch_top
 
                 def one(i=i, idx=idx):
-                    self._forget_loads()
                     it = Ptr(b.obj, _SCALAR(start[idx] + esize * i) if self.L > 1 or len(idx) > 1
                              else int(start[idx][0]) + esize * i)
                     self._range_iteration(var, it, body)
-                self.run_subset(idx, one)
+                self.run_subset(idx, lambda: self._fresh(one))
                 self.scratch_top = saved_top
                 broke = frame.vars.get(bkey, [None, 0])[1]
                 if np.ndim(broke) == 0:

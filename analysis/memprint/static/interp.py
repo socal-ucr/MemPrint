@@ -391,7 +391,9 @@ class Interpreter:
             if isinstance(v, np.ndarray):
                 return f(v)
             if isinstance(v, Ptr) and isinstance(v.off, np.ndarray):
-                return Ptr(v.obj, f(v.off))
+                return Ptr(v.obj, f(v.off), v.src)
+            if isinstance(v, Real) and isinstance(v.v, np.ndarray):
+                return Real(f(v.v))
             return v
 
         return [Frame(fr.func, fr.base, {k: [s, mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in self.frames]
@@ -433,7 +435,7 @@ class Interpreter:
             if old.obj is not new.obj:
                 return Ptr(UNK, UNK)
             off = Interpreter._merge_value(old.off, new.off, idx, L)
-            return Ptr(old.obj, off)
+            return Ptr(old.obj, off, old.src if old.src == new.src else None)
         if isinstance(old, Real) and isinstance(new, Real):
             full = np.array(np.broadcast_to(old.v, L), dtype=float)
             full[idx] = new.v
@@ -446,6 +448,13 @@ class Interpreter:
         full = np.array(np.broadcast_to(o, L), dtype=np.int64)
         full[idx] = n
         return full
+
+    def _link(self, child, parent, index):
+        """A batch of weights `child` derived from `parent` (its points parent[index]; None: the same
+        points). The C++ interpreter's load cache uses it; the C interpreter has none."""
+
+    def _drop(self, w):
+        """A derived batch is finished."""
 
     def run_subset(self, idx, fn, scale=1.0):
         """Run fn on the batch points idx (weights scaled); variable updates are merged back."""
@@ -889,7 +898,7 @@ class Interpreter:
             delta = 1 if "++" in op else -1
             if isinstance(old, Ptr):
                 size = ca.pointee_size(kid.type) or 1
-                new = Ptr(old.obj, UNK if old.off is UNK else _SCALAR(old.off + delta * size))
+                new = Ptr(old.obj, UNK if old.off is UNK else _SCALAR(old.off + delta * size), old.src)
             else:
                 o = _as_int(old)
                 new = UNK if o is UNK else _SCALAR(o + delta)
@@ -1197,8 +1206,10 @@ class Interpreter:
                     within = g - before[point]
                     self.frames = _map_frames_with(saved_frames, lambda arr: arr[point])
                     self.w = saved_w[point]
+                    self._link(self.w, saved_w, point)
                     self._lookup(var)[1] = start_arr[point] + step * within
                     self.exec(body)
+                    self._drop(self.w)
             finally:
                 self.frames, self.w = saved_frames, saved_w
         entry = self._lookup(var)
@@ -1209,7 +1220,7 @@ class Interpreter:
         idx = np.arange(self.L)
         for iteration in range(MAX_ITERATIONS):
             if cond is not None and not (do and iteration == 0):
-                value = self.run_subset(idx, lambda: _as_int(self.eval(cond)))
+                value = self._eval_condition(idx, cond)
                 if value is UNK:
                     self.data_loops += 1
                     self.uncertainly(lambda: self.run_subset(idx, lambda: self._iteration(body, inc),
@@ -1225,6 +1236,9 @@ class Interpreter:
             self.run_subset(idx, lambda: self._iteration(body, inc))
         self.data_loops += 1  # gave up: too many iterations
 
+    def _eval_condition(self, idx, cond):
+        return self.run_subset(idx, lambda: _as_int(self.eval(cond)))
+
     def _iteration(self, body, inc):
         self.exec(body)
         if inc is not None:
@@ -1236,7 +1250,9 @@ def _map_frames_with(frames, f):
         if isinstance(v, np.ndarray):
             return f(v)
         if isinstance(v, Ptr) and isinstance(v.off, np.ndarray):
-            return Ptr(v.obj, f(v.off))
+            return Ptr(v.obj, f(v.off), v.src)
+        if isinstance(v, Real) and isinstance(v.v, np.ndarray):
+            return Real(f(v.v))
         return v
 
     return [Frame(fr.func, fr.base, {k: [s, mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in frames]
