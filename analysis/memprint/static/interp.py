@@ -373,7 +373,18 @@ def _key(decl):
     return k
 
 
+class Partial:
+    """Integer values known for some batch points only (a variable assigned in the branches of an
+    if/else that only some points take). Unknown (UNK) to everything else until every point is known."""
+    __slots__ = ("v", "known")
+
+    def __init__(self, v, known):
+        self.v, self.known = v, known
+
+
 def _as_int(v):
+    if isinstance(v, Partial):
+        return v.v if v.known.all() else UNK
     if isinstance(v, (bool, np.bool_)):
         return int(v)
     if isinstance(v, (int, np.integer)):
@@ -478,6 +489,8 @@ class Interpreter:
                 return Ptr(v.obj, f(v.off), v.src)
             if isinstance(v, Real) and isinstance(v.v, np.ndarray):
                 return Real(f(v.v))
+            if isinstance(v, Partial):
+                return Partial(f(v.v), f(v.known))
             return v
 
         return [Frame(fr.func, fr.base, {k: [s, mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in self.frames]
@@ -524,6 +537,12 @@ class Interpreter:
             full = np.array(np.broadcast_to(old.v, L), dtype=float)
             full[idx] = new.v
             return Real(full)
+        if (old is UNK or isinstance(old, Partial)) and _as_int(new) is not UNK:
+            v = old.v.copy() if isinstance(old, Partial) else np.zeros(L, dtype=np.int64)
+            known = old.known.copy() if isinstance(old, Partial) else np.zeros(L, dtype=bool)
+            v[idx] = np.broadcast_to(np.asarray(_as_int(new), dtype=np.int64), np.shape(idx))
+            known[idx] = True
+            return v if known.all() else Partial(v, known)
         o, n = _as_int(old), _as_int(new)
         if _is_unk(o, n):
             return UNK if not (old is UNK and new is UNK) else UNK
@@ -1373,6 +1392,8 @@ def _map_frames_with(frames, f):
             return Ptr(v.obj, f(v.off), v.src)
         if isinstance(v, Real) and isinstance(v.v, np.ndarray):
             return Real(f(v.v))
+        if isinstance(v, Partial):
+            return Partial(f(v.v), f(v.known))
         return v
 
     return [Frame(fr.func, fr.base, {k: [s, mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in frames]
