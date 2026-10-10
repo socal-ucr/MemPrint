@@ -395,7 +395,7 @@ We first recorded selected references through trace buffers, as the splitter doe
 With the largest and middle of the sizes MINI to MEDIUM held out, as in \secref{sec:reference}, word sampling has 1.6\% and 4.0\% mean error at 1 in 25 words, 2.8\% and 4.9\% at 1 in 100, 2.9\% and 4.1\% at 1 in 250, and 5.3\% and 16.0\% at 1 in 1000 (\figref{fig:spatial}). The error follows the binomial prediction. The largest sizes (130{,}000 to 200{,}000 words) stay within about 5\% down to 1 in 1000, whereas the middle sizes (about 28{,}000 words) need 1 in 250 or denser, because at 1 in 1000 only about 28 of their words are selected. For the largest sizes, the true footprint lies within two standard errors of the estimate in 99\% of snapshots at 1 in 25 and 1 in 100 and in 75\% at 1 in 250, against 95\% expected, because a standard error computed from 20 buckets is itself uncertain.
 
 \paragraph{miniVite and threads.}
-With frees tracked, the live peak of miniVite is 3.8, 4.8 and 6.3\,MB at 1024, 4096 and 8192 vertices, the same at every thread count. Word sampling has 0.3\% to 6.8\% mean error at every rate from 1 in 25 to 1 in 1000 with 1, 4 and 16 threads, and the error of the peak is at most 3.6\% at 1 in 100 or denser and at most 7.7\% at 1 in 1000. The error bars are less reliable than on PolyBench: the truth lies within two standard errors in 98\% to 100\% of snapshots in most runs, but in only 1\% to 69\% in a few runs, which are off by more than their buckets suggest. At 8192 vertices a run takes 25 to 41\,s, against 175 to 187\,s for a complete recording and 0.16 to 0.22\,s natively.
+With frees tracked, the live peak of miniVite is 3.8, 4.8 and 6.3\,MB at 1024, 4096 and 8192 vertices, the same at every thread count. Word sampling has 0.3\% to 6.8\% mean error at every rate from 1 in 25 to 1 in 1000 with 1, 4 and 16 threads, and the error of the peak is at most 3.6\% at 1 in 100 or denser and at most 7.7\% at 1 in 1000. The error bars are calibrated across salts but not within a run. Over 20 runs of miniVite with 4096 vertices and different salts, at a given snapshot the truth lies within two standard errors in 94\% (1 in 100) and 95\% (1 in 250) of the runs, and the standardized errors have a standard deviation of 1.03 and 1.10 across runs and a mean of $-0.09$ and $+0.14$. A single run, however, keeps the same selected words, so its error persists from one snapshot to the next (lag-one correlation 0.82), and the share of its snapshots within two standard errors is nearly all or nothing (10\% to 100\% over the 20 runs). At 8192 vertices a run takes 25 to 41\,s, against 175 to 187\,s for a complete recording and 0.16 to 0.22\,s natively.
 
 \paragraph{Cost on large inputs.}
 On the LARGE PolyBench inputs, word sampling at 1 in 100 takes 284\,s for 2mm, 271\,s for gemm and 344\,s for jacobi-2d, against 8.0, 5.1 and 11.3\,s natively, which is an overhead of 30$\times$ to 53$\times$. Pin without a tool takes 8.2, 5.4 and 11.5\,s, so almost all of the cost is the selection test on every reference. The test checks one or two words for most references, against one start address for the start-address footprint, which took 211 to 236\,s.
@@ -460,7 +460,7 @@ When a window opens or closes, the instrumentation must change, because inside a
 
 The tool therefore counts window changes in a shared counter, and each thread remembers the last change it has acted on. When a thread checks the time and finds a change it has not acted on, it restarts at its current instruction with \texttt{PIN\_ExecuteAt}, using the machine state that Pin passes to the routine, so that Pin translates the code it is running again. Threads check the time every $s$ references also while running old code, because the counting call is present in both versions of the code. A reference that old code records after a window has closed is discarded.
 
-Discarding all translations has a cost that grows with the amount of code a program runs. For most programs it is small, but GCC's compiler runs a lot of code, and with 20 windows, which is 40 changes, it took 658 to 963\,s, against 101 to 122\,s with nothing watched and 182\,s watching the whole run (\secref{sec:cost}).
+Discarding all translations has a cost that grows with the amount of code a program runs, which \secref{sec:next-round} reduces with trace versions. For most programs it is small, but GCC's compiler runs a lot of code, and with 20 windows, which is 40 changes, it took 658 to 963\,s, against 101 to 122\,s with nothing watched and 182\,s watching the whole run (\secref{sec:cost}).
 
 \subsection{Tracking live blocks}
 \label{sec:blocks}
@@ -661,6 +661,63 @@ miniVite 65536, 4 threads & 6.0 & 11.1 & 221 & 84.1 & 101 & 109 & 136 \\
 \label{fig:cost}
 \end{figure}
 
+\subsection{Fewer windows, cheaper switching and partial pages}
+\label{sec:next-round}
+
+With bytes touched the windows matter less than before, so we tried four changes, evaluated against the same complete recordings (\tabref{tab:nextround}).
+
+\paragraph{No windows.} With \knob{pages\_only 1}, the tool never opens a window. Memory outside blocks comes from the resident pages of the program's writable image sections (\texttt{.data} and \texttt{.bss} of every loaded image, which Pin reports when it loads the image) and of the main thread's stack (the 8\,MB below the top of the stack mapping, read once from \texttt{/proc/self/maps}); the stacks of other threads are anonymous mappings, which the tool already tracks as blocks. This brings miniVite with 32768 vertices from $-6.9\%$ to $-3.5\%$ at the peak with nothing watched, and every peak is within $-5.4\%$ to $+5.4\%$. A pages-only run that never discarded its translations ran gemm and 2mm 8 times slower than one that did, for a reason we have not found (not the snapshots and not soft-dirty tracking), so the tool discards them once after the first snapshot.
+
+\paragraph{Partly used pages.} A touched page inside a block that borders an untouched page is probably only partly used. Counting such a page as half used (\knob{edge\_correction}, now the default) removes the churn test's error from whole pages ($+22.4\%$ to $+1.5\%$ at the peak with a quarter of each block written, $+12.2\%$ to $+1.4\%$ with half) and changes the other results by at most a point.
+
+\paragraph{The allocator's slack.} On Lua, 5.9 of the 6.2\,MB that the windows select outside blocks lies within 16 bytes past the end of a live block: string and copy functions read past the requested size into the slack that the allocator adds, in 650{,}000 small blocks. The truth counts these bytes, only windows see them, and so Lua's peak rises from $-5\%$ to $+5\%$ as more of the run is watched. Measuring blocks over their whole chunk (\knob{block\_slack 1}) fixes the peak but counts slack that is never read, which makes Lua's mean error 14\% instead of 6\%, so it is off by default. On GCC, by contrast, the memory outside blocks is far from any block (globals and stack), and the pages of its blocks overcount by about 8\,MB, because its garbage collector uses parts of pages.
+
+\paragraph{Cheaper switching.} Pin's trace versions let two instrumented versions of the code coexist: a test at each trace entry compares a tool register, which the time check sets to the window state, and moves to the other version when they differ, so nothing is discarded. On GCC at 5\% watched this takes 153\,s instead of 706\,s, but the test at every trace entry made 2mm with nothing watched take 63\,s instead of 16\,s. With \knob{window\_switch auto}, the default, the tool flushes until one window change retranslates more than 10{,}000 traces and then switches to versions for good: GCC retranslates about 47{,}000 traces per change, Lua 1300, miniVite 210 and 2mm 11, so only GCC switches. \tabref{tab:nextcost} gives the running times.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Windowed estimate with the partial-page correction, mean error / error of the peak in percent, 1 in 100 words, periodic windows; ``before'' is the tool of \secref{sec:windowed-eval} with nothing watched.}
+\label{tab:nextround}
+\begin{tabular}{lcccc}
+\toprule
+Run & Before, nothing & Pages only & 1\% & 5\% \\
+\midrule
+miniVite 65536, 1 thread & 10.1 / $-3.8$ & 5.0 / $-1.9$ & 1.8 / $+0.7$ & 2.9 / $+1.1$ \\
+miniVite 32768, 1 thread & 14.7 / $-6.9$ & 7.4 / $-3.5$ & 0.9 / $+0.4$ & 2.1 / $+1.0$ \\
+heap churn, 25\% touched & 22.8 / $+22.2$ & 3.0 / $-1.2$ & 1.1 / $+1.6$ & 1.4 / $+1.5$ \\
+heap churn, 50\% touched & 12.4 / $+12.0$ & 1.6 / $-0.3$ & 1.2 / $+1.7$ & 1.1 / $+1.4$ \\
+GAP bfs & 5.0 / $-0.3$ & 4.5 / $-0.3$ & 3.0 / $-0.1$ & 1.8 / $+0.2$ \\
+darknet & 3.1 / $+4.0$ & 3.1 / $+4.0$ & 3.1 / $+4.0$ & 3.1 / $+4.0$ \\
+Python & 3.4 / $+2.8$ & 4.4 / $+3.8$ & 5.6 / $+3.7$ & 6.2 / $+4.0$ \\
+Lua & 5.9 / $-5.4$ & 5.9 / $-5.4$ & 4.7 / $-4.9$ & 6.1 / $-4.1$ \\
+Perl & 1.9 / $-3.5$ & 1.9 / $-3.4$ & 1.8 / $-2.9$ & 1.8 / $-2.1$ \\
+SQLite & 6.4 / $-0.7$ & 6.7 / $-2.7$ & 8.3 / $-2.5$ & 8.1 / $-2.1$ \\
+GCC \texttt{cc1} & 3.6 / $+3.5$ & 6.4 / $+5.4$ & 7.7 / $+5.9$ & 8.2 / $+6.5$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Running time in seconds, one run at a time on a machine shared with other jobs (so only roughly comparable with \tabref{tab:cost}).}
+\label{tab:nextcost}
+\begin{tabular}{lrrrrr}
+\toprule
+Workload & Native & Pages only & 1\%, auto & 5\%, auto & 5\%, flush \\
+\midrule
+2mm LARGE & 9.6--13.4 & 23.2 & 20.2 & 35.5 & 45.4 \\
+gemm LARGE & 5.3--5.6 & 11.8 & 15.3 & 25.9 & 27.6 \\
+jacobi-2d LARGE & 11.9--12.5 & 22.6 & 28.0 & 44.9 & 47.7 \\
+miniVite 65536, 1 thread & 6.8--7.3 & 69.6 & 88.7 & 108.0 & 110.2 \\
+miniVite 65536, 4 threads & 6.4--6.8 & 85.8 & 114.0 & 137.4 & 123.5 \\
+GCC \texttt{cc1} & 1.7--1.9 & 81.7 & 137.5 & 152.7 & 706.3 \\
+Lua & 3.3--3.7 & 34.4 & 57.8 & 56.5 & 58.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 %=====================================================================
 \section{Discussion and limitations}
 \label{sec:discussion}
@@ -711,9 +768,8 @@ Good~\cite{good1953} introduced the estimation of the probability of unseen spec
 
 We propose the following next steps, in order of priority.
 \begin{enumerate}
-\item \textbf{Fewer or cheaper window changes.} With bytes touched, 1\% watched is as accurate as 5\%, and pages alone are within 8\% of every peak we measured except where memory outside blocks matters. Fewer windows, or a mode without windows, would cut the cost, and switching instrumentation per trace rather than discarding the whole code cache would make windows affordable for programs with a lot of code, such as GCC.
-\item \textbf{Find what windows overcount on GCC and Lua.} Watching moves their peaks up by several points, through the selected bytes outside blocks.
-\item \textbf{Reduce the error from whole pages for small blocks.} For blocks smaller than a few pages, combine the written pages with the word sample, for example by scaling a block's written bytes by the fraction of its selected words that were touched.
+\item \textbf{Measure the slack and the used part of pages from the sample.} Lua's bytes in its blocks' slack ($-5\%$) and GCC's partly used collector pages ($+6\%$) are the remaining errors; the word sample could estimate both per block, in place of the half-page rule.
+\item \textbf{Explain the slowdown of pages-only runs} that never discard their translated code (\secref{sec:next-round}).
 \item \textbf{Reduce the fixed cost of the allocator hooks and of soft-dirty clears.} On miniVite the allocator hooks account for about a third of the windowed running time. Instrumenting the allocator in Pin's probe mode, which patches the function's entry instead of translating code, or recording allocation events in a per-thread log that is processed at snapshots instead of under a lock, would lower both.
 \item \textbf{Support other allocators.} Recognize jemalloc, tcmalloc and allocators that manage regions of their own, such as Python's, so that their blocks are tracked and their bookkeeping excluded.
 \item \textbf{Evaluate at scale.} Run windowed sampling on a long application with several MPI processes, where a complete recording is not feasible, and compare the estimated peak with the maximum resident memory reported by the operating system, which is an upper bound to the page.
@@ -761,6 +817,10 @@ Option & Meaning \\
 \knob{window}, \knob{period} & Spatial: check references only for $W$ of every $P$ references (requires \knob{snapshot}, and turns on free tracking). \\
 \knob{window\_alloc} & Windowed: an allocation of at least $N$ bytes opens a window (default 1\,MB; 0 turns this off). \\
 \knob{dirty\_every} & Windowed: clear soft-dirty bits every $N$ references (default: every ten snapshots; 0: use residency for reused blocks). \\
+\knob{pages\_only} & Spatial with \knob{snapshot}: no windows; memory outside blocks from the resident pages of the writable image sections and the main stack. \\
+\knob{window\_switch} & Windowed: \texttt{flush}, \texttt{version}, or \texttt{auto} (default: flush until a window change retranslates more than \knob{version\_traces} traces, by default 10000, then version). \\
+\knob{edge\_correction} & Windowed: count half a page less for each touched page inside a block that borders an untouched one (default on). \\
+\knob{block\_slack} & Windowed: measure heap blocks over their whole chunk, slack included (default off). \\
 \knob{outdir}, \knob{name} & Output directory and trace name. \\
 \bottomrule
 \end{tabular}
@@ -775,7 +835,7 @@ Each run writes files named \texttt{<Prefix>\_<name>\_<interval>\_<pid>}, where 
 \begin{itemize}
 \item The summary file (\texttt{.csv}) and one file per bin (\texttt{\_SubSample\_<interval>\_bin\_<j>.csv}) have the columns \texttt{FunctionName}, \texttt{MemUsageObs} (footprint in bytes), \texttt{UniqueAddresses}, \texttt{CountObs} (references counted) and \texttt{SamplingInterval}, as in \memprint{}.
 \item The timeline (\texttt{\_timeline.csv}, with \knob{snapshot}) has one row per footprint per snapshot, with the columns \texttt{Time}, \texttt{SamplingInterval}, \texttt{Bin} ($-1$ for the main footprint, $-2$ for the union of an interval's bins), \texttt{MemUsageObs}, \texttt{UniqueAddresses}, \texttt{CountObs}, \texttt{FreedBytes}, \texttt{Singletons}, \texttt{Doubletons}, \texttt{Tripletons}, \texttt{Quadrupletons} ($f_1$ to $f_4$) and \texttt{Discovered} (how often an address entered the sample).
-\item The windowed file (\texttt{\_windowed.csv}, with \knob{window}) has one row per snapshot, with the columns \texttt{Time}, \texttt{Watching} (1 inside a window), \texttt{Windows} (completed), \texttt{AllocatedBytes}, \texttt{Blocks}, \texttt{FreshBytes}, \texttt{FreshResident}, \texttt{ReusedBytes}, \texttt{ReusedResident}, \texttt{FreshEst}, \texttt{ReusedEst} and \texttt{OtherEst} (selected footprint $\times i$ in fresh blocks, in reused blocks and outside blocks), \texttt{FreshCovered} and \texttt{ReusedCovered} (bytes covered $\times i$), \texttt{Density} (of all reused blocks; 1 with bytes touched), \texttt{Estimate} (\eqref{eq:windowed}), \texttt{Window}, \texttt{Period}, \texttt{ReusedWritten} (bytes of reused blocks on written pages), \texttt{TriggeredWindows} (windows opened by allocations) and \texttt{WatchedRefs} (references watched so far).
+\item The windowed file (\texttt{\_windowed.csv}, with \knob{window}) has one row per snapshot, with the columns \texttt{Time}, \texttt{Watching} (1 inside a window), \texttt{Windows} (completed), \texttt{AllocatedBytes}, \texttt{Blocks}, \texttt{FreshBytes}, \texttt{FreshResident}, \texttt{ReusedBytes}, \texttt{ReusedResident}, \texttt{FreshEst}, \texttt{ReusedEst} and \texttt{OtherEst} (selected footprint $\times i$ in fresh blocks, in reused blocks and outside blocks), \texttt{FreshCovered} and \texttt{ReusedCovered} (bytes covered $\times i$), \texttt{Density} (of all reused blocks; 1 with bytes touched), \texttt{Estimate} (\eqref{eq:windowed}), \texttt{Window}, \texttt{Period}, \texttt{ReusedWritten} (bytes of reused blocks on written pages), \texttt{TriggeredWindows} (windows opened by allocations), \texttt{WatchedRefs} (references watched so far), \texttt{RegionsResident} (resident bytes of the writable sections and the main stack, with \knob{pages\_only}) and \texttt{PartialEdges} (touched pages inside blocks that border untouched ones).
 \end{itemize}
 The analysis package scores windowed runs against a splitter run in the same directory with \texttt{python -m memprint timeline windowed <workload>}, and \texttt{paper/make\_figures.py} regenerates the figures of this report from the experiment outputs.
 

@@ -73,6 +73,10 @@ pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler|spatial [kno
 | `-window`, `-period` | 0 | spatial: watch accesses only for W of every P references, tracking allocations and page residency in between (needs `-snapshot`) |
 | `-window_alloc` | 1048576 | windowed: an allocation of at least N bytes opens a window (0: off) |
 | `-dirty_every` | 10 snapshots | windowed: clear soft-dirty bits every N references (0: residency only) |
+| `-pages_only` | 0 | spatial with `-snapshot`: no windows; memory outside blocks from the resident pages of the program's writable sections and main stack |
+| `-window_switch` | `auto` | windowed: `flush` (discard translated code at each window change), `version` (Pin trace versions, a test at every trace entry), `auto` (flush until a change retranslates more than `-version_traces` traces, default 10000, then version) |
+| `-edge_correction` | 1 | windowed: count half a page less for each touched page inside a block that borders an untouched one |
+| `-block_slack` | 0 | windowed: measure heap blocks over their whole glibc chunk, slack included |
 | `-footprint` | see text | `bytes`: bytes touched, the union of every access's byte range. `starts`: the paper's definition, the sum of the largest access size at each start address. Default: `bytes` with `-track_frees` or `-window`, else `starts` |
 
 The tool writes one CSV per footprint: `Buffered_<name>_1_<pid>.csv` (splitter, exact) or `Sampled_<name>_<i>_<pid>.csv` (sampler), plus `..._SubSample_<interval>_bin_<j>.csv` for every bin. Each file contains a single row:

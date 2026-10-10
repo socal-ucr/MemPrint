@@ -1484,20 +1484,24 @@ static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Block
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
                                      "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges";
 
-// Resident bytes of the program's writable image sections and of its main thread's stack
-// ("[stack]" in /proc/self/maps; other threads' stacks are anonymous mmaps, tracked as blocks).
+// Resident bytes of the program's writable image sections and of its main thread's stack (other
+// threads' stacks are anonymous mmaps, tracked as blocks). The stack is the 8 MB (the usual limit)
+// below the top of "[stack]" in /proc/self/maps, which is read once: under Pin the file is long
+// and Pin's C library slow (reading it at every snapshot made 2mm LARGE take 75 s instead of 20).
 static UINT64 RegionsResident()
 {
+    static ADDRINT stackTop = 0;
+    if (!stackTop)
+    {
+        ifstream maps("/proc/self/maps");
+        string line;
+        while (std::getline(maps, line))
+            if (line.find("[stack]") != string::npos)
+                stackTop = strtoull(line.substr(line.find('-') + 1).c_str(), NULL, 16);
+        if (!stackTop) stackTop = 1; // no [stack]: do not look again
+    }
     vector< std::pair< ADDRINT, ADDRINT > > regions = dataRegions;
-    ifstream maps("/proc/self/maps");
-    string line;
-    while (std::getline(maps, line))
-        if (line.find("[stack]") != string::npos)
-        {
-            size_t dash = line.find('-'), space = line.find(' ');
-            regions.push_back({strtoull(line.substr(0, dash).c_str(), NULL, 16),
-                               strtoull(line.substr(dash + 1, space - dash - 1).c_str(), NULL, 16)});
-        }
+    if (stackTop > (8 << 20)) regions.push_back({stackTop - (8 << 20), stackTop});
     std::sort(regions.begin(), regions.end());
     UINT64 total = 0;
     ADDRINT coveredTo = 0;
@@ -1550,6 +1554,12 @@ static VOID WriteWindowed()
     // -pages_only: memory outside blocks from the pages of the program's segments and stack;
     // with windows, from the bytes the windows selected outside blocks
     UINT64 regions  = pagesOnly ? RegionsResident() : 0; // (reads /proc/self/maps: only when used)
+    // -pages_only: discard the translated code once, after the first snapshot. Without this, gemm
+    // and 2mm LARGE ran 8x slower (gemm: 104 s against 12.6 s); windowed runs, which flush when
+    // their first window closes, did not. Not the snapshot work (10x fewer snapshots: 104 s) nor
+    // soft-dirty tracking (-dirty_every 0: 103 s); the cause is unknown.
+    static BOOL flushedOnce = FALSE;
+    if (pagesOnly && !flushedOnce) flushedOnce = TRUE, flushPending = TRUE, epoch++;
     double estimate = blocksEstimate + (pagesOnly ? (double)regions : (double)R * otherSampled);
     // a touched page next to an untouched one inside a block is, on average, half used
     if (KnobEdgeCorrection.Value()) estimate = std::max(0.0, estimate - (double)edges * (1 << (PAGE_BITS - 1)));
