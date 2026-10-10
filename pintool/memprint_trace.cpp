@@ -171,6 +171,21 @@ KNOB< UINT64 > KnobPeriod(KNOB_MODE_WRITEONCE, "pintool", "period", "0", "spatia
 KNOB< UINT64 > KnobWindowAlloc(KNOB_MODE_WRITEONCE, "pintool", "window_alloc", "1048576",
                                "spatial with -window: an allocation of at least N bytes opens a window, at most one "
                                "per period on top of the periodic ones (0: off)");
+KNOB< string > KnobWindowSwitch(KNOB_MODE_WRITEONCE, "pintool", "window_switch", "auto",
+                                "windowed: flush (discard all translated code at every window change) | version (two "
+                                "instrumented versions of the code, switched at trace entry) | auto (flush, until a window "
+                                "change retranslates more than -version_traces traces; then version)");
+KNOB< UINT64 > KnobVersionTraces(KNOB_MODE_WRITEONCE, "pintool", "version_traces", "10000",
+                                 "windowed, -window_switch auto: traces retranslated after one window change that make "
+                                 "the tool switch to versions");
+KNOB< BOOL > KnobEdgeCorrection(KNOB_MODE_WRITEONCE, "pintool", "edge_correction", "1",
+                                 "windowed: count half a page less for every touched page inside a block that borders an "
+                                 "untouched one (it is probably partly used)");
+KNOB< BOOL > KnobBlockSlack(KNOB_MODE_WRITEONCE, "pintool", "block_slack", "0",
+                            "windowed: measure heap blocks over their whole glibc chunk (requested size plus slack)");
+KNOB< BOOL > KnobPagesOnly(KNOB_MODE_WRITEONCE, "pintool", "pages_only", "0",
+                          "spatial with -snapshot: no windows at all; estimate from the pages of live blocks and of "
+                          "the program's writable segments and stack");
 KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
                               "spatial with -window: clear the kernel's soft-dirty page bits every N memory references "
                               "(default: every 10 snapshots; 0: off, reused blocks are measured by residency)");
@@ -438,10 +453,28 @@ struct Block
     vector< UINT8 > written; // reused blocks: per page, written since the block was allocated (soft-dirty)
     UINT64 sampled = 0, covered = 0; // selected footprint in the block and the bytes it covers (last Attribute)
     BOOL allWritten = FALSE;         // every page of `written` is set, so harvests can skip it
+    // Heap blocks: the end of the usable chunk (requested size plus the allocator's slack), which
+    // string and copy functions read and write past the requested size. 0: the block's size.
+    ADDRINT span = 0;
+    ADDRINT Extent() const { return span ? span : size; }
 };
 BOOL windowed = FALSE;
+BOOL pagesOnly = FALSE; // -pages_only: windowed bookkeeping, but never a window
+// The program's writable image sections (.data, .bss) of every loaded image, for -pages_only.
+vector< std::pair< ADDRINT, ADDRINT > > dataRegions;
 volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
 BOOL flushPending = FALSE;     // instrumentation must be redone for a window change
+// -window_switch version: every trace exists in a watching and a not-watching version. CheckTime,
+// which every thread runs every checkStep references, loads `watching` into a tool register, and
+// a version case at each trace entry moves to the other version if they differ, so no translated
+// code is discarded.
+// Versions cost a test at every trace entry (2mm LARGE with nothing watched: 63 s against 16 s),
+// flushing costs retranslating all code that runs (cc1 at 5% watched: 658 s against 127 s), so
+// -window_switch auto starts with flushing and switches when a window change was expensive.
+BOOL versioned = FALSE, autoSwitch = FALSE;
+UINT64 tracesSinceChange = 0; // traces instrumented since the last window change
+REG watchReg;
+enum { VERSION_IDLE = 0, VERSION_WATCH = 1 };
 UINT64 windowStart = 0, windowEnd = 0, nextPeriodic = 0, windowsDone = 0, checkStep = 0;
 // Windows opened by large allocations (-window_alloc): how many, when the last one ended, and
 // whether the current window is one; references watched in closed windows.
@@ -645,7 +678,7 @@ static ADDRINT PIN_FAST_ANALYSIS_CALL CountRefs(THREADID tid, UINT32 n)
     return t.refs >= t.checkAt;
 }
 
-static VOID CheckTime(THREADID tid, CONTEXT* ctxt);
+static ADDRINT CheckTime(THREADID tid, CONTEXT* ctxt);
 
 // windowed: select 1-in-i 64-byte chunks (every address in a selected chunk; with
 // countBytes, 8-byte words), without counting (CountRefs counts). Seeing whole chunks gives the bytes the
@@ -666,7 +699,13 @@ static UINT32 MemoryReferences(INS ins)
 
 static VOID TraceWindowed(TRACE trace)
 {
-    BOOL watch = watching;
+    tracesSinceChange++;
+    BOOL watch = versioned ? TRACE_Version(trace) == VERSION_WATCH : watching;
+    if (versioned)
+    {
+        INS head = BBL_InsHead(TRACE_BblHead(trace));
+        INS_InsertVersionCase(head, watchReg, watch ? 0 : 1, watch ? VERSION_IDLE : VERSION_WATCH, IARG_END);
+    }
     for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
     {
         UINT32 n = 0;
@@ -674,7 +713,11 @@ static VOID TraceWindowed(TRACE trace)
             n += MemoryReferences(ins);
         if (n == 0) continue;
         BBL_InsertIfCall(bbl, IPOINT_BEFORE, AFUNPTR(CountRefs), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID, IARG_UINT32, n, IARG_END);
-        BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_END);
+        if (versioned)
+            BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_RETURN_REGS, watchReg,
+                               IARG_END);
+        else
+            BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_END);
         if (!watch) continue;
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
         {
@@ -750,10 +793,23 @@ static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
 
 static VOID MaybeTriggerWindow(ADDRINT size);
 
-static VOID AddBlock(ADDRINT ptr, ADDRINT size, BOOL mapped, BOOL fresh)
+static ADDRINT ChunkHeader(ADDRINT ptr);
+static VOID ChunkRange(ADDRINT ptr, ADDRINT size, ADDRINT header, ADDRINT* lo, ADDRINT* hi);
+
+// Usable bytes of a heap block from its glibc chunk header, or `size` if the header does not fit
+static ADDRINT UsableSize(ADDRINT ptr, ADDRINT size)
+{
+    if (!KnobBlockSlack.Value()) return size;
+    ADDRINT lo, hi;
+    ChunkRange(ptr, size, ChunkHeader(ptr), &lo, &hi);
+    return lo == ptr ? size : hi - ptr;
+}
+
+static VOID AddBlock(ADDRINT ptr, ADDRINT size, BOOL mapped, BOOL fresh, ADDRINT span = 0)
 {
     if (ptr == 0 || size == 0) return;
     blocks[ptr] = {size, mapped, fresh};
+    if (span > size) blocks[ptr].span = span;
     MaybeTriggerWindow(size);
 }
 
@@ -778,7 +834,7 @@ static VOID UnmapBlocks(ADDRINT lo, ADDRINT hi)
     {
         auto next     = std::next(it);
         Block b       = it->second;
-        ADDRINT start = it->first, end = start + b.size;
+        ADDRINT start = it->first, end = start + b.Extent();
         if (b.mapped && end > lo)
         {
             blocks.erase(it);
@@ -806,7 +862,7 @@ static VOID Attribute()
         kv.second.sampled = kv.second.covered = 0;
     footprint.ForEach([&inBlocks, &outside](ADDRINT address, UINT32 size) {
         auto it = blocks.upper_bound(address);
-        if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.size)
+        if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.Extent())
             inBlocks.push_back({address, size, &std::prev(it)->second});
         else if (countBytes)
             outside.push_back({address, size, NULL});
@@ -849,7 +905,10 @@ static VOID ForgetResidency() { pageBits.clear(); }
 // Bytes of [lo, hi) on pages that have been touched (are resident or swapped).
 // With `written`, also marks the pages written since the last soft-dirty clear
 // (pagemap bit 55) and returns in *writtenBytes the bytes on pages marked so far.
-static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, UINT64* writtenBytes = NULL)
+// With `edges`, also adds the number of places inside [lo, hi) where a touched page (written, with
+// `written`; else resident) borders an untouched one: the touched page there is probably partly used.
+static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, UINT64* writtenBytes = NULL,
+                       UINT64* edges = NULL)
 {
     const ADDRINT page = 1 << PAGE_BITS, chunk = 512;
     ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
@@ -870,17 +929,22 @@ static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, 
     }
     if (written) written->resize(last - first + 1, 0);
     UINT64 bytes = 0, wbytes = 0;
+    int prev = -1;
     for (ADDRINT p = first; p <= last; p++)
     {
         UINT64 bits = pageBits[p - cachedFirst];
         ADDRINT a = p << PAGE_BITS, overlap = std::min(hi, a + page) - std::max(lo, a);
+        int touched = (bits >> 62) != 0; // bit 63: present, bit 62: swapped
         if (written)
         {
             UINT8& w = (*written)[p - first];
             if ((bits >> 55) & 1) w = 1;
             if (w) wbytes += overlap;
+            touched = w;
         }
-        if (bits >> 62) bytes += overlap; // bit 63: present, bit 62: swapped
+        if (bits >> 62) bytes += overlap;
+        if (edges && prev >= 0 && touched != prev) ++*edges;
+        prev = touched;
     }
     if (writtenBytes) *writtenBytes = wbytes;
     return bytes;
@@ -895,8 +959,8 @@ static VOID Harvest()
         Block& b = kv.second;
         if (b.fresh || b.allWritten) continue;
         UINT64 w = 0;
-        Resident(kv.first, kv.first + b.size, &b.written, &w);
-        b.allWritten = w == b.size;
+        Resident(kv.first, kv.first + b.Extent(), &b.written, &w);
+        b.allWritten = w == b.Extent();
     }
     ForgetResidency();
 }
@@ -962,7 +1026,7 @@ static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
     if (windowed)
     {
         PIN_GetLock(&stateLock, tid + 1);
-        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
+        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh, UsableSize(ptr, size));
         PIN_ReleaseLock(&stateLock);
         ApplyWindowChange();
     }
@@ -975,7 +1039,12 @@ static BOOL ResizeBlock(THREADID tid, ADDRINT ptr, ADDRINT size)
     PIN_GetLock(&stateLock, tid + 1);
     auto it  = blocks.find(ptr);
     BOOL got = !finished && it != blocks.end() && !threads[tid].allocFresh;
-    if (got) it->second.size = size, it->second.allWritten = FALSE; // the page bitmap follows at the next scan
+    if (got) // the page bitmap follows at the next scan
+    {
+        it->second.size = size, it->second.allWritten = FALSE;
+        ADDRINT usable  = UsableSize(ptr, size);
+        it->second.span = usable > size ? usable : 0;
+    }
     PIN_ReleaseLock(&stateLock);
     return got;
 }
@@ -1192,6 +1261,14 @@ static VOID FindMallocCode(IMG img)
 VOID ImageLoad(IMG img, VOID* v)
 {
     FindMallocCode(img);
+    if (windowed)
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+            if (SEC_Mapped(sec) && SEC_IsWriteable(sec) && SEC_Size(sec) > 0)
+            {
+                PIN_GetLock(&stateLock, 1);
+                dataRegions.push_back({SEC_Address(sec), SEC_Address(sec) + SEC_Size(sec)});
+                PIN_ReleaseLock(&stateLock);
+            }
     IARGLIST ret = Args({{IARG_FUNCRET_EXITPOINT_VALUE, 0}});
     IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
 
@@ -1405,7 +1482,34 @@ static VOID WriteSnapshot()
 
 static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
-                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs";
+                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges";
+
+// Resident bytes of the program's writable image sections and of its main thread's stack
+// ("[stack]" in /proc/self/maps; other threads' stacks are anonymous mmaps, tracked as blocks).
+static UINT64 RegionsResident()
+{
+    vector< std::pair< ADDRINT, ADDRINT > > regions = dataRegions;
+    ifstream maps("/proc/self/maps");
+    string line;
+    while (std::getline(maps, line))
+        if (line.find("[stack]") != string::npos)
+        {
+            size_t dash = line.find('-'), space = line.find(' ');
+            regions.push_back({strtoull(line.substr(0, dash).c_str(), NULL, 16),
+                               strtoull(line.substr(dash + 1, space - dash - 1).c_str(), NULL, 16)});
+        }
+    std::sort(regions.begin(), regions.end());
+    UINT64 total = 0;
+    ADDRINT coveredTo = 0;
+    ForgetResidency();
+    for (const auto& r : regions) // sections can overlap (.tbss inside .bss); count each page once
+    {
+        ADDRINT lo = std::max(r.first, coveredTo);
+        if (r.second > lo) total += Resident(lo, r.second), coveredTo = r.second;
+    }
+    ForgetResidency();
+    return total;
+}
 
 // windowed: the footprint estimate (see "Windows" at the top)
 static VOID WriteWindowed()
@@ -1414,6 +1518,7 @@ static VOID WriteWindowed()
     const UINT64 R = KnobSamplingInterval.Value();
     double reusedDensity = R * kindCovered[0] >= 65536 ? (double)kindSampled[0] / kindCovered[0] : 1.0;
     UINT64 bytes[2] = {0, 0}, resident[2] = {0, 0}, reusedWritten = 0; // reused [0], fresh [1]
+    UINT64 edges = 0; // touched pages that border untouched ones inside blocks (probably partly used)
     double blocksEstimate = 0;
     ForgetResidency();
     for (auto& kv : blocks)
@@ -1421,7 +1526,7 @@ static VOID WriteWindowed()
         Block& b = kv.second;
         bytes[b.fresh] += b.size;
         UINT64 w = 0;
-        UINT64 r = Resident(kv.first, kv.first + b.size, b.fresh || clearRefsFd < 0 ? NULL : &b.written, &w);
+        UINT64 r = Resident(kv.first, kv.first + b.Extent(), b.fresh || clearRefsFd < 0 ? NULL : &b.written, &w, &edges);
         resident[b.fresh] += r;
         if (!b.fresh) reusedWritten += w;
         // touched bytes x density: the block's own once its sample covers 64 KB / i, else that of all
@@ -1442,26 +1547,42 @@ static VOID WriteWindowed()
     // them; the pages written since they were allocated do not (heap memory is written before it
     // is read). Without soft-dirty tracking, residency is used.
     double density  = reusedDensity;
-    double estimate = blocksEstimate + R * otherSampled;
+    // -pages_only: memory outside blocks from the pages of the program's segments and stack;
+    // with windows, from the bytes the windows selected outside blocks
+    UINT64 regions  = pagesOnly ? RegionsResident() : 0; // (reads /proc/self/maps: only when used)
+    double estimate = blocksEstimate + (pagesOnly ? (double)regions : (double)R * otherSampled);
+    // a touched page next to an untouched one inside a block is, on average, half used
+    if (KnobEdgeCorrection.Value()) estimate = std::max(0.0, estimate - (double)edges * (1 << (PAGE_BITS - 1)));
     windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << bytes[0] + bytes[1] << ","
                  << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
                  << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
                  << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
                  << KnobPeriod.Value() << "," << reusedWritten << "," << triggeredWindows << ","
-                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "\n";
+                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "," << regions << "," << edges << "\n";
 }
 
 // windowed: windows are periodic (one of -window references at every multiple of -period)
 // or triggered by a large allocation (-window_alloc). Opening or closing one changes the
 // instrumentation, which the caller applies after releasing stateLock (flushPending).
+// A window opened or closed. Flushing: discard translated code, and make threads restart in
+// fresh code (epoch). -window_switch auto: after an expensive flush, switch to versions (one last
+// flush installs them).
+static VOID WindowChanged()
+{
+    if (!versioned && autoSwitch && tracesSinceChange > KnobVersionTraces.Value()) versioned = TRUE;
+    else if (versioned) return;
+    tracesSinceChange = 0;
+    flushPending      = TRUE;
+    epoch++;
+}
+
 static VOID OpenWindow(UINT64 start, BOOL triggered)
 {
     watching        = TRUE;
     triggeredWindow = triggered;
     windowStart     = start;
     windowEnd       = start + KnobWindow.Value();
-    flushPending    = TRUE;
-    epoch++;
+    WindowChanged();
 }
 
 static VOID CloseWindow()
@@ -1471,8 +1592,7 @@ static VOID CloseWindow()
     watchedRefs += windowEnd - windowStart;
     if (triggeredWindow) lastTriggeredEnd = windowEnd;
     watching     = FALSE;
-    flushPending = TRUE;
-    epoch++;
+    WindowChanged();
 }
 
 // windowed: open or close windows when time reaches them
@@ -1504,7 +1624,7 @@ static VOID AdvanceWindows()
 static VOID MaybeTriggerWindow(ADDRINT size)
 {
     UINT64 threshold = KnobWindowAlloc.Value();
-    if (!threshold || size < threshold || watching) return;
+    if (pagesOnly || !threshold || size < threshold || watching) return;
     if (triggeredWindows && timeNow < lastTriggeredEnd + KnobPeriod.Value()) return;
     OpenWindow(timeNow, TRUE);
     triggeredWindows++;
@@ -1563,7 +1683,8 @@ static VOID RecordSelected(THREADID tid, ADDRINT address, UINT32 size)
 // back into its old translation. So each thread, at its next check after a
 // window change, restarts at the current instruction, in code instrumented
 // for the new state.
-static VOID CheckTime(THREADID tid, CONTEXT* ctxt)
+// returns whether a window is open (-window_switch version: into the version register)
+static ADDRINT CheckTime(THREADID tid, CONTEXT* ctxt)
 {
     ThreadData& t = threads[tid];
     t.checkAt     = t.refs + checkStep;
@@ -1578,6 +1699,7 @@ static VOID CheckTime(THREADID tid, CONTEXT* ctxt)
         t.epoch = epoch;
         PIN_ExecuteAt(ctxt);
     }
+    return watching;
 }
 
 VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UINT64 numElements, VOID* v)
@@ -1810,10 +1932,21 @@ int main(int argc, char* argv[])
         numBins = KnobNumSplits.Value();
         if (KnobSamplingInterval.Value() == 0 || numBins == 0) return Usage("-i and -s must be positive");
         spatialThreshold = ~(UINT64)0 / KnobSamplingInterval.Value();
-        if (KnobWindow.Value())
+        if (KnobWindow.Value() || KnobPagesOnly.Value())
         {
-            if (KnobPeriod.Value() <= KnobWindow.Value()) return Usage("-period must be larger than -window");
-            if (!KnobSnapshot.Value()) return Usage("-window needs -snapshot");
+            pagesOnly = KnobPagesOnly.Value();
+            const string& sw = KnobWindowSwitch.Value();
+            if (sw != "version" && sw != "flush" && sw != "auto") return Usage("-window_switch must be auto, version or flush");
+            versioned  = sw == "version" && !pagesOnly;
+            autoSwitch = sw == "auto" && !pagesOnly;
+            if (versioned || autoSwitch)
+            {
+                watchReg = PIN_ClaimToolRegister();
+                if (!REG_valid(watchReg)) return Usage("no tool register for -window_switch version");
+            }
+            if (pagesOnly && KnobWindow.Value()) return Usage("-pages_only and -window exclude each other");
+            if (!pagesOnly && KnobPeriod.Value() <= KnobWindow.Value()) return Usage("-period must be larger than -window");
+            if (!KnobSnapshot.Value()) return Usage("-window and -pages_only need -snapshot");
             windowed   = TRUE;
             // residency of fresh blocks is their touched pages, at 4 KB granularity only without huge pages
             syscall(SYS_prctl, PR_SET_THP_DISABLE, 1, 0, 0, 0); // Pin's CRT has no prctl()
@@ -1828,13 +1961,15 @@ int main(int argc, char* argv[])
                 if (clearRefsFd >= 0 && write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1;
                 nextDirtyClear = dirtyEvery;
             }
-            // the first periodic window opens at time 0
-            nextPeriodic = KnobPeriod.Value();
+            // the first periodic window opens at time 0 (-pages_only: none ever does)
+            nextPeriodic = pagesOnly ? ~(UINT64)0 : KnobPeriod.Value();
             windowEnd    = KnobWindow.Value();
+            if (pagesOnly) watching = FALSE;
             // Threads advance time every checkStep references: well inside a window, the gap
             // between windows and a snapshot, but not so often that the lock costs (a window
             // shorter than 8 x 10^4 references lasts longer than asked).
-            UINT64 shortest = std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), KnobSnapshot.Value()});
+            UINT64 shortest = pagesOnly ? KnobSnapshot.Value()
+                                        : std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), KnobSnapshot.Value()});
             checkStep       = std::max< UINT64 >(10000, shortest / 8);
         }
         UINT64 base      = KnobSeed.Value().empty() ? PIN_GetPid() : strtoull(KnobSeed.Value().c_str(), NULL, 10);
