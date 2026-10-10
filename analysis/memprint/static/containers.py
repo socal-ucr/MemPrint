@@ -232,6 +232,13 @@ class Containers:
             return dest
         n = _as_int(self.eval(args_c[0])) if args_c else 0
         self._vinit(dest, n if n is not UNK else 0, esize, et=et)
+        if len(args_c) >= 2 and n is not UNK and int(np.max(n)) > 0 and et is not None and \
+                not ca.is_float(et) and esize in (4, 8):                # vector(n, value): integer fill
+            v = _as_int(self.eval(args_c[1]))
+            start = self._vfield(dest, 0, charge=False)
+            if isinstance(start, Ptr) and not _is_unk(start.obj, start.off):
+                offs = int(np.ravel(start.off)[0]) + esize * np.arange(int(np.max(n)))
+                start.obj.store(offs, UNK if v is UNK or np.ndim(v) else int(v), 4)
         return dest
 
     # ---------------------------------------------------------------- unordered_map

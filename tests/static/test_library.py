@@ -1,6 +1,6 @@
 """Check the C++ interpreter's library models on tests/static/umap.cc (unordered_map iterators) and
 tests/static/cas.cc (compare_and_swap idioms) and
-tests/static/globals.cc (globals through their address): python tests/static/test_library.py"""
+tests/static/globals.cc (globals through their address), tests/static/vector_iter.cc (vector iterators): python tests/static/test_library.py"""
 import sys
 from pathlib import Path
 
@@ -9,7 +9,8 @@ from memprint.static import clangast as ca  # noqa: E402
 from memprint.static.interp_cpp import CppInterpreter  # noqa: E402
 from memprint.static import interp  # noqa: E402
 
-EXPECTED = {"umap.cc": [2, 41, 66, 4, 100, 111, 1, 1, 1, 3, 5], "cas.cc": [64, 1, 8],
+EXPECTED = {"umap.cc": [2, 41, 66, 4, 100, 111, 1, 1, 1, 3, 5], "cas.cc": [64, 1, 8, 200, 8, 3],
+            "vector_iter.cc": [19, 6, 6, 3, 6, 6, 9, 57778, 4, 1],
             "globals.cc": [314159265, 1220703125, 314159265, 119209, 8388608, 794521, 869065, 647631, 15]}
 ok = True
 for name, expected in EXPECTED.items():

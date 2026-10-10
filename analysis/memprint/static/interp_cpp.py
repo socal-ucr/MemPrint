@@ -91,36 +91,75 @@ def _reference(type_):
 _REREAD = {}
 
 
-def _reread(target, expected):
-    """Was `expected` (a local variable) assigned from the same expression as `target`, the CAS retry
-    idiom (old = x; ... CAS(x, old, new))? Then a single thread's CAS always succeeds."""
-    e = ca.strip(expected)
+def _assignments(var):
+    """The expressions assigned to a local variable in its function (initialiser and = assignments)."""
+    out = []
+    fn = var.semantic_parent
+    if fn is None:
+        return out
+    for n in fn.walk_preorder():
+        if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
+            lhs, rhs = ca.children(n)
+            lhs = ca.strip(lhs)
+            if lhs.kind == K.DECL_REF_EXPR and lhs.referenced is not None and lhs.referenced.hash == var.hash:
+                out.append(rhs)
+        elif n.kind == K.VAR_DECL and n.hash == var.hash and ca.children(n):
+            out.append(ca.children(n)[-1])
+    return out
+
+
+def _local_var(c):
+    e = ca.strip(c)
     while e.kind == K.UNEXPOSED_EXPR and ca.children(e):
         e = ca.strip(ca.children(e)[0])
-    if e.kind != K.DECL_REF_EXPR or e.referenced is None or e.referenced.kind != K.VAR_DECL:
+    if e.kind == K.DECL_REF_EXPR and e.referenced is not None and e.referenced.kind == K.VAR_DECL:
+        return e.referenced
+    return None
+
+
+def _reread(target, expected, new):
+    """The bit-update retry idiom: `expected` (a local) was read from the same expression as `target`
+    and `new` sets or clears bits of it (do { o = x; n = o | m; } while (!CAS(x, o, n))). One thread's
+    CAS then always succeeds, and the bits it changes merge with earlier points' changes. Other loops
+    over a fresh read (relaxing a distance) keep the in-order semantics."""
+    var = _local_var(expected)
+    if var is None:
         return False
-    var = e.referenced
-    key = (var.hash, target.hash, target.location.offset)
+    key = (var.hash, target.hash, target.location.offset, new.hash)
     if key in _REREAD:
         return _REREAD[key]
     want = [t.spelling for t in target.get_tokens()]
-    found = False
-    fn = var.semantic_parent
-    if fn is not None and want:
-        for n in fn.walk_preorder():
-            rhs = None
-            if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
-                lhs, rhs = ca.children(n)
-                lhs = ca.strip(lhs)
-                if lhs.kind != K.DECL_REF_EXPR or lhs.referenced is None or lhs.referenced.hash != var.hash:
-                    rhs = None
-            elif n.kind == K.VAR_DECL and n.hash == var.hash and ca.children(n):
-                rhs = ca.children(n)[-1]
-            if rhs is not None and [t.spelling for t in rhs.get_tokens()] == want:
-                found = True
-                break
+    found = bool(want) and any([t.spelling for t in r.get_tokens()] == want for r in _assignments(var))
+    if found:
+        nvar = _local_var(new)
+        exprs = _assignments(nvar) if nvar is not None else [new]
+
+        def bitwise(e):
+            toks = [t.spelling for t in e.get_tokens()]
+            return var.spelling in toks and any(t in ("|", "&", "^") for t in toks)
+
+        found = any(bitwise(e) for e in exprs)
     _REREAD[key] = found
     return found
+
+
+def _vec_iter(t):
+    """Is t a vector iterator (libstdc++'s __normal_iterator<T*, vector<T>>, a pointer in a class)?"""
+    if not isinstance(t, str):
+        if ca.is_pointer(t):
+            return False
+        t = _referee(t).get_canonical().spelling
+    return "__normal_iterator" in t
+
+
+def _elem_size(t):
+    """Element size behind a pointer or a vector iterator."""
+    if ca.is_pointer(t):
+        return ca.pointee_size(t)
+    r = _referee(t).get_canonical()
+    if "__normal_iterator" in r.spelling and r.get_num_template_arguments() > 0:
+        return ca.pointee_size(r.get_template_argument_type(0))
+    return ca.pointee_size(t)
 
 
 def _node_iter(t):
@@ -2133,7 +2172,14 @@ class CppInterpreter(Containers, Interpreter):
         name = ref.spelling
         ptype = ref.semantic_parent.type.get_canonical().spelling if ref.semantic_parent is not None else ""
         if ptype.startswith("std::vector<") and obj is not None:
-            return self._vector_method(name, obj, args_c, ref.semantic_parent.type, c.type)
+            r = self._vector_method(name, obj, args_c, ref.semantic_parent.type, c.type)
+            if _vec_iter(c.type):                                      # begin, end: an iterator object
+                return self._iterator_object(r, c.type, sret)
+            return r
+        if _vec_iter(ptype) or (name.startswith("operator") and args_c and _vec_iter(args_c[0].type)
+                                and name not in ("operator=",)):
+            t = ref.semantic_parent.type if _vec_iter(ptype) else args_c[0].type
+            return self._vector_iterator(name, obj, args_c, c, sret, _elem_size(t) or 4)
         if _node_iter(ptype) or (name in ("operator==", "operator!=") and args_c and _node_iter(args_c[0].type)):
             return self._node_iterator(name, obj, args_c, c, sret)
         if ptype.startswith("std::unordered_map<") and obj is not None:
@@ -2152,7 +2198,7 @@ class CppInterpreter(Containers, Interpreter):
             return dest
         if name == "max_element" and len(args_c) >= 2:
             r = self._max_element(args_c)
-            return self._iterator_object(r, c.type, sret) if _node_iter(c.type) else r
+            return self._iterator_object(r, c.type, sret) if _node_iter(c.type) or _vec_iter(c.type) else r
         if "mersenne_twister_engine" in ptype:
             words = 312 if ", 64," in ptype else 624
             if name == "seed":
@@ -2287,19 +2333,19 @@ class CppInterpreter(Containers, Interpreter):
                 out = MATH[name][1](*[np.asarray(r.v, dtype=float) for r in reals])
             return Real(out if np.ndim(out) else float(out))
         if name in ("sort", "stable_sort") and len(args_c) >= 2:
-            b, e = self.eval(args_c[0]), self.eval(args_c[1])
+            b, e = self._iter_arg(args_c[0]), self._iter_arg(args_c[1])
             self._sort(b, e, c, args_c)
             return UNK
         if name in ("unique", "remove") and len(args_c) >= 2:
-            b, e = self.eval(args_c[0]), self.eval(args_c[1])
+            b, e = self._iter_arg(args_c[0]), self._iter_arg(args_c[1])
             value = self._value(args_c[2]) if name == "remove" and len(args_c) > 2 else None
             return self._compact(b, e, name, value, args_c)
         if name == "copy" and len(args_c) == 3:
-            b, e, out = (self.eval(x) for x in args_c)
+            b, e, out = (self._iter_arg(x) for x in args_c)
             return self._copy_range(b, e, out, args_c)
         if name == "fill" and len(args_c) == 3:
-            b, e, value = self.eval(args_c[0]), self.eval(args_c[1]), self._value(args_c[2])
-            esize = ca.pointee_size(args_c[0].type) or 4
+            b, e, value = self._iter_arg(args_c[0]), self._iter_arg(args_c[1]), self._value(args_c[2])
+            esize = _elem_size(args_c[0].type) or 4
             seg = self._segments(b, e, esize)
             if seg is not None:
                 starts, lengths = seg
@@ -2314,13 +2360,13 @@ class CppInterpreter(Containers, Interpreter):
                 self.eval(x)
             return UNK
         if name == "shuffle" and len(args_c) >= 2:
-            b, e = self.eval(args_c[0]), self.eval(args_c[1])
+            b, e = self._iter_arg(args_c[0]), self._iter_arg(args_c[1])
             gen = self.lvalue(args_c[2]) if len(args_c) > 2 else None
             return self._shuffle(b, e, gen, args_c)
         if name in ("__sync_fetch_and_add", "__atomic_fetch_add") and len(args_c) >= 2:
             p, v = self.eval(args_c[0]), self.eval(args_c[1])
             if isinstance(p, Ptr):
-                loc = Loc(p.obj, p.off, ca.pointee_size(args_c[0].type) or 4)
+                loc = Loc(p.obj, p.off, _elem_size(args_c[0].type) or 4)
                 self.access(loc)
                 self.access(loc, write=True)
                 old, _ = self._rmw_add(loc, args_c[0].type.get_pointee(), v)
@@ -2331,7 +2377,7 @@ class CppInterpreter(Containers, Interpreter):
             if not isinstance(p, Ptr):
                 return UNK
             pt = args_c[0].type.get_pointee()
-            loc = Loc(p.obj, p.off, ca.pointee_size(args_c[0].type) or 4)
+            loc = Loc(p.obj, p.off, _elem_size(args_c[0].type) or 4)
             self.access(loc)
             self.access(loc, write=True)
             cur = self._mem_load(loc, pt)
@@ -2401,7 +2447,7 @@ class CppInterpreter(Containers, Interpreter):
         # A constant old_val claims the location once (if (x == -1) CAS(x, -1, d)). A variable one was read
         # from the location just before (the retry loop do { o = x; n = f(o); } while (!CAS(x, o, n))): one
         # thread alone always succeeds, each point changing the bits it changes in its new_val
-        retry = _reread(args_c[0], args_c[1])
+        retry = _reread(args_c[0], args_c[1], args_c[2])
         order = np.argsort(offs, kind="stable")
         value = {}
         for i in order:
@@ -2429,8 +2475,8 @@ class CppInterpreter(Containers, Interpreter):
             b, e = self._iter_node(args_c[0]), self._iter_node(args_c[1])
             esize = self._node_stride(b)
         else:
-            b, e = self.eval(args_c[0]), self.eval(args_c[1])
-            esize = ca.pointee_size(args_c[0].type) or 16
+            b, e = self._iter_arg(args_c[0]), self._iter_arg(args_c[1])
+            esize = _elem_size(args_c[0].type) or 16
         if not (isinstance(b, Ptr) and isinstance(e, Ptr)) or _is_unk(b.obj, b.off, e.off) or self.L > 1:
             return Ptr(UNK, UNK)
         n = (int(e.off) - int(b.off)) // esize
@@ -2471,6 +2517,68 @@ class CppInterpreter(Containers, Interpreter):
         if not isinstance(it, Ptr) or _is_unk(it.obj, it.off):
             return Ptr(UNK, UNK)
         return self._ptr_load(Loc(it.obj, it.off, 8))
+
+    def _iter_arg(self, x):
+        """An iterator argument as the pointer it holds (vector iterators are objects holding one)."""
+        if not _vec_iter(x.type):
+            return self.eval(x)
+        p = self._iter_node(x)
+        return p
+
+    def _vector_iterator(self, name, obj, args_c, c, sret, esize):
+        """__normal_iterator: a pointer in an object. *, ->, [], ++, --, +, -, +=, -=, comparisons."""
+        sides = ([obj] if obj is not None else []) + list(args_c)
+        if name in ("operator*", "operator->") and sides:
+            return self._iter_node(sides[0])
+        if name == "base" and obj is not None:
+            return self._iter_node(obj)
+        if name == "operator[]" and len(sides) == 2:
+            p, i = self._iter_node(sides[0]), _as_int(self.eval(sides[1]))
+            if not isinstance(p, Ptr) or _is_unk(p.obj, p.off, i):
+                return Ptr(UNK, UNK)
+            return Ptr(p.obj, p.off + esize * i)
+        if name in ("operator++", "operator--", "operator+=", "operator-=") and isinstance(obj, Ptr) \
+                and not _is_unk(obj.obj, obj.off):
+            p = self._iter_node(obj)
+            if name in ("operator++", "operator--"):
+                d = 1 if name == "operator++" else -1
+            else:
+                d = _as_int(self.eval(args_c[0])) if args_c else UNK
+                if d is not UNK and name == "operator-=":
+                    d = -d
+            if not isinstance(p, Ptr) or _is_unk(p.obj, p.off, d):
+                self._ptr_store(Loc(obj.obj, obj.off, 8), Ptr(UNK, UNK))
+                return obj
+            self._ptr_store(Loc(obj.obj, obj.off, 8), Ptr(p.obj, p.off + esize * d))
+            self.access(Loc(obj.obj, obj.off, 8), write=True)
+            if name in ("operator++", "operator--") and args_c:       # it++: the old position
+                return self._iterator_object(p, c.type, sret)
+            return obj
+        if name in ("operator+", "operator-") and len(sides) == 2:
+            a = self._iter_node(sides[0]) if _vec_iter(sides[0].type if not isinstance(sides[0], Ptr) else "__normal_iterator") else UNK
+            if not isinstance(sides[1], Ptr) and _vec_iter(sides[1].type):      # it - it: elements apart
+                b = self._iter_node(sides[1])
+                if not (isinstance(a, Ptr) and isinstance(b, Ptr)) or _is_unk(a.off, b.off):
+                    return UNK
+                d = (np.asarray(a.off) - np.asarray(b.off)) // esize
+                return _SCALAR(d) if np.ndim(d) else int(d)
+            k = _as_int(self.eval(sides[1]))
+            if not isinstance(a, Ptr) or _is_unk(a.obj, a.off, k):
+                return self._iterator_object(Ptr(UNK, UNK), c.type, sret)
+            k = k if name == "operator+" else -k
+            return self._iterator_object(Ptr(a.obj, a.off + esize * k), c.type, sret)
+        if name in ("operator==", "operator!=", "operator<", "operator>", "operator<=", "operator>=") \
+                and len(sides) == 2:
+            a, b = (self._iter_node(x) for x in sides)
+            if any(not isinstance(x, Ptr) or _is_unk(x.obj, x.off) for x in (a, b)):
+                return UNK
+            ao, bo = np.asarray(a.off), np.asarray(b.off)
+            r = {"operator==": ao == bo, "operator!=": ao != bo, "operator<": ao < bo, "operator>": ao > bo,
+                 "operator<=": ao <= bo, "operator>=": ao >= bo}[name]
+            return _SCALAR(r.astype(np.int64)) if np.ndim(r) else int(r)
+        for a in args_c:
+            self.eval(a)
+        return UNK
 
     def _node_stride(self, node):
         if isinstance(node, Ptr) and not _is_unk(node.obj, node.off):
@@ -2555,6 +2663,9 @@ class CppInterpreter(Containers, Interpreter):
         src, dst = np.asarray(src, dtype=np.int64), np.asarray(dst, dtype=np.int64)
         if src.size == 0:
             return
+        if getattr(src_obj, "bytevals", None) is not None:              # bytes first: a byte store makes its
+            for u in range(esize):                                     # 4-byte unit unknown, the units below
+                dst_obj.store(dst + u, src_obj.load(src + u, 1), 1)    # then restore whole values
         for u in range(0, max(esize, 4), 4):
             vals = src_obj.load(src + u)
             dst_obj.store(dst + u, vals)
@@ -2568,14 +2679,11 @@ class CppInterpreter(Containers, Interpreter):
                         ptrs[: len(dst_obj.ptrs)] = dst_obj.ptrs
                     dst_obj.ptrs = ptrs
                 dst_obj.ptrs[(dst + u) // 4] = uids
-        if getattr(src_obj, "bytevals", None) is not None:
-            for u in range(esize):
-                dst_obj.store(dst + u, src_obj.load(src + u, 1), 1)
 
     def _sort(self, b, e, c, args_c):
         """std::sort on memory values: elements are compared field by field (pairs, NodeWeight: first,
         then second), descending with std::greater; the elements move with all their bytes."""
-        esize = ca.pointee_size(args_c[0].type) or 4
+        esize = _elem_size(args_c[0].type) or 4
         seg = self._segments(b, e, esize)
         if seg is None:
             return
@@ -2613,7 +2721,7 @@ class CppInterpreter(Containers, Interpreter):
         """std::unique (adjacent duplicates) or std::remove (a value): compacted in place; returns the
         new end. Charged: two reads per element for unique, one for remove, plus a write per kept
         element that moves."""
-        esize = ca.pointee_size(args_c[0].type) or 4
+        esize = _elem_size(args_c[0].type) or 4
         seg = self._segments(b, e, esize)
         if seg is None:
             return Ptr(UNK, UNK)
@@ -2640,7 +2748,7 @@ class CppInterpreter(Containers, Interpreter):
         return Ptr(b.obj, _SCALAR(new_end) if self.L > 1 else int(new_end[0]))
 
     def _copy_range(self, b, e, out, args_c):
-        esize = ca.pointee_size(args_c[0].type) or 4
+        esize = _elem_size(args_c[0].type) or 4
         seg = self._segments(b, e, esize)
         if seg is None or not isinstance(out, Ptr) or _is_unk(out.obj, out.off):
             return Ptr(UNK, UNK)
@@ -2655,7 +2763,7 @@ class CppInterpreter(Containers, Interpreter):
         return Ptr(out.obj, _SCALAR(end) if self.L > 1 else int(end[0]))
 
     def _shuffle(self, b, e, gen, args_c):
-        esize = ca.pointee_size(args_c[0].type) or 4
+        esize = _elem_size(args_c[0].type) or 4
         seg = self._segments(b, e, esize)
         if seg is None:
             return UNK

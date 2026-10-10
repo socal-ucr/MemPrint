@@ -17,5 +17,15 @@ int main() {
   long won = 0;
   for (int i = 0; i < 64; i++) { int h = -1; if (compare_and_swap(c[i / 8], h, i)) won++; }
   probe(won);                                 // 8: each slot claimed once
+  long dist[4] = {100, 100, 100, 100};        // relax (sssp): a retry over a fresh read, not a bit update
+  for (int i = 0; i < 64; i++) {
+    long nd = 50 + (i * 7) % 13, od = dist[i % 4];
+    while (nd < od) { if (compare_and_swap(dist[i % 4], od, nd)) break; od = dist[i % 4]; }
+  }
+  probe(dist[0] + dist[1] + dist[2] + dist[3]);  // 200: each the minimum, 50
+  int parent[8]; for (int i = 0; i < 8; i++) parent[i] = -1;
+  long claimed = 0;                           // claim through a fresh read (bfs)
+  for (int i = 0; i < 64; i++) { int cur = parent[i % 8]; if (cur < 0 && compare_and_swap(parent[i % 8], cur, i)) claimed++; }
+  probe(claimed); probe(parent[3]);           // 8, 3
   return 0;
 }
