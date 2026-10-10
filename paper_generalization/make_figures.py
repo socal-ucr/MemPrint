@@ -669,10 +669,145 @@ def fig_pb_sd_relative():
     save(fig, "pb_sd_error")
 
 
+def fig_method_requirements():
+    cols = ["$C$'s\nsource:\ninterpreter", "$C$'s\nsource:\nclang parse", "runtime\nbaseline\n(other traces)",
+            "sampled\nrun of $C$\n(test config)", "full traces\nof $C$ (other\nconfigs)",
+            "full trace\nof $C$ (test\nconfig)", "known\nprograms'\nmodels"]
+    rows = [
+        ("static footprint", [1, 0, 1, 0, 0, 0, 0], "footprint", 0),
+        ("static $\\alpha$", [1, 0, 1, 1, 0, 0, 0], "$\\alpha$", 0),
+        ("pooled regression + static $\\alpha$", [1, 0, 1, 1, 0, 0, 1], "$\\alpha$", 0),
+        ("nearest model by $\\hat z$", [1, 0, 1, 1, 0, 0, 1], "$\\alpha$", 1),
+        ("RBF mixture by $\\hat z$", [1, 0, 1, 1, 0, 0, 1], "$\\alpha$", 1),
+        ("nearest model by AST counts", [0, 1, 0, 1, 0, 0, 1], "$\\alpha$", 1),
+        ("uniform mixture", [0, 0, 0, 1, 0, 0, 1], "$\\alpha$", 1),
+        ("own model (MemPrint)", [0, 0, 0, 1, 1, 0, 0], "$\\alpha$", 2),
+        ("nearest / mixture by measured $z$", [0, 0, 0, 1, 0, 1, 1], "$\\alpha$", 2),
+        ("best borrowed model (oracle)", [0, 0, 0, 1, 0, 1, 1], "$\\alpha$", 2),
+    ]
+    fam_color = [C[0], C[1], C[2]]
+    fig, ax = plt.subplots(figsize=(W2, 3.6))
+    ax.grid(False)
+    for i, (name, need, out, fam) in enumerate(rows):
+        y = len(rows) - 1 - i
+        ax.axhline(y, color=GRID, lw=0.6, zorder=0)
+        for j, n in enumerate(need):
+            if n:
+                ax.scatter(j, y, s=70, color=fam_color[fam], zorder=3)
+            else:
+                ax.scatter(j, y, s=14, facecolor="white", edgecolor=GRAY, lw=0.6, zorder=3)
+        ax.text(len(cols) - 0.2, y, out, va="center", fontsize=7, color=INK)
+    ax.set_yticks(range(len(rows)), [r[0] for r in rows][::-1])
+    ax.set_xticks(range(len(cols)), cols, fontsize=6.3)
+    ax.xaxis.tick_top()
+    ax.set_xlim(-0.6, len(cols) + 0.9)
+    ax.text(len(cols) - 0.2, len(rows) - 0.4, "output", fontsize=7, color=INK2, va="bottom")
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.tick_params(length=0)
+    ax.legend(handles=[Line2D([], [], ls="", marker="o", color=fam_color[0], label="predicted from source"),
+                       Line2D([], [], ls="", marker="o", color=fam_color[1], label="borrowed from known programs"),
+                       Line2D([], [], ls="", marker="o", color=fam_color[2], label="references (need $C$'s traces)")],
+              loc="upper center", bbox_to_anchor=(0.45, -0.02), ncol=3)
+    save(fig, "method_requirements")
+
+
+def fig_static_example():
+    from memprint.static import load
+    from memprint.static.spectrum import BASIS, moments, sample_probability, Baseline
+    spec = load(ROOT / "data" / "polybench-bytes" / "data" / "static" / "gemm-MEDIUM.npz")[0]
+    b = pd.read_csv(D / "pb_baseline.csv")
+    base = Baseline(b.bytes.to_numpy(), b.addresses.to_numpy())
+    m = pd.read_csv(D / "pb_moments.csv")
+    m = m[(m.workload == "gemm") & (m.config == "MEDIUM")].sort_values("k")
+    edges = np.arange(0, 28)
+    cls = np.clip(np.floor(np.log2(np.maximum(spec.c, 1))).astype(int), 0, 26)
+    prog_bytes = np.bincount(cls, weights=spec.n * spec.s, minlength=27)
+    fig, axes = plt.subplots(1, 3, figsize=(W2, 2.4))
+    ax = axes[0]
+    ax.bar(edges[:-1] - 0.2, prog_bytes / 1024, width=0.4, color=C[0], label="program (interpreter)")
+    ax.bar(edges[:-1] + 0.2, base.bytes / 1024, width=0.4, color=C[1], label="runtime baseline")
+    ax.set_yscale("symlog", linthresh=1)
+    ax.set_xlabel("references per byte, $\\log_2 c$")
+    ax.set_ylabel("KB")
+    ax.set_title("(a) Spectrum", loc="left")
+    ax.legend(fontsize=6, loc="upper right")
+    ax = axes[1]
+    for i, k in enumerate([100, 1000, 10000, 100000]):
+        p = sample_probability(2.0 ** (edges[:-1] + 0.5), k)
+        contrib = (prog_bytes + base.bytes) * p
+        ax.plot(edges[:-1], np.cumsum(contrib) / (prog_bytes.sum() + base.bytes.sum()), color=C[i], marker="o",
+                ms=2, label=f"$k$ = {k:,}")
+    ax.set_xlabel("count class $\\log_2 c$ (cumulative)")
+    ax.set_ylabel("E[$m_k$] / truth")
+    ax.set_title("(b) Bytes a bin expects to see", loc="left")
+    ax.legend(fontsize=6, loc="upper left")
+    ax = axes[2]
+    ax.plot(m.k, m.alpha_meas, color=INK, marker="o", ms=2.5, label="measured (Pin)")
+    ax.plot(m.k, m.alpha_pred, color=C[0], ls="--", label="truth / E[$m_k$]")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("$k$")
+    ax.set_ylabel("$\\alpha_k$")
+    ax.set_title("(c) Resulting $\\alpha_k$", loc="left")
+    ax.legend(fontsize=6, loc="upper left")
+    fig.tight_layout()
+    save(fig, "static_example")
+
+
+def fig_borrow_example():
+    t = pd.read_csv(D / "borrow_example.csv")
+    cinfo = pd.read_csv(D / "borrow_example_c.csv").iloc[0]
+    e = pd.read_csv(PB / "lowo_errors.csv")
+    e = e[(e.workload == cinfo.held) & (e.split == cinfo.split)].set_index("method").mape
+    fig, axes = plt.subplots(1, 3, figsize=(W2, 2.6), gridspec_kw={"width_ratios": [1.15, 1, 1]})
+    ax = axes[0]
+    sc = ax.scatter(t.pc1, t.pc2, c=np.log10(t.error), cmap="Blues_r", s=12 + 300 * t.weight, edgecolor=INK2, lw=0.4,
+                    vmin=0, vmax=2, zorder=3)
+    ax.scatter([cinfo.hat_pc1], [cinfo.hat_pc2], marker="*", s=120, color=C[1], zorder=4, label="$\\hat z(C)$ (source)")
+    ax.scatter([cinfo.meas_pc1], [cinfo.meas_pc2], marker="D", s=30, facecolor="none", edgecolor=C[2], lw=1.2, zorder=4,
+               label="$z(C)$ (measured)")
+    offsets = [(-30, 14), (-34, -2), (-30, -16), (-22, -26)]
+    for (_, r), off in zip(t.nsmallest(4, "d_hat").iterrows(), offsets):
+        ax.annotate(r.workload, (r.pc1, r.pc2), xytext=off, textcoords="offset points", fontsize=6, color=INK2,
+                    arrowprops=dict(arrowstyle="-", color=GRAY, lw=0.5))
+    ax.set_xlabel(f"PC 1 ({cinfo.explained1 * 100:.0f}% of variance)")
+    ax.set_ylabel(f"PC 2 ({cinfo.explained2 * 100:.1f}%)")
+    ax.set_title(f"(a) Descriptor space, $C$ = {cinfo.held}", loc="left")
+    ax.legend(fontsize=6, loc="lower left")
+    cb = fig.colorbar(sc, ax=ax, shrink=0.75, ticks=[0, 1, 2])
+    cb.ax.set_yticklabels(["1%", "10%", "100%"], fontsize=6)
+    cb.set_label("error of its model on $C$", fontsize=6)
+    ax = axes[1]
+    from scipy.stats import spearmanr
+    for i, (col, name) in enumerate((("d_hat", "$\\hat z$"), ("d_meas", "measured $z$"), ("d_ast", "AST counts"))):
+        d = t.dropna(subset=[col])
+        rho = spearmanr(d[col], d.error)[0]
+        ax.scatter(d[col], d.error, s=8, color=C[i], alpha=0.8, label=f"{name}: $\\rho$ = {rho:.2f}", lw=0)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("distance from $C$")
+    ax.set_ylabel("error of the known model on $C$ (%)")
+    ax.set_title("(b) Distance against transfer error", loc="left")
+    ax.legend(fontsize=6, loc="lower right")
+    ax = axes[2]
+    top = t.nlargest(6, "weight").iloc[::-1]
+    ax.barh(range(len(top)), top.weight, color=C[1], height=0.6)
+    for i, (_, r) in enumerate(top.iterrows()):
+        ax.text(r.weight + 0.01, i, f"{r.error:.1f}%", va="center", fontsize=6, color=INK)
+    ax.set_yticks(range(len(top)), top.workload)
+    ax.set_xlabel("RBF weight $w_W$")
+    ax.set_xlim(0, max(top.weight) * 1.35)
+    ax.set_title("(c) Mixture weights (model error)", loc="left")
+    fig.tight_layout()
+    save(fig, "borrow_example")
+
+
 if __name__ == "__main__":
     for f in [fig_inclusion, fig_pb_spectra, fig_pb_alpha_curves, fig_pb_moments_scatter, fig_pb_alpha_heatmap,
               fig_lowo_methods, fig_pb_static_vs_own, fig_pb_footprint, fig_reuse_curves, fig_similarity,
               fig_baseline, fig_pb_interp_cost, fig_idioms, fig_minivite, fig_gap_degrees, fig_gap_skeleton,
               fig_gap_fp, fig_gap_methods, fig_gap_auto, fig_gap_auto_fp, fig_gap_alpha_curves, fig_gap_spectra,
-              fig_gap_arrays, fig_interp_cost, fig_csr, fig_pb_sd_relative, fig_blind]:
+              fig_gap_arrays, fig_interp_cost, fig_csr, fig_pb_sd_relative, fig_blind, fig_method_requirements,
+              fig_static_example, fig_borrow_example]:
         f()

@@ -524,24 +524,241 @@ referenced 32--512 times; for GAP's C++ runtime (libstdc++, \code{-O3}) it has 4
 \section{Using the spectrum for an unseen program}
 \label{sec:methods}
 
-Given the static spectrum $S_C$ of the unseen program $C$ at its test config and the baseline $b$:
+This section defines the eleven ways of obtaining a footprint or a correction factor for an unseen program $C$ that
+are compared in \secref{sec:pb}: what each computes, from what, and what it needs. \figref{fig:method-requirements}
+summarises the requirements, \figref{fig:families} the three families, and \tabref{tab:methods} the formulas.
 
-\begin{description}
-\item[static footprint] $\text{truth} \approx \sum_a s_a + \sum_j b_j$. No sampling at all.
-\item[static $\alpha$] $\alpha_k \approx \text{truth}/\E[m_k]$ from \eqref{eq:moments}, evaluated at the interval
-of each bin. (The bin's own observed $m$ is not needed.)
-\item[pooled regression] one model \eqref{eq:model} over all known programs, with $\log$ static $\alpha$ as an
-eighth feature.
-\item[nearest model by $\zhat$] the own model of the known program $W$ closest to $\zhat(C)$.
-\item[RBF mixture by $\zhat$] the known models' $\log\alpha$ predictions averaged with weights
-$w_W \propto \exp(-d(\zhat_C, z_W)^2 / 2h^2)$, with bandwidth $h$ the median nearest-neighbour distance among the
-known programs.
-\end{description}
+\subsection{The setting: what is known and what is asked}
+\label{sec:setting}
 
-Four references complete the comparison: the same two borrowing schemes with $C$'s \emph{measured} $z$ (an upper
-bound for $\zhat$), the nearest model by distance in clang AST node counts (the baseline static feature: the
-$\log(1+\text{count})$ of every node kind), a uniform mixture of all known models (no similarity), $C$'s own model
-(which needs $C$'s traces) and the \term{oracle}, the known model with the lowest error on $C$, chosen after scoring.
+\paragraph{What is known.}
+\begin{itemize}
+\item \textbf{The unseen program $C$}: its source code and the input configuration it will be run with (its
+\term{test config}). For PolyBench the config is a compile-time size (\code{-DMEDIUM\_DATASET}); for programs with a
+command line it is the command line.
+\item \textbf{The known programs} $\mathcal{W}$ (in the evaluation, the other 26 PolyBench kernels). Each was traced
+completely (Pin splitter) at all seven configs, so for each $W \in \mathcal{W}$ we have its traces (true footprints and
+splitter bins), its own model $M_W$ (\eqref{eq:model} fitted on all its configs), its measured descriptor $z_W$
+(\eqref{eq:z}), and its static spectra.
+\item \textbf{The runtime baseline} $b$, fitted on the known programs' traces (\secref{sec:baseline}); it is refitted
+without $C$ in every leave-one-out round.
+\end{itemize}
+
+\paragraph{What is asked.} Either the true footprint of $C$ at its test config, or the correction factor $\alpha_k$
+that turns what a 1-in-$k$ sample of $C$'s references sees into the footprint:
+\begin{equation}
+\widehat{\text{truth}} = \hat\alpha_k \cdot m_k ,
+\label{eq:apply}
+\end{equation}
+where $m_k$ is the footprint of one bin of a \term{sampled run} of $C$: one Pin run of $C$ at its test config that
+keeps one reference in $k$ and splits the kept references into bins (\memprint{}'s sampler; \secref{sec:background}).
+This is how \memprint{} is used: a cheap sampled run, scaled up by a predicted $\alpha$.
+
+\paragraph{Why most methods need a sampled run.} A regression model \eqref{eq:model}, whether $C$'s own or borrowed,
+predicts $\alpha$ \emph{from} the sampled run: its inputs are the bin footprint $m_k$, the interval $k$ and the spread
+$\mathrm{SD}_k$ of $m_k$ across the bins. Without a sampled run there is nothing to put into the model. Static
+$\alpha$ needs no input from a run to compute, but it is still a correction factor: turning it into a footprint needs
+an $m_k$ to multiply (\eqref{eq:apply}). Only the static footprint needs no run of $C$ at all. In the evaluation every
+$\alpha$ is scored against the measured $\alpha = \text{truth}/m$ of each of $C$'s splitter bins at the test config
+(13 intervals $\times$ 20 bins).
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/method_requirements.pdf}
+\caption[What each method needs]{What each method needs (filled circles). Blue: predicted from $C$'s source.
+Orange: borrowed from the known programs. Green: references that need traces of $C$ itself. ``Output'' is what the
+method produces: the footprint directly, or a correction factor $\alpha$ to apply to a sampled run with
+\eqref{eq:apply}. The costs of these requirements are measured in \secref{sec:overhead}.}
+\label{fig:method-requirements}
+\end{figure}
+
+\begin{figure}[!htbp]
+\centering
+\resizebox{\linewidth}{!}{\begin{tikzpicture}[
+  node distance=4mm and 5mm,
+  box/.style={draw, rounded corners=2pt, align=center, font=\scriptsize, minimum height=8mm, text width=20mm, fill=#1},
+  box/.default=white,
+  arrow/.style={-{Stealth[length=1.6mm]}, thick, draw=black!65},
+  lane/.style={font=\footnotesize\bfseries, anchor=west, align=left, text width=24mm}]
+% lane A: predicted from source
+\node[lane] (la) at (0,0) {A. Predict\\from source};
+\node[box=blue!6, right=1mm of la] (a1) {source of $C$\\+ test config};
+\node[box=blue!6, right=of a1] (a2) {interpreter\\$\to$ spectrum $S_C$};
+\node[box=orange!8, below=2mm of a2] (ab) {runtime\\baseline $b$};
+\node[box=green!8, right=of a2] (a3) {footprint\\$\sum s_a + \sum b_j$};
+\node[box=green!8, right=of a3] (a4) {$\hat\alpha_k = $ truth$/\E[m_k]$};
+\draw[arrow] (a1) -- (a2); \draw[arrow] (a2) -- (a3); \draw[arrow] (a3) -- (a4); \draw[arrow] (ab) -| (a3);
+% lane B: borrow
+\node[lane] (lb) at (0,-2.5) {B. Borrow from\\known programs};
+\node[box=blue!6, right=1mm of lb] (b1) {source of $C$\\(or AST)};
+\node[box=blue!6, right=of b1] (b2) {descriptor\\$\hat z(C)$};
+\node[box=gray!10, below=2mm of b2] (bk) {known $z_W$, $M_W$};
+\node[box=orange!8, right=of b2] (b3) {distances\\$d(\hat z_C, z_W)$};
+\node[box=orange!8, right=of b3] (b4) {nearest $M_{W^*}$ or\\mixture $\sum w_W M_W$};
+\draw[arrow] (b1) -- (b2); \draw[arrow] (b2) -- (b3); \draw[arrow] (bk) -| (b3); \draw[arrow] (b3) -- (b4);
+% lane C: train
+\node[lane] (lc) at (0,-5) {C. Train on\\$C$'s own traces};
+\node[box=red!6, right=1mm of lc] (c1) {full traces of $C$\\(other configs)};
+\node[box=red!6, right=of c1] (c2) {own model\\$M_C$};
+\draw[arrow] (c1) -- (c2);
+% the sampled run feeds every alpha model
+\node[box=yellow!12, text width=26mm] (s) at ($(b4.east)+(2.4,-1.25)$) {sampled run of $C$\\bins $m_k$, $\mathrm{SD}_k$};
+\node[box=green!8, text width=24mm, right=6mm of s] (out) {footprint\\$\hat\alpha_k \cdot m_k$};
+\draw[arrow] (a4.east) -- ++(0.5,0) |- (out.north west);
+\draw[arrow] (b4.east) -- ++(0.35,0) |- (s.north);
+\draw[arrow] (c2.east) -| (s.south);
+\draw[arrow] (s) -- (out);
+\end{tikzpicture}}
+\caption[The three families of methods]{The three families. A: the spectrum computed from $C$'s source gives the
+footprint directly, and $\alpha$ in closed form. B: a descriptor of $C$ selects or weights the regression models of
+known programs. C: \memprint{}'s own model, trained on traces of $C$. The $\alpha$ of every family is applied to a
+sampled run of $C$; only the static footprint needs no run.}
+\label{fig:families}
+\end{figure}
+
+\subsection{Family A: predicted from the source}
+
+All three methods start with the interpreter run on $C$'s source at the test config (\secref{sec:interp}), which gives
+the spectrum $S_C = \{(c_a, s_a)\}$: the bytes $s_a$ of every address $a$ and the references $c_a$ it receives.
+\figref{fig:static-example} follows gemm at MEDIUM through the computation.
+
+\paragraph{Static footprint.} The predicted footprint is the program's own bytes plus the runtime's:
+\begin{equation}
+\widehat{\text{truth}}_C = \sum_a s_a + \sum_j b_j .
+\label{eq:static-fp}
+\end{equation}
+\emph{Needs:} $C$'s source and test config, and the baseline (fitted once on other programs' traces). \emph{Does not
+need:} any run of $C$, any model. \emph{Output:} the footprint. \emph{Scored by} its error against the true footprint
+of $C$'s full trace. For gemm at MEDIUM the interpreter places 1{,}158{,}400~bytes (its three arrays exactly), the
+baseline adds 107~KB, and the prediction is 0.12\% off.
+
+\paragraph{Static $\alpha$.} The moments of \eqref{eq:moments} on $S_C$ and the baseline give the expected footprint of
+a 1-in-$k$ bin, and hence
+\begin{equation}
+\hat\alpha_k = \frac{\sum_a s_a + \sum_j b_j}{\sum_a s_a\,p(c_a,k) + \sum_j b_j\,p(2^j,k)} , \qquad
+p(c,k) = 1-(1-1/k)^c ,
+\label{eq:static-alpha}
+\end{equation}
+for every interval $k$ of the sampled run. Panel (b) of \figref{fig:static-example} shows why $\alpha$ grows with $k$: at
+$k=100$ most of gemm's bytes, referenced a few hundred times each, are in every bin; at $k=10^5$ almost none are.
+\emph{Needs:} the same as the static footprint, plus a sampled run of $C$ to apply $\hat\alpha_k$ to
+(\eqref{eq:apply}). \emph{Does not need:} any model or training. \emph{Output:} $\hat\alpha_k$ for each $k$.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/static_example.pdf}
+\caption[Worked example of the static route]{The static route for gemm at MEDIUM. (a) The spectrum: bytes per
+reference-count class, for the program (from the interpreter) and the runtime baseline. (b) The share of the true
+footprint that a 1-in-$k$ bin is expected to contain, accumulated over the count classes ($\sum s_a p(c_a,k)$ divided by
+the truth): rarely referenced bytes contribute little at large $k$. (c) $\hat\alpha_k$ from
+\eqref{eq:static-alpha} against the measured truth over the mean bin footprint.}
+\label{fig:static-example}
+\end{figure}
+
+\paragraph{Pooled regression with static $\alpha$.} One regression of the form \eqref{eq:model} is fitted over the
+bins of \emph{all} known programs at all their configs, with $\log\hat\alpha_k$ of each bin's program and config
+(from its static spectrum) as an eighth feature:
+\begin{equation}
+\log\alpha = b_0 + \sum_{i=1}^{7} b_i\,x_i(m_k, \mathrm{SD}_k, k) + b_8 \log\hat\alpha_k ,
+\label{eq:pooled}
+\end{equation}
+where $x_1,\dots,x_7$ are the seven features of \eqref{eq:model}. It is then applied to $C$'s sampled bins with
+$C$'s static $\hat\alpha_k$. The idea is that the regression learns how far the closed form is off. \emph{Needs:}
+the interpreter on $C$, a sampled run of $C$, and the known programs' traces and spectra. \emph{Output:} $\alpha$.
+It is less accurate than static $\alpha$ alone (\secref{sec:pb}): the other features bring in how the known programs'
+$\alpha$ varies with $m$ and $\mathrm{SD}$, which does not transfer.
+
+\subsection{Family B: borrowed from known programs}
+
+These methods do not predict $\alpha$ themselves; they choose or weight the regression models $M_W$ of known
+programs, and apply them to $C$'s sampled run.
+
+\paragraph{The descriptor and the distance.} $C$'s descriptor $\hat z(C)$ is \eqref{eq:z} evaluated on the moments of
+its static spectrum plus the baseline: 13 values of reuse$(k)$ and 13 of spread$(k)$. Each known program's $z_W$ is
+measured from its traces at the config of the same name (PolyBench's sizes are the same names for every kernel). Every
+component is standardised with the mean and standard deviation of the known programs, and
+\begin{equation}
+d(\hat z_C, z_W) = \Big\lVert \frac{\hat z_C - \mu}{\sigma} - \frac{z_W - \mu}{\sigma} \Big\rVert_2 .
+\end{equation}
+
+\paragraph{Nearest model by $\hat z$.} The model of the closest known program is applied to $C$'s bins:
+$W^* = \arg\min_W d(\hat z_C, z_W)$ and $\log\hat\alpha = M_{W^*}(m_k, \mathrm{SD}_k, k)$. \emph{Needs:} the
+interpreter on $C$, a sampled run of $C$, the known models and descriptors.
+
+\paragraph{RBF mixture by $\hat z$.} Every known model's prediction is averaged in log space with Gaussian weights:
+\begin{equation}
+\log\hat\alpha = \sum_W w_W\, M_W(m_k, \mathrm{SD}_k, k), \qquad
+w_W = \frac{\exp\!\big(-d(\hat z_C, z_W)^2 / 2h^2\big)}{\sum_{V} \exp\!\big(-d(\hat z_C, z_V)^2 / 2h^2\big)} ,
+\end{equation}
+with the bandwidth $h$ the median, over the known programs, of each one's distance to its nearest other known program
+(0.81 in the example below). Close programs dominate; distant ones get almost no weight. \emph{Needs:} as the
+nearest model.
+
+\paragraph{Nearest model by AST node counts.} The similarity baseline: each program is described by the number of
+nodes of every kind in its clang AST, as $\log(1 + \text{count})$, standardised like $z$; the nearest program's model
+is applied. \emph{Needs:} a parse of $C$ (no interpreter), a sampled run of $C$, the known models and their AST
+counts. It tests whether syntax alone tells which model transfers.
+
+\paragraph{Uniform mixture.} All known models with equal weights $w_W = 1/|\mathcal{W}|$: borrowing with no notion of
+similarity. \emph{Needs:} a sampled run of $C$ and the known models.
+
+\figref{fig:borrow-example} shows the borrowing methods on atax with its largest input held out. Its static descriptor
+lies almost on top of its measured one, next to mvt and bicg, whose models are 6--7\% off on atax, while most known
+programs' models are 40--90\% off (panel a). Distance in $\hat z$ ranks the transfer error well ($\rho = 0.89$), as
+the measured descriptor does, while AST distance does not ($\rho = 0.35$; panel b). The mixture puts 85\% of its weight
+on mvt and bicg (panel c). The resulting errors: nearest model 6.7\%, mixture 5.5\%, against 6.0\% for the oracle
+and 4.2\% for static $\alpha$; atax's own model has 19.5\%.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/borrow_example.pdf}
+\caption[Borrowing in practice]{Borrowing for atax (EXTRA). (a) The 26 known kernels in the first two principal
+components of the standardised descriptors, coloured by the error of their model on atax and sized by their RBF
+weight; the star is atax's descriptor predicted from source, the diamond its measured one. (b) Distance from atax
+against the error of each known model on atax, for the three distances, with Spearman's $\rho$. (c) The six largest
+mixture weights, with each model's error on atax.}
+\label{fig:borrow-example}
+\end{figure}
+
+\subsection{Family C and the references}
+
+These need traces of $C$ itself, so they are not available for an unseen program; they bound what the others can do.
+
+\paragraph{Own model (\memprint{}).} $M_C$ is \eqref{eq:model} fitted on the splitter bins of $C$'s other six configs
+(all intervals), and applied to $C$'s sampled bins at the test config. This is \memprint{} as published: train on full
+traces of small inputs of the same program, then predict a larger one (EXTRA) or one in between (INTER). \emph{Needs:}
+six full traces of $C$ and a sampled run.
+
+\paragraph{Nearest model and mixture by measured $z$.} The same as their $\hat z$ versions, with $C$'s descriptor
+measured from its splitter bins at the test config instead of predicted. They show how much is lost by predicting
+the descriptor; they are not usable methods, because the full trace they need already gives the exact footprint.
+
+\paragraph{Oracle.} The known model with the lowest error on $C$, chosen after scoring all 26 with the truth: the
+best that choosing one borrowed model could ever do.
+
+\begin{table}[!htbp]
+\centering\small
+\caption[The methods at a glance]{The methods at a glance. ``Needs of $C$'' is what the method needs of the unseen
+program itself; all methods but the static footprint and the own model also use the known programs.}
+\label{tab:methods}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.2\linewidth}>{\raggedright\arraybackslash}p{0.37\linewidth}>{\raggedright\arraybackslash}p{0.23\linewidth}>{\raggedright\arraybackslash}p{0.11\linewidth}}
+\toprule
+Method & What it computes & Needs of $C$ & Output \\
+\midrule
+Static footprint & $\sum_a s_a + \sum_j b_j$ (\ref{eq:static-fp}) & source & footprint \\
+Static $\alpha$ & truth$/\E[m_k]$ of $S_C + b$ (\ref{eq:static-alpha}) & source; sampled run to apply & $\alpha_k$ \\
+Pooled regression & \eqref{eq:model} + $\log\hat\alpha$, fitted on all known bins (\ref{eq:pooled}) & source; sampled run & $\alpha$ \\
+Nearest by $\hat z$ & $M_{W^*}$, $W^* = \arg\min d(\hat z_C, z_W)$ & source; sampled run & $\alpha$ \\
+Mixture by $\hat z$ & $\exp \sum_W w_W \log M_W$, Gaussian weights in $d$ & source; sampled run & $\alpha$ \\
+Nearest by AST & $M_{W^*}$ by distance in AST node counts & parse; sampled run & $\alpha$ \\
+Uniform mixture & $\exp \frac{1}{|\mathcal W|}\sum_W \log M_W$ & sampled run & $\alpha$ \\
+\addlinespace
+Own model & \eqref{eq:model} fitted on $C$'s six other configs & 6 full traces; sampled run & $\alpha$ \\
+By measured $z$ & as by $\hat z$, with $z(C)$ from its trace & full trace; sampled run & $\alpha$ \\
+Oracle & the known model best on $C$ & the truth & $\alpha$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{The access-idiom gate}
 \label{sec:gate}

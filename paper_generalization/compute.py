@@ -244,6 +244,58 @@ def inclusion():
     write(pd.DataFrame(rows), "inclusion.csv")
 
 
+def borrow_example(held="atax", split="EXTRA"):
+    """The borrowing methods on one held-out kernel, as the leave-one-out evaluation does them: distances from
+    C to every known kernel (z_hat, measured z, AST counts), the error of each known model on C, the RBF
+    weights, and a 2-D principal-component view of the standardised descriptors."""
+    from memprint.model import Model, features
+
+    spectra = {tuple(f.stem.rsplit("-", 1)): load_static(f)[0] for f in sorted((PB / "static").glob("*.npz"))}
+    data = {w: pd.read_csv(PB / f"{w}_allData.csv") for w in sorted({w for w, _ in spectra})}
+    known_all = lowo.load(data, spectra)
+    C = known_all[held]
+    known = [known_all[w] for w in sorted(known_all) if w != held]
+    baseline = lowo.fit_baseline(known)
+    test = getattr(C.prepared, lowo.SPLITS[split])
+    rows = C.rows(test)
+    alpha = rows["Alpha"].to_numpy(float)
+    X = features(rows).to_numpy()
+    err = {}
+    for w in known:
+        m = Model.fit(w.rows())
+        err[w.name] = float(np.mean(np.abs(np.exp(X @ m.coef + m.intercept) - alpha) / alpha) * 100)
+    z_known = pd.DataFrame({w.name: sim.measured(w.all_data, lowo._config_like(w, test)) for w in known}).T
+    z_hat = sim.predicted(C.spectra[test], baseline)
+    z_meas = sim.measured(C.all_data, test)
+    scaler = sim.Scaler(z_known)
+    d_hat, d_meas = sim.distances(z_hat, z_known, scaler), sim.distances(z_meas, z_known, scaler)
+    nn = [sim.distances(z_known.loc[w], z_known.drop(index=w), scaler).min() for w in z_known.index]
+    h = float(np.median(nn))
+    w_hat = sim.kernel_weights(d_hat, h)
+    ast = pd.read_csv(Path.home() / "memory_estimator" / "tools" / "ast_features.csv")
+    ast.index = ast.pop("file").str.replace(".c.ast.json", "", regex=False)
+    ast = np.log1p(ast.astype(float))
+    common = [w for w in z_known.index if w in ast.index]
+    d_ast = sim.distances(ast.loc[held], ast.loc[common]) if held in ast.index else pd.Series(dtype=float)
+    Z = scaler(z_known)
+    zc_hat, zc_meas = scaler(z_hat.to_frame().T).iloc[0], scaler(z_meas.to_frame().T).iloc[0]
+    mu = Z.mean()
+    U, S, Vt = np.linalg.svd((Z - mu).to_numpy(), full_matrices=False)
+    proj = lambda v: (np.asarray(v, float) - mu.to_numpy()) @ Vt[:2].T
+    P = proj(Z.to_numpy())
+    out = pd.DataFrame({"workload": z_known.index, "d_hat": d_hat.reindex(z_known.index).to_numpy(),
+                        "d_meas": d_meas.reindex(z_known.index).to_numpy(),
+                        "d_ast": d_ast.reindex(z_known.index).to_numpy(),
+                        "error": [err[w] for w in z_known.index], "weight": w_hat.reindex(z_known.index).to_numpy(),
+                        "pc1": P[:, 0], "pc2": P[:, 1]})
+    write(out, "borrow_example.csv")
+    ph, pm = proj(zc_hat.to_numpy()), proj(zc_meas.to_numpy())
+    explained = S[:2] ** 2 / np.sum(S ** 2)
+    write(pd.DataFrame([{"held": held, "split": split, "config": test, "bandwidth": h, "hat_pc1": ph[0],
+                         "hat_pc2": ph[1], "meas_pc1": pm[0], "meas_pc2": pm[1], "explained1": explained[0],
+                         "explained2": explained[1]}]), "borrow_example_c.csv")
+
+
 if __name__ == "__main__":
     inclusion()
     polybench()
