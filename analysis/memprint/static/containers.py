@@ -52,9 +52,16 @@ class Containers:
             self.access(loc)
         return self._ptr_load(loc)
 
-    def _vset(self, vec, k, ptr, offs=None):
+    def _vset(self, vec, k, ptr, offs=None, pts=None):
+        """Set field k of a vector. pts: the batch points doing it (a vector shared by several points,
+        set once for them: charged with their weights, not the whole batch's)."""
         loc = Loc(vec.obj, (vec.off if offs is None else offs) + VECTOR_FIELDS[k], 8)
-        self.access(loc, write=True)
+        if pts is None or self.L == 1:
+            self.access(loc, write=True)
+        else:
+            w = np.zeros(self.L)
+            w[pts] = np.broadcast_to(np.asarray(self.w, dtype=float), (self.L,))[pts]
+            self.with_weights(w, lambda: self.access(loc, write=True))
         self._ptr_store(loc, ptr)
 
     def _vinit(self, vec, n, esize, zero=True, et=None):
@@ -169,10 +176,10 @@ class Containers:
                     newcap *= 2
                 start = self._vgrow(int(vec_offs[p0]), start, size, newcap, esize)
                 cap = newcap
-                self._vset(Ptr(vec.obj, int(vec_offs[p0])), 0, Ptr(arena, start))
-                self._vset(Ptr(vec.obj, int(vec_offs[p0])), 2, Ptr(arena, start + cap * esize))
+                self._vset(Ptr(vec.obj, int(vec_offs[p0])), 0, Ptr(arena, start), pts=pts[:1])
+                self._vset(Ptr(vec.obj, int(vec_offs[p0])), 2, Ptr(arena, start + cap * esize), pts=pts[:1])
             slots[pts] = start + esize * (size + np.arange(len(pts)))
-            self._vset(Ptr(vec.obj, int(vec_offs[p0])), 1, Ptr(arena, start + need * esize))
+            self._vset(Ptr(vec.obj, int(vec_offs[p0])), 1, Ptr(arena, start + need * esize), pts=pts)
         loc = Loc(arena, _SCALAR(slots) if self.L > 1 else int(slots[0]), esize)
         self.access(loc, write=True)
         if isinstance(value, Ptr) or (et is not None and ca.is_pointer(et)):
@@ -197,8 +204,8 @@ class Containers:
             if target > cap:
                 newcap = max(target, 2 * size)
                 start = self._vgrow(int(v), start, size, newcap, esize)
-                self._vset(vp, 0, Ptr(arena, start))
-                self._vset(vp, 2, Ptr(arena, start + newcap * esize))
+                self._vset(vp, 0, Ptr(arena, start), pts=pts[:1])
+                self._vset(vp, 2, Ptr(arena, start + newcap * esize), pts=pts[:1])
             if target > size:                                          # new elements value-initialised
                 offs = start + esize * np.arange(size, target)
                 arena.add(offs, esize, np.ones(len(offs)))
@@ -206,7 +213,7 @@ class Containers:
                 for u in range(0, esize, 4):
                     arena.store(offs + u, 0)
                 self._init_elements(offs, et)
-            self._vset(vp, 1, Ptr(arena, start + target * esize))
+            self._vset(vp, 1, Ptr(arena, start + target * esize), pts=pts)
         return UNK
 
     def _vector_construct(self, dest, args_c, ctype):
