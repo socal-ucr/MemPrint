@@ -236,12 +236,30 @@ class Containers:
 
     # ---------------------------------------------------------------- unordered_map
 
+    def _map_state(self, mp, ctype):
+        """The map's nodes: one std::pair<const K, V> per key, `stride` bytes apart from `base`; the mapped
+        value sits at `voff` in the pair (after the key, aligned), as in libstdc++'s value_type."""
+        key_id = (id(mp.obj), int(np.ravel(mp.off)[0]))
+        state = self._maps.get(key_id)
+        if state is None:
+            t = ctype.get_canonical()
+            ks = vs = 4
+            if t.get_num_template_arguments() >= 2:
+                ks = ca.type_size(t.get_template_argument_type(0).get_canonical()) or 4
+                vs = ca.type_size(t.get_template_argument_type(1).get_canonical()) or 4
+            align = min(max(vs, 1), 8)
+            voff = (ks + align - 1) // align * align
+            stride = max(16, (voff + vs + 7) // 8 * 8)
+            state = self._maps[key_id] = {"keys": {}, "base": self._arena_alloc(stride * 65536), "n": 0,
+                                          "voff": voff, "stride": stride, "ksize": ks}
+        return state
+
     def _map_method(self, name, mp, args_c, ctype):
         """unordered_map<K, V>: nodes (K, V) kept in an arena region of the map, one per key."""
         if not isinstance(mp, Ptr) or _is_unk(mp.obj, mp.off):
             return UNK
-        key_id = (id(mp.obj), int(np.ravel(mp.off)[0]))
-        state = self._maps.setdefault(key_id, {"keys": {}, "base": self._arena_alloc(16 * 65536), "n": 0})
+        state = self._map_state(mp, ctype)
+        stride, voff = state["stride"], state["voff"]
         if name == "operator[]":
             k = _as_int(self.eval(args_c[0]))
             if k is UNK:
@@ -252,20 +270,31 @@ class Containers:
             for i, kv in enumerate(ks):
                 kv = int(kv)
                 if kv not in state["keys"]:
-                    node = state["base"] + 16 * state["n"]
+                    node = state["base"] + stride * state["n"]
                     state["keys"][kv] = node
                     state["n"] += 1
-                    arena.store(node, kv)
-                    arena.store(node + 8, 0)
-                    arena.add(np.array([node, node + 8]), 8, np.ones(2))
-                slots[i] = state["keys"][kv] + 8                       # the mapped value
+                    arena.store(node, kv, min(state["ksize"], 8))
+                    arena.store(node + voff, 0)
+                    arena.add(np.array([node, node + voff]), 8, np.ones(2))
+                slots[i] = state["keys"][kv] + voff                    # the mapped value
             return Ptr(arena, _SCALAR(slots) if self.L > 1 else int(slots[0]))
         if name == "begin":
             return Ptr(self._arena(), state["base"])
         if name == "end":
-            return Ptr(self._arena(), state["base"] + 16 * state["n"])
+            return Ptr(self._arena(), state["base"] + stride * state["n"])
         if name == "size":
             return state["n"]
+        if name in ("find", "count") and args_c:                       # the node with the key, or end
+            k = _as_int(self.eval(args_c[0]))
+            if k is UNK or np.ndim(k):
+                return Ptr(UNK, UNK) if name == "find" else UNK
+            node = state["keys"].get(int(k))
+            self.total += 1.0
+            if name == "count":
+                return int(node is not None)
+            if node is not None:
+                self._arena().add(np.array([node]), 8, np.ones(1))
+            return Ptr(self._arena(), node if node is not None else state["base"] + stride * state["n"])
         for a in args_c:
             self.eval(a)
         return UNK

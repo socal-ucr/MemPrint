@@ -47,6 +47,9 @@ FRAME_BYTES = 8192  # stack frame size; frames at the same call depth share addr
 STACK_ARRAY_LIMIT = 1024  # larger local arrays get their own object
 GUESS_TRIPS = 1  # trips charged for a loop whose trip count depends on data
 SEQUENTIAL_LIMIT = 2_000_000  # iterations a loop carrying values through memory may run one at a time
+FEW_TRIPS = 16  # a loop of at most this many iterations runs one at a time: batching it gains little, and its
+                # iterations (rounds, phases) often depend on each other through memory in ways a syntactic
+                # check misses (through calls); its inner loops are still batched
 
 
 # An unknown integer in memory: an arbitrary bit pattern (not INT64_MIN, which a bitmap word with
@@ -586,6 +589,7 @@ class Interpreter:
         self.symbolic_loops = 0
         self.functions = {}
         self._global_off = 0
+        self._dynamic_inits = []
         self.rng = np.random.default_rng(seed)
         self.argv = ()  # the command line (strings), argv[0] first
         for c in tu.cursor.get_children():
@@ -752,6 +756,10 @@ class Interpreter:
             return
         loc.obj.add(loc.off, loc.size or 8, self.w)
 
+    def _type_size(self, type_):
+        """sizeof(type); the C++ interpreter also sizes variable-length arrays at run time."""
+        return ca.type_size(type_)
+
     def _first_touch(self, loc):
         """Stamp an access with its time: the clock outside batched loops; inside, the start of each batch
         point's interval, turned into a time when the region ends (_close_region)."""
@@ -785,6 +793,8 @@ class Interpreter:
             if init is not None and not ca.is_array(c.type):
                 v = ca.evaluate(init)
                 value = v if isinstance(v, int) else UNK
+                if value is UNK:                                       # run before main (dynamic initialisation)
+                    self._dynamic_inits.append(c)
         self.frames[0].vars[_key(c)] = [slot, value]
 
     @staticmethod
@@ -855,7 +865,7 @@ class Interpreter:
             base, idx = self.eval(base_c), self.eval(idx_c)
             if isinstance(idx, Ptr):
                 base, idx = idx, base
-            size = ca.type_size(c.type) or 8
+            size = self._type_size(c.type) or 8
             array = ca.is_array(c.type)
             if isinstance(idx, Aff) and isinstance(base, Ptr) and base.obj is not UNK and base.off is not UNK \
                     and not isinstance(base.off, Aff):
@@ -1158,6 +1168,13 @@ class Interpreter:
                 return _SCALAR(ARITH[op](a.off, b.off))
             if op in ("==", "!=") and isinstance(a.obj, Obj) and isinstance(b.obj, Obj) and a.obj is not b.obj:
                 return int(op == "!=")                                 # distinct objects never compare equal
+            return UNK
+        if op in ("==", "!="):                                         # p == NULL
+            p, n = (a, b) if isinstance(a, Ptr) else (b, a)
+            n = _as_int(n)
+            if n is not UNK and np.ndim(n) == 0 and int(n) == 0 and isinstance(p.obj, Obj):
+                is_null = getattr(p.obj, "uid", None) == -2 or getattr(p.obj, "kind", "") == "null"
+                return int(is_null == (op == "=="))
             return UNK
         if op in ("+", "-"):
             p, n = (a, b) if isinstance(a, Ptr) else (b, a)
@@ -1465,12 +1482,15 @@ class Interpreter:
         if trips is None:
             return self._loop_general(None, cond, inc, body)
         trips = np.broadcast_to(np.maximum(trips, 0), (self.L,)).astype(np.int64)
-        if self.sequential_depth == 0 and int(trips.sum()) <= SEQUENTIAL_LIMIT and _memory_carried(body):
+        if self.sequential_depth == 0 and int(trips.sum()) <= SEQUENTIAL_LIMIT and \
+                (_memory_carried(body) or _address_carried(body)):
             self.sequential_depth += 1                                 # iterations depend on each other
             try:
                 return self._loop_general(None, cond, inc, body)
             finally:
                 self.sequential_depth -= 1
+        if self.L == 1 and 1 < int(trips.sum()) <= FEW_TRIPS and _has_loop(body):
+            return self._loop_general(None, cond, inc, body)           # a few rounds, one after another
         # the condition is tested trips + 1 times, the increment runs trips times
         self.with_weights(self.w * (trips + 1), lambda: self.eval(cond))
         saved = entry[1]
@@ -1648,6 +1668,22 @@ def _symbolic_ok(body, var):
     return all(id(x) in marked for x in _walk_nodes(body) if is_var(x))
 
 
+def _address_carried(body):
+    """Does the body pass the address of a scalar declared outside it to a call (randlc(&seed, a))? The callee
+    may update it every iteration: a dependence carried through memory that the body does not show."""
+    declared = {_key(n) for n in _walk_nodes(body) if n.kind == K.VAR_DECL}
+    for n in _walk_nodes(body):
+        if n.kind != K.CALL_EXPR:
+            continue
+        for a in n.get_arguments():
+            e = ca.strip(a)
+            if e.kind == K.UNARY_OPERATOR and ca.unary_op(e) == "&":
+                d = _decl_ref(ca.children(e)[0])
+                if d is not None and _key(d) not in declared and not ca.is_array(d.type):
+                    return True
+    return False
+
+
 def _walk_nodes(node):
     stack = [node]
     while stack:
@@ -1786,6 +1822,37 @@ def _subscript_base(c):
     while c.kind == K.ARRAY_SUBSCRIPT_EXPR:
         c = ca.strip(ca.children(c)[0])
     return _decl_ref(c)
+
+
+_HAS_LOOP = {}
+
+
+def _has_loop(body):
+    """Does the body contain a loop, directly or in a function of the program it calls?"""
+    key = (body.hash, body.location.offset)
+    if key not in _HAS_LOOP:
+        _HAS_LOOP[key] = _find_loop(body)
+    return _HAS_LOOP[key]
+
+
+def _find_loop(body):
+    seen = set()
+
+    def walk(n, depth):
+        for x in _walk_nodes(n):
+            if x.kind in (K.FOR_STMT, K.WHILE_STMT, K.DO_STMT, K.CXX_FOR_RANGE_STMT):
+                return True
+            if x.kind == K.CALL_EXPR and depth < 3:
+                ref = x.referenced
+                d = ref.get_definition() if ref is not None else None
+                if d is not None and d.location.file is not None and not d.location.is_in_system_header \
+                        and d.hash not in seen:
+                    seen.add(d.hash)
+                    if walk(d, depth + 1):
+                        return True
+        return False
+
+    return walk(body, 0)
 
 
 def _memory_carried(body):
@@ -1956,6 +2023,15 @@ def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=N
         raise ValueError(f"no definition of {entry}")
     frame = Frame(fdef, FRAME_BYTES)
     interp.frames.append(frame)
+    for c in interp._dynamic_inits:                                    # non-constant global initialisers, in order
+        try:
+            value = interp.eval(interp._initializer(c))
+        except Exception:
+            continue
+        slot = interp.frames[0].vars[_key(c)][0]
+        interp.frames[0].vars[_key(c)][1] = value
+        interp._mem_store(slot, c.type, value)                         # loads read memory (floats, pointers)
+        interp.access(slot, write=True)
     for p in [p for p in fdef.get_children() if p.kind == K.PARM_DECL]:
         value = argc if p.spelling == "argc" else (Ptr(UNK, UNK) if ca.is_pointer(p.type) else UNK)
         if p.spelling == "argv" and argv is not None and hasattr(interp, "_argv_array"):

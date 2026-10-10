@@ -70,6 +70,7 @@ int main() {
   return breaks();
 }
 // (appended) break and continue
+int dynamic_init();
 int breaks() {
   Vec<int> d(8);
   for (int i = 0; i < 8; i++) d[i] = i;
@@ -79,5 +80,16 @@ int breaks() {
   int k = 0;
   while (true) { k++; if (k == 6) break; }
   probe(first_big * 100 + odd * 10 + k);  // 5*100 + 16*10 + 6 = 666
+  return dynamic_init();
+}
+// (appended) a global initialised by a call runs before main
+#include <cstdlib>
+static int (*gtab) = (int *)malloc(sizeof(int) * 4);
+static int glt;
+static void gset(int *n) { *n = gtab[glt] + 2; }
+int dynamic_init() {
+  glt = 1; gtab[glt] = 5;
+  int n; gset(&n);
+  probe(n);                       // 7
   return 0;
 }

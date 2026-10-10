@@ -88,6 +88,50 @@ def _reference(type_):
     return type_.get_canonical().kind in (ca.ci.TypeKind.LVALUEREFERENCE, ca.ci.TypeKind.RVALUEREFERENCE)
 
 
+_REREAD = {}
+
+
+def _reread(target, expected):
+    """Was `expected` (a local variable) assigned from the same expression as `target`, the CAS retry
+    idiom (old = x; ... CAS(x, old, new))? Then a single thread's CAS always succeeds."""
+    e = ca.strip(expected)
+    while e.kind == K.UNEXPOSED_EXPR and ca.children(e):
+        e = ca.strip(ca.children(e)[0])
+    if e.kind != K.DECL_REF_EXPR or e.referenced is None or e.referenced.kind != K.VAR_DECL:
+        return False
+    var = e.referenced
+    key = (var.hash, target.hash, target.location.offset)
+    if key in _REREAD:
+        return _REREAD[key]
+    want = [t.spelling for t in target.get_tokens()]
+    found = False
+    fn = var.semantic_parent
+    if fn is not None and want:
+        for n in fn.walk_preorder():
+            rhs = None
+            if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
+                lhs, rhs = ca.children(n)
+                lhs = ca.strip(lhs)
+                if lhs.kind != K.DECL_REF_EXPR or lhs.referenced is None or lhs.referenced.hash != var.hash:
+                    rhs = None
+            elif n.kind == K.VAR_DECL and n.hash == var.hash and ca.children(n):
+                rhs = ca.children(n)[-1]
+            if rhs is not None and [t.spelling for t in rhs.get_tokens()] == want:
+                found = True
+                break
+    _REREAD[key] = found
+    return found
+
+
+def _node_iter(t):
+    """Is t (a type, or its spelling) an unordered_map iterator (libstdc++'s _Node_iterator)?"""
+    if not isinstance(t, str):
+        if ca.is_pointer(t):
+            return False
+        t = _referee(t).get_canonical().spelling
+    return "_Node_iterator" in t or "_Node_const_iterator" in t
+
+
 def _referee(type_):
     return type_.get_canonical().get_pointee() if _reference(type_) else type_
 
@@ -395,6 +439,77 @@ class CppInterpreter(Containers, Interpreter):
 
     # ------------------------------------------------------------ loops: pointers and reductions
 
+    def _type_size(self, type_):
+        """sizeof(type), with variable-length arrays (double [n2][n1]) sized from their dimensions: variables of
+        the current scope or integer literals, as written in the type."""
+        size = ca.type_size(type_)
+        if size is not None:
+            return size
+        t = type_
+        dims = re.findall(r"\[([^\[\]]*)\]", t.spelling)
+        base = t.get_canonical()
+        while base.kind in (ca.ci.TypeKind.VARIABLEARRAY, ca.ci.TypeKind.CONSTANTARRAY,
+                            ca.ci.TypeKind.INCOMPLETEARRAY, ca.ci.TypeKind.DEPENDENTSIZEDARRAY):
+            base = base.element_type
+        elem = ca.type_size(base)
+        if not dims or elem is None:
+            return None
+        total = elem
+        for d in dims:
+            v = self._dimension(d.strip())
+            if v is None:
+                return None
+            total *= v
+        return total
+
+    def _dimension(self, text):
+        """The value of an array dimension as written: an integer, a variable in scope, or + - * of those."""
+        tokens = re.findall(r"[A-Za-z_]\w*|\d+|[-+*()]", text)
+        if not tokens or "".join(tokens) != text.replace(" ", ""):
+            return None
+        out = []
+        for tok in tokens:
+            if tok[0].isalpha() or tok[0] == "_":
+                entry = None
+                frame = self.frames[-1]
+                while frame is not None and entry is None:
+                    entry = next((e for k, e in frame.vars.items() if isinstance(k, tuple) and k[0] == tok), None)
+                    frame = getattr(frame, "parent", None)
+                if entry is None:
+                    entry = next((e for k, e in self.frames[0].vars.items() if isinstance(k, tuple) and k[0] == tok),
+                                 None)
+                v = _as_int(entry[1]) if entry is not None else UNK
+                if v is UNK or np.ndim(v):
+                    return None
+                out.append(str(int(v)))
+            else:
+                out.append(tok)
+        try:
+            return int(eval("".join(out), {"__builtins__": {}}))
+        except Exception:
+            return None
+
+    def _constant(self, c):
+        """The value of an expression made only of literals and arithmetic (r23 = 0.5*0.5*...), folded once and
+        not charged, as -O3 compiles it; None if it is not such an expression."""
+        cache = self.__dict__.setdefault("_constants", {})
+        key = c.hash
+        hit = cache.get(key)
+        if hit is not None and hit[0] == c:
+            return hit[1]
+        value = None
+        if all(n.kind in (K.FLOATING_LITERAL, K.INTEGER_LITERAL, K.BINARY_OPERATOR, K.PAREN_EXPR, K.UNEXPOSED_EXPR,
+                          K.CSTYLE_CAST_EXPR, K.UNARY_OPERATOR) for n in _walk(c)) and \
+                not any(n.kind == K.UNARY_OPERATOR and ca.unary_op(n) not in ("-", "+") for n in _walk(c)) and \
+                not any(n.kind == K.BINARY_OPERATOR and ca.binary_op(n) in ("=", ",") for n in _walk(c)):
+            v = ca.evaluate(c)
+            if isinstance(v, float) and ca.is_float(c.type):
+                value = Real(v)
+            elif isinstance(v, int) and not ca.is_float(c.type):
+                value = v
+        cache[key] = (c, value)
+        return value
+
     @staticmethod
     def _combine_real(op, vals, v0, point, n, n_out):
         """A floating-point reduction over a batch: per enclosing point, its start value combined with
@@ -590,7 +705,8 @@ class CppInterpreter(Containers, Interpreter):
     def _for_inner(self, c):
         """Counted loops over pointers (iterators) and loops with reductions run vectorised; the
         rest as in the C interpreter."""
-        from .interp import (CHUNK, SEQUENTIAL_LIMIT, _FLIP, _decl_ref, _events, _map_frames_with, _memory_carried,
+        from .interp import (CHUNK, FEW_TRIPS, SEQUENTIAL_LIMIT, _FLIP, _has_loop, _address_carried, _decl_ref, _events, _map_frames_with,
+                             _memory_carried,
                              _refs, _step, _trips)
 
         init, cond, inc, body = ca.for_parts(c)
@@ -635,12 +751,15 @@ class CppInterpreter(Containers, Interpreter):
         if trips is None:
             return self._loop_general(None, cond, inc, body)
         trips = np.broadcast_to(np.maximum(trips, 0), (self.L,)).astype(np.int64)
-        if self.sequential_depth == 0 and int(trips.sum()) <= SEQUENTIAL_LIMIT and _memory_carried(body):
+        if self.sequential_depth == 0 and int(trips.sum()) <= SEQUENTIAL_LIMIT and \
+                (_memory_carried(body) or _address_carried(body)):
             self.sequential_depth += 1
             try:
                 return self._loop_general(None, cond, inc, body)
             finally:
                 self.sequential_depth -= 1
+        if self.L == 1 and 1 < int(trips.sum()) <= FEW_TRIPS and _has_loop(body):
+            return self._loop_general(None, cond, inc, body)           # a few rounds, one after another
         total = int(trips.sum())
         scan_entries = {}
         for fr in self.frames[::-1]:
@@ -1108,19 +1227,26 @@ class CppInterpreter(Containers, Interpreter):
             return Loc(UNK, UNK, ca.type_size(c.type) or 8, True)
         return super().lvalue(c)
 
+    def _global_slot(self, entry):
+        """Is this a scalar global, whose value is kept with the variable until its address is taken?"""
+        return isinstance(entry[0], Loc) and entry[0].obj is self.globals_obj and not entry[0].array
+
     def _materialize(self, decl, entry):
         """Give a register scalar its own memory slot (per batch point) and keep its value there."""
         if isinstance(entry[1], InMemory):
             return entry[1].loc
-        # its own region, not the scoped scratch: the variable outlives the block where its address is taken
-        size = max(ca.type_size(decl.type.get_canonical()) or 8, 8)
-        if getattr(self, "spill", None) is None:
-            self.spill = Obj("spilled registers", "register")
-            self.spill_top = 0
-        base = self.spill_top
-        self.spill_top += size * self.L
-        off = base + size * np.arange(self.L) if self.L > 1 else base
-        loc = Loc(self.spill, off, ca.type_size(decl.type.get_canonical()) or 8)
+        if self._global_slot(entry):                                    # a global has its memory: use it
+            loc = entry[0]
+        else:
+            # its own region, not the scoped scratch: the variable outlives the block where its address is taken
+            size = max(ca.type_size(decl.type.get_canonical()) or 8, 8)
+            if getattr(self, "spill", None) is None:
+                self.spill = Obj("spilled registers", "register")
+                self.spill_top = 0
+            base = self.spill_top
+            self.spill_top += size * self.L
+            off = base + size * np.arange(self.L) if self.L > 1 else base
+            loc = Loc(self.spill, off, ca.type_size(decl.type.get_canonical()) or 8)
         value = entry[1]
         if isinstance(value, Ptr) or ca.is_pointer(decl.type):
             self._ptr_store(loc, value if isinstance(value, Ptr) else Ptr(UNK, UNK))
@@ -1182,6 +1308,10 @@ class CppInterpreter(Containers, Interpreter):
         kind = c.kind
         if kind == K.DECL_REF_EXPR and c.referenced is not None and c.referenced.kind == K.FUNCTION_DECL:
             return Func(c.referenced)
+        if kind in (K.FLOATING_LITERAL, K.BINARY_OPERATOR, K.PAREN_EXPR, K.UNEXPOSED_EXPR) and self.opt >= 3:
+            folded = self._constant(c)                                 # -O3: constant expressions are folded
+            if folded is not None:
+                return folded
         if kind == K.COMPOUND_ASSIGNMENT_OPERATOR and self._is_ref_var(ca.children(c)[0]):
             lhs, rhs = ca.children(c)                                  # through a reference: memory
             loc = self.lvalue(lhs)
@@ -1206,7 +1336,7 @@ class CppInterpreter(Containers, Interpreter):
             return old if ca.unary_op(c).startswith("post") else new
         if kind == K.UNARY_OPERATOR and ca.unary_op(c) == "&":
             decl, entry = self._scalar_entry(ca.children(c)[0])
-            if entry is not None and getattr(entry[0], "register", False):
+            if entry is not None and (getattr(entry[0], "register", False) or self._global_slot(entry)):
                 loc = self._materialize(decl, entry)                   # its address escapes
                 return Ptr(loc.obj, loc.off)
         if kind == K.CXX_BOOL_LITERAL_EXPR:
@@ -1717,7 +1847,7 @@ class CppInterpreter(Containers, Interpreter):
                 a = args_c[i]
                 if _reference(p.type):
                     decl, entry = self._scalar_entry(a)
-                    if entry is not None and getattr(entry[0], "register", False):
+                    if entry is not None and (getattr(entry[0], "register", False) or self._global_slot(entry)):
                         loc = self._materialize(decl, entry)           # bound to a reference
                     else:
                         loc = self.lvalue(a)
@@ -1824,7 +1954,8 @@ class CppInterpreter(Containers, Interpreter):
                 et = element_type(rtype)
                 return self._vfield(rng, 0), self._vfield(rng, 1), \
                     (ca.type_size(et.get_canonical()) if et is not None else None) or 8
-            return self._map_method("begin", rng, [], rtype), self._map_method("end", rng, [], rtype), 16
+            return self._map_method("begin", rng, [], rtype), self._map_method("end", rng, [], rtype), \
+                self._map_state(rng, rtype)["stride"]
         begin = end = None
         for m in _class_members(rtype):
             if m.kind == K.CXX_METHOD and m.spelling == "begin" and begin is None:
@@ -2003,8 +2134,13 @@ class CppInterpreter(Containers, Interpreter):
         ptype = ref.semantic_parent.type.get_canonical().spelling if ref.semantic_parent is not None else ""
         if ptype.startswith("std::vector<") and obj is not None:
             return self._vector_method(name, obj, args_c, ref.semantic_parent.type, c.type)
+        if _node_iter(ptype) or (name in ("operator==", "operator!=") and args_c and _node_iter(args_c[0].type)):
+            return self._node_iterator(name, obj, args_c, c, sret)
         if ptype.startswith("std::unordered_map<") and obj is not None:
-            return self._map_method(name, obj, args_c, ref.semantic_parent.type)
+            r = self._map_method(name, obj, args_c, ref.semantic_parent.type)
+            if _node_iter(c.type):                                     # begin, end, find: an iterator object
+                return self._iterator_object(r, c.type, sret)
+            return r
         if ptype.startswith("std::pair<") and name == "operator=" and isinstance(obj, Ptr) and args_c:
             src = self.eval(args_c[0])                                 # trivially copyable: copy it
             if isinstance(src, Ptr):
@@ -2015,7 +2151,8 @@ class CppInterpreter(Containers, Interpreter):
             self._pair_store(dest, c.type, [self.eval(a) for a in args_c])
             return dest
         if name == "max_element" and len(args_c) >= 2:
-            return self._max_element(args_c)
+            r = self._max_element(args_c)
+            return self._iterator_object(r, c.type, sret) if _node_iter(c.type) else r
         if "mersenne_twister_engine" in ptype:
             words = 312 if ", 64," in ptype else 624
             if name == "seed":
@@ -2078,6 +2215,10 @@ class CppInterpreter(Containers, Interpreter):
 
     def _std(self, c, name, args_c, sret):
         from .interp import ATOI, RANDOM
+        if name in ("fopen", "fopen64", "freopen"):                    # no input files are present
+            for a in args_c:
+                self.eval(a)
+            return Ptr(self.null, 0)
         if name in RANDOM or name in ("srand", "srandom", "srand48"):  # the C library's generator (interp)
             return Interpreter._library(self, name, args_c)
         if name in ATOI and args_c:
@@ -2256,7 +2397,11 @@ class CppInterpreter(Containers, Interpreter):
         o = np.broadcast_to(np.asarray(o), (self.L,))
         nv = np.broadcast_to(np.asarray(nv), (self.L,))
         ok = np.zeros(self.L, dtype=np.int64)
-        # in order: the first point that finds old_val swaps; later points at that location see new_val
+        # in order: the first point that finds old_val swaps; later points at that location see new_val.
+        # A constant old_val claims the location once (if (x == -1) CAS(x, -1, d)). A variable one was read
+        # from the location just before (the retry loop do { o = x; n = f(o); } while (!CAS(x, o, n))): one
+        # thread alone always succeeds, each point changing the bits it changes in its new_val
+        retry = _reread(args_c[0], args_c[1])
         order = np.argsort(offs, kind="stable")
         value = {}
         for i in order:
@@ -2265,6 +2410,9 @@ class CppInterpreter(Containers, Interpreter):
             if c == int(o[i]):
                 ok[i] = 1
                 value[key] = int(nv[i])
+            elif retry and cur[i] == o[i]:
+                ok[i] = 1
+                value[key] = (c | (int(nv[i]) & ~int(o[i]))) & ~(int(o[i]) & ~int(nv[i]))
             else:
                 value[key] = c
         keys = np.array(list(value.keys()), dtype=np.int64)
@@ -2275,9 +2423,14 @@ class CppInterpreter(Containers, Interpreter):
 
     def _max_element(self, args_c):
         """std::max_element(first, last[, comp]): walks the range calling the comparator (a lambda of
-        the program, or <) on the values; returns a pointer to the largest."""
-        b, e = self.eval(args_c[0]), self.eval(args_c[1])
-        esize = ca.pointee_size(args_c[0].type) or 16
+        the program, or <) on the values; returns a pointer to the largest (for an unordered_map's
+        iterators, to the node)."""
+        if _node_iter(args_c[0].type):
+            b, e = self._iter_node(args_c[0]), self._iter_node(args_c[1])
+            esize = self._node_stride(b)
+        else:
+            b, e = self.eval(args_c[0]), self.eval(args_c[1])
+            esize = ca.pointee_size(args_c[0].type) or 16
         if not (isinstance(b, Ptr) and isinstance(e, Ptr)) or _is_unk(b.obj, b.off, e.off) or self.L > 1:
             return Ptr(UNK, UNK)
         n = (int(e.off) - int(b.off)) // esize
@@ -2297,6 +2450,64 @@ class CppInterpreter(Containers, Interpreter):
             if _as_int(less) is not UNK and _as_int(less):
                 best = cur
         return Ptr(b.obj, best)
+
+    # ------------------------------------------------------------ unordered_map iterators
+
+    def _iterator_object(self, node, type_, sret):
+        """An iterator object (one pointer, to the node) holding `node`."""
+        dest = sret if isinstance(sret, Ptr) else self._new_storage(_referee(type_))
+        if isinstance(dest, Ptr) and not _is_unk(dest.obj, dest.off):
+            self._ptr_store(Loc(dest.obj, dest.off, 8), node if isinstance(node, Ptr) else Ptr(UNK, UNK))
+        return dest
+
+    def _iter_node(self, it):
+        """The node an iterator (an expression, or the address of an iterator object) points to."""
+        if not isinstance(it, Ptr):
+            if ca.is_pointer(it.type):
+                it = self.eval(it)
+            else:
+                loc = self.lvalue(it)
+                it = Ptr(loc.obj, loc.off)
+        if not isinstance(it, Ptr) or _is_unk(it.obj, it.off):
+            return Ptr(UNK, UNK)
+        return self._ptr_load(Loc(it.obj, it.off, 8))
+
+    def _node_stride(self, node):
+        if isinstance(node, Ptr) and not _is_unk(node.obj, node.off):
+            off = int(np.ravel(node.off)[0])
+            for st in self._maps.values():
+                if st["base"] <= off < st["base"] + st["stride"] * 65536:
+                    return st["stride"]
+        return 16
+
+    def _node_iterator(self, name, obj, args_c, c, sret):
+        """_Node_iterator: ->, * (the node, whose value_type pair starts it), ++ (the next node: nodes are
+        contiguous), == and !=."""
+        if name in ("operator->", "operator*"):
+            return self._iter_node(obj) if obj is not None else Ptr(UNK, UNK)
+        if name == "operator++" and isinstance(obj, Ptr) and not _is_unk(obj.obj, obj.off):
+            node = self._iter_node(obj)
+            if not isinstance(node, Ptr) or _is_unk(node.obj, node.off):
+                return obj
+            nxt = Ptr(node.obj, node.off + self._node_stride(node))
+            self._ptr_store(Loc(obj.obj, obj.off, 8), nxt)
+            self.access(Loc(obj.obj, obj.off, 8), write=True)
+            if args_c:                                                 # it++: a copy of the old position
+                return self._iterator_object(node, c.type, sret)
+            return obj
+        if name in ("operator==", "operator!="):
+            sides = ([obj] if obj is not None else []) + list(args_c)
+            if len(sides) != 2:
+                return UNK
+            a, b = (self._iter_node(x) for x in sides)
+            if any(not isinstance(x, Ptr) or _is_unk(x.obj, x.off) for x in (a, b)):
+                return UNK
+            eq = (a.obj is b.obj) & (np.asarray(a.off) == np.asarray(b.off))
+            eq = eq if name == "operator==" else ~eq
+            return _SCALAR(eq.astype(np.int64)) if np.ndim(eq) else int(eq)
+        for a in args_c:
+            self.eval(a)
+        return UNK
 
     def _invoke_lambda_ptrs(self, closure, ptrs):
         """Call a lambda whose parameters are references, binding them to the given addresses."""

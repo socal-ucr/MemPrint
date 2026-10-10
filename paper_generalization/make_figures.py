@@ -803,11 +803,83 @@ def fig_borrow_example():
     save(fig, "borrow_example")
 
 
+def fig_timeline_static():
+    c = pd.read_csv(D / "timeline_static_curves.csv")
+    e = pd.read_csv(D / "timeline_static.csv").set_index(["workload", "config"])
+    fig, axes = plt.subplots(2, 4, figsize=(W2, 3.6))
+    for col, k in enumerate(["2mm", "atax", "gemm", "jacobi-2d"]):
+        for row, cfg in enumerate(["SMALL", "MEDIUM"]):
+            ax = axes[row, col]
+            d = c[(c.workload == k) & (c.config == cfg)]
+            ax.plot(d.time / 1e6, d.truth / 1024, color=INK, lw=1.4, label="Pin (exact)")
+            ax.plot(d.time / 1e6, d.pred / 1024, color=C[0], lw=1.1, ls="--", label="predicted from source")
+            r = e.loc[(k, cfg)]
+            ax.set_title(f"{k}, {cfg}", loc="left", fontsize=7)
+            ax.text(0.97, 0.06, f"median {r.median_error:.1f}%\npeak {r.peak_error:+.1f}%", transform=ax.transAxes,
+                    ha="right", va="bottom", fontsize=6, color=INK2)
+            if col == 0:
+                ax.set_ylabel("live footprint (KB)")
+    fig.legend(handles=[Line2D([], [], color=INK, lw=1.4, label="Pin (exact)"),
+                        Line2D([], [], color=C[0], ls="--", label="predicted from source, no run")],
+               loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.04), fontsize=7)
+    fig.supxlabel("memory references (millions)", fontsize=8)
+    fig.tight_layout()
+    save(fig, "timeline_static")
+
+
+def fig_symbolic():
+    chk = pd.read_csv(D / "symbolic_check.csv")
+    a = chk[~chk.symbolic].set_index(["workload", "config"]).seconds
+    b = chk[chk.symbolic].set_index(["workload", "config"]).seconds
+    sp = (a / b).rename("speedup").reset_index()
+    fig, axes = plt.subplots(1, 2, figsize=(W2, 2.5), gridspec_kw={"width_ratios": [1, 1.2]})
+    ax = axes[0]
+    order = ["MINI", "MINI2", "MINI3", "SMALL", "SMALL2", "SMALL3", "MEDIUM"]
+    rng = np.random.default_rng(3)
+    for i, cfg in enumerate(order):
+        v = sp[sp.config == cfg].speedup.to_numpy()
+        ax.scatter(i + rng.uniform(-0.2, 0.2, len(v)), v, s=6, color=C[0], alpha=0.7, lw=0)
+        ax.plot([i - 0.3, i + 0.3], [np.median(v)] * 2, color=INK, lw=1.3)
+    ax.set_yscale("log")
+    ax.axhline(1, color=INK2, lw=0.6)
+    ax.set_xticks(range(len(order)), order, rotation=45, fontsize=6)
+    ax.set_ylabel("speed-up (enumerated / symbolic)")
+    ax.set_title("(a) 27 kernels, identical spectra", loc="left")
+    ax = axes[1]
+    path = D / "symbolic_scaling.csv"
+    if path.exists():
+        t = pd.read_csv(path)
+        nat = pd.read_csv(D / "pb_native_large.csv") if (D / "pb_native_large.csv").exists() else None
+        xs = {"MEDIUM": 0, "LARGE": 1, "EXTRALARGE": 2}
+        t["x"] = t.config.map(xs)
+        for sym, color in ((True, C[0]), (False, C[1])):
+            d = t[t.symbolic == sym].dropna(subset=["seconds"])
+            for k, dk in d.groupby("workload"):                       # each kernel, thin
+                dk = dk.sort_values("x")
+                ax.plot(dk.x, dk.seconds, color=color, lw=0.6, alpha=0.35, marker="o", ms=1.5)
+            g = d.groupby("x").seconds
+            med = g.median()[g.count() == t.workload.nunique()]               # only where every kernel finished
+            ax.plot(med.index, med.to_numpy(), color=color, lw=2, marker="o", ms=3,
+                    label="symbolic (median)" if sym else "enumerated (median; stops at 900 s)")
+        if nat is not None:
+            m = nat.groupby("config").native_s.median()
+            ax.plot([xs[cfg] for cfg in m.index], m.to_numpy(), color=INK, lw=2, ls="--", marker="o", ms=3,
+                    label="native -O3 run (median)")
+        ax.axhline(900, color=INK2, lw=0.6, ls=":")
+        ax.set_xticks(range(3), list(xs))
+        ax.set_yscale("log")
+        ax.set_ylabel("seconds")
+        ax.set_title(f"(b) Time against input size ({t.workload.nunique()} kernels; thin: each)", loc="left", fontsize=7)
+        ax.legend(fontsize=6, loc="upper left", frameon=False)
+    fig.tight_layout()
+    save(fig, "symbolic")
+
+
 if __name__ == "__main__":
     for f in [fig_inclusion, fig_pb_spectra, fig_pb_alpha_curves, fig_pb_moments_scatter, fig_pb_alpha_heatmap,
               fig_lowo_methods, fig_pb_static_vs_own, fig_pb_footprint, fig_reuse_curves, fig_similarity,
               fig_baseline, fig_pb_interp_cost, fig_idioms, fig_minivite, fig_gap_degrees, fig_gap_skeleton,
               fig_gap_fp, fig_gap_methods, fig_gap_auto, fig_gap_auto_fp, fig_gap_alpha_curves, fig_gap_spectra,
               fig_gap_arrays, fig_interp_cost, fig_csr, fig_pb_sd_relative, fig_blind, fig_method_requirements,
-              fig_static_example, fig_borrow_example]:
+              fig_static_example, fig_borrow_example, fig_timeline_static, fig_symbolic]:
         f()
