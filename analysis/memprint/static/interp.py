@@ -252,6 +252,90 @@ class Obj:
             self.by_size[size] = arr = new
         return arr
 
+    def add_range(self, base, stride, trips, size, w):
+        """Charge w references to each of the byte offsets base + stride * t, t = 0 .. trips-1 (all arrays
+        over batch points), through a difference array per (size, |stride|) folded in later (flush)."""
+        n = max(np.size(base), np.size(stride), np.size(trips), np.size(w))
+        base, stride, trips = (np.broadcast_to(np.asarray(x, dtype=np.int64), (n,)) for x in (base, stride, trips))
+        w = np.broadcast_to(np.asarray(w, dtype=float), (n,))
+        keep = trips > 0
+        base, stride, trips, w = base[keep], stride[keep], trips[keep], w[keep]
+        if base.size == 0:
+            return
+        zero = stride == 0
+        if zero.any():                                                 # the same address every iteration
+            self.add(base[zero], size, w[zero] * trips[zero])
+            base, stride, trips, w = base[~zero], stride[~zero], trips[~zero], w[~zero]
+            if base.size == 0:
+                return
+        base = np.where(stride < 0, base + stride * (trips - 1), base)  # walk negative strides forwards
+        stride = np.abs(stride)
+        bad = base < 0
+        if bad.any():
+            self.unresolved += float(np.sum(w[bad] * trips[bad]))
+            base, stride, trips, w = base[~bad], stride[~bad], trips[~bad], w[~bad]
+        last = base + stride * (trips - 1)
+        pend = self.__dict__.setdefault("pending", {})
+        for st in np.unique(stride):
+            st = int(st)
+            sel = stride == st
+            b, tr, ww = base[sel], trips[sel], w[sel]
+            rows = int(np.max(last[sel])) // st + 2
+            key = (size, st)
+            d = pend.get(key)
+            if d is None or d.shape[0] < rows:
+                nd = np.zeros((max(rows, (self.nbytes + st - 1) // st + 2), st))
+                if d is not None:
+                    nd[: d.shape[0]] = d
+                pend[key] = d = nd
+            r0, col = b // st, b % st
+            np.add.at(d, (r0, col), ww)
+            np.add.at(d, (r0 + tr, col), -ww)
+
+    def touch_time(self, off, size, t):
+        """Timeline mode: the earliest time each start offset (of an access of `size` bytes) was referenced."""
+        ft = self.__dict__.setdefault("ftime", {})
+        offs = np.asarray(off, dtype=np.int64).ravel()
+        tt = np.broadcast_to(np.asarray(t, dtype=float), np.shape(off)).ravel()
+        ok = offs >= 0
+        offs, tt = offs[ok], tt[ok]
+        if offs.size == 0:
+            return
+        hi = int(offs.max()) + 1
+        arr = ft.get(size)
+        if arr is None or len(arr) < hi:
+            new = np.full(max(hi, self.nbytes), np.inf)
+            if arr is not None:
+                new[: len(arr)] = arr
+            ft[size] = arr = new
+        np.minimum.at(arr, offs, tt)
+
+    def first_touch_bytes(self):
+        """Timeline mode: the time each byte was first covered by a reference (inf: never)."""
+        ft = self.__dict__.get("ftime")
+        if not ft:
+            return np.zeros(0)
+        n = max(len(a) + s for s, a in ft.items())
+        out = np.full(n, np.inf)
+        for s, a in ft.items():
+            for k in range(s):
+                out[k: k + len(a)] = np.minimum(out[k: k + len(a)], a)
+        return out
+
+    def flush(self):
+        """Fold the pending range counts into the per-offset counts."""
+        pend = self.__dict__.get("pending")
+        if not pend:
+            return
+        for (size, st), d in pend.items():
+            counts = np.cumsum(d, axis=0).ravel()
+            nz = np.nonzero(np.abs(counts) > 1e-9)[0]
+            if nz.size:
+                hi = int(nz[-1]) + 1
+                arr = self._grow(size, hi)
+                arr[:hi] += counts[:hi]
+        pend.clear()
+
     def add(self, off, size, w):
         """Charge references at byte offsets off (scalar or array aligned with w)."""
         if np.ndim(off) == 0:
@@ -276,6 +360,10 @@ class Obj:
             arr[lo:hi] += np.bincount(off - lo, weights=w, minlength=hi - lo)
 
     def addresses(self, footprint="starts"):
+        self.flush()
+        return self._addresses(footprint)
+
+    def _addresses(self, footprint="starts"):
         """(counts, sizes) of the object's footprint units.
 
         starts: one unit per start address, sized by its largest access (the paper's footprint).
@@ -300,6 +388,10 @@ class Obj:
 
     def coverage(self):
         """References covering each byte (bytes touched)."""
+        self.flush()
+        return self._coverage()
+
+    def _coverage(self):
         if not self.by_size:
             return np.zeros(0)
         length = max(len(a) + s for s, a in self.by_size.items())
@@ -371,6 +463,16 @@ def _key(decl):
     if k is None:
         k = decl._memprint_key = (decl.spelling, decl.location.offset, str(decl.location.file))
     return k
+
+
+class Aff:
+    """The loop variable of an innermost loop counted symbolically, and affine expressions of it:
+    base + coef * t for t = 0 .. trips-1, per batch point (base, coef, trips: scalars or arrays over the
+    enclosing batch). Only + - and multiplication by a loop-invariant integer are defined on it."""
+    __slots__ = ("base", "coef", "trips")
+
+    def __init__(self, base, coef, trips):
+        self.base, self.coef, self.trips = base, coef, trips
 
 
 class Partial:
@@ -446,8 +548,21 @@ class Result:
         return 1.0 - (self.unresolved + self.uncertain) / self.total if self.total else 0.0
 
 
+class _TimedEvents(list):
+    """Heap events that also remember when they happened (the interpreter's reference clock)."""
+
+    def __init__(self, interp):
+        super().__init__()
+        self.interp, self.times = interp, []
+
+    def append(self, event):
+        super().append(event)
+        self.times.append(self.interp.total)
+
+
 class Interpreter:
     REALS = False  # track floating-point scalars (Real)
+    SYMBOLIC = True  # count affine innermost loops symbolically (Aff, Obj.add_range) instead of point by point
 
     def __init__(self, tu, seed=0):
         self.tu = tu
@@ -462,9 +577,13 @@ class Interpreter:
         self.charging = True
         self.uncertain_depth = 0
         self.sequential_depth = 0
-        self.heap_events = []  # ("new" | "free", Obj) in program order
+        self.heap_events = _TimedEvents(self)  # ("new" | "free", Obj) in program order, with their times
+        self.timeline = False  # record first-touch times (footprint over time); batches are then enumerated
+        self.tlo = self.thi = None  # per batch point: its time interval, as fractions of the current region
+        self.region = None  # the outermost batched loop being run: (clock at its start, pending first touches)
         self.total = self.unresolved = self.uncertain = 0.0
         self.data_loops = self.data_branches = 0
+        self.symbolic_loops = 0
         self.functions = {}
         self._global_off = 0
         self.rng = np.random.default_rng(seed)
@@ -565,14 +684,17 @@ class Interpreter:
             return None
         if len(idx) == self.L and scale == 1.0:
             return fn()
-        saved_frames, saved_w = self.frames, self.w
+        saved_frames, saved_w, saved_t = self.frames, self.w, (self.tlo, self.thi)
         self.frames = self._map_frames(lambda a: a[idx])
         self.w = saved_w[idx] * scale
+        if self.tlo is not None:
+            self.tlo, self.thi = np.broadcast_to(self.tlo, saved_w.shape)[idx], np.broadcast_to(self.thi, saved_w.shape)[idx]
         try:
             return fn()
         finally:
             sub = self.frames
             self.frames, self.w = saved_frames, saved_w
+            self.tlo, self.thi = saved_t
             self._merge(sub, idx)
 
     def with_weights(self, w, fn):
@@ -612,7 +734,32 @@ class Interpreter:
             if isinstance(loc.obj, Obj):
                 loc.obj.unresolved += weight
             return
+        if self.timeline and not isinstance(loc.off, Aff):
+            self._first_touch(loc)
+        if isinstance(loc.off, Aff):                                   # every element of a progression
+            a = loc.off
+            trips = np.broadcast_to(np.asarray(a.trips, dtype=np.int64), self.w.shape)
+            per = np.divide(self.w, trips, out=np.zeros_like(self.w), where=trips > 0)
+            loc.obj.add_range(a.base, a.coef, trips, loc.size or 8, per)
+            return
         loc.obj.add(loc.off, loc.size or 8, self.w)
+
+    def _first_touch(self, loc):
+        """Stamp an access with its time: the clock outside batched loops; inside, the start of each batch
+        point's interval, turned into a time when the region ends (_close_region)."""
+        size = loc.size or 8
+        if self.tlo is None:
+            loc.obj.touch_time(loc.off, size, self.total)
+            return
+        offs = np.broadcast_to(np.asarray(loc.off), (self.L,)) if np.ndim(loc.off) else np.full(self.L, int(loc.off))
+        self.region[1].append((loc.obj, np.array(offs), size, np.broadcast_to(self.tlo, (self.L,)).copy()))
+
+    def _close_region(self):
+        t0, pending = self.region
+        span = self.total - t0
+        for obj, offs, size, u in pending:
+            obj.touch_time(offs, size, t0 + u * span)
+        self.region = None
 
     def _declare_global(self, c):
         size = ca.type_size(c.type) or 8
@@ -702,7 +849,16 @@ class Interpreter:
                 base, idx = idx, base
             size = ca.type_size(c.type) or 8
             array = ca.is_array(c.type)
+            if isinstance(idx, Aff) and isinstance(base, Ptr) and base.obj is not UNK and base.off is not UNK \
+                    and not isinstance(base.off, Aff):
+                loc = Loc(base.obj, Aff(base.off + idx.base * size, idx.coef * size, idx.trips), size, array)
+                loc.src = base.src
+                return loc
             idx = _as_int(idx)
+            if isinstance(base, Ptr) and isinstance(base.off, Aff) and idx is not UNK:   # A[j][i], i invariant
+                loc = Loc(base.obj, Aff(base.off.base + idx * size, base.off.coef, base.off.trips), size, array)
+                loc.src = base.src
+                return loc
             if not isinstance(base, Ptr) or base.obj is UNK:
                 return Loc(UNK, UNK, size, array)
             if _is_unk(idx, base.off):
@@ -762,7 +918,7 @@ class Interpreter:
         return not (ca.is_float(t) or ca.is_pointer(t) or ca.is_array(t)) and ca.type_size(t) in (1, 2, 4, 8)
 
     def _mem_load(self, loc, type_):
-        if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK:
+        if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK or isinstance(loc.off, Aff):
             return UNK
         size = ca.type_size(type_.get_canonical()) or 4
         vals = loc.obj.load(loc.off, size)
@@ -775,7 +931,7 @@ class Interpreter:
         return _SCALAR(vals) if np.ndim(vals) else int(vals)
 
     def _mem_store(self, loc, type_, value):
-        if not isinstance(loc.obj, Obj) or loc.off is UNK:
+        if not isinstance(loc.obj, Obj) or loc.off is UNK or isinstance(loc.off, Aff):
             return
         value = _as_int(value) if self._tracked(type_) and not isinstance(value, Ptr) else UNK
         if self.charging:
@@ -787,6 +943,8 @@ class Interpreter:
         """a[i] += delta (or ++, --) for every batch point in order: returns (old, new) per point.
         Repeated offsets see each other's updates as in a sequential loop."""
         delta = _as_int(delta)
+        if isinstance(loc.off, Aff):
+            return UNK, UNK
         if not self._tracked(type_) or not isinstance(loc.obj, Obj) or loc.off is UNK or delta is UNK:
             if isinstance(loc.obj, Obj) and loc.off is not UNK:
                 loc.obj.store(loc.off, UNK, ca.type_size(type_.get_canonical()) or 4)
@@ -959,6 +1117,8 @@ class Interpreter:
         return _SCALAR(t) if np.ndim(t) else int(t)
 
     def _arith(self, op, a, b, c):
+        if isinstance(a, Aff) or isinstance(b, Aff):
+            return _aff_arith(op, a, b)
         if isinstance(a, Ptr) or isinstance(b, Ptr):
             return self._ptr_arith(op, a, b, c)
         if isinstance(a, Real) or isinstance(b, Real):
@@ -1310,11 +1470,21 @@ class Interpreter:
         entry[1] = saved
 
         total = int(trips.sum())
+        if total and self.SYMBOLIC and not self.timeline and np.ndim(step) == 0 and _symbolic_ok(body, var):
+            # the innermost loop counted symbolically: one pass, the loop variable an affine value, every
+            # reference charged once per trip (scalars) or on its whole progression (array elements)
+            self._lookup(var)[1] = Aff(np.broadcast_to(start, (self.L,)).copy(), step, trips)
+            self.with_weights(self.w * trips, lambda: self.exec(body))
+            self.symbolic_loops += 1
+            total = 0
         if total:
             cum = np.cumsum(trips)
             before = cum - trips
             start_arr = np.broadcast_to(start, (self.L,))
-            saved_frames, saved_w = self.frames, self.w
+            saved_frames, saved_w, saved_t = self.frames, self.w, (self.tlo, self.thi)
+            opened = self.timeline and self.tlo is None
+            if opened:
+                self.region = (self.total, [])
             try:
                 for a in range(0, total, CHUNK):
                     g = np.arange(a, min(a + CHUNK, total))
@@ -1323,11 +1493,22 @@ class Interpreter:
                     self.frames = _map_frames_with(saved_frames, lambda arr: arr[point])
                     self.w = saved_w[point]
                     self._link(self.w, saved_w, point)
+                    if self.timeline:
+                        if saved_t[0] is None:                         # the region: iterations in order
+                            self.tlo, self.thi = g / total, (g + 1) / total
+                        else:                                          # nested: split each parent interval
+                            lo = np.broadcast_to(saved_t[0], saved_w.shape)[point]
+                            width = (np.broadcast_to(saved_t[1], saved_w.shape) -
+                                     np.broadcast_to(saved_t[0], saved_w.shape))[point] / trips[point]
+                            self.tlo, self.thi = lo + within * width, lo + (within + 1) * width
                     self._lookup(var)[1] = start_arr[point] + step * within
                     self.exec(body)
                     self._drop(self.w)
             finally:
                 self.frames, self.w = saved_frames, saved_w
+                self.tlo, self.thi = saved_t
+                if opened:
+                    self._close_region()
         entry = self._lookup(var)
         entry[1] = _SCALAR(start + step * trips) if np.ndim(start) or np.ndim(trips) else start + step * trips
         self._forget_float_writes(body)
@@ -1374,6 +1555,89 @@ class Interpreter:
         self.exec(body)
         if inc is not None:
             self.eval(inc)
+
+
+SYMBOLIC_CALLS = {"sqrt", "sqrtf", "exp", "expf", "pow", "powf", "fabs", "fabsf", "log", "logf", "sin", "cos",
+                  "floor", "ceil", "fmax", "fmin"}
+
+
+def _aff_arith(op, a, b):
+    """+, - and multiplication by a loop-invariant integer on affine values; anything else is unknown."""
+    if isinstance(a, Aff) and isinstance(b, Aff):
+        if op in ("+", "-"):
+            sign = 1 if op == "+" else -1
+            return Aff(a.base + sign * b.base, a.coef + sign * b.coef, a.trips)
+        return UNK
+    aff, other, aff_left = (a, b, True) if isinstance(a, Aff) else (b, a, False)
+    o = _as_int(other)
+    if o is UNK:
+        return UNK
+    if op == "+":
+        return Aff(aff.base + o, aff.coef, aff.trips)
+    if op == "-":
+        return Aff(aff.base - o, aff.coef, aff.trips) if aff_left else Aff(o - aff.base, -aff.coef, aff.trips)
+    if op == "*":
+        return Aff(aff.base * o, aff.coef * o, aff.trips)
+    return UNK
+
+
+def _symbolic_ok(body, var):
+    """Can this innermost loop be counted symbolically? Its body has no loop, branch, short-circuit operator or
+    call (but pure math), writes only floating-point scalars and floating-point array elements, and uses the
+    loop variable only inside array subscripts that are affine in it (no subscript nested in a subscript)."""
+    vk = _key(var)
+
+    def is_var(n):
+        return n.kind == K.DECL_REF_EXPR and n.referenced is not None and _key(n.referenced) == vk
+
+    def has_var(n):
+        return any(is_var(x) for x in _walk_nodes(n))
+
+    def affine(n):
+        k = n.kind
+        kids = ca.children(n)
+        if k in (K.UNEXPOSED_EXPR, K.PAREN_EXPR):
+            return len(kids) == 1 and affine(kids[0])
+        if k == K.CSTYLE_CAST_EXPR:
+            return not ca.is_float(n.type) and affine(kids[-1])
+        if k in (K.DECL_REF_EXPR, K.INTEGER_LITERAL):
+            return True
+        if k == K.UNARY_OPERATOR and ca.unary_op(n) in ("-", "+"):
+            return affine(kids[0])
+        if k == K.BINARY_OPERATOR:
+            op = ca.binary_op(n)
+            if op in ("+", "-"):
+                return affine(kids[0]) and affine(kids[1])
+            if op == "*":
+                return affine(kids[0]) and affine(kids[1]) and not (has_var(kids[0]) and has_var(kids[1]))
+        return not has_var(n) and not any(x.kind in (K.ARRAY_SUBSCRIPT_EXPR, K.CALL_EXPR) for x in _walk_nodes(n))
+
+    marked = set()
+    for n in _walk_nodes(body):
+        k = n.kind
+        if k in (K.FOR_STMT, K.WHILE_STMT, K.DO_STMT, K.IF_STMT, K.CONDITIONAL_OPERATOR, K.SWITCH_STMT,
+                 K.RETURN_STMT, K.BREAK_STMT, K.CONTINUE_STMT, K.GOTO_STMT, K.LABEL_STMT):
+            return False
+        if k == K.CALL_EXPR and n.spelling not in SYMBOLIC_CALLS:
+            return False
+        if k == K.BINARY_OPERATOR and ca.binary_op(n) in ("&&", "||"):
+            return False
+        if k == K.ARRAY_SUBSCRIPT_EXPR:
+            base_c, idx_c = ca.children(n)
+            if has_var(idx_c):
+                if not affine(idx_c) or any(x.kind in (K.ARRAY_SUBSCRIPT_EXPR, K.CALL_EXPR)
+                                            for x in _walk_nodes(idx_c)):
+                    return False
+                if not (ca.is_float(n.type) or ca.is_array(n.type)):
+                    return False                                       # integer elements: their values matter
+                marked.update(id(x) for x in _walk_nodes(idx_c) if is_var(x))
+        if (k == K.BINARY_OPERATOR and ca.binary_op(n) == "=") or k == K.COMPOUND_ASSIGNMENT_OPERATOR:
+            lhs = ca.children(n)[0]
+            if not ca.is_float(lhs.type):
+                return False
+        if k == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "pre++", "post--", "pre--", "&"):
+            return False
+    return all(id(x) in marked for x in _walk_nodes(body) if is_var(x))
 
 
 def _walk_nodes(node):
@@ -1637,13 +1901,37 @@ def _place_heap(events, heap_top):
     return blocks
 
 
-def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=None, argv=None):
+def timeline_curve(interp, points=400):
+    """The live footprint over time predicted by a timeline run: at each of `points` times spread over the run
+    (the interpreter's reference clock), the bytes first touched by then and not yet freed."""
+    end = max(interp.total, 1.0)
+    times = np.linspace(0, end, points)
+    freed = {}
+    for (event, obj), t in zip(interp.heap_events, interp.heap_events.times):
+        if event == "free":
+            freed[id(obj)] = t
+    live = np.zeros(points)
+    for obj in interp.objects:
+        ft = obj.first_touch_bytes()
+        ft = np.sort(ft[np.isfinite(ft)])
+        if ft.size == 0:
+            continue
+        n = np.searchsorted(ft, times, side="right").astype(float)
+        f = freed.get(id(obj))
+        if f is not None:
+            n[times >= f] = 0
+        live += n
+    return times / end, live
+
+
+def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=None, argv=None, timeline=False):
     """Run the program from `entry` and return its access-count spectrum (footprint: starts or bytes).
     seed: for the values drawn in place of the C library's random numbers. With bytes, heap blocks
     are placed by glibc's allocator (skeleton.Process, starting with heap_top free bytes), so a
     block that reuses a freed block's addresses adds no new bytes. make: a factory for the
     interpreter (the C++ one), called with (tu, seed)."""
     interp = (make or Interpreter)(tu, seed)
+    interp.timeline = timeline
     if argv is not None:                                               # the command line, argv[0] first
         interp.argv = tuple(str(a) for a in argv)
         argc = len(interp.argv)
@@ -1685,6 +1973,8 @@ def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=N
         c, s = group_words(space)
         counts.append(c)
         sizes.append(s)
-    return Result(np.concatenate(counts) if counts else np.zeros(0),
-                  np.concatenate(sizes) if sizes else np.zeros(0), objects, interp.total, interp.unresolved,
-                  interp.uncertain, interp.data_loops, interp.data_branches)
+    result = Result(np.concatenate(counts) if counts else np.zeros(0),
+                    np.concatenate(sizes) if sizes else np.zeros(0), objects, interp.total, interp.unresolved,
+                    interp.uncertain, interp.data_loops, interp.data_branches)
+    result.timeline = timeline_curve(interp) if timeline else None
+    return result

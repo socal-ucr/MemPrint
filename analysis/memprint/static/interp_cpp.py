@@ -205,6 +205,7 @@ class _Batch:
 
 class CppInterpreter(Containers, Interpreter):
     REALS = True
+    SYMBOLIC = False  # -O3 counting needs every batch point (per-point load cache)
     LOAD_CACHE = "point"  # "point": per-point load cache with parent batches; "batch": one record per batch
     def __init__(self, tu, seed=0, stubs=None, opt=3):
         super().__init__(tu, seed)
