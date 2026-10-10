@@ -608,7 +608,7 @@ class CppInterpreter(Containers, Interpreter):
         if var is None or not step:
             return super()._for(c)
         reductions = self._reductions(body)
-        first, written = _events(body)
+        first, written = _events(body, floats=self.REALS)               # floats are values now: carried ones too
         scans = {k: d for k, d in self._scans(body).items() if k not in reductions}
         carried = [k for k in written if first.get(k) == "r" and k not in reductions and k not in scans]
         pointer = ca.is_pointer(var.type)
@@ -1486,7 +1486,14 @@ class CppInterpreter(Containers, Interpreter):
                 self.scopes[-1].append((decl, dest, t))
             return
         if ca.is_array(t):
-            super()._exec_decl(decl)
+            size = ca.type_size(t.get_canonical()) or 0
+            if self.opt >= 3 and 0 < size <= REGISTER_BYTES:
+                # a small local array lives in registers at -O3 (scalar replacement), one copy per batch
+                # point, so every iteration keeps its own elements through nested batches
+                dest = self._new_storage(t)
+                self.frames[-1].vars[_key(decl)] = [Loc(dest.obj, dest.off, size, True), dest]
+            else:
+                super()._exec_decl(decl)
             if init is not None and _strip(init).kind == K.INIT_LIST_EXPR:
                 slot = self._lookup(decl)[0]                           # {a, b, ...}: store the elements
                 et = t.get_canonical().element_type
@@ -1882,7 +1889,7 @@ class CppInterpreter(Containers, Interpreter):
         one iteration to the next), other than the loop variable?"""
         from .interp import _events
 
-        first, written = _events(body)
+        first, written = _events(body, floats=True)
         own = _key(var)
         return any(first.get(k) == "r" for k in written if k != own)
 

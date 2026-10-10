@@ -612,7 +612,15 @@ class Interpreter:
                 return Partial(f(v.v), f(v.known))
             return v
 
-        return [Frame(fr.func, fr.base, {k: [s, mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in self.frames]
+        def maps(slot):                                                # a slot with an offset per point
+            if isinstance(slot, Loc) and isinstance(slot.off, np.ndarray):
+                new = Loc(slot.obj, f(slot.off), slot.size, slot.array)
+                new.__dict__.update({k: v for k, v in slot.__dict__.items() if k not in ("obj", "off", "size", "array")})
+                return new
+            return slot
+
+        return [Frame(fr.func, fr.base, {k: [maps(s), mapv(v)] for k, (s, v) in fr.vars.items()})
+                for fr in self.frames]
 
     def _merge(self, sub_frames, idx):
         L = self.L
@@ -1660,7 +1668,14 @@ def _map_frames_with(frames, f):
             return Partial(f(v.v), f(v.known))
         return v
 
-    return [Frame(fr.func, fr.base, {k: [s, mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in frames]
+    def maps(slot):
+        if isinstance(slot, Loc) and isinstance(slot.off, np.ndarray):
+            new = Loc(slot.obj, f(slot.off), slot.size, slot.array)
+            new.__dict__.update({k: v for k, v in slot.__dict__.items() if k not in ("obj", "off", "size", "array")})
+            return new
+        return slot
+
+    return [Frame(fr.func, fr.base, {k: [maps(s), mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in frames]
 
 
 # ---------------------------------------------------------------- loop analysis
@@ -1826,13 +1841,14 @@ def _memory_carried(body):
     return bool((written | updated) & read) or bool(written & updated)
 
 
-def _events(body):
-    """First event ('r' or 'w') of each integer or pointer scalar in evaluation order, and
-    the set of scalars written. Writes through subscripts or pointers are not scalar writes."""
+def _events(body, floats=False):
+    """First event ('r' or 'w') of each integer or pointer scalar (and floating-point one, with floats) in
+    evaluation order, and the set of scalars written. Writes through subscripts or pointers are not scalar
+    writes."""
     first, written = {}, set()
 
     def note(decl, event):
-        if ca.is_float(decl.type) or ca.is_array(decl.type):
+        if (ca.is_float(decl.type) and not floats) or ca.is_array(decl.type):
             return
         k = _key(decl)
         first.setdefault(k, event)
