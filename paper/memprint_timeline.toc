@@ -32,12 +32,12 @@
 \contentsline {paragraph}{Programs that reuse their heap.}{11}{section*.19}
 \contentsline {paragraph}{Machine.}{11}{section*.20}
 \contentsline {subsection}{\numberline {5.2}Ground truth and error metrics}{11}{subsection.5.2}
-\contentsline {paragraph}{Training and testing.}{11}{section*.21}
+\contentsline {paragraph}{Training and testing.}{12}{section*.21}
 \contentsline {subsection}{\numberline {5.3}Validation of the ground truth}{12}{subsection.5.3}
 \contentsline {section}{\numberline {6}Estimating from sampled references}{13}{section.6}
 \contentsline {subsection}{\numberline {6.1}The $\alpha $ model at every snapshot}{13}{subsection.6.1}
-\contentsline {subsection}{\numberline {6.2}Estimators of unseen species}{13}{subsection.6.2}
-\contentsline {subsection}{\numberline {6.3}An estimator that uses the known sampling rate}{14}{subsection.6.3}
+\contentsline {subsection}{\numberline {6.2}Estimators of unseen species}{14}{subsection.6.2}
+\contentsline {subsection}{\numberline {6.3}An estimator that uses the known sampling rate}{15}{subsection.6.3}
 \contentsline {subsection}{\numberline {6.4}A hybrid of the known-rate estimate and a learned correction}{15}{subsection.6.4}
 \contentsline {paragraph}{Where the hybrid falls off.}{16}{section*.25}
 \contentsline {paragraph}{Forecasting.}{16}{section*.29}
@@ -53,7 +53,7 @@
 \contentsline {subsection}{\numberline {8.2}Switching between watching and not watching}{20}{subsection.8.2}
 \contentsline {subsection}{\numberline {8.3}Tracking live blocks}{21}{subsection.8.3}
 \contentsline {subsection}{\numberline {8.4}Page residency}{21}{subsection.8.4}
-\contentsline {subsection}{\numberline {8.5}Written pages of reused blocks}{21}{subsection.8.5}
+\contentsline {subsection}{\numberline {8.5}Written pages of reused blocks}{22}{subsection.8.5}
 \contentsline {subsection}{\numberline {8.6}Word sampling inside windows}{22}{subsection.8.6}
 \contentsline {paragraph}{Density, under the start-address footprint.}{22}{section*.36}
 \contentsline {subsection}{\numberline {8.7}The estimate}{23}{subsection.8.7}
@@ -83,7 +83,7 @@
 \contentsline {section}{\numberline {11}Related work}{32}{section.11}
 \contentsline {paragraph}{Measuring memory use.}{32}{section*.59}
 \contentsline {paragraph}{Hardware sampling of memory accesses.}{32}{section*.60}
-\contentsline {paragraph}{Page-level tracking by the operating system.}{32}{section*.61}
+\contentsline {paragraph}{Page-level tracking by the operating system.}{33}{section*.61}
 \contentsline {paragraph}{Sampling locations in caches and simulation.}{33}{section*.62}
 \contentsline {paragraph}{Sampling over time.}{33}{section*.63}
 \contentsline {paragraph}{Estimating unseen elements.}{33}{section*.64}
