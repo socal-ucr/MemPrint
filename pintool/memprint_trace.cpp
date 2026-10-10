@@ -113,6 +113,8 @@
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
+#include <elf.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <map>
 #include <set>
@@ -624,6 +626,12 @@ static VOID ApplyRelease(ADDRINT lo, ADDRINT hi);
 // Its accesses are chunk headers and free-list links, which land outside live blocks and
 // would never be released, so they count as time but not toward any footprint.
 ADDRINT mallocCodeLo = 0, mallocCodeHi = 0;
+// The allocator in use is the first loaded library (not the program) that defines malloc. If it is
+// not glibc (e.g. jemalloc or tcmalloc, usually preloaded), its whole image counts as allocator code,
+// glibc's chunk headers do not apply, and a freed block releases up to the allocator's own
+// malloc_usable_size (usableFn), called at free's entry.
+BOOL foreignAllocator = FALSE;
+ADDRINT usableFn = 0;
 const UINT32 MALLOC_REF = ~0u; // buffered size of an allocator reference
 
 static BOOL InMallocCode(INS ins) { return INS_Address(ins) >= mallocCodeLo && INS_Address(ins) < mallocCodeHi; }
@@ -991,7 +999,7 @@ static VOID HarvestAndClear()
 static ADDRINT ChunkHeader(ADDRINT ptr)
 {
     ADDRINT header = 0;
-    if (mallocCodeHi == 0 || ptr < 8 || PIN_SafeCopy(&header, (VOID*)(ptr - 8), sizeof(header)) != sizeof(header)) return 0;
+    if (foreignAllocator || mallocCodeHi == 0 || ptr < 8 || PIN_SafeCopy(&header, (VOID*)(ptr - 8), sizeof(header)) != sizeof(header)) return 0;
     return header;
 }
 
@@ -1081,6 +1089,8 @@ static BOOL InAllocator(ADDRINT pc)
     return FALSE;
 }
 
+static VOID NoteReturnSite(ADDRINT ret, int kind);
+
 static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike, ADDRINT size, ADDRINT ptr, ADDRINT out)
 {
     ThreadData& t = threads[tid];
@@ -1100,6 +1110,7 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
     t.allocPtr    = ptr;
     t.allocHeader = ptr ? ChunkHeader(ptr) : 0; // realloc: the old chunk, before it changes
     t.allocOut  = out;
+    if (foreignAllocator) NoteReturnSite(caller, mallocLike ? 1 : out ? 3 : 2);
 }
 
 static BOOL AllocLeave(THREADID tid)
@@ -1143,6 +1154,15 @@ static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
     ADDRINT size = ForgetAllocation(ptr), lo, hi;
     ForgetBlock(tid, ptr);
     ChunkRange(ptr, size, size ? ChunkHeader(ptr) : 0, &lo, &hi);
+    if (foreignAllocator && usableFn && ptr)
+    {
+        // the bytes the allocator gave the block, which string and copy functions read past `size`;
+        // also the size of a block whose allocation was missed (an exit through a path not hooked)
+        size_t usable = 0;
+        PIN_CallApplicationFunction(ctxt, tid, CALLINGSTD_DEFAULT, AFUNPTR(usableFn), NULL, PIN_PARG(size_t), &usable,
+                                    PIN_PARG(void*), (void*)ptr, PIN_PARG_END());
+        if (usable > size && usable < size + (1 << 20)) lo = ptr, hi = ptr + usable;
+    }
     QueueRelease(tid, ctxt, lo, hi);
 }
 
@@ -1179,21 +1199,251 @@ static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     RememberAllocation(tid, ret, size);
 }
 
+// Calls f(name, value, size, dynamic) for every defined function symbol of an ELF file, from its
+// symbol table (.symtab) and its dynamic symbol table (.dynsym; dynamic = TRUE).
+template < typename F > static VOID ElfFunctions(const string& file, F f)
+{
+    int fd = open(file.c_str(), O_RDONLY);
+    if (fd < 0) return;
+    struct stat st;
+    if (fstat(fd, &st) == 0 && st.st_size > (off_t)sizeof(Elf64_Ehdr))
+    {
+        vector< char > data(st.st_size);
+        if (read(fd, data.data(), data.size()) == (ssize_t)data.size() && memcmp(data.data(), ELFMAG, SELFMAG) == 0)
+        {
+            const Elf64_Ehdr* eh = (const Elf64_Ehdr*)data.data();
+            const Elf64_Shdr* sh = (const Elf64_Shdr*)(data.data() + eh->e_shoff);
+            for (int i = 0; i < eh->e_shnum; i++)
+            {
+                if ((sh[i].sh_type != SHT_DYNSYM && sh[i].sh_type != SHT_SYMTAB) || sh[i].sh_link >= eh->e_shnum) continue;
+                const Elf64_Sym* sym = (const Elf64_Sym*)(data.data() + sh[i].sh_offset);
+                const char* str      = data.data() + sh[sh[i].sh_link].sh_offset;
+                for (size_t k = 0; k < sh[i].sh_size / sizeof(Elf64_Sym); k++)
+                    if (sym[k].st_shndx != SHN_UNDEF && ELF64_ST_TYPE(sym[k].st_info) == STT_FUNC)
+                        f(str + sym[k].st_name, sym[k].st_value, sym[k].st_size, sh[i].sh_type == SHT_DYNSYM);
+            }
+        }
+    }
+    close(fd);
+}
+
+// Value of a defined function `name` in the dynamic symbol table (.dynsym) of an ELF file, 0 if absent.
+static ADDRINT DynamicSymbol(const string& file, const char* name)
+{
+    ADDRINT value = 0;
+    ElfFunctions(file, [&](const char* n, ADDRINT v, ADDRINT, BOOL dynamic) {
+        if (dynamic && !value && strcmp(n, name) == 0) value = v;
+    });
+    return value;
+}
+
+// Sizes of the allocator's functions by address, from its ELF symbols. Pin may not know the
+// allocator's symbols (jemalloc's), and a routine it creates then runs on to the next symbol it
+// knows, over other functions (memalign over realloc): its returns are not all memalign's.
+std::map< ADDRINT, ADDRINT > functionSizes;
+
+// End of the function at the start of `rtn`.
+static ADDRINT RoutineEnd(RTN rtn)
+{
+    auto it = functionSizes.find(RTN_Address(rtn));
+    if (it == functionSizes.end() || it->second == 0) return RTN_Address(rtn) + RTN_Size(rtn);
+    return RTN_Address(rtn) + std::min(it->second, (ADDRINT)RTN_Size(rtn));
+}
+
+// Hooks `exit` (with `ifCall` as condition, if given) before each return of the function at the start of `rtn`.
+static VOID HookReturns(RTN rtn, AFUNPTR ifCall, AFUNPTR exit, IARGLIST exitArgs)
+{
+    ADDRINT end = RoutineEnd(rtn);
+    for (INS ins = RTN_InsHead(rtn); INS_Valid(ins) && INS_Address(ins) < end; ins = INS_Next(ins))
+        if (INS_IsRet(ins))
+        {
+            if (ifCall)
+            {
+                INS_InsertIfCall(ins, IPOINT_BEFORE, ifCall, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_END);
+                INS_InsertThenCall(ins, IPOINT_BEFORE, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+            }
+            else
+                INS_InsertCall(ins, IPOINT_BEFORE, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+        }
+}
+
+// The routine named `name`. Pin keeps one name per address and may not list a library's exported
+// aliases at all (jemalloc's malloc, which its own symbol table calls je_malloc), so the image's
+// symbols and then its .dynsym are searched; a routine is created at the address if Pin has none.
+static RTN FindRoutine(IMG img, const char* name)
+{
+    auto real = [](RTN r) { return RTN_Valid(r) && SEC_Name(RTN_Sec(r)).find(".plt") != 0; }; // not a PLT stub
+    RTN rtn   = RTN_FindByName(img, name);
+    if (real(rtn)) return rtn;
+    for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym); sym = SYM_Next(sym))
+        if (SYM_Name(sym) == name && real(RTN_FindByAddress(SYM_Address(sym)))) return RTN_FindByAddress(SYM_Address(sym));
+    if (IMG_IsMainExecutable(img)) return RTN_Invalid();
+    ADDRINT value = DynamicSymbol(IMG_Name(img), name);
+    if (!value) return RTN_Invalid();
+    ADDRINT address = IMG_LoadOffset(img) + value;
+    rtn             = RTN_FindByAddress(address);
+    if (RTN_Valid(rtn) && RTN_Address(rtn) == address) return rtn;
+    return RTN_CreateAt(address, name);
+}
+
+// Hook the exit of every function that `rtn` jumps to (not calls) inside the allocator's code.
+// A return instruction executing with the stack pointer of the outermost allocator call's entry
+// returns to that call's caller.
+static ADDRINT AtOuterReturn(THREADID tid, ADDRINT sp)
+{
+    return threads[tid].allocDepth == 1 && sp == threads[tid].allocSp;
+}
+
+// The exit of the outermost call, through a function that several allocation functions jump to
+// (jemalloc's realloc and malloc share one): the exit of the kind of call that was entered.
+static VOID TailExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
+{
+    ThreadData& t = threads[tid];
+    if (t.allocMallocLike)
+        MallocExit(tid, ret);
+    else if (t.allocOut)
+        PosixMemalignExit(tid, ret);
+    else
+        ReallocExit(tid, ctxt, ret);
+}
+
+static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args);
+
+static VOID HookTailJumps(RTN rtn, int depth, std::set< ADDRINT >& instrumented)
+{
+    static IARGLIST tailExitArgs = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
+    if (depth == 0) return;
+    vector< ADDRINT > targets;
+    RTN_Open(rtn);
+    ADDRINT end = RoutineEnd(rtn);
+    for (INS ins = RTN_InsHead(rtn); INS_Valid(ins) && INS_Address(ins) < end; ins = INS_Next(ins))
+        if (INS_IsDirectControlFlow(ins) && !INS_IsCall(ins))
+        {
+            ADDRINT t = INS_DirectControlFlowTargetAddress(ins);
+            if ((t < RTN_Address(rtn) || t >= end) && t >= mallocCodeLo && t < mallocCodeHi)
+                targets.push_back(t);
+        }
+    RTN_Close(rtn);
+    for (ADDRINT t : targets)
+    {
+        RTN target = RTN_FindByAddress(t);
+        if (!RTN_Valid(target) || RTN_Address(target) != t || !instrumented.insert(t).second) continue;
+        RTN_Open(target);
+        if (allocatorCode.size() < allocatorCode.capacity())
+            allocatorCode.push_back({RTN_Address(target), RoutineEnd(target)});
+        // Only a return to the outermost call's caller is that call's exit: the function is also called
+        // normally from inside the allocator (e.g. by realloc), where its return exits nothing.
+        HookReturns(target, AFUNPTR(AtOuterReturn), AFUNPTR(TailExit), tailExitArgs);
+        RTN_Close(target);
+        HookTailJumps(target, depth - 1, instrumented);
+    }
+}
+
 static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLIST enterArgs, AFUNPTR exit,
                                 IARGLIST exitArgs)
 {
     static std::set< ADDRINT > instrumented; // aliases (e.g. memalign, aligned_alloc) share an address
-    RTN rtn = RTN_FindByName(img, name);
+    RTN rtn = FindRoutine(img, name);
     // Skip PLT stubs: they jump to the real function and never return.
     if (!RTN_Valid(rtn) || SEC_Name(RTN_Sec(rtn)).find(".plt") == 0) return;
     if (!instrumented.insert(RTN_Address(rtn)).second) return;
+    if (getenv("MEMPRINT_VERBOSE"))
+        cerr << "memprint_trace: hook " << name << " = " << RTN_Name(rtn) << " in " << IMG_Name(img) << endl;
     RTN_Open(rtn);
     // read by analysis routines of other threads: reserved in main, so pushing never moves it
-    if (allocatorCode.size() < allocatorCode.capacity()) allocatorCode.push_back({RTN_Address(rtn), RTN_Address(rtn) + RTN_Size(rtn)});
+    if (allocatorCode.size() < allocatorCode.capacity()) allocatorCode.push_back({RTN_Address(rtn), RoutineEnd(rtn)});
     RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP, IARG_BOOL,
                    exit == AFUNPTR(MallocExit), IARG_IARGLIST, enterArgs, IARG_END);
-    RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+    if (foreignAllocator)
+        HookReturns(rtn, NULL, exit, exitArgs);
+    else
+        RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
     RTN_Close(rtn);
+    // Allocators other than glibc's leave some calls through a jump to another function of theirs
+    // (jemalloc's malloc to je_malloc_default on its slow path; tcmalloc two levels deep), whose
+    // return is the call's exit: follow such jumps within the allocator's code, three levels deep.
+    if (foreignAllocator) HookTailJumps(rtn, 3, instrumented);
+}
+
+
+// Allocators other than glibc's leave some calls through paths whose return Pin's routine exits
+// do not see (a jump into code without a symbol, as in tcmalloc). So, with such an allocator, the
+// exit is also taken on the caller's side: before the instruction at the return address of every
+// call to an allocation function, where RAX holds the result. A second exit for the same call is
+// ignored (the call's depth is already 0). Direct calls (and calls of PLT stubs) are found when
+// their code is translated; any other call (through the GOT, as code built with -fno-plt does, or
+// through a function pointer) when the allocation function is entered, from its return address:
+// that code is then translated again, with the exit, before the call returns.
+std::map< ADDRINT, int > returnSites; // return address -> 1 malloc-like, 2 realloc, 3 posix_memalign
+std::map< ADDRINT, int > callTargets; // call target -> kind (0: not an allocation function)
+PIN_LOCK siteLock;                    // returnSites, written by analysis routines too
+
+static VOID NoteReturnSite(ADDRINT ret, int kind)
+{
+    if (ret >= mallocCodeLo && ret < mallocCodeHi) return; // the allocator calling itself
+    PIN_GetLock(&siteLock, 1);
+    BOOL added = returnSites.emplace(ret, kind).second;
+    PIN_ReleaseLock(&siteLock);
+    if (added) PIN_RemoveInstrumentationInRange(ret, ret + 1);
+}
+
+static int AllocationKind(ADDRINT target)
+{
+    auto it = callTargets.find(target);
+    if (it != callTargets.end()) return it->second;
+    int kind = 0;
+    RTN rtn  = RTN_FindByAddress(target);
+    if (RTN_Valid(rtn) && RTN_Address(rtn) == target)
+    {
+        string name = RTN_Name(rtn);
+        name        = name.substr(0, name.find('@')); // malloc@plt
+        if (name == "malloc" || name == "calloc" || name == "valloc" || name == "pvalloc" || name == "memalign" ||
+            name == "aligned_alloc")
+            kind = 1;
+        else if (name == "realloc")
+            kind = 2;
+        else if (name == "posix_memalign")
+            kind = 3;
+    }
+    return callTargets[target] = kind;
+}
+
+static VOID InsertReturnSite(INS ins, int kind)
+{
+    if (kind == 1)
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(MallocExit), IARG_THREAD_ID, IARG_REG_VALUE, REG_GAX, IARG_END);
+    else if (kind == 2)
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(ReallocExit), IARG_THREAD_ID, IARG_CONTEXT, IARG_REG_VALUE, REG_GAX, IARG_END);
+    else if (kind == 3)
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(PosixMemalignExit), IARG_THREAD_ID, IARG_REG_VALUE, REG_GAX, IARG_END);
+}
+
+static VOID CallSites(TRACE trace, VOID* v)
+{
+    if (!foreignAllocator) return;
+    for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+        for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+        {
+            PIN_GetLock(&siteLock, 1);
+            auto site = returnSites.find(INS_Address(ins));
+            int siteKind = site != returnSites.end() ? site->second : 0;
+            PIN_ReleaseLock(&siteLock);
+            if (siteKind) InsertReturnSite(ins, siteKind);
+            if (!INS_IsCall(ins) || !INS_IsDirectControlFlow(ins)) continue;
+            int kind = AllocationKind(INS_DirectControlFlowTargetAddress(ins));
+            if (!kind) continue;
+            ADDRINT ret = INS_NextAddress(ins);
+            PIN_GetLock(&siteLock, 1);
+            BOOL added = returnSites.emplace(ret, kind).second;
+            PIN_ReleaseLock(&siteLock);
+            if (added)
+            {
+                // later in this trace, the loop hooks it; elsewhere, code translated before is redone
+                INS next = INS_Next(ins);
+                if (!INS_Valid(next) && BBL_Valid(BBL_Next(bbl))) next = BBL_InsHead(BBL_Next(bbl));
+                if (!INS_Valid(next) || INS_Address(next) != ret) PIN_RemoveInstrumentationInRange(ret, ret + 1);
+            }
+        }
 }
 
 static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args)
@@ -1228,6 +1478,26 @@ static IARGLIST EnterArgs(INT32 sizeArg, INT32 ptrArg, INT32 outArg)
 // need the library's symbol table; without one only the public functions are covered.
 static VOID FindMallocCode(IMG img)
 {
+    static BOOL chosen = FALSE; // a non-glibc allocator was found: later images (libc) do not count
+    if (chosen || IMG_IsMainExecutable(img)) return;
+    RTN m = FindRoutine(img, "malloc");
+    string imgName = IMG_Name(img);
+    imgName = imgName.substr(imgName.find_last_of('/') + 1);
+    if (RTN_Valid(m) && SEC_Name(RTN_Sec(m)).find(".plt") != 0 && imgName.compare(0, 5, "libc.") != 0 &&
+        imgName.compare(0, 5, "libc-") != 0)
+    {
+        chosen = foreignAllocator = TRUE;
+        mallocCodeLo = IMG_LowAddress(img), mallocCodeHi = IMG_HighAddress(img) + 1;
+        RTN u = FindRoutine(img, "malloc_usable_size");
+        usableFn = RTN_Valid(u) ? RTN_Address(u) : 0;
+        ElfFunctions(IMG_Name(img), [&](const char*, ADDRINT value, ADDRINT size, BOOL) {
+            if (size) functionSizes[IMG_LoadOffset(img) + value] = size;
+        });
+        if (getenv("MEMPRINT_VERBOSE"))
+            cerr << "memprint_trace: allocator " << IMG_Name(img) << " [" << std::hex << mallocCodeLo << ", " << mallocCodeHi
+                 << ") malloc_usable_size " << usableFn << std::dec << endl;
+        return;
+    }
     // names without leading underscores and "libc_" (aliases such as __libc_malloc)
     static const std::set< string > names = {
         "malloc", "free", "cfree", "realloc", "calloc", "memalign", "valloc", "pvalloc", "aligned_alloc", "posix_memalign",
@@ -1282,7 +1552,7 @@ VOID ImageLoad(IMG img, VOID* v)
     InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
     InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
 
-    RTN free = RTN_FindByName(img, "free");
+    RTN free = FindRoutine(img, "free");
     if (RTN_Valid(free) && SEC_Name(RTN_Sec(free)).find(".plt") != 0)
     {
         RTN_Open(free);
@@ -2002,6 +2272,7 @@ int main(int argc, char* argv[])
     allocatorCode.reserve(64);
     PIN_InitLock(&stateLock);
     PIN_InitLock(&allocLock);
+    PIN_InitLock(&siteLock);
     if (KnobTrackFrees.Value() || windowed)
     {
         footprint.SetIndexed(TRUE);
@@ -2010,6 +2281,7 @@ int main(int argc, char* argv[])
         for (Footprint& u : unions)
             u.SetIndexed(TRUE);
         IMG_AddInstrumentFunction(ImageLoad, 0);
+        TRACE_AddInstrumentFunction(CallSites, 0);
         PIN_AddSyscallEntryFunction(SyscallEntry, 0);
         PIN_AddSyscallExitFunction(SyscallExit, 0);
     }

@@ -155,7 +155,7 @@ The allocator keeps bookkeeping data next to the blocks it hands out. The GNU C 
 
 With free tracking or windows on, the tool therefore finds the allocator's own code when the C library is loaded, by the names of its functions in the library's symbol table: the public functions and the internal ones such as \texttt{\_int\_malloc} and \texttt{\_int\_free}. The allocator is one source file, so its code is contiguous, and the tool takes the address range that these functions span. A memory reference made by an instruction in that range still counts as time but goes into no footprint. Copies and fills that the allocator delegates to \texttt{memcpy} and \texttt{memset}, for example the zeroing in \texttt{calloc} and the copy in \texttt{realloc}, still count, because they write the program's block. With this change the test above peaks at 14.45\,MB and ends at 1.7\,MB.
 
-A second, smaller leak appeared when we counted bytes touched (\secref{sec:definition}). String and copy functions read a few bytes past the end of a block, inside the slack that the allocator adds to round the block up, and those bytes were never freed, because a free removed only the requested size: Lua ended with 5.3\,MB live and nothing allocated. A freed block now releases its whole chunk, which is the size field below it, the block and its slack, read from the size field at the entry of \texttt{free} and checked against the requested size. If the field does not match a chunk of that size, as for a block that the allocator mapped directly or for another allocator, the tool releases only the requested size. Lua now ends at 0.3\,MB.
+A second, smaller leak appeared when we counted bytes touched (\secref{sec:definition}). String and copy functions read a few bytes past the end of a block, inside the slack that the allocator adds to round the block up, and those bytes were never freed, because a free removed only the requested size: Lua ended with 5.3\,MB live and nothing allocated. A freed block now releases its whole chunk, which is the size field below it, the block and its slack, read from the size field at the entry of \texttt{free} and checked against the requested size. If the field does not match a chunk of that size, as for a block that the allocator mapped directly, the tool releases only the requested size; with another allocator it releases the usable size that the allocator reports (\secref{sec:allocators}). Lua now ends at 0.3\,MB.
 
 \subsection{Counting bytes touched}
 \label{sec:definition}
@@ -718,6 +718,57 @@ Lua & 3.3--3.7 & 34.4 & 57.8 & 56.5 & 58.2 \\
 \end{tabular}
 \end{table}
 
+\subsection{Many MPI processes}
+\label{sec:mpi}
+
+To see how the estimate behaves with several processes and on runs too long to record completely, we ran LULESH~2.0, a hydrodynamics proxy application, with 8 MPI processes, and miniVite with 4 processes, built against the Spack OpenMPI 5.0.5. Each process runs under its own Pin and writes its own files. Two medium runs (LULESH with $20^3$ elements per process and 100 iterations, miniVite with 131072 vertices) were also recorded completely; two long ones (LULESH with $50^3$ elements and 500 iterations, 156\,s natively; miniVite with 524288 vertices and 4 threads per process, 146\,s) were not, and we compare them with each process's peak resident memory. \tabref{tab:mpi} gives the results.
+
+Watching 1\% of the run, every process's peak is within 2.1\% of its truth, and the processes agree with each other within a point. Without windows, the estimate is 5\% to 9\% low at the peak, because MPI's own memory, such as its shared-memory segments, which are mappings of files rather than anonymous memory, lies outside the blocks and outside the image sections that the pages-only mode measures, so only windows see it. For MPI programs, at least 1\% should therefore be watched. The true footprint is 0.41 to 0.50 of the resident memory on the medium runs, because resident memory also counts the loader, the MPI library's code and data, and whole pages. On the long runs the windowed peak is 0.77 to 0.88 of the resident memory and below it on every process; resident memory is only an upper bound, so it cannot check the estimate more closely. Relative to native time, long runs are cheaper: 4.6$\times$ (LULESH) and 5.6$\times$ (miniVite) without windows, and 10.3$\times$ and 5.2$\times$ at 1\% watched, against 18$\times$ to 34$\times$ for the 3\,s medium LULESH run, because the fixed cost of starting Pin and translating the MPI library is spread over a longer run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{MPI runs, ranges over the processes. Footprints in MB; estimates as mean error / error of the peak in percent where a complete recording exists, else the estimated peak.}
+\label{tab:mpi}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Run & True peak & Peak RSS & Allocated & Pages only & 1\% watched \\
+\midrule
+LULESH 20, 8 processes & 9.0--9.1 & 20.2--21.8 & 18.0--18.1 & 20.7--22.4 / $-8.7$ to $-9.4$ & 12.9--15.5 / $-0.8$ to $-2.1$ \\
+miniVite 131072, 4 processes & 16.4--17.1 & 33.4--34.4 & 30.9--31.5 & 9.2--11.9 / $-5.4$ to $-6.0$ & 3.2--5.4 / $-2.0$ to $+0.2$ \\
+LULESH 50, 8 processes & --- & 105.3--107.2 & 100.3--100.4 & 90.5--90.6 & 92.4--92.6 \\
+miniVite 524288, 4$\times$4 threads & --- & 76.4--79.5 & 88.7--90.9 & 58.6--60.8 & 59.3--61.6 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Other allocators}
+\label{sec:allocators}
+
+The tool now also handles an allocator that replaces the GNU C library's, such as jemalloc~5.3 and tcmalloc (gperftools~2.18), which we load with \texttt{LD\_PRELOAD}. The first image other than the C library that defines \texttt{malloc} is taken as the allocator, and all of its code counts as the allocator's for the exclusion of its bookkeeping (\secref{sec:allocator}). Four problems had to be solved. First, Pin did not list jemalloc's exported functions at all, so the tool reads their addresses from the library's dynamic symbol table and creates the routines itself; such a routine extends to the next symbol that Pin knows, over other functions (jemalloc's \texttt{memalign} covered \texttt{realloc}), so the tool takes each function's size from the ELF symbol tables and hooks only the returns inside it. Second, both allocators leave their slow paths by jumping into another function, sometimes one without a symbol, so the tool catches a call's exit at the first of three places: a return of a jump target executed with the stack pointer of the outermost call's entry, dispatched by the kind of call that was entered (jemalloc's \texttt{malloc} and \texttt{realloc} jump to the same function); the instruction at the return address of a direct call to an allocation function; and return addresses learned at run time, because programs built without PLT stubs, such as the system's \texttt{sqlite3}, call through the global offset table: each allocation call records its return address, and the code there is translated again, with the exit, before the call returns. Third, at \texttt{free} the tool releases the block's usable size, which it asks the allocator for, so that bytes read past the requested size are freed, and blocks whose allocation was missed are freed too. Fourth, the bugs were only visible as leaks: before the size fix, jemalloc's \texttt{realloc} left 16{,}468 of 20{,}000 blocks live in a unit test.
+
+\tabref{tab:allocators} gives the results on Lua and SQLite. Every peak is within $-7.0\%$ to $+2.8\%$. The true peaks depend on the allocator, because size classes and layouts differ. tcmalloc remains partial: a program that allocates and frees 600{,}000 small blocks ends with 5.75\,MB live, against 1.70\,MB under the GNU allocator and 2.15\,MB under jemalloc, and Lua with 5.3\,MB instead of 0.3\,MB, because writes to tcmalloc's metadata that are made outside its own code are counted and never released. Allocators that manage regions inside the program, such as Python's small-object allocator and GCC's garbage collector, are still tracked only through the regions that they map.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Lua and SQLite under three allocators: true peak and peak RSS in MB, estimates as mean error / error of the peak in percent, 1 in 100 words.}
+\label{tab:allocators}
+\begin{tabular}{llcccc}
+\toprule
+Allocator & Program & True peak & Peak RSS & Pages only & 1\% watched \\
+\midrule
+GNU C library & Lua & 55.5 & --- & 5.9 / $-5.4$ & 4.7 / $-4.8$ \\
+jemalloc & Lua & 51.7 & 93.2 & 7.6 / $+1.9$ & 8.3 / $+2.8$ \\
+tcmalloc & Lua & 55.3 & 69.4 & 6.1 / $+1.3$ & 7.4 / $-0.9$ \\
+GNU C library & SQLite & 76.2 & --- & 6.8 / $-2.7$ & 8.5 / $-2.5$ \\
+jemalloc & SQLite & 81.0 & 144.1 & 10.7 / $-6.4$ & 10.0 / $-7.0$ \\
+tcmalloc & SQLite & 79.2 & 112.1 & 2.2 / $-0.9$ & 8.5 / $-2.7$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 %=====================================================================
 \section{Discussion and limitations}
 \label{sec:discussion}
@@ -732,13 +783,13 @@ The start-address footprint of \memprint{} measures the access pattern as well a
 A limitation of written pages is that they miss memory that a reused block only reads, which is rare for heap memory because the allocator does not initialize it, and that they are exact only to the page, which adds up to 4\,KB per block and dominates for programs with many small blocks that are only partly touched (23\% on the churn test). Pages also round up fresh blocks that are touched only in part, which is darknet's $+4\%$. Blocks smaller than 16\,KB do not clear the soft-dirty bits when they are allocated, so they can inherit marks from writes made since the last clear. With several threads, writes that other threads make between the entry and the exit of a \texttt{brk} or \texttt{mmap} call are cleared without being recorded.
 
 \paragraph{Limitations of the allocator handling.}
-The tool recognizes the GNU C library's allocator by the names of its functions, which needs the library's symbol table, and it reads the allocator's chunk size field to release a whole chunk. Programs that use another allocator, such as jemalloc or tcmalloc, or that manage memory inside large regions of their own, as Python's small-object allocator and GCC's garbage collector do, are tracked only at the level of the regions that they map.
+The tool recognizes the GNU C library's allocator by the names of its functions, which needs the library's symbol table, and it reads the allocator's chunk size field to release a whole chunk. It also handles jemalloc and tcmalloc (\secref{sec:allocators}), although tcmalloc's metadata writes made outside its own code leave a few megabytes live, and other replacement allocators are untested. Programs that manage memory inside large regions of their own, as Python's small-object allocator and GCC's garbage collector do, are tracked only at the level of the regions that they map.
 
 \paragraph{Other limitations.}
 Memory outside blocks, such as the stack and global variables, is seen only in windows. The tool does not track \texttt{mremap} calls made outside \texttt{realloc}, \texttt{madvise}, or the growth and shrinking of the stack. Every window change discards all translated code, which is expensive for programs with a lot of code. Address and word selection depend on absolute addresses, which move when the tool library changes size, because the operating system places the program's mappings around the tool's, so spatial and windowed outputs are not byte for byte identical across builds of the tool, whereas splitter and sampler outputs are. Soft-dirty tracking requires a Linux kernel built with soft-dirty support, and the tool falls back to residency for reused blocks if \texttt{/proc/self/clear\_refs} cannot be written.
 
 \paragraph{Generality of the evaluation.}
-We evaluated two scientific applications, four graph kernels, a neural network, three interpreters, a database, a compiler and one synthetic test, each on one input. It remains unclear how the windowed estimate behaves on long programs whose footprint changes in phases shorter than a window period, and with many MPI processes.
+We evaluated two scientific applications, four graph kernels, a neural network, three interpreters, a database, a compiler and one synthetic test, each on one input. With up to 8 MPI processes, the estimate at 1\% watched stays within 2.1\% of the peak (\secref{sec:mpi}), but the longest runs could be checked only against resident memory. It remains unclear how the windowed estimate behaves on long programs whose footprint changes in phases shorter than a window period.
 
 %=====================================================================
 \section{Related work}
@@ -771,8 +822,9 @@ We propose the following next steps, in order of priority.
 \item \textbf{Measure the slack and the used part of pages from the sample.} Lua's bytes in its blocks' slack ($-5\%$) and GCC's partly used collector pages ($+6\%$) are the remaining errors; the word sample could estimate both per block, in place of the half-page rule.
 \item \textbf{Explain the slowdown of pages-only runs} that never discard their translated code (\secref{sec:next-round}).
 \item \textbf{Reduce the fixed cost of the allocator hooks and of soft-dirty clears.} On miniVite the allocator hooks account for about a third of the windowed running time. Instrumenting the allocator in Pin's probe mode, which patches the function's entry instead of translating code, or recording allocation events in a per-thread log that is processed at snapshots instead of under a lock, would lower both.
-\item \textbf{Support other allocators.} Recognize jemalloc, tcmalloc and allocators that manage regions of their own, such as Python's, so that their blocks are tracked and their bookkeeping excluded.
-\item \textbf{Evaluate at scale.} Run windowed sampling on a long application with several MPI processes, where a complete recording is not feasible, and compare the estimated peak with the maximum resident memory reported by the operating system, which is an upper bound to the page.
+\item \textbf{Allocators that manage regions of their own.} Recognize Python's small-object allocator and GCC's garbage collector, so that their objects are tracked as blocks, and find tcmalloc's metadata writes made outside its code (\secref{sec:allocators}).
+\item \textbf{MPI memory without windows.} Measure the resident pages of MPI's shared-memory segments directly, so that the pages-only mode, which is 5\% to 9\% low on MPI programs (\secref{sec:mpi}), needs no windows there either.
+\item \textbf{Evaluate across nodes.} Run with many MPI processes on several nodes, where communication buffers grow with the number of processes, and record one medium run completely to check it.
 \item \textbf{Combine with hardware sampling.} PEBS or SPE could replace the per-block counter and the word sample at even lower cost, with the known-rate correction of \secref{sec:knownrate} for their bias toward frequently used memory.
 \item \textbf{Revisit forecasting.} Windowed sampling makes the beginnings of long runs cheap to record, which may make it practical to predict the rest of a run from the phases seen so far.
 \end{enumerate}

@@ -490,7 +490,59 @@ Four changes to the windowed tool, measured on 2026-10-10 against the same full 
 
 **Spatial error bars are calibrated** (item 6 of the last open questions). 20 runs of miniVite 4096 (1 thread) with different salts, at 1-in-100 and 1-in-250 words: at a given snapshot, 93.9% and 95.0% of the runs have the truth within ±2 standard errors (nominal 95%), the z-scores have a standard deviation of 1.03 and 1.10 across runs, and their mean is −0.09 and +0.14. A single run's error persists over its snapshots (lag-1 correlation 0.82), because the same words stay selected, so the share of one run's snapshots within ±2 standard errors is nearly all or nothing (0.10 to 1.00 across the 20 runs) and says nothing about calibration.
 
-**Not done:** a sample-based refinement of the partial-page correction, and other allocators.
+**Not done:** a sample-based refinement of the partial-page correction.
+
+### MPI applications at scale (branch `windowed-next`)
+
+Each MPI rank runs under its own Pin and writes its own files (`-name r<rank>`, from `OMPI_COMM_WORLD_RANK`), with spack OpenMPI 5.0.5, `--bind-to none`, 8 or 4 ranks oversubscribed on one node. Two medium runs have full traces (splitter, `-track_frees`); two long ones, where a full trace is not feasible, are compared with each rank's peak RSS (`/usr/bin/time %M`). 1-in-100 words, snapshots every 2–50 M references; `w1` is 1% watched (periodic windows, no allocation windows). Per-rank ranges (MB; error cells mean / peak, %):
+
+| Run | Ranks | True peak | Peak RSS | Live allocated | Pages only | 1% watched |
+|---|---|---|---|---|---|---|
+| LULESH 2.0 `-s 20 -i 100` | 8 | 8.98–9.06 | 20.2–21.8 | 18.0–18.1 | 20.7–22.4 / −8.7 to −9.4 | 12.9–15.5 / −0.8 to −2.1 |
+| miniVite `-n 131072` | 4 | 16.4–17.1 | 33.4–34.4 | 30.9–31.5 | 9.2–11.9 / −5.4 to −6.0 | 3.2–5.4 / −2.0 to +0.2 |
+| LULESH 2.0 `-s 50 -i 500` | 8 | — | 105.3–107.2 | 100.3–100.4 | 90.5–90.6 | 92.4–92.6 |
+| miniVite `-n 524288`, 4 threads | 4 | — | 76.4–79.5 | 88.7–90.9 | 58.6–60.8 | 59.3–61.6 |
+
+- **1% watched holds at scale:** within 2.1% of every rank's true peak where a full trace exists. The ranks agree with each other within a point.
+- **Pages only underestimates MPI codes by 5–9% at the peak.** MPI's memory (shared-memory segments, which are file mappings rather than anonymous ones, and the library's buffers) is outside blocks and outside the image sections, so only windows see it. For MPI programs, watch 1%.
+- **Against RSS:** the true live footprint is 0.41–0.50 of peak RSS on the medium runs (RSS counts the loader, the MPI library's code and data, and whole pages); on the long runs the windowed peak is 0.86–0.88 (LULESH) and 0.77–0.79 (miniVite) of RSS, and below it on every rank. RSS is an upper bound only; it cannot check the estimate more closely than that.
+- **Live allocated bytes** are 2× the truth on the medium runs and above RSS on miniVite 524288: both programs allocate more than they touch.
+- **Cost** (wall time of the whole job, 8 or 4 ranks on one shared node): LULESH 20: native 3 s, pages only 54 s, 1% 102 s, full trace 578 s. miniVite 131072: native 8 s, 90 s, 88 s, 2623 s. LULESH 50: native 156 s, pages only 715 s (4.6×), 1% 1613 s (10.3×). miniVite 524288: native 146 s, 811 s (5.6×), 755 s (5.2×). Long runs are cheaper relative to native, because the fixed cost of starting Pin is amortized.
+- Data: `~/memprint-data/scale/` (`rank.sh`, `exp.sh`, `list.txt`, `score.py`, `results.csv`).
+
+### Other allocators: jemalloc and tcmalloc (branch `windowed-next`)
+
+The tool now tracks blocks, excludes the allocator's code and releases freed blocks for an allocator preloaded or linked in place of glibc's (tested with jemalloc 5.3.0 and gperftools 2.18 `tcmalloc_minimal`, both through `LD_PRELOAD`):
+
+- **Recognition:** the first image other than libc that defines `malloc` (not a PLT stub) is the allocator. All of its code is the allocator's code for the exclusion of the truth's bookkeeping accesses.
+- **Finding its functions:** Pin may not list a library's exported functions at all (jemalloc's `malloc`; Pin's symbol view shows the `je_`-prefixed internal names at other addresses). The tool falls back to the image's `.dynsym` and creates the routine at that address. Such a routine runs on to the next symbol Pin knows, over other functions (jemalloc's `memalign` spans `realloc`), so return hooks are placed only within the function's size from the ELF symbol tables.
+- **Exits:** jemalloc's and tcmalloc's allocation functions leave their slow paths by a jump into another function, sometimes one without a symbol (tcmalloc). Three mechanisms, the first exit of a call winning:
+  - returns of the jump targets (3 levels deep), only when the stack pointer is that of the outermost call's entry, dispatched by the kind of call that was entered (jemalloc's `malloc` and `realloc` jump to the same function);
+  - the instruction at the return address of every direct call to an allocation function;
+  - return addresses learned at run time, for calls through the GOT (`-fno-plt`, as the system's `sqlite3` is built) or through function pointers: an allocation function's entry records its return address and has that code retranslated with the exit before the call returns.
+- **Freeing:** a block's whole usable size (`malloc_usable_size`, called in the application) is released at `free`, which also releases blocks whose allocation was missed.
+
+Unit checks (`re2`: 20,000 blocks, malloc or realloc(NULL) → grow by realloc → free or realloc(p, 0)): blocks tracked at the end are 2 with glibc, 8–9 with jemalloc and tcmalloc (their own initial mappings, 1.9–2.3 MB), against 16,468 leaked by the earlier build for jemalloc's realloc. The 600,000-block test ends with 1.70 MB live under glibc, 2.15 MB under jemalloc and 5.75 MB under tcmalloc.
+
+Workloads (mean / peak error, %; truth and estimates from the same tool):
+
+| Allocator | Workload | True peak | Peak RSS | Pages only | 1% watched |
+|---|---|---|---|---|---|
+| glibc | Lua | 55.5 | — | 5.9 / −5.4 | 4.7 / −4.8 |
+| jemalloc | Lua | 51.7 | 93.2 | 7.6 / +1.9 | 8.3 / +2.8 |
+| tcmalloc | Lua | 55.3 | 69.4 | 6.1 / +1.3 | 7.4 / −0.9 |
+| glibc | SQLite | 76.2 | — | 6.8 / −2.7 | 8.5 / −2.5 |
+| jemalloc | SQLite | 81.0 | 144.1 | 10.7 / −6.4 | 10.0 / −7.0 |
+| tcmalloc | SQLite | 79.2 | 112.1 | 2.2 / −0.9 | 8.5 / −2.7 |
+
+- Every peak is within −7.0% to +2.8%. The true peaks differ by allocator because size classes and layouts differ (slack read past the requested size, pages shared by blocks).
+- Lua's peak is −5% under glibc (bytes read in the slack of 650,000 small blocks, which the pages of blocks do not cover) but +1% to +3% under jemalloc and tcmalloc. We have not checked why; packing small blocks into size-class slabs, so that the slack shares pages with neighbouring blocks, is the likely reason.
+- **Limits:**
+  - tcmalloc keeps 4–5 MB "live" at the end of the 600,000-block test and of Lua (glibc: 1.7 and 0.3 MB): writes to its metadata that are made outside its own code (likely `memset` and `memcpy` in libc on its behalf) are counted and never released.
+  - The allocator's initial mappings (1.9–2.3 MB) count as blocks.
+  - Allocators that manage regions of their own inside the program (pymalloc, GCC's collector) are still not recognized.
+  - The fixes were developed on these two allocators; others (mimalloc, Hoard) are untested.
+- Data: `~/memprint-data/2026-10-10-next/allocwl/`, `allocwl_results.csv`, `alloc/` (unit tests); earlier builds' runs in `allocwl-v1`–`v4`.
 
 ### Why
 
@@ -929,8 +981,8 @@ Measured before miniVite was rebuilt against spack's OpenMPI 5.0.5, under the pa
 
 - **Slack and partly used pages:** Lua's bytes in its blocks' slack (−5% at the peak) and cc1's partly used collector pages (+6%) are the remaining errors of the windowed estimate. A sample-based estimate of each block's slack and of the used part of its boundary pages could replace the half-page rule.
 - **The pages-only slowdown** without an early flush on gemm and 2mm is unexplained.
-- **Other allocators** (jemalloc, tcmalloc, region allocators such as pymalloc and GCC's collector) are not tracked as blocks.
-- **Ground truth:** allocator accesses are excluded for glibc only. Other allocators (jemalloc, tcmalloc, pymalloc's arenas inside Python) are neither tracked as blocks nor excluded.
+- **Other allocators:** jemalloc and tcmalloc are tracked and excluded (see above); tcmalloc keeps 4–5 MB of metadata writes made outside its code. Region allocators inside the program (pymalloc's arenas, GCC's collector) are neither tracked as blocks nor excluded.
+- **MPI:** pages-only runs miss MPI's memory (5–9% low at the peak); a cheaper source for it than windows (the shared-memory segments' resident pages) would make pages-only usable for MPI codes.
 - **Windowed density** is moot with bytes touched. It still applies to `-footprint starts`.
 - **Hybrid below `-i 5`:** the correction overshoots once it extrapolates past its training range (`-i 8` and sparser); constraining it might move the fall-off.
 - **Generalisation:** the correction is trained per workload on its smaller sizes, like the paper's α model. It has not been tested across workloads, or on miniVite.

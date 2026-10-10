@@ -71,21 +71,23 @@
 \contentsline {paragraph}{Partly used pages.}{28}{section*.46}
 \contentsline {paragraph}{The allocator's slack.}{29}{section*.47}
 \contentsline {paragraph}{Cheaper switching.}{29}{section*.48}
-\contentsline {section}{\numberline {10}Discussion and limitations}{30}{section.10}
-\contentsline {paragraph}{Why each part is needed.}{30}{section*.51}
-\contentsline {paragraph}{The definition of the footprint.}{30}{section*.52}
-\contentsline {paragraph}{Limitations of written pages.}{30}{section*.53}
-\contentsline {paragraph}{Limitations of the allocator handling.}{30}{section*.54}
-\contentsline {paragraph}{Other limitations.}{30}{section*.55}
-\contentsline {paragraph}{Generality of the evaluation.}{30}{section*.56}
-\contentsline {section}{\numberline {11}Related work}{31}{section.11}
-\contentsline {paragraph}{Measuring memory use.}{31}{section*.57}
-\contentsline {paragraph}{Hardware sampling of memory accesses.}{31}{section*.58}
-\contentsline {paragraph}{Page-level tracking by the operating system.}{31}{section*.59}
-\contentsline {paragraph}{Sampling locations in caches and simulation.}{31}{section*.60}
-\contentsline {paragraph}{Sampling over time.}{31}{section*.61}
-\contentsline {paragraph}{Estimating unseen elements.}{31}{section*.62}
-\contentsline {section}{\numberline {12}Next steps}{32}{section.12}
-\contentsline {section}{\numberline {13}Conclusion}{32}{section.13}
-\contentsline {section}{\numberline {A}Options of the Pin tool}{36}{appendix.A}
-\contentsline {section}{\numberline {B}Output files}{36}{appendix.B}
+\contentsline {subsection}{\numberline {9.7}Many MPI processes}{30}{subsection.9.7}
+\contentsline {subsection}{\numberline {9.8}Other allocators}{30}{subsection.9.8}
+\contentsline {section}{\numberline {10}Discussion and limitations}{31}{section.10}
+\contentsline {paragraph}{Why each part is needed.}{31}{section*.53}
+\contentsline {paragraph}{The definition of the footprint.}{31}{section*.54}
+\contentsline {paragraph}{Limitations of written pages.}{31}{section*.55}
+\contentsline {paragraph}{Limitations of the allocator handling.}{32}{section*.56}
+\contentsline {paragraph}{Other limitations.}{32}{section*.57}
+\contentsline {paragraph}{Generality of the evaluation.}{32}{section*.58}
+\contentsline {section}{\numberline {11}Related work}{32}{section.11}
+\contentsline {paragraph}{Measuring memory use.}{32}{section*.59}
+\contentsline {paragraph}{Hardware sampling of memory accesses.}{32}{section*.60}
+\contentsline {paragraph}{Page-level tracking by the operating system.}{32}{section*.61}
+\contentsline {paragraph}{Sampling locations in caches and simulation.}{33}{section*.62}
+\contentsline {paragraph}{Sampling over time.}{33}{section*.63}
+\contentsline {paragraph}{Estimating unseen elements.}{33}{section*.64}
+\contentsline {section}{\numberline {12}Next steps}{33}{section.12}
+\contentsline {section}{\numberline {13}Conclusion}{34}{section.13}
+\contentsline {section}{\numberline {A}Options of the Pin tool}{38}{appendix.A}
+\contentsline {section}{\numberline {B}Output files}{38}{appendix.B}
