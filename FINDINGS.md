@@ -547,7 +547,7 @@ Workloads (mean / peak error, %; truth and estimates from the same tool):
 
 ### Overhead of every method (branch `windowed-next`, 2026-10-10)
 
-Every method of the paper, run with the final tool on eight programs; wall time and peak RSS of the whole process (`/usr/bin/time`). Runs of a few minutes or less were repeated three times (median). Up to six runs at once on the 32-core machine, which another session was also using: native runs in the mix were 1.1–1.3× slower than alone (2mm 1.8×). Slowdowns are relative to the median native run made alone. Late in the experiment another session's NPB `mg.A` under Pin took 57 GB, so some complete recordings are still to be measured (—); OOM = Pin aborted ("Freepages: Out of memory") at about 5 GB.
+Every method of the paper, run with the final tool on eight programs; wall time and peak RSS of the whole process (`/usr/bin/time`). Runs of a few minutes or less were repeated three times (median). Up to six runs at once (briefly ten) on the 32-core machine, which another session was also using: native runs in the mix were 1.1–1.3× slower than alone (2mm 1.8×). Slowdowns are relative to the median native run made alone. Late in the experiment another session's NPB `mg.A` under Pin took 57 GB, so some complete recordings are still to be measured (—); OOM = Pin aborted ("Freepages: Out of memory") at about 5 GB.
 
 **Time / native time** (first row: native seconds):
 
