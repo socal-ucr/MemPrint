@@ -1,6 +1,7 @@
 """Cost of every method of the leave-one-out table, from measured run times.
 
-python paper_generalization/overhead.py   (reads data/pb_timings.csv, writes data/overhead_*.csv)
+python paper_generalization/overhead.py [timings.csv]   (default data/pb_timings_measured.csv if present, else
+data/pb_timings.csv; writes data/overhead_*.csv)
 
 data/pb_timings.csv holds, per PolyBench kernel and config, the time of
     splitter     the full Pin trace (MemPrint's ground truth), all seven configs, with the native time
@@ -40,7 +41,10 @@ ORDER = ["native", "instrumentation only", "full trace", "static-fp", "static-al
 
 
 def main():
-    t = pd.read_csv(HERE / "data" / "pb_timings.csv")
+    import sys
+    default = HERE / "data" / "pb_timings_measured.csv"
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else (default if default.exists() else HERE / "data" / "pb_timings.csv")
+    t = pd.read_csv(path)
     T = t.set_index(["workload", "config", "mode"])
     rows = []
     for k in sorted(t.workload.unique()):

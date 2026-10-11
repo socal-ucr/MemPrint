@@ -1,0 +1,141 @@
+\begin{tabular}{llrrrr}
+\toprule
+Method & Runs of the program & s & $\times$native & $\times$full trace & $\times$sampled run \\
+\midrule
+\multicolumn{6}{l}{\textit{PolyBench (27 kernels, MEDIUM)}} \\
+\quad Native run & -- & 65\,ms & 1.00 & 0.002 & 0.023 \\
+\quad Pin, instrumentation only & -- & 2.8 & 41 & 0.060 & 0.88 \\
+\quad Sampled run (\memprint{}'s deployed run) & sampled run & 3.3 & 44 & 0.072 & 1.00 \\
+\quad Full trace (Pin splitter; exact footprint) & full trace & 45.1 & 582 & 1.00 & 14 \\
+\quad Static footprint: C interpreter, symbolic counting & interpreter & 174\,ms & 2.66 & 0.005 & 0.056 \\
+\quad C interpreter, every iteration enumerated & interpreter & 1.9 & 25 & 0.042 & 0.58 \\
+\quad Footprint over time: C interpreter, timeline mode & interpreter & 4.7 & 62 & 0.11 & 1.45 \\
+\quad Static $\alpha$, pooled regression, nearest/RBF by $\hat z$ & interpreter + sampled run & 3.4 & 53 & 0.088 & 1.06 \\
+\quad Nearest model by AST counts & parse + sampled run & 3.3 & 45 & 0.073 & 1.01 \\
+\quad Access-idiom gate (features) & parse & 57\,ms & 0.85 & 0.001 & 0.019 \\
+\quad Uniform mixture & sampled run & 3.3 & 44 & 0.072 & 1.00 \\
+\quad Own model (\memprint{}): six training traces & 6 full traces + sampled run & 32.8 & 445 & 0.74 & 9.31 \\
+\quad Measured $z$ (nearest, RBF), oracle & full trace (+ sampled run) & 48.3 & 706 & 1.07 & 15 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{GAP (12 workloads, scale 16)}} \\
+\quad Native run & -- & 302\,ms & 1.00 & 0.004 & 0.058 \\
+\quad Pin, instrumentation only & -- & 4.5 & 14 & 0.052 & 0.89 \\
+\quad Sampled run & sampled run & 5.0 & 17 & 0.061 & 1.00 \\
+\quad Full trace & full trace & 90.3 & 266 & 1.00 & 16 \\
+\quad Hand skeleton and its spectrum & skeleton & 15.0 & 70 & 0.21 & 3.25 \\
+\quad C++ interpreter (recorded, 4--16 jobs at a time) & interpreter & 68.9 & 291 & 1.18 & 13 \\
+\quad C++ interpreter (one at a time) & interpreter & 58.0 & 176 & 0.68 & 11 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{GAP (12 workloads, scale 18)}} \\
+\quad Native run & -- & 1.6 & 1.00 & -- & 0.13 \\
+\quad Pin, instrumentation only & -- & 8.5 & 5.56 & -- & 0.74 \\
+\quad Sampled run & sampled run & 11.7 & 7.89 & -- & 1.00 \\
+\quad Hand skeleton and its spectrum & skeleton & 66.9 & 46 & -- & 6.45 \\
+\quad C++ interpreter (recorded, 4--16 jobs at a time) & interpreter & 257 & 183 & -- & 22 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{C program csr\_bfs (scale 10)}} \\
+\quad Native run & -- & 2.7\,ms & 1.00 & 0.002 & 0.002 \\
+\quad Pin, instrumentation only & -- & 1.7 & 615 & 1.19 & 0.99 \\
+\quad Sampled run & sampled run & 1.7 & 623 & 1.20 & 1.00 \\
+\quad Full trace & full trace & 1.4 & 518 & 1.00 & 0.83 \\
+\quad C interpreter & interpreter & 11.7 & 4347 & 8.40 & 6.98 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{C program csr\_bfs (scale 14)}} \\
+\quad Native run & -- & 18\,ms & 1.00 & 0.003 & 0.010 \\
+\quad Pin, instrumentation only & -- & 1.8 & 96 & 0.24 & 0.95 \\
+\quad Sampled run & sampled run & 1.9 & 101 & 0.26 & 1.00 \\
+\quad Full trace & full trace & 7.3 & 393 & 1.00 & 3.91 \\
+\quad C interpreter & interpreter & 190 & 10260 & 26 & 102 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{C program csr\_pr (scale 12)}} \\
+\quad Native run & -- & 8.0\,ms & 1.00 & 0.002 & 0.004 \\
+\quad Pin, instrumentation only & -- & 1.7 & 217 & 0.41 & 0.97 \\
+\quad Sampled run & sampled run & 1.8 & 223 & 0.42 & 1.00 \\
+\quad Full trace & full trace & 4.3 & 530 & 1.00 & 2.37 \\
+\quad C interpreter & interpreter & 2.2 & 271 & 0.51 & 1.21 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{C program csr\_pr (scale 16)}} \\
+\quad Native run & -- & 111\,ms & 1.00 & 0.001 & 0.032 \\
+\quad Pin, instrumentation only & -- & 3.0 & 27 & 0.034 & 0.86 \\
+\quad Sampled run & sampled run & 3.5 & 32 & 0.039 & 1.00 \\
+\quad Full trace & full trace & 89.9 & 807 & 1.00 & 26 \\
+\quad C interpreter & interpreter & 36.0 & 323 & 0.40 & 10 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{HPCCG (20)}} \\
+\quad Native run & -- & 43\,ms & 1.00 & 0.001 & 0.009 \\
+\quad Pin, instrumentation only & -- & 4.3 & 101 & 0.084 & 0.87 \\
+\quad Sampled run & sampled run & 4.9 & 115 & 0.096 & 1.00 \\
+\quad Full trace & full trace & 51.2 & 1196 & 1.00 & 10 \\
+\quad C++ interpreter (recorded) & interpreter & 24.0 & 561 & 0.47 & 4.87 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{HPCCG (28)}} \\
+\quad Native run & -- & 109\,ms & 1.00 & 0.001 & 0.015 \\
+\quad Pin, instrumentation only & -- & 5.5 & 51 & 0.031 & 0.75 \\
+\quad Sampled run & sampled run & 7.4 & 68 & 0.042 & 1.00 \\
+\quad Full trace & full trace & 178 & 1639 & 1.00 & 24 \\
+\quad C++ interpreter (recorded) & interpreter & 48.4 & 445 & 0.27 & 6.52 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{LULESH (15)}} \\
+\quad Native run & -- & 88\,ms & 1.00 & 0.001 & 0.017 \\
+\quad Pin, instrumentation only & -- & 4.7 & 53 & 0.063 & 0.89 \\
+\quad Sampled run & sampled run & 5.3 & 60 & 0.071 & 1.00 \\
+\quad Full trace & full trace & 74.5 & 842 & 1.00 & 14 \\
+\quad C++ interpreter (recorded) & interpreter & 163 & 1838 & 2.18 & 31 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{LULESH (20)}} \\
+\quad Native run & -- & 222\,ms & 1.00 & 0.001 & 0.026 \\
+\quad Pin, instrumentation only & -- & 6.7 & 30 & 0.030 & 0.77 \\
+\quad Sampled run & sampled run & 8.6 & 39 & 0.039 & 1.00 \\
+\quad Full trace & full trace & 223 & 1001 & 1.00 & 26 \\
+\quad C++ interpreter (recorded) & interpreter & 306 & 1376 & 1.37 & 35 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB IS (S)}} \\
+\quad Native run & -- & 15\,ms & 1.00 & 0.003 & 0.006 \\
+\quad Pin, instrumentation only & -- & 2.4 & 158 & 0.45 & 0.96 \\
+\quad Sampled run & sampled run & 2.5 & 164 & 0.47 & 1.00 \\
+\quad Full trace & full trace & 5.4 & 352 & 1.00 & 2.15 \\
+\quad C++ interpreter (recorded) & interpreter & 1007 & 65095 & 185 & 397 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB IS (W)}} \\
+\quad Native run & -- & 199\,ms & 1.00 & 0.003 & 0.049 \\
+\quad Pin, instrumentation only & -- & 3.4 & 17 & 0.051 & 0.84 \\
+\quad Sampled run & sampled run & 4.1 & 20 & 0.061 & 1.00 \\
+\quad Full trace & full trace & 66.7 & 335 & 1.00 & 16 \\
+\quad C++ interpreter (recorded) & interpreter & 4.0\,h & 71546 & 214 & 3493 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB CG (S)}} \\
+\quad Native run & -- & 54\,ms & 1.00 & 0.001 & 0.013 \\
+\quad Pin, instrumentation only & -- & 3.3 & 61 & 0.054 & 0.81 \\
+\quad Sampled run & sampled run & 4.1 & 76 & 0.066 & 1.00 \\
+\quad Full trace & full trace & 61.4 & 1138 & 1.00 & 15 \\
+\quad C++ interpreter (recorded) & interpreter & 2905 & 53860 & 47 & 713 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB CG (W)}} \\
+\quad Native run & -- & 342\,ms & 1.00 & 0.001 & 0.026 \\
+\quad Pin, instrumentation only & -- & 7.1 & 21 & 0.017 & 0.55 \\
+\quad Sampled run & sampled run & 12.9 & 38 & 0.031 & 1.00 \\
+\quad Full trace & full trace & 420 & 1228 & 1.00 & 32 \\
+\quad C++ interpreter (recorded) & interpreter & 5.5\,h & 57537 & 47 & 1523 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB MG (S)}} \\
+\quad Native run & -- & 13\,ms & 1.00 & 0.002 & 0.004 \\
+\quad Pin, instrumentation only & -- & 3.4 & 265 & 0.59 & 1.08 \\
+\quad Sampled run & sampled run & 3.1 & 245 & 0.54 & 1.00 \\
+\quad Full trace & full trace & 5.8 & 451 & 1.00 & 1.84 \\
+\quad C++ interpreter (recorded) & interpreter & 10.1 & 792 & 1.75 & 3.23 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB MG (W)}} \\
+\quad Native run & -- & 303\,ms & 1.00 & 0.001 & 0.036 \\
+\quad Pin, instrumentation only & -- & 5.9 & 19 & 0.024 & 0.69 \\
+\quad Sampled run & sampled run & 8.5 & 28 & 0.034 & 1.00 \\
+\quad Full trace & full trace & 248 & 818 & 1.00 & 29 \\
+\quad C++ interpreter (recorded) & interpreter & 67.6 & 224 & 0.27 & 7.97 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{NPB MG (A)}} \\
+\quad Native run & -- & 2.5 & 1.00 & -- & 0.044 \\
+\quad Pin, instrumentation only & -- & 29.2 & 12 & -- & 0.51 \\
+\quad Sampled run & sampled run & 57.5 & 23 & -- & 1.00 \\
+\quad C++ interpreter (recorded) & interpreter & 409 & 163 & -- & 7.11 \\
+\addlinespace
+\bottomrule
+\end{tabular}

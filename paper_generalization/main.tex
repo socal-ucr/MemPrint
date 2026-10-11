@@ -45,6 +45,7 @@
 \newtheorem{proposition}{Proposition}
 \input{tables/numbers.tex}
 \input{tables/numbers_overhead.tex}
+\input{tables/numbers_costs.tex}
 
 \title{From Source Code to Sampling Correction:\\Predicting Memory-Footprint Models for Unseen Programs}
 \author{Nafis Mustakin\\University of California, Riverside}
@@ -79,9 +80,15 @@ interpreter that runs GAP's own source for all six kernels on both graph familie
 footprint within 3\% and $\alpha$ within about a point of the hand-written skeleton for pr, bfs and tc. A blind test
 on two programs never used in development, with predictions committed before they were traced, passes clearly on
 HPCCG (footprint within 2.1\%, $\alpha$ within 0.5--4.4\%, against 11--12\% for its own model) and partly on LULESH
-(footprint within 4.2\%, $\alpha$ within 5\% at small and middle meshes but 28--43\% at the largest). Where the interpreter applies, the static
-footprint is cheaper than \memprint{}'s own sampled run and more accurate than its model, but it needs one traced
-program per runtime for its baseline, and programs it cannot run still need sampling. We describe
+(footprint within 4.2\%, $\alpha$ within 5\% at small and middle meshes but 28--43\% at the largest). A second blind
+test on three NAS Parallel Benchmarks predicts IS and CG almost exactly (footprint within 0.33\%, $\alpha$ within
+1.8--5.3\%) and fails on MG (footprint 7--9\% short, $\alpha$ off by more than 200\%). Symbolic counting of affine
+innermost loops gives identical spectra in a fraction of the time, and the same interpreter predicts the footprint
+over time, with the peak within 3.5\% on PolyBench. We measured the cost of every method afresh: on affine code the
+static footprint costs 0.5\% of a full trace and a twentieth of \memprint{}'s own sampled run while being more
+accurate than its model; on irregular code the interpreter costs 0.3--2.2 full traces, and on programs that are long
+chains of dependent steps (IS, CG) up to 214, where tracing is cheaper. It needs traced programs with the same
+runtime for its baseline, and programs it cannot run still need sampling. We describe
 every component in enough detail to re-implement it, and we report the limitations, the post-hoc corrections and the
 parts of the evaluation that are not blind.
 \end{abstract}
@@ -338,6 +345,7 @@ exactly $c$ times: $\alpha_k \approx k/c$ while $c \ll k$, and $\alpha_k \to 1$ 
 \end{figure}
 
 \subsection{Assumptions}
+\label{sec:assumptions}
 \begin{itemize}
 \item \textbf{Independence.} The splitter draws each reference's inclusion independently (per bin, with its own
 pseudo-random stream), so the $X_a$ are independent. A deterministic 1-in-$k$ sampler (every $k$-th reference) would
@@ -419,7 +427,45 @@ otherwise it stays batched, and the values it computes may differ from a sequent
 when several batch points hit the same element (degree counting, \code{nbr[pos[u]++] = v}): the updates are
 applied in iteration order with a stable sort and a cumulative sum per element (\code{\_rmw\_add}); \code{|=},
 \code{\&=} and \code{\^{}=} with repeated offsets reduce with \code{ufunc.at}.
+\item \textbf{Loops of a few rounds}: a loop of at most 16 iterations (\code{FEW\_TRIPS}) whose body contains a loop,
+directly or in a function it calls, runs one iteration at a time; its inner loops are still batched. Batching it
+saves little, and its rounds often depend on each other through memory in ways the syntactic check misses (GAP cc's
+two neighbour rounds, each linking components the previous one compressed).
 \end{itemize}
+
+\subsection{Symbolic counting of affine innermost loops}
+\label{sec:symbolic}
+
+A batch still evaluates every iteration: its cost grows with the program's references, like the program itself
+(a median of 25$\times$ native at MEDIUM, \secref{sec:overhead}). For the innermost loops of affine code it does not
+have to. When a counted innermost loop's body (i) indexes arrays only with affine functions of the loop variable,
+(ii) stores no value that a later iteration or a branch needs, (iii) has no inner loop, break or call that could
+write memory, and (iv) has a scalar step, the interpreter runs the body \emph{once}: the loop variable becomes an
+affine value $v = b + c\,i$ for $i = 0..t-1$ (\code{Aff}, with $b$ per enclosing batch point), each scalar reference
+is charged with weight $w \cdot t$, and each array reference adds one count to every element of the arithmetic
+progression $\{o + s\,i\}$ it touches. Progressions are added with difference arrays per (element size, stride) and
+folded into the counts lazily, so the cost is that of the body once plus the touched range, not of $t$ iterations.
+Floating-point values computed in such a loop are not needed (they decide no branch and no address, by (ii)).
+
+\textbf{Identity.} For all 189 (kernel, config) pairs of PolyBench, the spectrum, the reference count and the
+checksum of the computed values are identical with and without symbolic counting
+(\code{paper\_generalization/symbolic.py}).
+
+\textbf{Speed.} The median speed-up grows with the input: 1.0$\times$ at MINI, 2.2$\times$ at SMALL2 and
+5.6$\times$ at MEDIUM (up to 19$\times$; \figref{fig:symbolic}a). At LARGE and EXTRALARGE, where enumerating every
+iteration exceeds 900\,s for most kernels, the interpreter takes 5--295\,s, 0.16--1.6$\times$ the native run, for 9
+of the 10 kernels measured (\figref{fig:symbolic}b). The exception is atax (140$\times$ native): its time is in
+initialisation loops that store computed values element by element, which (ii) excludes. Symbolic counting is used
+by the C interpreter; the C++ interpreter, whose loops in GAP are irregular, enumerates.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/symbolic.pdf}
+\caption[Symbolic counting]{(a) Speed-up of symbolic counting over enumerating every iteration, per PolyBench kernel
+and config; the spectra are identical. (b) Interpreter time against input size for ten kernels, symbolic and
+enumerated (stopped at 900\,s), with the native run.}
+\label{fig:symbolic}
+\end{figure}
 
 \subsection{What is charged (\code{-O0})}
 
@@ -469,6 +515,7 @@ Name & Value & Role \\
 \code{CHUNK} & $2^{21}$ & batch points per chunk \\
 \code{MAX\_ITERATIONS} & $2^{24}$ & iterations of a general loop before giving up \\
 \code{SEQUENTIAL\_LIMIT} & $2\times10^6$ & iterations a memory-carried loop may run one at a time \\
+\code{FEW\_TRIPS} & 16 & loops of at most this many rounds (with inner loops) run one at a time \\
 \code{GUESS\_TRIPS} & 1 & trips charged for a loop with unknown trip count \\
 \code{FRAME\_BYTES} & 8192 & stack frame size (\code{-O0}) \\
 \code{STACK\_ARRAY\_LIMIT} & 1024 B & larger local arrays get their own object \\
@@ -889,6 +936,39 @@ times.}
 \end{minipage}
 \end{figure}
 
+\subsection{The footprint over time from source}
+\label{sec:timeline-static}
+
+The spectrum gives the footprint at the end of a run; the same interpreter also gives it \emph{over} the run. In
+timeline mode each batch point carries the interval of the outermost batched loop it belongs to, as a fraction
+$[t_{lo}, t_{hi})$ of that loop's time; each byte records the time of its first touch, and heap events carry the
+interpreter's reference clock. The program's live footprint at clock $u$ is then the bytes first touched before $u$,
+less those freed. Pin's clock counts references the interpreter does not (the runtime's start-up and the \code{-O0}
+stack traffic), so the prediction maps the clocks linearly and adds the runtime:
+\begin{equation}
+\widehat{F}(t) = R(t) + F_{\text{prog}}\!\left(\frac{t - R_s}{s}\right),
+\end{equation}
+where $R_s$ (the start-up references) and $s$ (Pin's references per interpreter reference) are the medians of
+per-kernel least-squares fits of Pin's total references against the interpreter's over the seven sizes, on the other
+26 kernels; $R(t)$ is the runtime baseline $B$ once the program has started, and during start-up $B$ times the median
+shape of the other timeline kernels' start-up ramps. Nothing of the predicted kernel's traces is used.
+
+Against Pin's exact live-footprint timelines of 2mm, atax, gemm and jacobi-2d at seven sizes
+(\figref{fig:timeline-static}, \code{paper\_generalization/timeline\_static.py}), the per-snapshot error has a
+median of 1.8\% (median over the 28 runs; mean 5.1\%), and the peak footprint is within 3.5\% in every run (median
+1.8\%). Most of the mean error is on the time axis: the predicted run length is off by $-8$ to $+9$\% (the clock
+fit), and on time normalised by each run's length the median mean error falls to 2.5\%. Timeline mode cannot use
+symbolic counting (first touches need each iteration's time) and costs \numctlCostX$\times$ the symbolic
+interpreter at MEDIUM (median, \tabref{tab:costs-all}).
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/timeline_static.pdf}
+\caption[The footprint over time from source]{Live footprint over Pin's reference clock: Pin's exact timeline and
+the prediction from source with no run of the kernel, at SMALL and MEDIUM.}
+\label{fig:timeline-static}
+\end{figure}
+
 \subsection{Dependence on the runtime baseline}
 \label{sec:baseline-dependence}
 
@@ -967,22 +1047,22 @@ from source (dotted), for six kernels.}
 \subsection{Cost of each method}
 \label{sec:overhead}
 
-\figref{fig:pb-cost}a shows the interpreter's run time against the number of references it charges: below 0.2\,s up to
-$10^7$ references, then roughly linear, at most \numinterpMaxSeconds\,s. To compare the methods of \tabref{tab:lowo} on
-cost as well as accuracy, we measured what each needs for the held-out kernel $C$ at its test config
-(\tabref{tab:overhead}; \code{paper\_generalization/overhead.py}):
+To compare the methods of \tabref{tab:lowo} on cost as well as accuracy, we measured what each needs for the held-out
+kernel $C$ at its test config (\tabref{tab:overhead}; \code{paper\_generalization/overhead.py}):
 \begin{itemize}
 \item the \term{full trace} (Pin splitter at the test config), which gives the exact footprint;
 \item the \term{sampled run}, the run \memprint{} deploys: Pin's sampler with \code{run.sh}'s defaults (\code{-i 1000
 -s 100 -r 10}). Every method that applies a regression model, its own or a borrowed one, needs it, because the model
 predicts $\alpha$ from that run's bin footprint and spread;
-\item the interpreter (bytes touched, one run at a time) and a clang parse;
+\item the interpreter (bytes touched, symbolic counting, \secref{sec:symbolic}) and a clang parse;
 \item for the own model, the full traces of $C$'s six other configs it is trained on.
 \end{itemize}
-The methods that borrow known models, the pooled regression and the runtime baseline also need full traces of other
-programs once: \numovOneTime\,s for all 27 kernels at all seven configs. Sampled and instrumentation-only runs were
-measured with four kernels in parallel on a 32-core node; the full traces and native times are those of the traces
-used throughout.
+The analysis that turns these into a prediction (fitting the baseline, the moments, the descriptor, fitting and
+applying models) takes milliseconds to 0.4\,s (\tabref{tab:costs-steps}) and is not counted. The methods that borrow
+known models, the pooled regression and the runtime baseline also need full traces of other programs once:
+\numovOneTime\,s for all 27 kernels at all seven configs. Every time in this section was measured afresh for this
+version, one run at a time, on a shared 32-core node (median 1-minute load \numcloadMedian; \secref{sec:costs-all}
+describes the measurement and checks it against the times used before).
 
 \begin{table}[!htbp]
 \centering\small
@@ -994,29 +1074,30 @@ median MAPE of \tabref{tab:lowo} (\%). ``Runs of $C$'' is what the method needs 
 \end{table}
 
 \begin{itemize}
-\item \textbf{The static footprint is the cheapest and the most accurate.} It runs nothing of $C$: the interpreter takes
-a median of \numovStaticS\,s at MEDIUM (\numovStaticX$\times$ native, 4\% of a full trace), less than \memprint{}'s one
-sampled run (\numovSampS\,s, \numovSampX$\times$ native). The interpreter is slower than the sampled run for only
-\numovSlowE{} (EXTRA) and \numovSlowI{} (INTER) of the 27 kernels, nussinov and floyd-warshall, the two it predicts least
-accurately.
+\item \textbf{The static footprint is the cheapest and the most accurate.} It runs nothing of $C$: with symbolic
+counting the interpreter takes a median of \numovStaticS\,s at MEDIUM (\numovStaticX$\times$ native, 0.5\% of a full
+trace), a twentieth of \memprint{}'s one sampled run (\numovSampS\,s, \numovSampX$\times$ native). It is slower than
+the sampled run only for nussinov (both splits) and floyd-warshall (EXTRA), whose time is in loops that cannot be
+counted symbolically (data-dependent minima over computed values) and which it predicts least accurately; nussinov
+reaches the maximum, \numovStaticXmax$\times$ native at SMALL2.
 \item \textbf{The own model is the most expensive usable method}: its six training traces take a median of
-\numovOwnS\,s for EXTRA (\numovOwnX$\times$ native, 0.78 of a full trace at the test config), and for INTER, whose
+\numovOwnS\,s for EXTRA (\numovOwnX$\times$ native, 0.74 of a full trace at the test config), and for INTER, whose
 training includes the larger MEDIUM config, \numovOwnInterTrace{} times the full trace it is meant to avoid.
 \item \textbf{Static $\alpha$ is dominated} by the static footprint: it needs the same interpreter run plus a sampled
 run, and is less accurate (\numalphaExtra\% against \numfpExtra\%). Its value is where the footprint itself is not
 the target, e.g.\ in correcting sampled bins, or where a sampled run is taken anyway.
 \item \textbf{Borrowing by measured $z$, and the oracle, cost at least a full trace} of $C$, which already gives the exact
 footprint; they are upper bounds for the descriptor, not methods.
-\item \textbf{The interpreter's cost grows with the program's references}, like the program itself: at
-\numovStaticX$\times$ native (up to \numovStaticXmax$\times$) it is of the order of Pin's instrumentation alone
-(\numovInstrX$\times$ at MEDIUM). PolyBench runs for milliseconds, so this is cheap here; for a run of hours it is not,
-and only symbolic counting (Polly, Barvinok) would make the affine part independent of the input size.
+\item \textbf{Enumerating every iteration} (the interpreter before symbolic counting) costs \numcenuCostX$\times$ more
+at MEDIUM (median 1.9\,s, 25$\times$ native), of the order of Pin's instrumentation alone (\numovInstrX$\times$); it
+grows with the program's references, symbolic counting with the touched range (\figref{fig:symbolic}).
 \end{itemize}
+
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/pb_interp_cost.pdf}
-\caption[Cost and reference share of the C interpreter]{(a) Interpreter time per kernel and config. (b) References the
+\caption[Cost and reference share of the C interpreter]{(a) Interpreter time per kernel and config, every iteration enumerated (symbolic counting: \figref{fig:symbolic}). (b) References the
 interpreter charges as a share of those Pin records, at MEDIUM. Coverage is 1.0 for every kernel.}
 \label{fig:pb-cost}
 \end{figure}
@@ -1190,7 +1271,10 @@ The interpreter of \secref{sec:interp-c} was tested on two C programs written fo
 \code{csr\_bfs.c}: both build a random CSR graph from \code{rand()}, then run PageRank or a queue-driven BFS. They
 were built \code{-O0} and traced at scales 8--16 (pr) and 8--14 (bfs); the baseline was fitted on PolyBench. The blind
 run missed the C library's internal references per \code{rand()} call; adding the measured cost brought $\alpha$ to
-1.3--6.0\% (\tabref{tab:csr}, \figref{fig:csr}). That correction is post hoc.
+1.3--6.0\% (\tabref{tab:csr}, \figref{fig:csr}). That correction is post hoc. At their largest scales the interpreter costs
+36\,s for csr\_pr (scale 16: 0.40 of a full trace, 10$\times$ a sampled run) and 190\,s for csr\_bfs (scale 14:
+26$\times$ a full trace, 102$\times$ a sampled run): BFS's queue loop claims vertices through memory, so it runs one
+vertex at a time (\tabref{tab:costs-all}).
 
 \begin{figure}[!htbp]
 \centering
@@ -1434,14 +1518,29 @@ interpreter.}
 \end{figure}
 
 \subsection{Cost}
+\label{sec:gap-cost}
 
 The first version of the interpreter took about 13 minutes at scale 16 and 67--78 minutes at scale 18, almost all
-of it in GAP's prefix sum, which ran one vertex at a time. With scans, cached libclang answers (child lists, kinds
-and canonical types are cached on the cursor and type objects, declaration keys on the declaration) and counting
-over the touched range only, pr and bfs take about 20\,s at scale 16 and 1--2 minutes at scale 18; all 108
-(kernel, graph, scale) runs took 39 minutes with 6 in parallel (\figref{fig:interp-cost}, \tabref{tab:cost}),
-peaking at 12~GB in total. tc remains the slowest (18 minutes at scale 18 on Kronecker graphs): its merge loops
-break per point and run one iteration at a time.
+of it in GAP's prefix sum, which ran one vertex at a time. Scans, cached libclang answers (child lists, kinds and
+canonical types are cached on the cursor and type objects, declaration keys on the declaration) and counting over the
+touched range only brought pr and bfs to about 20\,s at scale 16. The interpreter as frozen for the second blind test
+(\secref{sec:blind2}) is slower again on some workloads, because it is more faithful: floating-point scalars read
+before they are written now count as carried (needed for LULESH), so pr's pull loop, a floating-point sum over each
+vertex's in-neighbours, runs one neighbour position at a time for all vertices, and on Kronecker graphs, whose
+largest degree is in the thousands, pr\_kron takes \numcGapPrKronEighteen\,s at scale 18; cc, bc and sssp now run
+their algorithms to the end (the iterator and compare-and-swap fixes listed in \secref{sec:blind2}). All 108 runs took
+\numcGapTotalHours\ CPU-hours, recorded with 4--16 runs at a time (\tabref{tab:cost}, \figref{fig:interp-cost});
+16 at a time ran the 62\,GB node out of memory (one run at scale 18 had reached 9.5\,GB), and the 23 lost runs were
+repeated with 4 at a time. Run alone, the scale-16 runs take a median of \numccppSixteenMedianS\,s, half the time
+recorded in parallel (\tabref{tab:costs-verify}).
+
+Against the alternatives at scale 16 (medians over the 12 workloads, \tabref{tab:costs-all}): the native run takes
+0.30\,s, Pin's sampled run 5.0\,s (17$\times$), a full trace 90\,s (266$\times$), the hand skeleton 15\,s and the
+interpreter 58\,s alone (176$\times$ native, 0.68 of a full trace). At scale 18 the sampled run takes 12\,s, the
+skeleton 67\,s and the interpreter 257\,s (recorded in parallel). So on GAP the interpreter costs about as much as a
+full trace and ten times a sampled run; the hand skeleton is cheaper to run but costs a person: about 1{,}075 lines of
+Python written for GAP's seven kernels (\code{gap.py}, \code{gap\_kernels.py}, \code{skeleton.py}), against about
+4{,}900 lines for the two interpreters, which contain no code for any particular program.
 
 \begin{figure}[!htbp]
 \centering
@@ -1452,7 +1551,8 @@ break per point and run one iteration at a time.
 
 \begin{table}[!htbp]
 \centering\small
-\caption{C++ interpreter seconds per kernel and scale (u: uniform, K: Kronecker; 6 runs in parallel).}
+\caption{C++ interpreter seconds per kernel and scale as frozen for the second blind test (u: uniform, K: Kronecker;
+recorded with 4--16 runs at a time, so up to about twice the time of a run alone, \tabref{tab:costs-verify}).}
 \label{tab:cost}
 \fittable{tables/cost.tex}
 \end{table}
@@ -1527,6 +1627,137 @@ cancelled, and LULESH's remaining error has more than one cause; the strongest c
 arrays filled by a nested loop do not keep per-iteration values across the nested batch, so some floating-point
 time-step and cut-off decisions stay unknown (coverage 0.95--0.98). We report the blind numbers as the result.
 
+\paragraph{Cost.} At the largest configs (\tabref{tab:costs-all}), the interpreter took 48\,s for HPCCG ($n = 28$:
+445$\times$ native, 0.27 of a full trace, 6.5$\times$ a sampled run) and 306\,s for LULESH ($s = 20$: 1{,}376$\times$
+native, 1.4 full traces, 35 sampled runs); these are the times recorded at the freeze.
+
+%=====================================================================
+\clearpage
+\section{A second blind test: NPB}
+\label{sec:blind2}
+
+\paragraph{Programs and protocol.} Three kernels of the NAS Parallel Benchmarks in C++ (GMAP NPB-CPP, serial):
+IS (integer sort; classes S and W), CG (conjugate gradient on a random sparse matrix; S, W) and MG (multigrid on a
+3-D grid; S, W, A), built \code{-O3} with NPB's own settings. None of NPB was used in development. Bringing them up
+found generic gaps, fixed before the freeze: global initialisers that are not constants (NPB allocates every array in
+one, \code{int *nx = malloc(...)} at namespace scope) now run before \code{main}; a scalar global whose address is
+taken (\code{randlc(\&tran, amult)}) keeps its value in memory from then on; literal-only expressions are folded as
+\code{-O3} does; variable-length arrays are sized at run time; \code{fopen} returns \code{NULL}; loops that pass a
+scalar's address to a call, and loops of a few rounds, run one iteration at a time. Recomputing GAP's spectra for the
+baseline found further library gaps, fixed in the same freeze: \code{unordered\_map} and \code{vector} iterators
+(Afforest's largest-component skip in cc, and \code{std::copy} of sssp's bins into its frontier, which had stored
+nothing), compare-and-swap retry loops (bc's successor bitmap retried $k^2/2$ times per word in a batch) and vector
+field writes in batches (charged with the whole batch's weight). NPB uses neither the STL nor atomics. The
+interpreter was frozen at commit \code{2ee17f3}; the NPB spectra are bit-identical there and at \code{df6e536}, where
+they were computed (checked for every MG class and for IS and CG at class S). The runtime baseline was fitted on the
+12 serial GAP workloads. The predictions and the protocol were committed (\code{27be534}) before any NPB trace
+existed (\code{paper\_generalization/blind2/}).
+
+\paragraph{Results.} (\tabref{tab:blind2}.) IS and CG are predicted almost exactly: the footprint within 0.33\% at
+every class and $\alpha$ within 1.8--5.3\%, as good as the best PolyBench kernels, for programs whose control flow
+depends on random numbers they generate (IS's keys, CG's sparsity pattern), interpreted exactly. MG fails: the
+footprint is 7--9\% short and $\alpha$ is off by 221--297\%. MG's class A has a prediction but no truth: Pin's
+splitter grew to the node's 62\,GB and was stopped.
+
+\begin{table}[!htbp]
+\centering\small
+\caption[Second blind test: NPB]{The second blind test: committed predictions against Pin. ``Program part'' is the
+interpreter's spectrum; the rest is the runtime baseline.}
+\label{tab:blind2}
+\fittable{tables/blind2.tex}
+\end{table}
+
+\paragraph{Post hoc (MG).} Looked at after the traces existed: the interpreter's reference count is within $\pm40$\%
+of Pin's (0.77$\times$ at S, 1.40$\times$ at W, as for IS and CG), yet the predicted bin footprints are 3.5--4.5$\times$
+smaller than measured at every interval, and the program's footprint is about 10\% short of the truth minus the
+baseline. Since the splitter samples each reference independently (\secref{sec:assumptions}), bins this much smaller
+with a similar total mean that the interpreter concentrates MG's references on far fewer addresses than the program
+does. We have not identified the cause (MG indexes its grids through casts to pointers to variable-length arrays,
+a construct no other workload uses), and report MG as a failure of the method.
+
+\paragraph{Cost.} (\tabref{tab:costs-all}.) MG is cheap to interpret (10\,s at S, 68\,s at W, 409\,s at A; 0.27--1.75
+of a full trace). IS and CG are not: their inputs come from NPB's linear congruential generator, a chain of
+\code{randlc} calls each of which needs the previous one's result, so the interpreter runs them one at a time (about
+3\,ms each). IS took 17\,minutes at S and 4.0\,hours at W (185 and 214 full traces), CG 48\,minutes and 5.5\,hours
+(47 full traces each). For such programs, a full trace is far cheaper than the prediction.
+
+%=====================================================================
+\clearpage
+\section{The cost of every method}
+\label{sec:costs-all}
+
+\paragraph{Measurement.} Every cost in this paper was measured afresh for this version, on one 32-core node (62\,GB)
+that was shared with other jobs (median 1-minute load \numcloadMedian; each step logs its load,
+\code{data/costs/load.txt}). Native and Pin runs used \code{scripts/run.sh}, one run at a time: three native runs
+(mean) and one Pin run per mode and config, for the 27 PolyBench kernels at all seven configs, the 12 serial GAP
+workloads at scales 14, 16 and 18 (full traces at 16), the two C programs, HPCCG, LULESH and NPB
+(\code{paper\_generalization/costs\_pin.sh}, \code{costs\_pin\_train.sh}). Everything outside Pin (parse, interpreter,
+skeleton, analysis) was timed in-process, one step at a time, as the median of three runs when a run takes under
+5\,s (\code{costs.py}). The C++ interpreter's long runs (GAP at every scale, HPCCG, LULESH, NPB) are the times
+recorded when their spectra were computed, often with several runs at a time; GAP's scale-16 runs were repeated alone
+as a check. \code{costs\_tables.py} builds the tables.
+
+\begin{table}[!htbp]
+\centering\scriptsize
+\caption[Cost of every method]{Cost of every method on every program set: the native run, Pin's overhead
+(instrumentation only, the sampled run that \memprint{} deploys, the full trace that gives the exact footprint), and
+each static method's time, as multiples of the native run and of a full trace. PolyBench and GAP rows are medians over
+their programs; the others are single programs at their largest config.}
+\label{tab:costs-all}
+\fittable{tables/costs_wide.tex}
+\end{table}
+
+\paragraph{What it shows.}
+\begin{itemize}
+\item \textbf{Pin.} Instrumentation alone costs 12--265$\times$ the native run, the sampled run barely more
+(8--245$\times$; the ratios are largest for the shortest runs, which Pin's start-up dominates), and a full trace
+266--1{,}639$\times$. Every method that applies a regression model pays at least the sampled run.
+\item \textbf{The static footprint on affine code} costs \numcsymMedianS\,s at MEDIUM with symbolic counting
+(2.7$\times$ native, 0.5\% of a full trace, a twentieth of a sampled run) and is the only method cheaper than
+\memprint{}'s own deployment. Enumerating every iteration costs \numcenuCostX$\times$ more and timeline mode
+\numctlCostX$\times$ more (\secref{sec:timeline-static}).
+\item \textbf{The hand skeleton} runs in a fifth of a full trace on GAP (15\,s at scale 16, 67\,s at 18; median
+\numcskelMedianS\,s over all scales, at most \numcskelMaxS\,s), but it is a program written by a person for each
+kernel: about 1{,}075 lines of Python for GAP's seven, against about 4{,}900 lines for the two interpreters, which
+contain no code for any particular program.
+\item \textbf{The C++ interpreter on irregular code} costs 0.3--2.2 full traces (GAP 0.68 at scale 16 alone, HPCCG
+0.27, LULESH 1.4, MG 0.27--1.75), that is 7--35 sampled runs. Where the program is a long chain of dependent steps it
+must run one at a time and costs far more: NPB IS 185--214 full traces, CG 47, the C program csr\_bfs 26.
+\item \textbf{The analysis} that turns spectra, traces and sampled bins into predictions takes at most 0.4\,s
+(\tabref{tab:costs-steps}): fitting the runtime baseline by NNLS (\numcbaselineFitMs\,ms), the pooled regression
+(\numcpooledMs\,ms), the known programs' measured descriptors (0.3\,s); the moments at 13 intervals take
+\numcmomentsMs\,ms.
+\item \textbf{One-time costs.} Borrowing, the pooled regression and the runtime baseline need full traces of known
+programs once: \numovOneTime\,s for PolyBench's 27 kernels at seven configs; for GAP, the 12 workloads at nine scales
+(a median of 90\,s each at scale 16 alone).
+\item \textbf{Memory.} A full trace of MG at class A (412\,MB footprint) exceeded the node's 62\,GB; the C++
+interpreter reached 9.5\,GB on GAP at scale 18, which limited it to 4--6 runs at a time.
+\end{itemize}
+
+\begin{table}[!htbp]
+\centering\small
+\caption[Cost of the analysis steps]{The analysis steps on PolyBench, per held-out kernel and split (milliseconds),
+and the parse-based descriptors at SMALL2 and MEDIUM.}
+\label{tab:costs-steps}
+\fittable{tables/costs_steps.tex}
+\end{table}
+
+\paragraph{Verification.} \tabref{tab:costs-verify} compares the re-measured PolyBench times with those behind the
+first version of \tabref{tab:overhead}, taken on the same node (full traces and native runs from the original
+traces, sampled and instrumentation-only runs four kernels at a time). Medians per kernel agree within 15\% (full
+traces are now 13--15\% faster, native runs 4--9\%), and the rank correlations over the kernels are 0.89--0.99,
+except instrumentation only at SMALL2 (0.58, times of 1.4--2.4\,s) and the parse (a few milliseconds, now
+14--19\% slower); the interpreter enumerating every iteration agrees within 6\%. The C++ interpreter run alone at GAP scale 16 takes half
+the time recorded with up to 16 runs at a time.
+
+\begin{table}[!htbp]
+\centering\scriptsize
+\caption[Re-measured against earlier times]{Re-measured times against the times used before (medians over the
+PolyBench kernels or GAP workloads, the median and range of the per-program ratio, and the Spearman correlation).}
+\label{tab:costs-verify}
+\fittable{tables/costs_verify.tex}
+\end{table}
+
 %=====================================================================
 \clearpage
 \section{Discussion}
@@ -1553,13 +1784,17 @@ program, and makes even the static $\alpha$ redundant (\secref{sec:overhead}). I
 models. Programs that read data files, use MPI or unmodelled libraries, or whose control depends on data the
 interpreter cannot compute, fall to the gate; miniVite runs with coverage 0.06.
 \item It predicts, it does not measure. When the counts are wrong there is no signal: LULESH's footprint was within
-4.2\%, but its $\alpha$ was 28--43\% off at the largest meshes (\secref{sec:blind}). A sampled run observes the
+4.2\%, but its $\alpha$ was 28--43\% off at the largest meshes (\secref{sec:blind}), and NPB MG's footprint was
+7--9\% short with $\alpha$ off by more than 200\% at full coverage (\secref{sec:blind2}). A sampled run observes the
 execution that actually happens.
 \item It needs traces of other programs with the same runtime for the baseline (\secref{sec:baseline-dependence}), and
-its cost grows with the program's references, of the order of Pin's instrumentation, so long runs need symbolic
-counting.
-\item It gives the whole-run footprint only. The footprint over time and its peak need the address-sampling and
-windowed methods of the companion report~\cite{timeline2026}.
+its cost depends on the program's structure (\secref{sec:costs-all}): with symbolic counting, affine code costs 0.5\%
+of a full trace and about native time even at EXTRALARGE; irregular code costs 0.3--2.2 full traces; and a program
+that is a long chain of dependent steps (NPB IS and CG, whose inputs come from a sequential random-number
+generator) costs 47--214 full traces, where tracing is the cheaper way to the exact footprint.
+\item The footprint over time comes from source too, with the peak within 3.5\% on PolyBench
+(\secref{sec:timeline-static}), but at 23 times the cost of the whole-run footprint and only where the interpreter
+applies; elsewhere it needs the address-sampling and windowed methods of the companion report~\cite{timeline2026}.
 \end{itemize}
 So the static footprint is the first choice for programs the gate admits, and \memprint{} (or training-free sampling)
 for the rest.

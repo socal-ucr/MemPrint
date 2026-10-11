@@ -1,0 +1,21 @@
+\begin{tabular}{llrrrrr}
+\toprule
+Measured & Config & Before (s) & Now (s) & Now/before & range & Spearman \\
+\midrule
+clang parse & MEDIUM & 28\,ms & 33\,ms & 1.19 & 1.06--1.41 & 0.21 \\
+clang parse & SMALL2 & 30\,ms & 34\,ms & 1.14 & 0.98--1.31 & -0.30 \\
+Instrumentation only & MEDIUM & 2.6 & 2.8 & 1.07 & 0.83--1.19 & 0.98 \\
+Instrumentation only & SMALL2 & 1.7 & 1.9 & 1.08 & 0.88--1.39 & 0.58 \\
+C interpreter (before: enumerated; now: symbolic) & MEDIUM & 1.9 & 174\,ms & 0.13 & 0.03--2.28 & 0.85 \\
+C interpreter (before: enumerated; now: symbolic) & SMALL2 & 293\,ms & 101\,ms & 0.42 & 0.12--2.76 & 0.85 \\
+Sampled run & MEDIUM & 3.6 & 3.3 & 1.00 & 0.64--1.15 & 0.96 \\
+Sampled run & SMALL2 & 1.8 & 1.9 & 1.05 & 0.83--1.16 & 0.89 \\
+Full trace & MEDIUM & 60.9 & 45.1 & 0.87 & 0.54--1.19 & 0.99 \\
+Native run & MEDIUM & 71\,ms & 64\,ms & 0.91 & 0.48--1.09 & 0.98 \\
+Full trace & SMALL2 & 7.5 & 6.7 & 0.85 & 0.55--0.99 & 0.99 \\
+Native run & SMALL2 & 13\,ms & 12\,ms & 0.96 & 0.51--1.18 & 0.99 \\
+C interpreter, enumerated (same method) & MEDIUM & 1.9 & 1.9 & 0.94 & 0.48--2.27 & 0.99 \\
+C interpreter, enumerated (same method) & SMALL2 & 293\,ms & 305\,ms & 1.01 & 0.69--2.80 & 0.99 \\
+C++ interpreter, GAP scale 16 (recorded in parallel, now alone) & 16 & 68.9 & 58.0 & 0.50 & 0.35--1.54 & 0.78 \\
+\bottomrule
+\end{tabular}
