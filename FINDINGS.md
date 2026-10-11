@@ -544,6 +544,66 @@ Workloads (mean / peak error, %; truth and estimates from the same tool):
   - The fixes were developed on these two allocators; others (mimalloc, Hoard) are untested.
 - Data: `~/memprint-data/2026-10-10-next/allocwl/`, `allocwl_results.csv`, `alloc/` (unit tests); earlier builds' runs in `allocwl-v1`–`v4`.
 
+
+### Overhead of every method (branch `windowed-next`, 2026-10-10)
+
+Every method of the paper, run with the final tool on eight programs; wall time and peak RSS of the whole process (`/usr/bin/time`). Runs of a few minutes or less were repeated three times (median). Up to six runs at once on the 32-core machine, which another session was also using: native runs in the mix were 1.1–1.3× slower than alone (2mm 1.8×). Slowdowns are relative to the median native run made alone. Late in the experiment another session's NPB `mg.A` under Pin took 57 GB, so some complete recordings are still to be measured (—); OOM = Pin aborted ("Freepages: Out of memory") at about 5 GB.
+
+**Time / native time** (first row: native seconds):
+
+| Method | 2mm | gemm | jacobi-2d | miniVite 1t | miniVite 4t | Lua | SQLite | GCC cc1 |
+|---|---|---|---|---|---|---|---|---|
+| Native (s) | 7.4 | 5.0 | 11.2 | 6.4 | 6.0 | 2.5 | 0.9 | 1.6 |
+| Pin, no tool | 1.6 | 1.2 | 1.1 | 2.2 | 2.3 | 2.8 | 3.9 | 13 |
+| Per-reference instrumentation only | 26 | 28 | 24 | 26 | 28 | 13 | 27 | 54 |
+| MemPrint splitter (13 intervals × 20 bins) | 665 | 781 | — | — | — | — | — | — |
+| Complete recording (truth) | 299 | — | 285 | 341 | — | — | — | — |
+| Reference sampling, 1 in 100 | 54 | 79 | 42 | 44 | 46 | 29 | 47 | 109 |
+| Reference sampling, 1 in 25 | OOM | OOM | 86 | 81 | 87 | 52 | 107 | 132 |
+| Word sampling, 1 in 100 | 48 | 59 | 36 | 37 | 54 | 27 | 49 | 68 |
+| Windowed, pages only | 3.2 | 2.5 | 2.0 | 12 | 14 | 13 | 17 | 50 |
+| Windowed, 1\% watched | 3.4 | 3.2 | 2.5 | 14 | 18 | 22 | 52 | 85 |
+| Windowed, 5\% watched | 6.0 | 5.6 | 4.0 | 18 | 20 | 22 | 54 | 99 |
+| Windowed, 20\% watched | 13 | 13 | 10 | 23 | 26 | 25 | 62 | 108 |
+| Windowed, 5\%, flushing | 4.8 | 5.4 | 4.0 | 18 | 20 | 29 | 53 | 395 |
+| Massif | 5.6 | 6.1 | 7.9 | 20 | 23 | 6.6 | 9.8 | 11 |
+| DHAT | 16 | 17 | 15 | 32 | 34 | 44 | 43 | 74 |
+
+**Peak memory, MB:**
+
+| Method | 2mm | gemm | jacobi-2d | miniVite 1t | miniVite 4t | Lua | SQLite | GCC cc1 |
+|---|---|---|---|---|---|---|---|---|
+| Native | 36 | 29 | 27 | 46 | 48 | 63 | 79 | 128 |
+| Pin, no tool | 70 | 62 | 60 | 261 | 266 | 125 | 170 | 747 |
+| Per-reference instrumentation only | 78 | 77 | 74 | 348 | 353 | 144 | 202 | 776 |
+| MemPrint splitter (13 intervals × 20 bins) | 21,131 | 17,420 | — | — | — | — | — | — |
+| Complete recording (truth) | 750 | — | 728 | 764 | — | — | — | — |
+| Reference sampling, 1 in 100 | 2,785 | 2,662 | 3,805 | 700 | 698 | 387 | 666 | 2,024 |
+| Reference sampling, 1 in 25 | OOM | OOM | 5,050 | 850 | 846 | 596 | 1,322 | 2,975 |
+| Word sampling, 1 in 100 | 121 | 105 | 102 | 452 | 444 | 247 | 355 | 1,263 |
+| Windowed, pages only | 77 | 69 | 67 | 400 | 411 | 265 | 227 | 1,289 |
+| Windowed, 1\% watched | 105 | 97 | 100 | 447 | 455 | 278 | 269 | 1,728 |
+| Windowed, 5\% watched | 114 | 103 | 102 | 462 | 479 | 285 | 288 | 1,858 |
+| Windowed, 20\% watched | 115 | 103 | 100 | 477 | 491 | 303 | 317 | 1,990 |
+| Windowed, 5\%, flushing | 113 | 104 | 100 | 436 | 442 | 277 | 287 | 1,587 |
+| Massif | 60 | 53 | 51 | 90 | 90 | 137 | 111 | 223 |
+| DHAT | 64 | 56 | 54 | 98 | 101 | 275 | 120 | 236 |
+
+- **Pin alone** is cheap on long runs (1.1–2.3×) but 2.8–13× on the short Lua, SQLite and GCC runs (code translation).
+- **Per-reference instrumentation** (the sampler with nothing sampled) costs 13–54×: the floor of every method that looks at every reference.
+- **MemPrint's splitter** (260 bins) costs 665–781× and 17–21 GB on PolyBench LARGE; the complete recording (1 bin, frees, snapshots) 285–341× and about 750 MB.
+- **Reference sampling** costs 29–109× at 1 in 100 and 52–132× at 1 in 25, with 2.7–3.8 GB on PolyBench LARGE at 1 in 100; at 1 in 25 it ran out of Pin memory on 2mm and gemm. Training the α model or the hybrid adds complete recordings of the smaller sizes (2mm, MINI to MEDIUM: 128 s against 0.1 s natively) and 190–220 s of fitting and evaluation per workload (`timeline build`).
+- **Word sampling** costs 27–68× with 3–10× the program's memory.
+- **Windowed:**
+  - PolyBench: pages only 2.0–3.2×; 1% watched 2.5–3.4×; 20% watched 10–13×. Each percent watched costs about as much as word sampling on that fraction of the run.
+  - miniVite: 12–14× with pages only, 14–18× at 1% watched.
+  - Lua and SQLite: 13–17× with pages only, 22–52× at 1% watched.
+  - GCC: 50–108×, and 395× at 5% if every window change flushes, against 99× with auto switching.
+  - Memory: 2.1–3.8× on PolyBench and 2.9–16× elsewhere, close to Pin's own.
+- **Massif** costs 5.6–23× and **DHAT** 15–74×, both with under 2.2× the memory (DHAT on Lua: 4.4×). Windowed at 1% is cheaper than DHAT everywhere except SQLite and GCC, cheaper than Massif on PolyBench and miniVite, and 3–8× dearer than Massif on the interpreters and the compiler.
+- Only windowed sampling gets below the per-reference floor: 7–10× below on PolyBench, 1.6–1.8× on miniVite. On the short interpreter and compiler runs, the allocator hooks and code translation dominate every method.
+- Data and scripts: `~/memprint-data/2026-10-10-overhead/` (`job.sh`, `wl.txt`, `res/times.txt`, `summarize.py`, `latex.py`); figure `paper/figures/overhead.pdf` from `paper/overhead_figure.py --data .../res/summary.csv`.
+
 ### Why
 
 Spatial sampling still checks every memory access, even when it records only 1 in 100 words. On 2mm LARGE that alone takes 284 s against 8.0 s native, and Pin itself costs almost nothing (8.2 s). For long real workloads that overhead is the obstacle, not the sampling rate.
