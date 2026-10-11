@@ -77,7 +77,8 @@ their input, we extend the approach in three steps on the GAP graph benchmarks: 
 the program on an input drawn from the distribution of its generator (blind tests on Kronecker graphs, new kernels
 and OpenMP threads pass with 0.6--11\% error), an interpreter that runs irregular C code, and finally a C++
 interpreter that runs GAP's own source for all six kernels on both graph families at scales 10--18, predicting the
-footprint within 3\% and $\alpha$ within about a point of the hand-written skeleton for pr, bfs and tc. A blind test
+footprint within 3\% and $\alpha$ within about a point of the hand-written skeleton for pr, bfs and tc, within two
+points for cc and sssp, and better than it on average for bc. A blind test
 on two programs never used in development, with predictions committed before they were traced, passes clearly on
 HPCCG (footprint within 2.1\%, $\alpha$ within 0.5--4.4\%, against 11--12\% for its own model) and partly on LULESH
 (footprint within 4.2\%, $\alpha$ within 5\% at small and middle meshes but 28--43\% at the largest). A second blind
@@ -1444,6 +1445,16 @@ enclosing point. \\
 pointer increments lost & \code{p++} was summed as an integer reduction; pointers advance as scans. \\
 two out-parameters shared a slot & a scalar whose address is taken in an inner block was given scoped scratch
 space; it now gets its own region. \\
+\midrule
+\multicolumn{2}{l}{\textit{Found while preparing the second blind test (\secref{sec:blind2}):}} \\
+cc drifted from the skeleton with scale & \code{unordered\_map} iterators were not modelled, so Afforest's most frequent
+component was unknown and its largest-component skip never fired; iterators now hold a node pointer. Its two neighbour
+rounds also ran as one batch; loops of at most 16 rounds with inner loops now run in order. \\
+bc drifted from the skeleton with scale & a compare-and-swap retry loop over a fresh read of the same word failed for
+all but one of the batch points setting bits of that word; a retry that updates bits now succeeds, merging the bits. \\
+sssp better than the skeleton & \code{vector} iterators were copied as objects, so \code{std::copy} of a bin into the
+frontier stored nothing and the algorithm stopped after one round; iterators now hold their pointer. Then each batched
+\code{push\_back} charged the whole batch's weight per vector; now each point's. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1461,17 +1472,30 @@ MAPE over the scales computed, for the hand skeleton and the interpreter, and th
 
 \tabref{tab:auto} and \figref{fig:gap-auto} compare the interpreter with the hand skeleton against Pin, with the same
 runtime baselines. All six kernels run on both graph families with coverage of 1.0 (sssp at scale 12: 0.9999).
-The footprint is within \numautoFpMax\% everywhere (\figref{fig:gap-auto-fp}), and the total reference count
-within 9\% of the skeleton's for every kernel (\tabref{tab:auto}, last column). All six kernels were computed at all
+The footprint is within \numautoFpMax\% everywhere (\figref{fig:gap-auto-fp}; largest on tc and sssp with Kronecker
+graphs), and the total reference count within 3\% of the skeleton's for every kernel (\tabref{tab:auto}, last
+column). All six kernels were computed at all
 nine scales. For pr, bfs and tc, $\alpha$ is within about a point of the hand skeleton at every scale. At scales
 13--18 of pr and bfs, which were never used while the interpreter was developed, $\alpha$ is within
 \numbigAutoAlphaMin--\numbigAutoAlphaMax\%, against \numbigHandAlphaMin--\numbigHandAlphaMax\% for the hand
 skeleton, and the footprint within \numbigAutoFpMax\% (\tabref{tab:auto-scales}). The per-point load cache closed the
 gap the per-batch cache left on tc (15.6\% to 9.4\% at scale 10; skeleton 8.8\%) and bc (11.7\% to 6.6\%; 5.5\%):
-the per-block comparison (\figref{fig:gap-arrays}) now matches the skeleton within 0.3\% of tc's references. Two
-gaps remain: on uniform graphs, cc and bc drift away from the skeleton as the scale grows (cc reaches 8\% at scale
-18 where the skeleton has 1\%), and sssp is better than the skeleton on uniform graphs (7.2\% against 9.3\% mean),
-which is not explained either.
+the per-block comparison (\figref{fig:gap-arrays}) matches the skeleton within 0.3\% of tc's references and 0.9\%
+of bfs's.
+
+Three kernels changed with the fixes made while preparing the second blind test (\secref{sec:blind2}, the last
+rows of \tabref{tab:bugs}). Before them, cc and bc drifted away from the skeleton on uniform graphs as the scale grew
+(cc reached 8.3\% at scale 18 where the skeleton has 1.1\%, bc 10--11\% at scales 15--17 against 3--4\%), and sssp looked
+better than the skeleton (7.2\% against 9.3\% mean). The per-block comparison found the causes: Afforest's
+largest-component skip in cc never fired, because the interpreter could not dereference an \code{unordered\_map}
+iterator and the most frequent component stayed unknown, so every vertex traversed its whole neighbourhood; bc's
+successor bitmap retried its compare-and-swap about $k^2/2$ times per word when $k$ batch points set bits of one word;
+and sssp's \code{std::copy} of a bin into its frontier stored nothing, so the algorithm stopped after its first round
+and its lower error was an accident. Now cc is within 1.7 points of the skeleton at every scale (2.0\% against
+1.1\% at scale 18; 3.9\% against 3.7\% mean on uniform graphs), bc is better than the skeleton on average (4.4\%
+against 4.6\% mean on uniform graphs, 3.9\% against 4.9\% on Kronecker graphs; worse at scale 11, 8.9\% against
+5.8\%), and sssp, now run to the end, tracks the skeleton within 1.6 points (8.9\% against 9.3\% mean on uniform
+graphs, 8.8\% against 8.1\% on Kronecker graphs), with its footprint within 2.9\%.
 
 \begin{figure}[!htbp]
 \centering

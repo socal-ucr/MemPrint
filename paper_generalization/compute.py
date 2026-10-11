@@ -190,16 +190,17 @@ def gap():
 
 
 def interpreter_cost():
-    """Seconds per GAP workload and scale of the final interpreter, from the log of
-    `memprint static gap --source interp --jobs 6` (data/interp_times.txt; 6 runs in parallel)."""
+    """Seconds per GAP workload and scale of the interpreter, as recorded in its spectra (data/gap-bytes static_auto,
+    computed from a worktree at the second blind test's freeze with 4-16 runs at a time)."""
     rows = []
-    for line in (OUT / "interp_times.txt").read_text().splitlines():
-        parts = line.replace(",", "").split()
-        if len(parts) >= 7 and parts[1] == "footprint" and parts[-1] == "s":
-            name, scale = parts[0].rstrip(":").rsplit("-", 1)
-            k = name.replace("gap_", "").replace("_kron", "")
-            rows.append({"kernel": k, "scale": int(scale), "graph": "kron" if "_kron" in name else "uniform",
-                         "seconds": float(parts[-2]), "coverage": float(parts[5]), "parallel": 6})
+    for p in sorted((GAP / "static_auto").glob("*.npz")):
+        z = np.load(p)
+        name, scale = p.stem.rsplit("-", 1)
+        k = name.replace("gap_", "").replace("_kron", "")
+        total = float(z["total"])
+        cov = 1 - (float(z["unresolved"]) + float(z["uncertain"])) / total if total else np.nan
+        rows.append({"kernel": k, "scale": int(scale), "graph": "kron" if "_kron" in name else "uniform",
+                     "seconds": float(z["seconds"]), "coverage": cov, "parallel": "4-16"})
     write(pd.DataFrame(rows), "interp_cost.csv")
 
 
