@@ -547,7 +547,7 @@ Workloads (mean / peak error, %; truth and estimates from the same tool):
 
 ### Overhead of every method (branch `windowed-next`, 2026-10-10)
 
-Every method of the paper, run with the final tool on eight programs; wall time and peak RSS of the whole process (`/usr/bin/time`). Runs of a few minutes or less were repeated three times (median). Up to six runs at once (briefly ten) on the 32-core machine, which another session was also using: native runs in the mix were 1.1–1.3× slower than alone (2mm 1.8×). Slowdowns are relative to the median native run made alone. Late in the experiment another session's NPB `mg.A` under Pin took 57 GB, so some complete recordings are still to be measured (—); OOM = Pin aborted ("Freepages: Out of memory") at about 5 GB.
+Every method of the paper, run with the final tool on eight programs; wall time and peak RSS of the whole process (`/usr/bin/time`). Runs of a few minutes or less were repeated three times (median). Up to six runs at once (briefly ten) on the 32-core machine, which another session was also using: native runs in the mix were 1.1–1.3× slower than alone (2mm 1.8×). Slowdowns are relative to the median native run made alone. Late in the experiment another session's NPB `mg.A` under Pin took 62 GB and filled memory and swap: the miniVite complete recordings overlapped it (possibly slowed), and three of our runs were stopped and repeated after it finished (Lua's truth on a quieter machine, load 2.5); OOM = Pin aborted ("Freepages: Out of memory") at about 5 GB.
 
 **Time / native time** (first row: native seconds):
 
@@ -556,8 +556,8 @@ Every method of the paper, run with the final tool on eight programs; wall time 
 | Native (s) | 7.4 | 5.0 | 11.2 | 6.4 | 6.0 | 2.5 | 0.9 | 1.6 |
 | Pin, no tool | 1.6 | 1.2 | 1.1 | 2.2 | 2.3 | 2.8 | 3.9 | 13 |
 | Per-reference instrumentation only | 26 | 28 | 24 | 26 | 28 | 13 | 27 | 54 |
-| MemPrint splitter (13 intervals × 20 bins) | 665 | 781 | — | — | — | — | — | — |
-| Complete recording (truth) | 299 | — | 285 | 341 | — | — | — | — |
+| MemPrint splitter (13 intervals × 20 bins) | 665 | 781 | 540 | 863 | 866 | 347 | 554 | 502 |
+| Complete recording (truth) | 299 | 291 | 285 | 341 | 398 | 134 | 217 | 210 |
 | Reference sampling, 1 in 100 | 54 | 79 | 42 | 44 | 46 | 29 | 47 | 109 |
 | Reference sampling, 1 in 25 | OOM | OOM | 86 | 81 | 87 | 52 | 107 | 132 |
 | Word sampling, 1 in 100 | 48 | 59 | 36 | 37 | 54 | 27 | 49 | 68 |
@@ -576,8 +576,8 @@ Every method of the paper, run with the final tool on eight programs; wall time 
 | Native | 36 | 29 | 27 | 46 | 48 | 63 | 79 | 128 |
 | Pin, no tool | 70 | 62 | 60 | 261 | 266 | 125 | 170 | 747 |
 | Per-reference instrumentation only | 78 | 77 | 74 | 348 | 353 | 144 | 202 | 776 |
-| MemPrint splitter (13 intervals × 20 bins) | 21,131 | 17,420 | — | — | — | — | — | — |
-| Complete recording (truth) | 750 | — | 728 | 764 | — | — | — | — |
+| MemPrint splitter (13 intervals × 20 bins) | 21,131 | 17,420 | 20,502 | 3,456 | 3,459 | 7,818 | 8,516 | 9,984 |
+| Complete recording (truth) | 750 | 611 | 728 | 764 | 621 | 1,197 | 3,466 | 2,946 |
 | Reference sampling, 1 in 100 | 2,785 | 2,662 | 3,805 | 700 | 698 | 387 | 666 | 2,024 |
 | Reference sampling, 1 in 25 | OOM | OOM | 5,050 | 850 | 846 | 596 | 1,322 | 2,975 |
 | Word sampling, 1 in 100 | 121 | 105 | 102 | 452 | 444 | 247 | 355 | 1,263 |
@@ -591,7 +591,7 @@ Every method of the paper, run with the final tool on eight programs; wall time 
 
 - **Pin alone** is cheap on long runs (1.1–2.3×) but 2.8–13× on the short Lua, SQLite and GCC runs (code translation).
 - **Per-reference instrumentation** (the sampler with nothing sampled) costs 13–54×: the floor of every method that looks at every reference.
-- **MemPrint's splitter** (260 bins) costs 665–781× and 17–21 GB on PolyBench LARGE; the complete recording (1 bin, frees, snapshots) 285–341× and about 750 MB.
+- **MemPrint's splitter** (260 bins) costs 347–866× (540–781× on PolyBench) and 3.5–21 GB: 580–760× the program's memory on PolyBench, 73–125× elsewhere. The complete recording (1 bin, frees, snapshots) costs 134–398× and 0.6–3.5 GB (13–44× the program's memory).
 - **Reference sampling** costs 29–109× at 1 in 100 and 52–132× at 1 in 25, with 2.7–3.8 GB on PolyBench LARGE at 1 in 100; at 1 in 25 it ran out of Pin memory on 2mm and gemm. Training the α model or the hybrid adds complete recordings of the smaller sizes (2mm, MINI to MEDIUM: 128 s against 0.1 s natively) and 190–220 s of fitting and evaluation per workload (`timeline build`).
 - **Word sampling** costs 27–68× with 3–10× the program's memory.
 - **Windowed:**

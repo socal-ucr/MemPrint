@@ -20,7 +20,6 @@
 \newcommand{\figref}[1]{Figure~\ref{#1}}
 \newcommand{\tabref}[1]{Table~\ref{#1}}
 \newcommand{\term}[1]{\emph{#1}}
-\newcommand{\pending}{---}
 
 \title{Estimating How Much Memory a Program Uses over Time\\from Partial Instrumentation of Its Memory Accesses}
 \author{Nafis Mustakin\\University of California, Riverside}
@@ -779,11 +778,11 @@ tcmalloc & SQLite & 79.2 & 112.1 & 2.2 / $-0.9$ & 8.5 / $-2.7$ \\
 \section{Overhead of every method}
 \label{sec:overhead}
 
-The costs reported so far were measured with different builds of the tool and under different loads. To compare all the methods of this report on equal terms, we ran each of them with the final tool on eight programs: 2mm, gemm and jacobi-2d at the LARGE size, miniVite with 65536 vertices and 1 or 4 threads, Lua, SQLite and GCC's \texttt{cc1}. We measured the wall time and the peak resident memory of the whole process (program, Pin and tool) with \texttt{/usr/bin/time}. Runs that take a few minutes or less were repeated three times and we report the median; runs differed by a few percent, more for the short SQLite and GCC runs. Up to six runs (briefly ten) shared a 32-core machine, which was also running another user's jobs, so the slowdowns, which are relative to the median of three native runs made alone, include some interference: native runs made in the same mix were 1.1$\times$ to 1.3$\times$ slower than alone, and 2mm, which is limited by memory bandwidth, 1.8$\times$. \tabref{tab:overhead-time} and \tabref{tab:overhead-mem} give the results, and \figref{fig:overhead} shows both. Late in the experiment, another user's job filled the machine's memory, so the complete recordings of some programs are still to be measured (marked --- in the tables).
+The costs reported so far were measured with different builds of the tool and under different loads. To compare all the methods of this report on equal terms, we ran each of them with the final tool on eight programs: 2mm, gemm and jacobi-2d at the LARGE size, miniVite with 65536 vertices and 1 or 4 threads, Lua, SQLite and GCC's \texttt{cc1}. We measured the wall time and the peak resident memory of the whole process (program, Pin and tool) with \texttt{/usr/bin/time}. Runs that take a few minutes or less were repeated three times and we report the median; runs differed by a few percent, more for the short SQLite and GCC runs. Up to six runs (briefly ten) shared a 32-core machine, which was also running another user's jobs, so the slowdowns, which are relative to the median of three native runs made alone, include some interference: native runs made in the same mix were 1.1$\times$ to 1.3$\times$ slower than alone, and 2mm, which is limited by memory bandwidth, 1.8$\times$. \tabref{tab:overhead-time} and \tabref{tab:overhead-mem} give the results, and \figref{fig:overhead} shows both. Late in the experiment another user's job filled the machine's memory and swap; the complete recordings of miniVite overlapped that period and may be slowed by it, and we stopped three of our runs and repeated them after the job had finished (Lua's complete recording ran on an otherwise quieter machine).
 
 \paragraph{Pin and per-reference instrumentation.} Pin without a tool costs 1.1$\times$ to 1.6$\times$ on PolyBench and 2.2$\times$ on miniVite, but 2.8$\times$ to 13$\times$ on the short interpreter, database and compiler runs, where translating code dominates: GCC's 1.6\,s run executes a lot of code once. Instrumenting every reference, even with an analysis routine that only counts, costs 13$\times$ to 54$\times$. This is the floor for every method that looks at every reference: \memprint{}'s splitter and sampler, the complete recording and word sampling.
 
-\paragraph{Complete recordings.} \memprint{}'s splitter, which keeps 260 subsampled footprints (13 intervals with 20 bins each) for its whole-run model, costs 665$\times$ and 781$\times$ native time on 2mm and gemm and needs 21\,GB and 17\,GB of memory, 500$\times$ to 600$\times$ the program's own. The complete recording that we use as the truth, with one bin, freed memory removed and snapshots, costs 285$\times$ to 341$\times$ and about 750\,MB. Either is affordable only for small inputs.
+\paragraph{Complete recordings.} \memprint{}'s splitter, which keeps 260 subsampled footprints (13 intervals with 20 bins each) for its whole-run model, costs 347$\times$ to 866$\times$ native time (540$\times$ to 781$\times$ on PolyBench) and needs 3.5 to 21\,GB of memory: 580$\times$ to 760$\times$ the program's own on PolyBench, whose arrays it records word by word in every bin, and 73$\times$ to 125$\times$ elsewhere. The complete recording that we use as the truth, with one bin, freed memory removed and snapshots, costs 134$\times$ to 398$\times$ and 0.6 to 3.5\,GB, 13$\times$ to 44$\times$ the program's memory. Either is affordable only for small inputs.
 
 \paragraph{Estimators from sampled references.} \memprint{}'s sampler (\secref{sec:reference}) costs 29$\times$ to 109$\times$ at 1 in 100 references and 52$\times$ to 132$\times$ at 1 in 25, above the instrumentation floor, because every selected reference updates hash sets for each of its bins. Its memory is the largest of the sampling methods: 2.7 to 3.8\,GB on PolyBench LARGE at 1 in 100, and at 1 in 25 on 2mm and gemm it exceeded about 5\,GB and Pin aborted with an out-of-memory error, although the machine had memory to spare. The estimators that need training (the $\alpha$ model, the hybrid) add the complete recordings of smaller inputs: for 2mm, recording the seven training sizes from MINI to MEDIUM took 128\,s, against 0.1\,s natively, and fitting and evaluating every estimator took 190 to 220\,s per program on one core. The unseen-species estimators need no training.
 
@@ -793,12 +792,12 @@ The costs reported so far were measured with different builds of the tool and un
 
 \paragraph{Heap profilers.} Massif costs 5.6$\times$ to 23$\times$ and DHAT 15$\times$ to 74$\times$, both with less than 2.2$\times$ the memory (4.4$\times$ for DHAT on Lua). Windowed sampling at 1\% is cheaper than DHAT on every program except SQLite and GCC, and cheaper than Massif on PolyBench and miniVite, but costs 3$\times$ to 8$\times$ more than Massif on the interpreters and the compiler, where the allocator hooks and Pin's translation dominate. Massif and DHAT measure allocations, however, not the memory touched (\secref{sec:validation}).
 
-\paragraph{Summary.} The floor set by per-reference instrumentation (13$\times$ to 54$\times$) separates the methods: every method that examines every reference costs at least that much, and the complete recordings and \memprint{}'s splitter 11$\times$ to 28$\times$ more. Windowed sampling is the only method below that floor, by 7$\times$ to 10$\times$ on PolyBench and 1.6$\times$ to 1.8$\times$ on miniVite at 1\% watched. On the short interpreter, database and compiler runs it is above the floor, because the allocator hooks and code translation, not the references, dominate there; a longer run of the same programs would weigh these fixed costs less.
+\paragraph{Summary.} The floor set by per-reference instrumentation (13$\times$ to 54$\times$) separates the methods: every method that examines every reference costs at least that much, and the complete recordings and \memprint{}'s splitter 4$\times$ to 33$\times$ more. Windowed sampling is the only method below that floor, by 7$\times$ to 10$\times$ on PolyBench and 1.6$\times$ to 1.8$\times$ on miniVite at 1\% watched. On the short interpreter, database and compiler runs it is above the floor, because the allocator hooks and code translation, not the references, dominate there; a longer run of the same programs would weigh these fixed costs less.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Running time as a multiple of the native time (first row, in seconds, median of three runs alone). Medians of three runs where repeated. OOM: Pin aborted at about 5\,GB. ---: still to be measured.}
+\caption{Running time as a multiple of the native time (first row, in seconds, median of three runs alone). Medians of three runs where repeated. OOM: Pin aborted at about 5\,GB.}
 \label{tab:overhead-time}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lrrrrrrrr}
@@ -809,8 +808,8 @@ Native (s) & 7.4 & 5.0 & 11.2 & 6.4 & 6.0 & 2.5 & 0.9 & 1.6 \\
 \midrule
 Pin, no tool & 1.6 & 1.2 & 1.1 & 2.2 & 2.3 & 2.8 & 3.9 & 13 \\
 Per-reference instrumentation only & 26 & 28 & 24 & 26 & 28 & 13 & 27 & 54 \\
-\memprint{} splitter (13 intervals $\times$ 20 bins) & 665 & 781 & \pending & \pending & \pending & \pending & \pending & \pending \\
-Complete recording (truth) & 299 & \pending & 285 & 341 & \pending & \pending & \pending & \pending \\
+\memprint{} splitter (13 intervals $\times$ 20 bins) & 665 & 781 & 540 & 863 & 866 & 347 & 554 & 502 \\
+Complete recording (truth) & 299 & 291 & 285 & 341 & 398 & 134 & 217 & 210 \\
 Reference sampling, 1 in 100 & 54 & 79 & 42 & 44 & 46 & 29 & 47 & 109 \\
 Reference sampling, 1 in 25 & OOM & OOM & 86 & 81 & 87 & 52 & 107 & 132 \\
 Word sampling, 1 in 100 & 48 & 59 & 36 & 37 & 54 & 27 & 49 & 68 \\
@@ -839,8 +838,8 @@ Native & 36 & 29 & 27 & 46 & 48 & 63 & 79 & 128 \\
 \midrule
 Pin, no tool & 70 & 62 & 60 & 261 & 266 & 125 & 170 & 747 \\
 Per-reference instrumentation only & 78 & 77 & 74 & 348 & 353 & 144 & 202 & 776 \\
-\memprint{} splitter (13 intervals $\times$ 20 bins) & 21{,}131 & 17{,}420 & \pending & \pending & \pending & \pending & \pending & \pending \\
-Complete recording (truth) & 750 & \pending & 728 & 764 & \pending & \pending & \pending & \pending \\
+\memprint{} splitter (13 intervals $\times$ 20 bins) & 21{,}131 & 17{,}420 & 20{,}502 & 3{,}456 & 3{,}459 & 7{,}818 & 8{,}516 & 9{,}984 \\
+Complete recording (truth) & 750 & 611 & 728 & 764 & 621 & 1{,}197 & 3{,}466 & 2{,}946 \\
 Reference sampling, 1 in 100 & 2{,}785 & 2{,}662 & 3{,}805 & 700 & 698 & 387 & 666 & 2{,}024 \\
 Reference sampling, 1 in 25 & OOM & OOM & 5{,}050 & 850 & 846 & 596 & 1{,}322 & 2{,}975 \\
 Word sampling, 1 in 100 & 121 & 105 & 102 & 452 & 444 & 247 & 355 & 1{,}263 \\
