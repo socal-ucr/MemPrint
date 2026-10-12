@@ -285,6 +285,19 @@ python -c "from memprint.sched import run; run.run('DIR/corpus', 'DIR/traces', '
 python paper_sched/make_figures.py --data DIR && python paper_sched/make_tables.py --data DIR
 ```
 
+## Resizing allocations (experimental)
+
+MemPrint's per-site footprints, passed to the compiler and the runtime as non-binding reservations (FINDINGS.md, "Resizing allocations").
+
+| Piece | What it does |
+|---|---|
+| `pintool -sites` | per allocation site: requested, touched and high-water bytes (`*_sites.csv`), large blocks one by one (`*_blocks.csv`) |
+| `analysis/memprint/sites.py` | reservations (dead, const, ratio, affine per site) from one or more `-sites` runs |
+| `resize/runtime/mpr.c` | `libmpr`: commits a block's predicted part, maps the rest `MAP_NORESERVE`; zero pages for calloc, realloc without copies, telemetry (`MPR_RESERVATIONS`, `MPR_REPORT`, `MPR_SCALE`, `MPR_ALL`, `MPR_MIN`, `MPR_DEBUG`) |
+| `resize/pass/` | `MemPrintResize` LLVM plugin: allocation calls through libmpr with stable site ids; std::vector capacity through `__mpr_capacity`; apply mode embeds the reservations |
+| `scripts/resize_build.sh`, `scripts/resize_eval.sh` | build a program with the pass; measure RSS, commit, time and output under glibc or libmpr |
+| `resize/tests/run_tests.sh` | runtime tests, `opt` + FileCheck tests of the pass, and a program built with the pass end to end |
+
 ## Differences from the original tooling
 
 This repository replaces the scripts in `memory_estimator` (Pin `ManualExamples/buffer_memtrace_*`, `workloads/*/run*.sh`, `tools/*.py`). Before the fixes below were applied, the refactored code was checked against the original on the same inputs: Pin outputs were byte-identical with a fixed seed, and all analysis outputs matched. The fixes change results:

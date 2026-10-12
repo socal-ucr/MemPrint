@@ -6,6 +6,48 @@ Goal: reconstruct a program's live memory footprint over time from a sparse Pin 
 
 On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This branch adds per-address sample counts to the Pin tool and tries estimators of the memory that was never sampled.
 
+## Resizing allocations with MemPrint's per-site footprints (branch `alloc-resize`)
+
+Summary: MemPrint now profiles requested against touched bytes per allocation site, and passes the result to a compiler pass and a runtime as non-binding reservations. A block still gets every byte the program asks for; only the predicted part is committed and the rest is mapped `MAP_NORESERVE`, so an under-prediction costs accounting, never correctness. On darknet (AlexNet inference) the committed memory falls from 534.7 MB to 284.6 MB with identical predictions; on miniVite a predicted vector capacity removes a growth chain, and peak RSS falls from 30.5 to 26.6 MB.
+
+- **Profile** (`pintool -sites`, splitter with `-track_frees`): each block's touched bytes, high-water offset and pages are read from the exact footprint when its release is applied, just before the bits are cleared; calloc's own zeroing is measured by a probe queued in order with the thread's references. Sites are the outermost allocator call's return address as `image+address` (operator new is hooked as an allocator, so STL growth resolves to the program's code) or the id a program built with the pass passes to `__mpr_*`. `tests/pintool/sites.c` and `sites_vec.cpp` check the sizes they were written with.
+- **Reservations** (`analysis/memprint/sites.py`): per site with blocks of at least 64 KB, the cheapest of dead / const / ratio / affine that covers a quantile (default 0.9) of the training bytes, from the blocks' high-water offsets.
+- **Runtime** (`resize/runtime/mpr.c`, `libmpr`): a large block at a reserved site is one mapping, its predicted prefix committed and the rest `MAP_NORESERVE` (no fault the program could see; `read()` into it works). calloc gets zero pages without a memset, realloc moves page tables instead of copying, free unmaps and records residency (`mincore`) for telemetry (`MPR_REPORT`). Preloaded (sites by return address) or linked into a program built with the pass (sites by id).
+- **Pass** (`resize/pass`, LLVM 21 plugin): at the end of the pipeline every malloc, calloc, realloc, memalign, posix_memalign and operator new call goes through libmpr with an id hashed from the enclosing function and the debug location chain; at its start, std::vector's new capacity (`_M_check_len`) goes through `__mpr_capacity`. Apply mode embeds the reservations in the binary. On darknet it rewrote 631 calls in 48 files, and the profile and apply builds give identical ids.
+- **What the profile found:** darknet's untouched 250 MB are `weight_updates` (`connected_layer.c:35`, `convolutional_layer.c:196`), training-only buffers inference never touches; miniVite's largest waste is `edgeList`'s doubling growth (`graph.hpp:777`), whose final 12.6 MB buffer is 52% touched; Open MPI's start-up maps 8.4 MB it does not touch.
+
+Results (mean of 3 runs; peak RSS and peak commit, the size of the mappings smaps flags `ac`, sampled every 20 ms; outputs compared by hash):
+
+| Program, setting | Reservations from | RSS (MB) | Commit (MB) | Output |
+|---|---|---|---|---|
+| darknet AlexNet, glibc | — | 287.3 | 534.7 | — |
+| darknet AlexNet, libmpr preloaded | its own profile (a repeat run) | 287.6 | 284.6 | identical |
+| darknet AlexNet, libmpr preloaded | darknet reference net (held out) | 287.5 | 519.1 | identical |
+| darknet AlexNet, pass, apply build (no environment) | its own profile | 287.5 | 284.6 | identical |
+| miniVite 32768, glibc | — | 30.3 | 46.2 | — |
+| miniVite 32768, libmpr preloaded | 8192 and 16384 (held out) | 27.0 | 45.8 | identical |
+| miniVite 32768, pass build, no capacity | — | 30.5 | 35.7 | — |
+| miniVite 32768, pass build, edgeList capacity | its own profile | 26.6 | 26.1 | identical |
+| 2mm LARGE, HPCCG 64 (controls), libmpr serving every large block | — | +0.4, +1.8 | +0.1, 0 | identical |
+
+- **Under-prediction is safe:** every prediction scaled by 0.1 (`MPR_SCALE`) gives identical outputs on both programs; the telemetry reports the blocks that used more than predicted.
+- **Coverage limits held-out gains:** the darknet reference net has no fully connected layers, so a profile of it has no site for AlexNet's 234 MB of connected-layer `weight_updates`; only the convolutional ones (15 MB) carry over. A profile helps the code paths it covers.
+- **RSS needs a change in how memory is obtained, not a smaller reservation:** untouched large blocks are already not resident. The RSS savings come from fresh zero pages, realloc without copies, and the vector capacity (one 6.5 MB allocation instead of 8 blocks totalling 25 MB).
+- **The vector capacity is per instantiation:** `_M_realloc_insert<T, Args...>` is shared by every vector of that element type and argument list, so a capacity reservation applies to all of them, and a capacity known for one input does not carry to another (the final size depends on the input, not on the request). Predicting it before the run needs the static route.
+- **Bugs found and fixed on the way:** mremap cannot move a range the kernel keeps as several mappings, and a failed `mremap(MREMAP_FIXED)` has already unmapped its destination (Open MPI's start-up grows a table one element at a time: realloc returned NULL, then crashed); libmpr's exit handler deadlocked on its own lock through fclose.
+- **Not done:** the static route (per-site profiles from the interpreter, `interp.py`/`interp_cpp.py`) and windowed or spatial `-sites` (exact mode only). Small blocks are left to glibc.
+
+### Reproduce
+
+    tests/pintool/run_tests.sh && resize/tests/run_tests.sh                    # with PIN_ROOT set
+    pin -t memprint_trace.so -mode splitter -track_frees 1 -sites 1 -outdir D -name N -- prog args
+    python -m memprint.sites D1 D2 D3 -o reservations.txt                      # from analysis/
+    LD_PRELOAD=libmpr.so MPR_RESERVATIONS=reservations.txt prog args           # runtime alone
+    scripts/resize_build.sh profile OUT -- make ...; scripts/resize_build.sh apply OUT reservations.txt -- make ...
+    scripts/resize_eval.sh OUTDIR {base,mpr,mprall,mprscaled} reservations.txt "<cwd> <stdin> <pattern> <cmd>"
+
+Data (not in the repository): `~/memprint-data/2026-10-12-resize/` (`sites/` profiles, `res/` reservations, `runs/` measurements, `build/` the darknet and miniVite builds).
+
 ## Verification, 2026-10-11 (branches `windowed-next` and `static-generalization`)
 
 Summary: both branches pass their tests, and the published numbers reproduce. One mismatch was found and explained: the main checkout's Pin tool build was stale.
