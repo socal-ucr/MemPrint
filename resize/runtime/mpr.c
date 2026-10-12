@@ -622,6 +622,7 @@ __attribute__((destructor)) static void fini(void)
             double r = b.requested ? (double)res / b.requested : 0;
             if (r > s->max_resident_ratio) s->max_resident_ratio = r;
         }
+    pthread_mutex_unlock(&lock); /* fclose frees its buffer through free(): no lock held from here */
     FILE *f = fopen(report, "w");
     if (f) {
         fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio\n");
@@ -634,5 +635,4 @@ __attribute__((destructor)) static void fini(void)
                         (unsigned long)sites[i].under, sites[i].max_resident_ratio);
         fclose(f);
     }
-    pthread_mutex_unlock(&lock);
 }

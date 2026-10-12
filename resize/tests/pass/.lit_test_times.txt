@@ -1,2 +1,2 @@
-2.424002e-02 alloc.ll
-2.503395e-02 growth.ll
+2.269506e-02 alloc.ll
+2.220130e-02 growth.ll

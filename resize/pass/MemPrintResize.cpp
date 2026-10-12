@@ -20,6 +20,7 @@
 // to a predicted final size.
 #include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/IRBuilder.h"
@@ -215,9 +216,11 @@ struct MemPrintResize : PassInfoMixin< MemPrintResize >
             else if (!M.getGlobalVariable("__mpr_embedded_reservations"))
             {
                 Constant* text = ConstantDataArray::getString(C, (*buf)->getBuffer(), true);
-                auto* gv       = new GlobalVariable(M, text->getType(), true, GlobalValue::WeakAnyLinkage, text,
-                                                    "__mpr_embedded_reservations");
-                (void)gv;
+                // one copy in the program however many modules carry it: a COMDAT the linker keeps once
+                auto* gv = new GlobalVariable(M, text->getType(), true, GlobalValue::WeakODRLinkage, text,
+                                              "__mpr_embedded_reservations");
+                if (Triple(M.getTargetTriple()).supportsCOMDAT())
+                    gv->setComdat(M.getOrInsertComdat("__mpr_embedded_reservations"));
             }
         }
         if (!siteMap.empty() && (rewritten || grown))
