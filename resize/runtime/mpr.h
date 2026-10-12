@@ -21,6 +21,11 @@ enum mpr_kind { MPR_MALLOC = 1, MPR_CALLOC = 2, MPR_REALLOC = 4, MPR_MEMALIGN = 
 /* Entry points the MemPrintResize pass calls in place of the allocator (site: its id for the call). */
 void *__mpr_alloc(size_t size, uint64_t site, int kind, size_t align);
 void *__mpr_realloc(void *ptr, size_t size, uint64_t site);
+void *__mpr_calloc(size_t n, size_t size, uint64_t site);
+int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site);
+/* A program built with the pass in apply mode carries its reservations in this string (the
+   MPR_RESERVATIONS file format); MPR_RESERVATIONS overrides it. */
+extern const char __mpr_embedded_reservations[] __attribute__((weak));
 /* std::vector growth: the capacity to allocate, at least `len` (MemPrint's predicted final size) */
 size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site);
 /* Bytes committed for the live blocks the runtime serves, as predicted (a scheduler could read it). */

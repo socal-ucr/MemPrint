@@ -460,6 +460,8 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     ADDRINT allocHeader = 0; // realloc: the old chunk's size field at the entry
     ADDRINT allocSite   = 0; // -sites: the outermost call's return address, or the id passed to __mpr_alloc
     BOOL allocSiteId    = FALSE; // allocSite is an id from the MemPrintResize pass, not an address
+    ADDRINT pendingSite = 0;     // -sites: the id passed to __mpr_* by a program built with the pass,
+    BOOL pendingSiteSet = FALSE; // taken by the next outermost allocator call of the thread
     UINT8 allocKind     = 0; // -sites: SITE_MALLOC, SITE_CALLOC, ...
     BOOL allocMallocLike = FALSE; // the outermost call returns its block (malloc, calloc, memalign, ...)
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
@@ -1327,8 +1329,9 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
     if (t.allocDepth++ > 0) return;
     t.allocSp         = sp;
     t.allocMallocLike = mallocLike;
-    t.allocSite       = caller;
-    t.allocSiteId     = FALSE;
+    t.allocSite       = t.pendingSiteSet ? t.pendingSite : caller;
+    t.allocSiteId     = t.pendingSiteSet;
+    t.pendingSiteSet  = FALSE;
     t.allocKind       = mallocLike ? SITE_MALLOC : (out ? SITE_MEMALIGN : SITE_REALLOC);
     t.allocFresh      = FALSE;
     // At the entry, before calloc zeroes or realloc copies the new block's memory: see DIRTY_CLEAR_MIN.
@@ -1367,6 +1370,15 @@ static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLik
 {
     AllocEnter(tid, sp, caller, mallocLike, n * size, 0, 0);
     if (threads[tid].allocDepth == 1) threads[tid].allocKind = SITE_CALLOC;
+}
+
+// __mpr_alloc(size, site, ...) and the other entry points of libmpr, called by a program built with
+// the MemPrintResize pass: the site id it passes is the next block's site (libmpr then calls glibc's
+// allocator, or maps the block itself, which -sites does not see)
+static VOID MprEnter(THREADID tid, ADDRINT site)
+{
+    threads[tid].pendingSite    = site;
+    threads[tid].pendingSiteSet = TRUE;
 }
 
 // operator new(size, ...): as malloc
@@ -1829,6 +1841,17 @@ VOID ImageLoad(IMG img, VOID* v)
                                  "_ZnamSt11align_val_t", "_ZnwmSt11align_val_tRKSt9nothrow_t",
                                  "_ZnamSt11align_val_tRKSt9nothrow_t"})
             InstrumentAllocator(img, name, AFUNPTR(NewEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
+    if (sitesOn)
+        for (auto entry : {std::make_pair("__mpr_alloc", 1), std::make_pair("__mpr_calloc", 2),
+                           std::make_pair("__mpr_realloc", 2), std::make_pair("__mpr_posix_memalign", 3)})
+        {
+            RTN rtn = FindRoutine(img, entry.first);
+            if (!RTN_Valid(rtn)) continue;
+            RTN_Open(rtn);
+            RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(MprEnter), IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                           entry.second, IARG_END);
+            RTN_Close(rtn);
+        }
     InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
     InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
 

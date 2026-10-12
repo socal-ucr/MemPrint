@@ -167,7 +167,8 @@ static struct site *site_of_id(uint64_t id)
 /* the runtime's blocks start on a page; glibc's (16 bytes into a chunk) almost never do */
 #define MAYBE_OURS(p) ((p) && nlive && ((uintptr_t)(p) & (PAGE - 1)) == 0)
 
-static size_t predict(const struct site *s, size_t n)
+/* the model's value for a request of n (not clamped) */
+static double model_value(const struct site *s, size_t n)
 {
     double p;
     switch (s->model) {
@@ -178,7 +179,13 @@ static size_t predict(const struct site *s, size_t n)
     default: p = n; /* no reservation (MPR_ALL): all of it */
     }
     if (s->model != M_NONE) p *= scale;
-    if (p < 0) p = 0;
+    return p < 0 ? 0 : p;
+}
+
+/* bytes to commit for a request of n: the model's value within [0, n] */
+static size_t predict(const struct site *s, size_t n)
+{
+    double p = model_value(s, n);
     return p > n ? n : (size_t)p;
 }
 
@@ -478,6 +485,25 @@ void *__mpr_alloc(size_t size, uint64_t site, int kind, size_t align)
 
 void *__mpr_realloc(void *ptr, size_t size, uint64_t site) { return realloc_at(ptr, size, 0, site, 1); }
 
+void *__mpr_calloc(size_t n, size_t size, uint64_t site)
+{
+    size_t total;
+    if (__builtin_mul_overflow(n, size, &total)) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    return alloc_at(total, 0, site, 1, 0, 1);
+}
+
+int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site)
+{
+    if (align < sizeof(void *) || (align & (align - 1))) return EINVAL;
+    void *p = alloc_at(size, 0, site, 1, align, 0);
+    if (!p && size) return ENOMEM;
+    *out = p;
+    return 0;
+}
+
 size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site)
 {
     (void)size;
@@ -485,13 +511,37 @@ size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site)
     struct site *s = site_of_id(site);
     /* a growth site's model predicts the final bytes from the first request: reserve them at once */
     if (!s || s->model == M_NONE || s->model == M_DEAD) return len;
-    size_t final = predict(s, len * elem) / elem;
+    size_t final = (size_t)(model_value(s, len * elem) / elem); /* above the request: that is the point */
     return final > len ? final : len;
 }
 
 size_t __mpr_committed(void) { return atomic_load(&committed); }
 
 /* ---- start and end ---- */
+
+static void parse_line(const char *line)
+{
+    char key[128], model[32];
+    double a, b;
+    if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) return;
+    int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
+          : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST : M_NONE;
+    if (m != M_NONE) add_site(key, m, a, b);
+}
+
+/* reservations built into the program by the pass (apply mode) */
+static void load_embedded(const char *text)
+{
+    char line[512];
+    while (*text) {
+        size_t n = strcspn(text, "\n");
+        if (n < sizeof line) {
+            memcpy(line, text, n), line[n] = 0;
+            parse_line(line);
+        }
+        text += n + (text[n] == '\n');
+    }
+}
 
 static void load(const char *file)
 {
@@ -500,13 +550,9 @@ static void load(const char *file)
         fprintf(stderr, "libmpr: cannot read %s\n", file);
         return;
     }
-    char line[512], key[128], model[32];
-    double a, b;
+    char line[512];
     while (fgets(line, sizeof line, f)) {
-        if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) continue;
-        int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
-              : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST : M_NONE;
-        if (m != M_NONE) add_site(key, m, a, b);
+        parse_line(line);
     }
     fclose(f);
 }
@@ -528,7 +574,10 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_SCALE"))) scale = strtod(v, NULL);
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
     report = getenv("MPR_REPORT");
-    if ((v = getenv("MPR_RESERVATIONS"))) load(v);
+    if ((v = getenv("MPR_RESERVATIONS")))
+        load(v);
+    else if (__mpr_embedded_reservations)
+        load_embedded(__mpr_embedded_reservations);
     ready = 1;
 }
 
