@@ -52,17 +52,17 @@ struct site {
 
 /* sites: from the reservation file, plus (MPR_ALL) sites without one; read-only keys after init */
 #define MAX_SITES 8192
-static struct site sites[MAX_SITES];
+static struct site *sites; /* the tables are mapped MAP_NORESERVE at start-up: no commit of their own */
 static int nsites;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* return address -> site (or NULL) */
 #define CACHE 8192
-static struct { uintptr_t ret; struct site *site; int known; } cache[CACHE];
+static struct cache_entry { uintptr_t ret; struct site *site; int known; } *cache;
 
 /* live blocks served by the runtime */
 #define LIVE (1 << 16)
-static struct block { uintptr_t ptr; size_t len, commit, requested; struct site *site; } live[LIVE];
+static struct block { uintptr_t ptr; size_t len, commit, requested; struct site *site; } *live;
 static size_t nlive;
 
 static int ready;
@@ -511,9 +511,19 @@ static void load(const char *file)
     fclose(f);
 }
 
+static void *table(size_t bytes)
+{
+    void *p = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
 __attribute__((constructor)) static void init(void)
 {
     const char *v;
+    sites = table(MAX_SITES * sizeof *sites);
+    cache = table(CACHE * sizeof *cache);
+    live  = table(LIVE * sizeof *live);
+    if (!sites || !cache || !live) return; /* not ready: everything goes to glibc */
     if ((v = getenv("MPR_MIN"))) min_size = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_SCALE"))) scale = strtod(v, NULL);
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
