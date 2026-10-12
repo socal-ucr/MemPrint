@@ -32,3 +32,12 @@ paper/*.log
 paper/*.bbl
 paper/*.blg
 paper/*.out
+# The scheduling paper keeps its figures (paper_sched/make_figures.py) and its PDF
+!paper_sched/figures/
+!paper_sched/figures/*.pdf
+!paper_sched/main.pdf
+paper_sched/*.aux
+paper_sched/*.log
+paper_sched/*.bbl
+paper_sched/*.blg
+paper_sched/*.out

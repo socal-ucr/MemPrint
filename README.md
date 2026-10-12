@@ -257,6 +257,27 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
 - **Windowed sampling** (`-window`, `-period`) tests accesses only in windows and tracks allocations, resident pages and (for reused heap blocks) soft-dirty written pages all the time. At 5% watched the peak is within 0.1% on PolyBench LARGE, within +1.8% on miniVite, and within −3.7% to +6.7% on GAP, darknet, Python, Lua, Perl, SQLite and GCC's cc1. `python -m memprint timeline windowed <wl>` scores such runs.
 - The true peaks never exceed the peak RSS, and the tool's tracked allocations agree with Valgrind's Massif and DHAT where both see the same memory.
 
+## Scheduling study (experimental)
+
+`analysis/memprint/sched/` holds DMSched-Sim, a simulator of job scheduling on disaggregated memory (nodes with local DRAM and a shared pool) in which only the footprint oracle changes, and the code that turns measured footprints into its jobs. The results are in FINDINGS.md ("Scheduling on disaggregated memory") and `paper_sched/main.tex`.
+
+| File | What it does |
+|---|---|
+| `sched/model.py`, `sched/sim.py` | jobs (memory curves over progress), the cluster, FCFS + EASY backfilling over memory curves, remote-memory slowdown, OOM kills |
+| `sched/oracles.py` | what each estimator makes the scheduler reserve (curve or peak, margin as a factor or as headroom) |
+| `sched/corpus.py` | parses each method's output (Pin truth, MemPrint windowed, Massif, DHAT, heaptrack, gperftools, RSS, static) into curves over progress |
+| `sched/real.py`, `sched/ml.py` | job streams from Parallel Workloads Archive logs or synthetic arrivals, with corpus footprints; the ML-peak oracle |
+| `sched/run.py` | the experiment grids (truth, load, seed, margin policy, oracle), in parallel |
+| `scripts/footprint_corpus.sh` | runs one program under one footprint method (native first: it sets the snapshot and window lengths) |
+| `scripts/rss_sampler.py` | samples a process tree's RSS; with `--limit`, kills it above a limit (an OOM watchdog) |
+
+```bash
+python tests/sched/test_sim.py                                   # simulator unit tests
+python -c "from memprint.sched import corpus; corpus.build('DIR/corpus')"          # from analysis/
+python -c "from memprint.sched import run; run.run('DIR/corpus', 'DIR/traces', 'grid.csv')"
+python paper_sched/make_figures.py --data DIR && python paper_sched/make_tables.py --data DIR
+```
+
 ## Differences from the original tooling
 
 This repository replaces the scripts in `memory_estimator` (Pin `ManualExamples/buffer_memtrace_*`, `workloads/*/run*.sh`, `tools/*.py`). Before the fixes below were applied, the refactored code was checked against the original on the same inputs: Pin outputs were byte-identical with a fixed seed, and all analysis outputs matched. The fixes change results:

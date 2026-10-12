@@ -6,9 +6,9 @@ usage: check.py TIMELINE --peak MB --freed MB [--final-max MB] [--slack MB]
 Peak live footprint must lie in [peak - tolerance, peak + slack]: snapshots
 are taken every N references, so the true peak can fall between two of them,
 and slack covers the C runtime's own memory. At least `freed` must have been
-released (more is fine: the footprint counts the largest access at each start
-address, so overlapping vector accesses, e.g. in memcpy, weigh more than their
-bytes), and the footprint at exit must be below final-max (default: slack).
+released (more is fine: whole glibc chunks are released, and with
+-footprint starts overlapping vector accesses, e.g. in memcpy, weigh more than
+their bytes), and the footprint at exit must be below final-max (default: slack).
 With --windowed the file is a -window run's estimate (*_windowed.csv), which
 must also have completed at least two windows.
 """

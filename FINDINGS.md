@@ -6,6 +6,49 @@ Goal: reconstruct a program's live memory footprint over time from a sparse Pin 
 
 On `main`, the paper's α model applied per snapshot gives 25–55% MAPE. This branch adds per-address sample counts to the Pin tool and tries estimators of the memory that was never sampled.
 
+## Verification, 2026-10-11 (branches `windowed-next` and `static-generalization`)
+
+Summary: both branches pass their tests, and the published numbers reproduce. One mismatch was found and explained: the main checkout's Pin tool build was stale.
+
+- **Pin tool tests.** `tests/pintool/run_tests.sh` passes on `windowed-next` (its build is up to date, byte-identical to `2026-10-10-next/tool-alloc.so`). On `static-generalization` the build in `pintool/obj-intel64` was stale and was in fact a `windowed-next` build (it had `-pages_only`, `-edge_correction` and other knobs the branch's source lacks). Rebuilt from the branch's own source, all its tests pass.
+- **Static tests.** `tests/static/test_{argv,cpp,library,loops}.py` all pass.
+- **Blind tests.** Rescoring the committed predictions (`paper_generalization/blind/score.py`, `blind2/score.py`) reproduces the committed `scores.csv` byte for byte: HPCCG footprint within 0.09–0.88%; NPB IS and CG within 0.33%; the known failures, LULESH α (28–43% at s = 15–20) and NPB MG (footprint 7–9% short, α 221–297% off), are unchanged. The interpreter at HEAD re-predicts HPCCG within 0.6% (footprint) and 0.9% (α) of the frozen predictions: a constant 4.8 KB shift from the baseline fit changed after the freeze.
+- **Windowed sampling.** W1 and W5 rerun with the current `windowed-next` build and scored against the 2026-10-08 truths (`~/memprint-data/2026-10-11-sched/verify/`), mean / peak error in %:
+
+| Run | W1 | W5 | FINDINGS (W1) |
+|---|---|---|---|
+| 2mm LARGE | 0.0 / 0.0 | 0.0 / 0.0 | 0.1 / +0.1 |
+| GAP pr | 1.2 / +0.4 | 1.5 / +0.6 | 1.7 / +0.5 |
+| Lua | 6.4 / −4.9 | 5.2 / −4.0 | 6.7 / −4.0 |
+| miniVite 32768 (4 threads) | 1.4 / −0.7 | 1.1 / +0.5 | — |
+
+- **Truth reruns.** The splitter truth of GAP pr reproduces within 0.002% of its peak. Lua's moves by 1.7% and has a different number of snapshots (201 against 200): the program itself runs differently from one run to the next, not the tool.
+- **No user cgroup memory limits on this node.** cgroup v1 memory limits are not delegated to users (a 300 MB allocation survives `systemd-run --user -p MemoryLimit=100M`), so `scripts/rss_sampler.py --limit` enforces a limit by polling RSS instead.
+
+## Scheduling on disaggregated memory: what footprint knowledge is worth (branch `sched-motivation`)
+
+Summary: on a simulated cluster with local DRAM and a shared memory pool, knowing a job's footprint *curve* rather than its peak is where most of the gain lies, and MemPrint's windowed curves are the only measured estimate that beats even the exact peak, but only when their time axis matches the truth's and the program's footprint has phases. Full write-up: `paper_sched/main.tex`.
+
+- **Simulator.** DMSched-Sim (`analysis/memprint/sched/`): 32 nodes × 32 cores × 128 GB plus a 1 TB pool, FCFS + EASY backfilling over memory curves, local-first placement, linear remote-memory slowdown (β = 0.5), OOM kill and requeue at ×1.5. Only the footprint oracle changes between runs. 10 unit tests in `tests/sched/test_sim.py`.
+- **Corpus.** 23 programs × 3 inputs under 12 methods (`scripts/footprint_corpus.sh`): native RSS every 5 ms, the full Pin trace (truth), MemPrint W1, W5 and pages only, Massif and Massif `--pages-as-heap` (instruction and ms clocks), DHAT, heaptrack 1.3.0 and gperftools 2.18. 802 runs, one failure (NPB MG class A truth, out of memory).
+- **Peaks.** Massif, DHAT and gperftools are within 5% of the true peak on 19 of 23 programs, but read GCC's cc1 at 0.14–0.16× (its collector maps its own pages) and darknet at 1.97×. MemPrint W5 is within 5% on 21 of 23 (0.94–1.06×).
+- **Scheduling, load 0.8, bytes-touched truth** (mean response time; calibrated margins): exact curve 90 min, MemPrint windowed 358–391, exact peak 460, reactive resizing 589, DHAT 979, heaptrack 1,077, Massif (instruction clock) 2,175 (875 at its best margin), user request 2,215. The exact curve needs 5.0 TB for a service level the exact peak and MemPrint meet with 6.0 TB, DHAT with 9.0 TB and the request with 11.0 TB.
+- **Where MemPrint does not win.** On mostly flat programs (PolyBench, HPCCG, NPB, LULESH) MemPrint W5 is worse than the exact peak (471 against 273 min). Under the RSS truth (wall-clock seconds) its curve needs 58% headroom, because its clock is memory references, and its peak does better than its curve.
+- **DHAT curves.** Curves built from DHAT's three recorded points (peak, its time, exit) are worse than DHAT's peak under every margin (3,443 and 4,342 against 979 min).
+- **Massif's clock.** Massif reports the heap over the whole run; with its default instruction clock (`--time-unit=i`) the headroom covering 90% of programs is 48%, against 84% with `--time-unit=ms`, whose Valgrind start-up misaligns short runs.
+- **Cost** (median time over native, largest inputs): heaptrack 1.4×, gperftools 1.2×, Massif 5.7×, DHAT 23.8×, MemPrint pages only 6.3×, W1 8.9×, W5 11.4×, full trace 227×; the static interpreter 7× to 59,000×.
+
+### Reproduce
+
+    scripts/footprint_corpus.sh native "<prog> <input> <threads> <cwd> <cmd>"   # first, for each corpus line
+    scripts/footprint_corpus.sh <method> "<same line>"                          # truth, W1, W5, P, massifi, dhat, ...
+    python -c "from memprint.sched import corpus; corpus.build('<data>/corpus')"   # from analysis/: curves.csv, costs.csv
+    python -c "from memprint.sched import run; run.run('<data>/corpus', '<data>/traces', 'grid.csv')"   # one grid
+    python paper_sched/make_figures.py --data ~/memprint-data/2026-10-11-sched
+    python paper_sched/make_tables.py --data ~/memprint-data/2026-10-11-sched
+
+Data (not in the repository): `~/memprint-data/2026-10-11-sched/` (`corpus/`, `results/`, `traces/` with the Parallel Workloads Archive logs, `verify/`, `static/`).
+
 ## Unseen workloads from source code alone (branch `static-generalization`)
 
 Summary: across the 27 PolyBench kernels we tested, an unseen workload's footprint and α can be predicted from its source code alone, more accurately than with its own trained model. Each kernel was held out in turn and predicted from its source and the other 26. All numbers here use the bytes-touched footprint (`-footprint bytes`); PolyBench and miniVite were retraced for it (see "Footprint definition" below).
