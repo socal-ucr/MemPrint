@@ -8,6 +8,8 @@
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{listings}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,fit}
 \usepackage[hidelinks]{hyperref}
@@ -85,6 +87,11 @@ Specifically, we treat \memprint{}'s per-site measurements as \term{non-binding 
 receives every byte the program requested, but only the predicted part is committed, and the rest is mapped so
 that the kernel backs it only if the program touches it. A wrong prediction then costs accounting and never
 causes a fault the program can observe.
+\emph{To the best of our knowledge, this is the first compiler pass and runtime that commit only the profiled
+part of each heap block, leaving the rest to be backed on demand.} Existing profile-guided allocation work, such
+as LLVM's MemProf, changes where an object is placed but commits every requested byte~\cite{MemProf}, and existing
+container-sizing tools give advice to the programmer or replace data structures in managed
+runtimes~\cite{LibstdcxxProfile,Makor2025Replacement} (\secref{sec:related}).
 
 In this work, we make the following contributions:
 \begin{itemize}
@@ -140,21 +147,94 @@ how memory is obtained, not a smaller reservation. In our measurements RSS fell 
 allocator, or the kernel touched pages the program did not need: vector growth that keeps two buffers live, a
 zeroing \texttt{memset} over fresh memory, and transparent huge pages that back 2\,MB on the first touch.
 
-\subsection{Related work}
+\section{Related work}
+\label{sec:related}
 
-Mesh compacts the heap of unmodified C and C++ programs by merging pages whose live objects do not overlap,
-and therefore reduces RSS after fragmentation, but unlike our system it does not use a profile of what the
-program will touch~\cite{Powers2019Mesh}. Maas et al.\ predict object lifetimes from allocation call stacks to
-place long-lived objects together~\cite{Maas2020Llama}, and HALO groups heap objects by profiled access
-affinity after link time~\cite{Savage2020HALO}. Both use per-site profiles to change placement, whereas we use
-them to change how much of a block is committed and how it is backed. jemalloc and similar allocators return
-freed memory to the kernel more eagerly than glibc~\cite{Evans2006jemalloc}, but they still commit every
-requested byte. PagedAttention allocates an LLM server's KV cache in blocks as tokens arrive and therefore avoids
-reserving a full context per request~\cite{Kwon2023vLLM}. Our llama.cpp result reaches a similar effect for an
-unmodified engine, without changing its code, because the untouched part of the cache is never backed.
-Zacarias et al.\ show that a 60\% overestimate of memory demand reduces the throughput of a disaggregated
-system by about 25\%~\cite{Zacarias2021Accurate}, which is the scheduling motivation for both this work and
-our earlier study~\cite{memprintsched}.
+We searched the compiler, allocator, operating-system and LLM-serving literature for an existing pass that
+resizes heap allocations from a profile of what a program touches. To the best of our knowledge, no prior
+compiler pass commits only the profiled part of a heap block and leaves the rest to be backed on demand.
+The closest work falls into five groups, which \tabref{tab:related} summarises.
+
+\begin{table}[t]
+\centering\footnotesize
+\begin{tabular}{L{2.9cm}L{3.1cm}L{3.7cm}L{2.2cm}L{2.4cm}}
+\toprule
+System & Profile & Action & Automatic & Wrong profile \\
+\midrule
+LLVM MemProf~\cite{MemProf} & access density and lifetime per allocation context & hot or cold hint to \texttt{operator new} (placement) & yes (compiler + TCMalloc) & placement only \\
+libstdc++ profile mode, Perflint~\cite{Liu2009Perflint,LibstdcxxProfile} & container operations per call stack & advice: initial size, container choice & no (programmer) & -- \\
+Chameleon, Brainy~\cite{Shacham2009Chameleon,Jung2011Brainy} & collection usage & select a collection implementation & partly & slower or larger collection \\
+Makor et al.~\cite{Makor2025Replacement} & data-structure use per allocation site & replace with a smaller implementation (GraalVM Native Image) & yes & guarded by the implementation \\
+Odaira (IBM patent)~\cite{Odaira2015ArraySize} & highest index accessed per allocation context & JIT sets the initial array size & yes (Java JIT) & array grows by copying \\
+Xu et al., DHAT~\cite{Xu2010LowUtility,Xu2010Containers,ValgrindDHAT} & cost and benefit, or bytes accessed, per site & report bloat & no (programmer) & -- \\
+\midrule
+\textbf{This work} & bytes touched, highest offset, pages per block and site & commit the predicted prefix, rest \texttt{MAP\_NORESERVE}; raise vector capacity; skip zeroing untouched pages & yes (pass or preload) & costs commit accounting only \\
+\bottomrule
+\end{tabular}
+\caption{Profile-guided work on heap allocations, and how a wrong profile affects each.}
+\label{tab:related}
+\end{table}
+
+\textbf{Profile-guided compilation of allocation sites.} LLVM's MemProf is the closest existing compiler
+work~\cite{MemProf}. It records, per allocation context (a call stack of function, line and column), the
+allocation count, access counts at 64-byte granularity and lifetimes. Its \texttt{MemProfUse} pass matches the
+profile to allocation calls through debug information, clones functions under LTO to separate contexts, and
+rewrites \texttt{operator new} into a variant that carries a hot or cold hint, which an allocator such as TCMalloc
+uses to place the object. \pass{} shares this structure: an instrumented profile, sites matched through the
+inlined debug location chain, and allocation calls rewritten to a runtime that accepts site information.
+However, MemProf changes only where an object is placed and leaves every requested byte committed, whereas
+\pass{} and \libmpr{} change how much of each block is committed and how it is backed, and a site's reservation is a
+size model rather than a temperature. MemProf's profile is collected by a sanitizer-style runtime in the
+program itself, while ours comes from \memprint{}'s Pin tool, which needs no recompilation for the profiling run
+and measures bytes rather than 64-byte granules.
+
+\textbf{Profile-guided container sizing and selection.} Perflint traces C++ standard library operations and
+reports where a better use exists~\cite{Liu2009Perflint}, and libstdc++'s profile mode, its descendant, prints
+advice such as a vector's suggested initial size or a vector that is never filled to its reserved
+size~\cite{LibstdcxxProfile}. The advice is for the programmer to apply, and libstdc++ notes that it depends on the
+profiled input. Chameleon selects Java collection implementations from runtime metrics~\cite{Shacham2009Chameleon},
+Brainy selects C++ data structures with machine-learned cost models~\cite{Jung2011Brainy}, and Makor et al.\
+automatically replace data structures at allocation sites in GraalVM Native Image with versions specialised to
+their profiled use, which reduces memory by up to 13.85\% (2.94\% on average for microservices)~\cite{Makor2025Replacement}.
+The closest to our vector capacity is an IBM patent by Odaira, in which a Java JIT records the highest index
+accessed per allocation context and sets the initial array size from it when it inlines the allocation
+site~\cite{Odaira2015ArraySize}. Our capacity reservation differs in that it can only raise the capacity a growing
+vector would have chosen, so a wrong prediction cannot shrink a block below its request, and it applies to C++
+compiled ahead of time, with the profile taken from an unmodified binary.
+
+\textbf{Bloat detection and heap profiling.} Xu et al.\ find Java data structures whose cost exceeds their
+benefit~\cite{Xu2010LowUtility}, and Xu and Rountev find containers that are overpopulated or
+underused~\cite{Xu2010Containers}. Heap profilers that report lag, drag and void, the time a block is allocated
+but not yet or no longer used~\cite{Rojemo1996Lag}, and DHAT, which reports per allocation stack how many bytes
+were read and written and flags blocks that are not completely filled in~\cite{ValgrindDHAT}, also diagnose
+over-allocation. All of them leave the fix to the programmer. \memprint{}'s \texttt{-sites} profile reports
+similar quantities, but the system acts on them without a source change.
+
+\textbf{Placement, compaction and huge pages.} Mesh compacts the heap of unmodified C and C++ programs by
+merging pages whose live objects do not overlap~\cite{Powers2019Mesh}, Maas et al.\ predict object lifetimes from
+allocation call stacks to place long-lived objects together~\cite{Maas2020Llama}, and HALO groups heap objects by
+profiled access affinity after link time~\cite{Savage2020HALO}. These systems use per-site profiles to change
+placement, whereas we use them to change commitment and backing. jemalloc and TCMalloc's hugepage-aware
+Temeraire return freed memory to the kernel more eagerly than glibc~\cite{Evans2006jemalloc,Hunter2021Temeraire},
+but they still commit every requested byte. Ingens and HawkEye showed that transparent huge pages inflate the
+resident set of sparsely used memory, and they promote a region to a huge page only when enough of it is used
+or deduplicate zero-filled huge pages in the kernel~\cite{Kwon2016Ingens,Panwar2019HawkEye}. \libmpr{}'s
+huge-page policy addresses the same bloat from user space, for the specific pages whose zeroing it skipped.
+Yang et al.\ measured the cost of zeroing new memory in managed runtimes and made zeroing cheaper with
+non-temporal and concurrent zeroing~\cite{Yang2011Zeroing}. \libmpr{} instead avoids writing zeros to pages that
+are already zero, which saves resident memory as well as time.
+
+\textbf{LLM serving and memory pools.} PagedAttention allocates an LLM server's KV cache in fixed-size blocks as
+tokens arrive~\cite{Kwon2023vLLM}, which requires paged attention kernels and a memory manager in the serving
+framework. vAttention keeps the KV cache contiguous in virtual memory and backs it with physical GPU memory on
+demand through the CUDA virtual memory API, which removes the kernel changes but still requires changes to the
+serving framework~\cite{Prabhu2025vAttention}. Our llama.cpp result obtains the same kind of on-demand backing on the
+CPU for an unmodified engine: the cache keeps its full virtual size, and only the pages it writes are backed,
+because \libmpr{} skips the zeroing that would otherwise touch the whole cache. At cluster scale, Pond predicts
+how much of a virtual machine's memory will stay untouched and places that part on a CXL pool~\cite{Li2023Pond},
+and Zacarias et al.\ show that a 60\% overestimate of memory demand reduces the throughput of a disaggregated system
+by about 25\%~\cite{Zacarias2021Accurate}. These works motivate knowing what a job touches, which our earlier study
+measured for scheduling~\cite{memprintsched} and this work passes to the allocator.
 
 \section{Overview}
 \label{sec:overview}
