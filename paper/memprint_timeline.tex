@@ -29,7 +29,7 @@
 \maketitle
 
 \begin{abstract}
-Knowing how much memory a program touches, and when, helps compilers, runtime systems and job schedulers decide where to place data and how many programs fit on one machine. The most direct way to measure it is to record every memory access with a binary instrumentation tool such as Pin, but recording every access slows a program down by two to three orders of magnitude. \memprint{} reduces that cost by recording only a random fraction of the accesses and by learning, from small inputs that were recorded completely, how to scale the sampled result up to the true total. \memprint{} predicts a single number for a whole run. In this report we extend the problem to the number of bytes in use at every point of a run, with freed memory removed, and we describe every approach we tried, including those that failed, because the failures explain the design that works. We find four things. First, \memprint{}'s definition of the footprint, which adds up the largest access at each start address, counts overlapping accesses more than once, by up to 3.4$\times$ on a database; we therefore count the bytes touched, and we stop counting the memory allocator's own bookkeeping. Second, estimators that work from a random sample of memory accesses cannot tell memory that is used for the first time from memory that is used again, and at a sampling rate of 1 in 25 accesses the best such estimator still has 24\% mean error on a larger input. Third, sampling memory words instead of accesses removes that difficulty, because every word is chosen with the same probability no matter how often it is used; this estimator needs no training, and its mean error is 1.6\% to 4.9\% on PolyBench at 1 in 100 words or denser and 0.3\% to 6.8\% on miniVite with 1, 4 and 16 threads. Fourth, sampling words still requires a check on every access. We therefore check accesses only during short windows of time, and between windows we track only memory allocations, the pages that the operating system reports as touched, and, for memory that the allocator reuses, the pages written since each allocation. Watching 5\% of the run, the estimate of the peak is within 0.1\% on PolyBench, within 1.8\% on miniVite, and within $-3.7\%$ to $+6.7\%$ on graph kernels, a neural network, three language interpreters, a database and a compiler; the true peaks are consistent with Valgrind's heap profilers and never exceed the operating system's resident memory. The estimate costs about 3.5$\times$ native time on PolyBench and 15$\times$ to 18$\times$ on miniVite at 5\% watched, and 2.2$\times$ to 2.7$\times$ and 13$\times$ to 17$\times$ at 1\% watched, which is as accurate.
+Knowing how much memory a program touches, and when, helps compilers, runtime systems and job schedulers decide where to place data and how many programs fit on one machine. The most direct way to measure it is to record every memory access with a binary instrumentation tool such as Pin, but recording every access slows a program down by two to three orders of magnitude. \memprint{} reduces that cost by recording only a random fraction of the accesses and by learning, from small inputs that were recorded completely, how to scale the sampled result up to the true total. \memprint{} predicts a single number for a whole run. In this report we extend the problem to the number of bytes in use at every point of a run, with freed memory removed, and we describe every approach we tried, including those that failed, because the failures explain the design that works. We find four things. First, \memprint{}'s definition of the footprint, which adds up the largest access at each start address, counts overlapping accesses more than once, by up to 3.4$\times$ on a database; we therefore count the bytes touched, and we stop counting the memory allocator's own bookkeeping. Second, estimators that work from a random sample of memory accesses cannot tell memory that is used for the first time from memory that is used again, and at a sampling rate of 1 in 25 accesses the best such estimator still has 24\% mean error on a larger input. Third, sampling memory words instead of accesses removes that difficulty, because every word is chosen with the same probability no matter how often it is used; this estimator needs no training, and its mean error is 1.6\% to 4.9\% on PolyBench at 1 in 100 words or denser and 0.3\% to 6.8\% on miniVite with 1, 4 and 16 threads. Fourth, sampling words still requires a check on every access. We therefore check accesses only during short windows of time, and between windows we track only memory allocations, the pages that the operating system reports as touched, and, for memory that the allocator reuses, the pages written since each allocation. Watching 5\% of the run, the estimate of the peak is within 0.1\% on PolyBench, within 1.8\% on miniVite, and within $-3.7\%$ to $+6.7\%$ on graph kernels, a neural network, three language interpreters, a database and a compiler; the true peaks are consistent with Valgrind's heap profilers and never exceed the operating system's resident memory. The estimate costs about 3.5$\times$ native time on PolyBench and 15$\times$ to 18$\times$ on miniVite at 5\% watched, and 2.2$\times$ to 2.7$\times$ and 13$\times$ to 17$\times$ at 1\% watched, which is as accurate. With a correction for partly used pages, 1\% watched is within $-4.9\%$ to $+5.9\%$ at the peak on every program; with 8 MPI processes it is within 2.1\% of every process's peak, and under the jemalloc and tcmalloc allocators within $-7.0\%$ to $+2.8\%$.
 \end{abstract}
 
 \tableofcontents
@@ -55,6 +55,7 @@ In this work, we make the following contributions:
 \item We propose sampling memory words instead of memory accesses, and show that it estimates the memory in use over time without any training (\secref{sec:spatial}).
 \item We propose windowed sampling, which samples memory words only during short windows of time, and which tracks allocations, touched pages and written pages for the whole run at low cost (\secref{sec:windowed} and \secref{sec:windowed-eval}).
 \item We evaluate every estimator against complete recordings on PolyBench~\cite{polybench}, miniVite~\cite{minivite}, the GAP graph kernels~\cite{beamer2015gap}, the darknet neural network framework~\cite{darknet13}, the Python, Lua and Perl interpreters, the SQLite database~\cite{sqlite}, the GCC compiler and a synthetic test that reuses freed memory, we validate the true peaks against Valgrind's heap profilers and the operating system, and we list the limitations and the next steps (\secref{sec:discussion} and \secref{sec:next}).
+\item We reduce the cost of windowed sampling further, with a mode that opens no windows, a correction for partly used pages and cheaper switching between watching and not watching, and we extend it to MPI programs with up to 8 processes and to the jemalloc and tcmalloc allocators (\secref{sec:next-round}, \secref{sec:mpi} and \secref{sec:allocators}).
 \end{itemize}
 
 The rest of this report is organized as follows. \secref{sec:terms} defines the terms we use. \secref{sec:background} describes Pin and \memprint{}. \secref{sec:tool} describes the changes we made to the Pin tool to measure memory over time, and \secref{sec:method} describes how we evaluate an estimate. Sections~\ref{sec:reference} to~\ref{sec:windowed-eval} present the three families of estimators in the order in which we developed them. \secref{sec:discussion} discusses limitations, \secref{sec:related} discusses related work, and \secref{sec:next} lists next steps. The appendices list the tool's options and output files.
@@ -155,7 +156,7 @@ The allocator keeps bookkeeping data next to the blocks it hands out. The GNU C 
 
 With free tracking or windows on, the tool therefore finds the allocator's own code when the C library is loaded, by the names of its functions in the library's symbol table: the public functions and the internal ones such as \texttt{\_int\_malloc} and \texttt{\_int\_free}. The allocator is one source file, so its code is contiguous, and the tool takes the address range that these functions span. A memory reference made by an instruction in that range still counts as time but goes into no footprint. Copies and fills that the allocator delegates to \texttt{memcpy} and \texttt{memset}, for example the zeroing in \texttt{calloc} and the copy in \texttt{realloc}, still count, because they write the program's block. With this change the test above peaks at 14.45\,MB and ends at 1.7\,MB.
 
-A second, smaller leak appeared when we counted bytes touched (\secref{sec:definition}). String and copy functions read a few bytes past the end of a block, inside the slack that the allocator adds to round the block up, and those bytes were never freed, because a free removed only the requested size: Lua ended with 5.3\,MB live and nothing allocated. A freed block now releases its whole chunk, which is the size field below it, the block and its slack, read from the size field at the entry of \texttt{free} and checked against the requested size. If the field does not match a chunk of that size, as for a block that the allocator mapped directly or for another allocator, the tool releases only the requested size. Lua now ends at 0.3\,MB.
+A second, smaller leak appeared when we counted bytes touched (\secref{sec:definition}). String and copy functions read a few bytes past the end of a block, inside the slack that the allocator adds to round the block up, and those bytes were never freed, because a free removed only the requested size: Lua ended with 5.3\,MB live and nothing allocated. A freed block now releases its whole chunk, which is the size field below it, the block and its slack, read from the size field at the entry of \texttt{free} and checked against the requested size. If the field does not match a chunk of that size, as for a block that the allocator mapped directly, the tool releases only the requested size; with another allocator it releases the usable size that the allocator reports (\secref{sec:allocators}). Lua now ends at 0.3\,MB.
 
 \subsection{Counting bytes touched}
 \label{sec:definition}
@@ -198,6 +199,8 @@ We first built miniVite against the OpenMPI~\cite{gabriel2004openmpi} library of
 
 \paragraph{Programs that reuse their heap.}
 To test windowed sampling on real programs, we use the GAP benchmark suite~\cite{beamer2015gap} (breadth-first search, PageRank, connected components and single-source shortest paths on a synthetic graph with $2^{18}$ vertices), darknet~\cite{darknet13} classifying four images with AlexNet~\cite{krizhevsky2012alexnet} and random weights, and six programs that allocate and free memory constantly: CPython 3.6 serializing, parsing and sorting records, Lua 5.3~\cite{ierusalimschy1996lua} growing tables and concatenating strings, Perl 5.26 building hashes and strings, SQLite 3.26~\cite{sqlite} building, indexing, joining and vacuuming an in-memory database of 300{,}000 rows, and GCC 8's compiler proper (\texttt{cc1}) compiling the SQLite source file at \texttt{-O0}. They run for 1 to 4\,s natively and make 1.2 to 10.8 billion references. All but darknet, GAP and Python keep most of their memory in reused heap blocks (\secref{sec:blocks}).
+
+For runs with several MPI processes we use LULESH~2.0, a proxy application for shock hydrodynamics on an unstructured mesh, built with MPI at \texttt{-O3}, with 8 processes, and miniVite with 4 processes (\secref{sec:mpi}). To test allocators other than the GNU C library's, we run Lua and SQLite with jemalloc~5.3.0 and with tcmalloc from gperftools~2.18, loaded with \texttt{LD\_PRELOAD} (\secref{sec:allocators}).
 
 \paragraph{Machine.}
 All runs use Pin 3.30 on a machine with two Intel Xeon E5-2620 v4 processors (16 cores and 32 hardware threads in total) and 62\,GB of memory, running Rocky Linux 8.10 with Linux 4.18, GCC 8.5 and the GNU C library 2.28.
@@ -395,7 +398,7 @@ We first recorded selected references through trace buffers, as the splitter doe
 With the largest and middle of the sizes MINI to MEDIUM held out, as in \secref{sec:reference}, word sampling has 1.6\% and 4.0\% mean error at 1 in 25 words, 2.8\% and 4.9\% at 1 in 100, 2.9\% and 4.1\% at 1 in 250, and 5.3\% and 16.0\% at 1 in 1000 (\figref{fig:spatial}). The error follows the binomial prediction. The largest sizes (130{,}000 to 200{,}000 words) stay within about 5\% down to 1 in 1000, whereas the middle sizes (about 28{,}000 words) need 1 in 250 or denser, because at 1 in 1000 only about 28 of their words are selected. For the largest sizes, the true footprint lies within two standard errors of the estimate in 99\% of snapshots at 1 in 25 and 1 in 100 and in 75\% at 1 in 250, against 95\% expected, because a standard error computed from 20 buckets is itself uncertain.
 
 \paragraph{miniVite and threads.}
-With frees tracked, the live peak of miniVite is 3.8, 4.8 and 6.3\,MB at 1024, 4096 and 8192 vertices, the same at every thread count. Word sampling has 0.3\% to 6.8\% mean error at every rate from 1 in 25 to 1 in 1000 with 1, 4 and 16 threads, and the error of the peak is at most 3.6\% at 1 in 100 or denser and at most 7.7\% at 1 in 1000. The error bars are less reliable than on PolyBench: the truth lies within two standard errors in 98\% to 100\% of snapshots in most runs, but in only 1\% to 69\% in a few runs, which are off by more than their buckets suggest. At 8192 vertices a run takes 25 to 41\,s, against 175 to 187\,s for a complete recording and 0.16 to 0.22\,s natively.
+With frees tracked, the live peak of miniVite is 3.8, 4.8 and 6.3\,MB at 1024, 4096 and 8192 vertices, the same at every thread count. Word sampling has 0.3\% to 6.8\% mean error at every rate from 1 in 25 to 1 in 1000 with 1, 4 and 16 threads, and the error of the peak is at most 3.6\% at 1 in 100 or denser and at most 7.7\% at 1 in 1000. The error bars are calibrated across salts but not within a run. Over 20 runs of miniVite with 4096 vertices and different salts, at a given snapshot the truth lies within two standard errors in 94\% (1 in 100) and 95\% (1 in 250) of the runs, and the standardized errors have a standard deviation of 1.03 and 1.10 across runs and a mean of $-0.09$ and $+0.14$. A single run, however, keeps the same selected words, so its error persists from one snapshot to the next (lag-one correlation 0.82), and the share of its snapshots within two standard errors is nearly all or nothing (10\% to 100\% over the 20 runs). At 8192 vertices a run takes 25 to 41\,s, against 175 to 187\,s for a complete recording and 0.16 to 0.22\,s natively.
 
 \paragraph{Cost on large inputs.}
 On the LARGE PolyBench inputs, word sampling at 1 in 100 takes 284\,s for 2mm, 271\,s for gemm and 344\,s for jacobi-2d, against 8.0, 5.1 and 11.3\,s natively, which is an overhead of 30$\times$ to 53$\times$. Pin without a tool takes 8.2, 5.4 and 11.5\,s, so almost all of the cost is the selection test on every reference. The test checks one or two words for most references, against one start address for the start-address footprint, which took 211 to 236\,s.
@@ -460,7 +463,7 @@ When a window opens or closes, the instrumentation must change, because inside a
 
 The tool therefore counts window changes in a shared counter, and each thread remembers the last change it has acted on. When a thread checks the time and finds a change it has not acted on, it restarts at its current instruction with \texttt{PIN\_ExecuteAt}, using the machine state that Pin passes to the routine, so that Pin translates the code it is running again. Threads check the time every $s$ references also while running old code, because the counting call is present in both versions of the code. A reference that old code records after a window has closed is discarded.
 
-Discarding all translations has a cost that grows with the amount of code a program runs. For most programs it is small, but GCC's compiler runs a lot of code, and with 20 windows, which is 40 changes, it took 658 to 963\,s, against 101 to 122\,s with nothing watched and 182\,s watching the whole run (\secref{sec:cost}).
+Discarding all translations has a cost that grows with the amount of code a program runs, which \secref{sec:next-round} reduces with trace versions. For most programs it is small, but GCC's compiler runs a lot of code, and with 20 windows, which is 40 changes, it took 658 to 963\,s, against 101 to 122\,s with nothing watched and 182\,s watching the whole run (\secref{sec:cost}).
 
 \subsection{Tracking live blocks}
 \label{sec:blocks}
@@ -628,6 +631,8 @@ GCC \texttt{cc1} & 105.4\,MB & 11.5 / $+8.3$ & 3.6 / $+3.5$ & 8.1 / $+6.4$ & 8.5
 \subsection{Cost}
 \label{sec:cost}
 
+\secref{sec:overhead} compares every method of this report with the final tool; the measurements here are of the tool as described up to this section.
+
 \tabref{tab:cost} and \figref{fig:cost} report running times measured one at a time on an otherwise idle machine, one run per configuration, except where a run was repeated (the table then shows the median). On PolyBench LARGE, windowed sampling at 5\% watched costs 3.5$\times$ (jacobi-2d) and 3.6$\times$ (2mm) native time, and 4.5$\times$ to 12$\times$ on gemm, whose running time varied between 23 and 61\,s over three runs (the table shows the median), against 30$\times$ to 53$\times$ for word sampling of every reference, and with nothing watched it costs 1.9$\times$ to 2.3$\times$, which is mostly the cost of the per-block counter. Each further percent watched adds about 0.8\% of the cost of word sampling over that floor. On miniVite with 65536 vertices it costs 14.9$\times$ with one thread and 18.1$\times$ with four at 5\% watched, against 34$\times$ and 37$\times$ for word sampling, and 12.6$\times$ and 16.7$\times$ at 1\%, which is as accurate.
 
 The cost on miniVite is higher for three reasons. First, Pin itself costs about 1.8$\times$, because Pin translates the MPI library's start-up code once and the run is short. Second, miniVite makes 8 million \texttt{malloc} and \texttt{free} calls at 65536 vertices, each of which runs the allocator hooks and takes the lock, and on miniVite with 16384 vertices, turning the allocator hooks off saved 7\,s of 22\,s. Third, soft-dirty tracking cost about 14\% at 5\% watched in an earlier measurement, and 4\% to 14\% on PolyBench. The complete recordings that provided the truth took 3116 to 4080\,s, but they ran at the same time as other runs, so they are not directly comparable.
@@ -661,6 +666,201 @@ miniVite 65536, 4 threads & 6.0 & 11.1 & 221 & 84.1 & 101 & 109 & 136 \\
 \label{fig:cost}
 \end{figure}
 
+\subsection{Fewer windows, cheaper switching and partial pages}
+\label{sec:next-round}
+
+With bytes touched the windows matter less than before, so we tried four changes, evaluated against the same complete recordings (\tabref{tab:nextround}).
+
+\paragraph{No windows.} With \knob{pages\_only 1}, the tool never opens a window. Memory outside blocks comes from the resident pages of the program's writable image sections (\texttt{.data} and \texttt{.bss} of every loaded image, which Pin reports when it loads the image) and of the main thread's stack (the 8\,MB below the top of the stack mapping, read once from \texttt{/proc/self/maps}); the stacks of other threads are anonymous mappings, which the tool already tracks as blocks. This brings miniVite with 32768 vertices from $-6.9\%$ to $-3.5\%$ at the peak with nothing watched, and every peak is within $-5.4\%$ to $+5.4\%$. A pages-only run that never discarded its translations ran gemm and 2mm 8 times slower than one that did, for a reason we have not found (not the snapshots and not soft-dirty tracking), so the tool discards them once after the first snapshot.
+
+\paragraph{Partly used pages.} A touched page inside a block that borders an untouched page is probably only partly used. Counting such a page as half used (\knob{edge\_correction}, now the default) removes the churn test's error from whole pages ($+22.4\%$ to $+1.5\%$ at the peak with a quarter of each block written, $+12.2\%$ to $+1.4\%$ with half) and changes the other results by at most a point.
+
+\paragraph{The allocator's slack.} On Lua, 5.9 of the 6.2\,MB that the windows select outside blocks lies within 16 bytes past the end of a live block: string and copy functions read past the requested size into the slack that the allocator adds, in 650{,}000 small blocks. The truth counts these bytes, only windows see them, and so Lua's peak rises from $-5\%$ to $+5\%$ as more of the run is watched. Measuring blocks over their whole chunk (\knob{block\_slack 1}) fixes the peak but counts slack that is never read, which makes Lua's mean error 14\% instead of 6\%, so it is off by default. On GCC, by contrast, the memory outside blocks is far from any block (globals and stack), and the pages of its blocks overcount by about 8\,MB, because its garbage collector uses parts of pages.
+
+\paragraph{Cheaper switching.} Pin's trace versions let two instrumented versions of the code coexist: a test at each trace entry compares a tool register, which the time check sets to the window state, and moves to the other version when they differ, so nothing is discarded. On GCC at 5\% watched this takes 153\,s instead of 706\,s, but the test at every trace entry made 2mm with nothing watched take 63\,s instead of 16\,s. With \knob{window\_switch auto}, the default, the tool flushes until one window change retranslates more than 10{,}000 traces and then switches to versions for good: GCC retranslates about 47{,}000 traces per change, Lua 1300, miniVite 210 and 2mm 11, so only GCC switches. \tabref{tab:nextcost} gives the running times.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Windowed estimate with the partial-page correction, mean error / error of the peak in percent, 1 in 100 words, periodic windows; ``before'' is the tool of \secref{sec:windowed-eval} with nothing watched.}
+\label{tab:nextround}
+\begin{tabular}{lcccc}
+\toprule
+Run & Before, nothing & Pages only & 1\% & 5\% \\
+\midrule
+miniVite 65536, 1 thread & 10.1 / $-3.8$ & 5.0 / $-1.9$ & 1.8 / $+0.7$ & 2.9 / $+1.1$ \\
+miniVite 32768, 1 thread & 14.7 / $-6.9$ & 7.4 / $-3.5$ & 0.9 / $+0.4$ & 2.1 / $+1.0$ \\
+heap churn, 25\% touched & 22.8 / $+22.2$ & 3.0 / $-1.2$ & 1.1 / $+1.6$ & 1.4 / $+1.5$ \\
+heap churn, 50\% touched & 12.4 / $+12.0$ & 1.6 / $-0.3$ & 1.2 / $+1.7$ & 1.1 / $+1.4$ \\
+GAP bfs & 5.0 / $-0.3$ & 4.5 / $-0.3$ & 3.0 / $-0.1$ & 1.8 / $+0.2$ \\
+darknet & 3.1 / $+4.0$ & 3.1 / $+4.0$ & 3.1 / $+4.0$ & 3.1 / $+4.0$ \\
+Python & 3.4 / $+2.8$ & 4.4 / $+3.8$ & 5.6 / $+3.7$ & 6.2 / $+4.0$ \\
+Lua & 5.9 / $-5.4$ & 5.9 / $-5.4$ & 4.7 / $-4.9$ & 6.1 / $-4.1$ \\
+Perl & 1.9 / $-3.5$ & 1.9 / $-3.4$ & 1.8 / $-2.9$ & 1.8 / $-2.1$ \\
+SQLite & 6.4 / $-0.7$ & 6.7 / $-2.7$ & 8.3 / $-2.5$ & 8.1 / $-2.1$ \\
+GCC \texttt{cc1} & 3.6 / $+3.5$ & 6.4 / $+5.4$ & 7.7 / $+5.9$ & 8.2 / $+6.5$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Running time in seconds, one run at a time on a machine shared with other jobs (so only roughly comparable with \tabref{tab:cost}).}
+\label{tab:nextcost}
+\begin{tabular}{lrrrrr}
+\toprule
+Workload & Native & Pages only & 1\%, auto & 5\%, auto & 5\%, flush \\
+\midrule
+2mm LARGE & 9.6--13.4 & 23.2 & 20.2 & 35.5 & 45.4 \\
+gemm LARGE & 5.3--5.6 & 11.8 & 15.3 & 25.9 & 27.6 \\
+jacobi-2d LARGE & 11.9--12.5 & 22.6 & 28.0 & 44.9 & 47.7 \\
+miniVite 65536, 1 thread & 6.8--7.3 & 69.6 & 88.7 & 108.0 & 110.2 \\
+miniVite 65536, 4 threads & 6.4--6.8 & 85.8 & 114.0 & 137.4 & 123.5 \\
+GCC \texttt{cc1} & 1.7--1.9 & 81.7 & 137.5 & 152.7 & 706.3 \\
+Lua & 3.3--3.7 & 34.4 & 57.8 & 56.5 & 58.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Many MPI processes}
+\label{sec:mpi}
+
+To see how the estimate behaves with several processes and on runs too long to record completely, we ran LULESH~2.0, a hydrodynamics proxy application, with 8 MPI processes, and miniVite with 4 processes, built against the Spack OpenMPI 5.0.5. Each process runs under its own Pin and writes its own files. Two medium runs (LULESH with $20^3$ elements per process and 100 iterations, miniVite with 131072 vertices) were also recorded completely; two long ones (LULESH with $50^3$ elements and 500 iterations, 156\,s natively; miniVite with 524288 vertices and 4 threads per process, 146\,s) were not, and we compare them with each process's peak resident memory. \tabref{tab:mpi} gives the results.
+
+Watching 1\% of the run, every process's peak is within 2.1\% of its truth, and the processes agree with each other within a point. Without windows, the estimate is 5\% to 9\% low at the peak, because MPI's own memory, such as its shared-memory segments, which are mappings of files rather than anonymous memory, lies outside the blocks and outside the image sections that the pages-only mode measures, so only windows see it. For MPI programs, at least 1\% should therefore be watched. The true footprint is 0.41 to 0.50 of the resident memory on the medium runs, because resident memory also counts the loader, the MPI library's code and data, and whole pages. On the long runs the windowed peak is 0.77 to 0.88 of the resident memory and below it on every process; resident memory is only an upper bound, so it cannot check the estimate more closely. Relative to native time, long runs are cheaper: 4.6$\times$ (LULESH) and 5.6$\times$ (miniVite) without windows, and 10.3$\times$ and 5.2$\times$ at 1\% watched, against 18$\times$ to 34$\times$ for the 3\,s medium LULESH run, because the fixed cost of starting Pin and translating the MPI library is spread over a longer run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{MPI runs, ranges over the processes. Footprints in MB; estimates as mean error / error of the peak in percent where a complete recording exists, else the estimated peak.}
+\label{tab:mpi}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Run & True peak & Peak RSS & Allocated & Pages only & 1\% watched \\
+\midrule
+LULESH 20, 8 processes & 9.0--9.1 & 20.2--21.8 & 18.0--18.1 & 20.7--22.4 / $-8.7$ to $-9.4$ & 12.9--15.5 / $-0.8$ to $-2.1$ \\
+miniVite 131072, 4 processes & 16.4--17.1 & 33.4--34.4 & 30.9--31.5 & 9.2--11.9 / $-5.4$ to $-6.0$ & 3.2--5.4 / $-2.0$ to $+0.2$ \\
+LULESH 50, 8 processes & --- & 105.3--107.2 & 100.3--100.4 & 90.5--90.6 & 92.4--92.6 \\
+miniVite 524288, 4$\times$4 threads & --- & 76.4--79.5 & 88.7--90.9 & 58.6--60.8 & 59.3--61.6 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Other allocators}
+\label{sec:allocators}
+
+The tool now also handles an allocator that replaces the GNU C library's, such as jemalloc~5.3 and tcmalloc (gperftools~2.18), which we load with \texttt{LD\_PRELOAD}. The first image other than the C library that defines \texttt{malloc} is taken as the allocator, and all of its code counts as the allocator's for the exclusion of its bookkeeping (\secref{sec:allocator}). Four problems had to be solved. First, Pin did not list jemalloc's exported functions at all, so the tool reads their addresses from the library's dynamic symbol table and creates the routines itself; such a routine extends to the next symbol that Pin knows, over other functions (jemalloc's \texttt{memalign} covered \texttt{realloc}), so the tool takes each function's size from the ELF symbol tables and hooks only the returns inside it. Second, both allocators leave their slow paths by jumping into another function, sometimes one without a symbol, so the tool catches a call's exit at the first of three places: a return of a jump target executed with the stack pointer of the outermost call's entry, dispatched by the kind of call that was entered (jemalloc's \texttt{malloc} and \texttt{realloc} jump to the same function); the instruction at the return address of a direct call to an allocation function; and return addresses learned at run time, because programs built without PLT stubs, such as the system's \texttt{sqlite3}, call through the global offset table: each allocation call records its return address, and the code there is translated again, with the exit, before the call returns. Third, at \texttt{free} the tool releases the block's usable size, which it asks the allocator for, so that bytes read past the requested size are freed, and blocks whose allocation was missed are freed too. Fourth, the bugs were only visible as leaks: before the size fix, jemalloc's \texttt{realloc} left 16{,}468 of 20{,}000 blocks live in a unit test.
+
+\tabref{tab:allocators} gives the results on Lua and SQLite. Every peak is within $-7.0\%$ to $+2.8\%$. The true peaks depend on the allocator, because size classes and layouts differ. tcmalloc remains partial: a program that allocates and frees 600{,}000 small blocks ends with 5.75\,MB live, against 1.70\,MB under the GNU allocator and 2.15\,MB under jemalloc, and Lua with 5.3\,MB instead of 0.3\,MB, because writes to tcmalloc's metadata that are made outside its own code are counted and never released. Allocators that manage regions inside the program, such as Python's small-object allocator and GCC's garbage collector, are still tracked only through the regions that they map.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Lua and SQLite under three allocators: true peak and peak RSS in MB, estimates as mean error / error of the peak in percent, 1 in 100 words.}
+\label{tab:allocators}
+\begin{tabular}{llcccc}
+\toprule
+Allocator & Program & True peak & Peak RSS & Pages only & 1\% watched \\
+\midrule
+GNU C library & Lua & 55.5 & --- & 5.9 / $-5.4$ & 4.7 / $-4.8$ \\
+jemalloc & Lua & 51.7 & 93.2 & 7.6 / $+1.9$ & 8.3 / $+2.8$ \\
+tcmalloc & Lua & 55.3 & 69.4 & 6.1 / $+1.3$ & 7.4 / $-0.9$ \\
+GNU C library & SQLite & 76.2 & --- & 6.8 / $-2.7$ & 8.5 / $-2.5$ \\
+jemalloc & SQLite & 81.0 & 144.1 & 10.7 / $-6.4$ & 10.0 / $-7.0$ \\
+tcmalloc & SQLite & 79.2 & 112.1 & 2.2 / $-0.9$ & 8.5 / $-2.7$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=====================================================================
+\section{Overhead of every method}
+\label{sec:overhead}
+
+The costs reported so far were measured with different builds of the tool and under different loads. To compare all the methods of this report on equal terms, we ran each of them with the final tool on eight programs: 2mm, gemm and jacobi-2d at the LARGE size, miniVite with 65536 vertices and 1 or 4 threads, Lua, SQLite and GCC's \texttt{cc1}. We measured the wall time and the peak resident memory of the whole process (program, Pin and tool) with \texttt{/usr/bin/time}. Runs that take a few minutes or less were repeated three times and we report the median; runs differed by a few percent, more for the short SQLite and GCC runs. Up to six runs (briefly ten) shared a 32-core machine, which was also running another user's jobs, so the slowdowns, which are relative to the median of three native runs made alone, include some interference: native runs made in the same mix were 1.1$\times$ to 1.3$\times$ slower than alone, and 2mm, which is limited by memory bandwidth, 1.8$\times$. \tabref{tab:overhead-time} and \tabref{tab:overhead-mem} give the results, and \figref{fig:overhead} shows both. Late in the experiment another user's job filled the machine's memory and swap; the complete recordings of miniVite overlapped that period and may be slowed by it, and we stopped three of our runs and repeated them after the job had finished (Lua's complete recording ran on an otherwise quieter machine).
+
+\paragraph{Pin and per-reference instrumentation.} Pin without a tool costs 1.1$\times$ to 1.6$\times$ on PolyBench and 2.2$\times$ on miniVite, but 2.8$\times$ to 13$\times$ on the short interpreter, database and compiler runs, where translating code dominates: GCC's 1.6\,s run executes a lot of code once. Instrumenting every reference, even with an analysis routine that only counts, costs 13$\times$ to 54$\times$. This is the floor for every method that looks at every reference: \memprint{}'s splitter and sampler, the complete recording and word sampling.
+
+\paragraph{Complete recordings.} \memprint{}'s splitter, which keeps 260 subsampled footprints (13 intervals with 20 bins each) for its whole-run model, costs 347$\times$ to 866$\times$ native time (540$\times$ to 781$\times$ on PolyBench) and needs 3.5 to 21\,GB of memory: 580$\times$ to 760$\times$ the program's own on PolyBench, whose arrays it records word by word in every bin, and 73$\times$ to 125$\times$ elsewhere. The complete recording that we use as the truth, with one bin, freed memory removed and snapshots, costs 134$\times$ to 398$\times$ and 0.6 to 3.5\,GB, 13$\times$ to 44$\times$ the program's memory. Either is affordable only for small inputs.
+
+\paragraph{Estimators from sampled references.} \memprint{}'s sampler (\secref{sec:reference}) costs 29$\times$ to 109$\times$ at 1 in 100 references and 52$\times$ to 132$\times$ at 1 in 25, above the instrumentation floor, because every selected reference updates hash sets for each of its bins. Its memory is the largest of the sampling methods: 2.7 to 3.8\,GB on PolyBench LARGE at 1 in 100, and at 1 in 25 on 2mm and gemm it exceeded about 5\,GB and Pin aborted with an out-of-memory error, although the machine had memory to spare. The estimators that need training (the $\alpha$ model, the hybrid) add the complete recordings of smaller inputs: for 2mm, recording the seven training sizes from MINI to MEDIUM took 128\,s, against 0.1\,s natively, and fitting and evaluating every estimator took 190 to 220\,s per program on one core. The unseen-species estimators need no training.
+
+\paragraph{Word sampling.} Word sampling without windows (\secref{sec:spatial}) costs 27$\times$ to 68$\times$, close to the instrumentation floor, and needs 3$\times$ to 10$\times$ the program's memory, mostly Pin's own: it keeps only the selected words.
+
+\paragraph{Windowed sampling.} With pages only, windowed sampling costs 2.0$\times$ to 3.2$\times$ on PolyBench, 12$\times$ to 14$\times$ on miniVite and 13$\times$ to 17$\times$ on Lua and SQLite; at 1\% watched, 2.5$\times$ to 3.4$\times$, 14$\times$ to 18$\times$ and 22$\times$ to 52$\times$. On PolyBench every further percent watched costs about as much as word sampling on that fraction of the run, so 20\% watched costs 10$\times$ to 13$\times$. On the other programs the cost of watching is smaller than the fixed cost, which comes from the allocator hooks (miniVite, Lua, SQLite) and from translating code (GCC: 50$\times$ with pages only, 85$\times$ to 108$\times$ with windows, and 395$\times$ at 5\% if every window change discards all translations, against 99$\times$ with the automatic switch to trace versions). SQLite's run is 0.9\,s natively, so the fixed cost of starting Pin and the tool weighs heavily: 17$\times$ with pages only and 52$\times$ at 1\%, where every window change discards the translated code and Pin translates it again (\secref{sec:switching}). The memory is 2.1$\times$ to 3.8$\times$ the program's on PolyBench and 2.9$\times$ to 16$\times$ elsewhere, close to Pin's own (1.9$\times$ to 5.8$\times$): blocks, pages and selected words take little.
+
+\paragraph{Heap profilers.} Massif costs 5.6$\times$ to 23$\times$ and DHAT 15$\times$ to 74$\times$, both with less than 2.2$\times$ the memory (4.4$\times$ for DHAT on Lua). Windowed sampling at 1\% is cheaper than DHAT on every program except SQLite and GCC, and cheaper than Massif on PolyBench and miniVite, but costs 3$\times$ to 8$\times$ more than Massif on the interpreters and the compiler, where the allocator hooks and Pin's translation dominate. Massif and DHAT measure allocations, however, not the memory touched (\secref{sec:validation}).
+
+\paragraph{Summary.} The floor set by per-reference instrumentation (13$\times$ to 54$\times$) separates the methods: every method that examines every reference costs at least that much, and the complete recordings and \memprint{}'s splitter 4$\times$ to 33$\times$ more. Windowed sampling is the only method below that floor, by 7$\times$ to 10$\times$ on PolyBench and 1.6$\times$ to 1.8$\times$ on miniVite at 1\% watched. On the short interpreter, database and compiler runs it is above the floor, because the allocator hooks and code translation, not the references, dominate there; a longer run of the same programs would weigh these fixed costs less.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Running time as a multiple of the native time (first row, in seconds, median of three runs alone). Medians of three runs where repeated. OOM: Pin aborted at about 5\,GB.}
+\label{tab:overhead-time}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
+\toprule
+& 2mm & gemm & jacobi-2d & miniVite 1t & miniVite 4t & Lua & SQLite & GCC \\
+\midrule
+Native (s) & 7.4 & 5.0 & 11.2 & 6.4 & 6.0 & 2.5 & 0.9 & 1.6 \\
+\midrule
+Pin, no tool & 1.6 & 1.2 & 1.1 & 2.2 & 2.3 & 2.8 & 3.9 & 13 \\
+Per-reference instrumentation only & 26 & 28 & 24 & 26 & 28 & 13 & 27 & 54 \\
+\memprint{} splitter (13 intervals $\times$ 20 bins) & 665 & 781 & 540 & 863 & 866 & 347 & 554 & 502 \\
+Complete recording (truth) & 299 & 291 & 285 & 341 & 398 & 134 & 217 & 210 \\
+Reference sampling, 1 in 100 & 54 & 79 & 42 & 44 & 46 & 29 & 47 & 109 \\
+Reference sampling, 1 in 25 & OOM & OOM & 86 & 81 & 87 & 52 & 107 & 132 \\
+Word sampling, 1 in 100 & 48 & 59 & 36 & 37 & 54 & 27 & 49 & 68 \\
+Windowed, pages only & 3.2 & 2.5 & 2.0 & 12 & 14 & 13 & 17 & 50 \\
+Windowed, 1\% watched & 3.4 & 3.2 & 2.5 & 14 & 18 & 22 & 52 & 85 \\
+Windowed, 5\% watched & 6.0 & 5.6 & 4.0 & 18 & 20 & 22 & 54 & 99 \\
+Windowed, 20\% watched & 13 & 13 & 10 & 23 & 26 & 25 & 62 & 108 \\
+Windowed, 5\%, flushing & 4.8 & 5.4 & 4.0 & 18 & 20 & 29 & 53 & 395 \\
+Massif & 5.6 & 6.1 & 7.9 & 20 & 23 & 6.6 & 9.8 & 11 \\
+DHAT & 16 & 17 & 15 & 32 & 34 & 44 & 43 & 74 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Peak resident memory in MB of the process (program, Pin and tool).}
+\label{tab:overhead-mem}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
+\toprule
+& 2mm & gemm & jacobi-2d & miniVite 1t & miniVite 4t & Lua & SQLite & GCC \\
+\midrule
+Native & 36 & 29 & 27 & 46 & 48 & 63 & 79 & 128 \\
+\midrule
+Pin, no tool & 70 & 62 & 60 & 261 & 266 & 125 & 170 & 747 \\
+Per-reference instrumentation only & 78 & 77 & 74 & 348 & 353 & 144 & 202 & 776 \\
+\memprint{} splitter (13 intervals $\times$ 20 bins) & 21{,}131 & 17{,}420 & 20{,}502 & 3{,}456 & 3{,}459 & 7{,}818 & 8{,}516 & 9{,}984 \\
+Complete recording (truth) & 750 & 611 & 728 & 764 & 621 & 1{,}197 & 3{,}466 & 2{,}946 \\
+Reference sampling, 1 in 100 & 2{,}785 & 2{,}662 & 3{,}805 & 700 & 698 & 387 & 666 & 2{,}024 \\
+Reference sampling, 1 in 25 & OOM & OOM & 5{,}050 & 850 & 846 & 596 & 1{,}322 & 2{,}975 \\
+Word sampling, 1 in 100 & 121 & 105 & 102 & 452 & 444 & 247 & 355 & 1{,}263 \\
+Windowed, pages only & 77 & 69 & 67 & 400 & 411 & 265 & 227 & 1{,}289 \\
+Windowed, 1\% watched & 105 & 97 & 100 & 447 & 455 & 278 & 269 & 1{,}728 \\
+Windowed, 5\% watched & 114 & 103 & 102 & 462 & 479 & 285 & 288 & 1{,}858 \\
+Windowed, 20\% watched & 115 & 103 & 100 & 477 & 491 & 303 & 317 & 1{,}990 \\
+Windowed, 5\%, flushing & 113 & 104 & 100 & 436 & 442 & 277 & 287 & 1{,}587 \\
+Massif & 60 & 53 & 51 & 90 & 90 & 137 & 111 & 223 \\
+DHAT & 64 & 56 & 54 & 98 & 101 & 275 & 120 & 236 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/overhead.pdf}
+\caption{Running time and peak memory of every method relative to the native run, one marker per program. The vertical lines separate the methods that examine every reference, windowed sampling, and Valgrind's heap profilers.}
+\label{fig:overhead}
+\end{figure}
+
 %=====================================================================
 \section{Discussion and limitations}
 \label{sec:discussion}
@@ -672,16 +872,16 @@ Each part of \eqref{eq:windowed} corrects one failure that we observed. Residenc
 The start-address footprint of \memprint{} measures the access pattern as well as the memory, by up to 3.4$\times$ on SQLite, and a heap profiler measures allocation, which can be 2$\times$ to 4$\times$ the memory touched. The bytes touched are bounded by the resident memory, which our validation confirmed on every workload. The tool keeps the start-address footprint for \memprint{}'s whole-run model, whose outputs do not change.
 
 \paragraph{Limitations of written pages.}
-A limitation of written pages is that they miss memory that a reused block only reads, which is rare for heap memory because the allocator does not initialize it, and that they are exact only to the page, which adds up to 4\,KB per block and dominates for programs with many small blocks that are only partly touched (23\% on the churn test). Pages also round up fresh blocks that are touched only in part, which is darknet's $+4\%$. Blocks smaller than 16\,KB do not clear the soft-dirty bits when they are allocated, so they can inherit marks from writes made since the last clear. With several threads, writes that other threads make between the entry and the exit of a \texttt{brk} or \texttt{mmap} call are cleared without being recorded.
+A limitation of written pages is that they miss memory that a reused block only reads, which is rare for heap memory because the allocator does not initialize it, and that they are exact only to the page, which adds up to 4\,KB per block and dominates for programs with many small blocks that are only partly touched (23\% on the churn test). Counting a page at the border of a block's untouched part as half used reduces that to 1.5\% (\secref{sec:next-round}), but it is a rule of thumb, not a measurement. It does not help darknet ($+4\%$), whose partly touched pages lie at the ends of fresh blocks, or GCC ($+6\%$), whose collector uses parts of its pages. Blocks smaller than 16\,KB do not clear the soft-dirty bits when they are allocated, so they can inherit marks from writes made since the last clear. With several threads, writes that other threads make between the entry and the exit of a \texttt{brk} or \texttt{mmap} call are cleared without being recorded.
 
 \paragraph{Limitations of the allocator handling.}
-The tool recognizes the GNU C library's allocator by the names of its functions, which needs the library's symbol table, and it reads the allocator's chunk size field to release a whole chunk. Programs that use another allocator, such as jemalloc or tcmalloc, or that manage memory inside large regions of their own, as Python's small-object allocator and GCC's garbage collector do, are tracked only at the level of the regions that they map.
+The tool recognizes the GNU C library's allocator by the names of its functions, which needs the library's symbol table, and it reads the allocator's chunk size field to release a whole chunk. It also handles jemalloc and tcmalloc (\secref{sec:allocators}), although tcmalloc's metadata writes made outside its own code leave a few megabytes live, and other replacement allocators are untested. Programs that manage memory inside large regions of their own, as Python's small-object allocator and GCC's garbage collector do, are tracked only at the level of the regions that they map.
 
 \paragraph{Other limitations.}
-Memory outside blocks, such as the stack and global variables, is seen only in windows. The tool does not track \texttt{mremap} calls made outside \texttt{realloc}, \texttt{madvise}, or the growth and shrinking of the stack. Every window change discards all translated code, which is expensive for programs with a lot of code. Address and word selection depend on absolute addresses, which move when the tool library changes size, because the operating system places the program's mappings around the tool's, so spatial and windowed outputs are not byte for byte identical across builds of the tool, whereas splitter and sampler outputs are. Soft-dirty tracking requires a Linux kernel built with soft-dirty support, and the tool falls back to residency for reused blocks if \texttt{/proc/self/clear\_refs} cannot be written.
+Memory outside blocks is seen only in windows, except for the writable sections of the loaded images and the main thread's stack, whose resident pages the pages-only mode measures; MPI's shared memory is not among them, so MPI programs need windows (\secref{sec:mpi}). The tool does not track \texttt{mremap} calls made outside \texttt{realloc}, \texttt{madvise}, or the growth and shrinking of the stack. A window change discards all translated code until one change has retranslated more than 10{,}000 traces, after which the tool keeps two versions of the code instead; the version test at every trace entry then costs time for the rest of the run. Address and word selection depend on absolute addresses, which move when the tool library changes size, because the operating system places the program's mappings around the tool's, so spatial and windowed outputs are not byte for byte identical across builds of the tool, whereas splitter and sampler outputs are. Soft-dirty tracking requires a Linux kernel built with soft-dirty support, and the tool falls back to residency for reused blocks if \texttt{/proc/self/clear\_refs} cannot be written.
 
 \paragraph{Generality of the evaluation.}
-We evaluated two scientific applications, four graph kernels, a neural network, three interpreters, a database, a compiler and one synthetic test, each on one input. It remains unclear how the windowed estimate behaves on long programs whose footprint changes in phases shorter than a window period, and with many MPI processes.
+We evaluated three scientific applications, four graph kernels, a neural network, three interpreters, a database, a compiler and one synthetic test, mostly on one input each, and two of the programs under two other allocators. With up to 8 MPI processes, the estimate at 1\% watched stays within 2.1\% of the peak (\secref{sec:mpi}), but the longest runs could be checked only against resident memory. It remains unclear how the windowed estimate behaves on long programs whose footprint changes in phases shorter than a window period.
 
 %=====================================================================
 \section{Related work}
@@ -711,12 +911,12 @@ Good~\cite{good1953} introduced the estimation of the probability of unseen spec
 
 We propose the following next steps, in order of priority.
 \begin{enumerate}
-\item \textbf{Fewer or cheaper window changes.} With bytes touched, 1\% watched is as accurate as 5\%, and pages alone are within 8\% of every peak we measured except where memory outside blocks matters. Fewer windows, or a mode without windows, would cut the cost, and switching instrumentation per trace rather than discarding the whole code cache would make windows affordable for programs with a lot of code, such as GCC.
-\item \textbf{Find what windows overcount on GCC and Lua.} Watching moves their peaks up by several points, through the selected bytes outside blocks.
-\item \textbf{Reduce the error from whole pages for small blocks.} For blocks smaller than a few pages, combine the written pages with the word sample, for example by scaling a block's written bytes by the fraction of its selected words that were touched.
+\item \textbf{Measure the slack and the used part of pages from the sample.} Lua's bytes in its blocks' slack ($-5\%$) and GCC's partly used collector pages ($+6\%$) are the remaining errors; the word sample could estimate both per block, in place of the half-page rule.
+\item \textbf{Explain the slowdown of pages-only runs} that never discard their translated code (\secref{sec:next-round}).
 \item \textbf{Reduce the fixed cost of the allocator hooks and of soft-dirty clears.} On miniVite the allocator hooks account for about a third of the windowed running time. Instrumenting the allocator in Pin's probe mode, which patches the function's entry instead of translating code, or recording allocation events in a per-thread log that is processed at snapshots instead of under a lock, would lower both.
-\item \textbf{Support other allocators.} Recognize jemalloc, tcmalloc and allocators that manage regions of their own, such as Python's, so that their blocks are tracked and their bookkeeping excluded.
-\item \textbf{Evaluate at scale.} Run windowed sampling on a long application with several MPI processes, where a complete recording is not feasible, and compare the estimated peak with the maximum resident memory reported by the operating system, which is an upper bound to the page.
+\item \textbf{Allocators that manage regions of their own.} Recognize Python's small-object allocator and GCC's garbage collector, so that their objects are tracked as blocks, and find tcmalloc's metadata writes made outside its code (\secref{sec:allocators}).
+\item \textbf{MPI memory without windows.} Measure the resident pages of MPI's shared-memory segments directly, so that the pages-only mode, which is 5\% to 9\% low on MPI programs (\secref{sec:mpi}), needs no windows there either.
+\item \textbf{Evaluate across nodes.} Run with many MPI processes on several nodes, where communication buffers grow with the number of processes, and record one medium run completely to check it.
 \item \textbf{Combine with hardware sampling.} PEBS or SPE could replace the per-block counter and the word sample at even lower cost, with the known-rate correction of \secref{sec:knownrate} for their bias toward frequently used memory.
 \item \textbf{Revisit forecasting.} Windowed sampling makes the beginnings of long runs cheap to record, which may make it practical to predict the rest of a run from the phases seen so far.
 \end{enumerate}
@@ -725,7 +925,7 @@ We propose the following next steps, in order of priority.
 \section{Conclusion}
 \label{sec:conclusion}
 
-The footprint of a program is best counted as the bytes it touches: \memprint{}'s start-address definition counts overlapping accesses more than once, by up to 3.4$\times$, and heap profilers count allocations, which can be several times the memory touched. Estimating the bytes in use over time from a random sample of memory references fails at sparse sampling rates, because such a sample cannot separate memory used for the first time from memory used again. Sampling memory words instead removes that difficulty and needs no training, but it still checks every reference. Checking references only during short windows, while tracking allocations, resident pages and, for reused memory, written pages for the whole run, keeps the estimated peak within 0.1\% on PolyBench LARGE, within 1.8\% on miniVite, and within $-3.7\%$ to $+6.7\%$ on ten other programs at 5\% of the run watched, at about 3.5$\times$ native time on PolyBench and 15$\times$ to 18$\times$ on miniVite, and less at 1\% watched, which is as accurate.
+The footprint of a program is best counted as the bytes it touches: \memprint{}'s start-address definition counts overlapping accesses more than once, by up to 3.4$\times$, and heap profilers count allocations, which can be several times the memory touched. Estimating the bytes in use over time from a random sample of memory references fails at sparse sampling rates, because such a sample cannot separate memory used for the first time from memory used again. Sampling memory words instead removes that difficulty and needs no training, but it still checks every reference. Checking references only during short windows, while tracking allocations, resident pages and, for reused memory, written pages for the whole run, keeps the estimated peak within 0.1\% on PolyBench LARGE, within 1.8\% on miniVite, and within $-3.7\%$ to $+6.7\%$ on ten other programs at 5\% of the run watched, at about 3.5$\times$ native time on PolyBench and 15$\times$ to 18$\times$ on miniVite, and less at 1\% watched, which is as accurate. Counting pages at the border of a block's untouched part as half used, and switching to two versions of the code for programs with a lot of code, make 1\% watched the best setting: within $-4.9\%$ to $+5.9\%$ at the peak on every program. The estimate holds with 8 MPI processes, within 2.1\% of every process's peak, as long as some of the run is watched, and under the jemalloc and tcmalloc allocators.
 
 \bibliographystyle{plain}
 \bibliography{memprint_timeline}
@@ -761,6 +961,10 @@ Option & Meaning \\
 \knob{window}, \knob{period} & Spatial: check references only for $W$ of every $P$ references (requires \knob{snapshot}, and turns on free tracking). \\
 \knob{window\_alloc} & Windowed: an allocation of at least $N$ bytes opens a window (default 1\,MB; 0 turns this off). \\
 \knob{dirty\_every} & Windowed: clear soft-dirty bits every $N$ references (default: every ten snapshots; 0: use residency for reused blocks). \\
+\knob{pages\_only} & Spatial with \knob{snapshot}: no windows; memory outside blocks from the resident pages of the writable image sections and the main stack. \\
+\knob{window\_switch} & Windowed: \texttt{flush}, \texttt{version}, or \texttt{auto} (default: flush until a window change retranslates more than \knob{version\_traces} traces, by default 10000, then version). \\
+\knob{edge\_correction} & Windowed: count half a page less for each touched page inside a block that borders an untouched one (default on). \\
+\knob{block\_slack} & Windowed: measure heap blocks over their whole chunk, slack included (default off). \\
 \knob{outdir}, \knob{name} & Output directory and trace name. \\
 \bottomrule
 \end{tabular}
@@ -775,7 +979,7 @@ Each run writes files named \texttt{<Prefix>\_<name>\_<interval>\_<pid>}, where 
 \begin{itemize}
 \item The summary file (\texttt{.csv}) and one file per bin (\texttt{\_SubSample\_<interval>\_bin\_<j>.csv}) have the columns \texttt{FunctionName}, \texttt{MemUsageObs} (footprint in bytes), \texttt{UniqueAddresses}, \texttt{CountObs} (references counted) and \texttt{SamplingInterval}, as in \memprint{}.
 \item The timeline (\texttt{\_timeline.csv}, with \knob{snapshot}) has one row per footprint per snapshot, with the columns \texttt{Time}, \texttt{SamplingInterval}, \texttt{Bin} ($-1$ for the main footprint, $-2$ for the union of an interval's bins), \texttt{MemUsageObs}, \texttt{UniqueAddresses}, \texttt{CountObs}, \texttt{FreedBytes}, \texttt{Singletons}, \texttt{Doubletons}, \texttt{Tripletons}, \texttt{Quadrupletons} ($f_1$ to $f_4$) and \texttt{Discovered} (how often an address entered the sample).
-\item The windowed file (\texttt{\_windowed.csv}, with \knob{window}) has one row per snapshot, with the columns \texttt{Time}, \texttt{Watching} (1 inside a window), \texttt{Windows} (completed), \texttt{AllocatedBytes}, \texttt{Blocks}, \texttt{FreshBytes}, \texttt{FreshResident}, \texttt{ReusedBytes}, \texttt{ReusedResident}, \texttt{FreshEst}, \texttt{ReusedEst} and \texttt{OtherEst} (selected footprint $\times i$ in fresh blocks, in reused blocks and outside blocks), \texttt{FreshCovered} and \texttt{ReusedCovered} (bytes covered $\times i$), \texttt{Density} (of all reused blocks; 1 with bytes touched), \texttt{Estimate} (\eqref{eq:windowed}), \texttt{Window}, \texttt{Period}, \texttt{ReusedWritten} (bytes of reused blocks on written pages), \texttt{TriggeredWindows} (windows opened by allocations) and \texttt{WatchedRefs} (references watched so far).
+\item The windowed file (\texttt{\_windowed.csv}, with \knob{window}) has one row per snapshot, with the columns \texttt{Time}, \texttt{Watching} (1 inside a window), \texttt{Windows} (completed), \texttt{AllocatedBytes}, \texttt{Blocks}, \texttt{FreshBytes}, \texttt{FreshResident}, \texttt{ReusedBytes}, \texttt{ReusedResident}, \texttt{FreshEst}, \texttt{ReusedEst} and \texttt{OtherEst} (selected footprint $\times i$ in fresh blocks, in reused blocks and outside blocks), \texttt{FreshCovered} and \texttt{ReusedCovered} (bytes covered $\times i$), \texttt{Density} (of all reused blocks; 1 with bytes touched), \texttt{Estimate} (\eqref{eq:windowed}), \texttt{Window}, \texttt{Period}, \texttt{ReusedWritten} (bytes of reused blocks on written pages), \texttt{TriggeredWindows} (windows opened by allocations), \texttt{WatchedRefs} (references watched so far), \texttt{RegionsResident} (resident bytes of the writable sections and the main stack, with \knob{pages\_only}) and \texttt{PartialEdges} (touched pages inside blocks that border untouched ones).
 \end{itemize}
 The analysis package scores windowed runs against a splitter run in the same directory with \texttt{python -m memprint timeline windowed <workload>}, and \texttt{paper/make\_figures.py} regenerates the figures of this report from the experiment outputs.
 

@@ -73,6 +73,10 @@ pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler|spatial [kno
 | `-window`, `-period` | 0 | spatial: watch accesses only for W of every P references, tracking allocations and page residency in between (needs `-snapshot`) |
 | `-window_alloc` | 1048576 | windowed: an allocation of at least N bytes opens a window (0: off) |
 | `-dirty_every` | 10 snapshots | windowed: clear soft-dirty bits every N references (0: residency only) |
+| `-pages_only` | 0 | spatial with `-snapshot`: no windows; memory outside blocks from the resident pages of the program's writable sections and main stack |
+| `-window_switch` | `auto` | windowed: `flush` (discard translated code at each window change), `version` (Pin trace versions, a test at every trace entry), `auto` (flush until a change retranslates more than `-version_traces` traces, default 10000, then version) |
+| `-edge_correction` | 1 | windowed: count half a page less for each touched page inside a block that borders an untouched one |
+| `-block_slack` | 0 | windowed: measure heap blocks over their whole glibc chunk, slack included |
 | `-footprint` | see text | `bytes`: bytes touched, the union of every access's byte range. `starts`: the paper's definition, the sum of the largest access size at each start address. Default: `bytes` with `-track_frees` or `-window`, else `starts` |
 
 The tool writes one CSV per footprint: `Buffered_<name>_1_<pid>.csv` (splitter, exact) or `Sampled_<name>_<i>_<pid>.csv` (sampler), plus `..._SubSample_<interval>_bin_<j>.csv` for every bin. Each file contains a single row:
@@ -81,6 +85,8 @@ The tool writes one CSV per footprint: `Buffered_<name>_1_<pid>.csv` (splitter, 
 FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval
 Total,<bytes>,<unique addresses>,<references>,<interval>
 ```
+
+**MPI programs:** run one Pin per rank and name each rank's outputs, e.g. `mpirun -np 8 sh -c 'exec pin -t memprint_trace.so -mode spatial -i 100 -s 20 -window 20000 -period 2000000 -window_alloc 0 -snapshot 20000000 -name r$OMPI_COMM_WORLD_RANK -- ./app'`. Watch at least 1%: `-pages_only` misses MPI's own memory (5–9% low at the peak on LULESH and miniVite).
 
 ## Running workloads
 
@@ -236,9 +242,10 @@ python -m memprint timeline forecast 2mm --run <dir> --upto <references>
 - **`-track_frees 1`:** `free`, `realloc` (the moved block or the shrunk tail) and `munmap` remove the released range from every footprint, so the footprint is live memory.
   - Releases are applied in program order relative to the buffered accesses of the same thread.
   - `free` is handled at its entry, because glibc's `free` exits through a tail jump.
-  - A freed block releases its whole glibc chunk, read from the chunk's size field at `free`'s entry: the block, its size field and the slack after the requested size, which string and copy functions read past the end of a block. If the size field does not fit a chunk of the block's size (an mmapped chunk, another allocator), only the requested size is released.
+  - A freed block releases its whole glibc chunk, read from the chunk's size field at `free`'s entry: the block, its size field and the slack after the requested size, which string and copy functions read past the end of a block. If the size field does not fit a chunk of the block's size (an mmapped chunk), only the requested size is released; with another allocator, the usable size it reports.
   - Accesses made by the allocator's own code (glibc's `malloc.c`: chunk headers, free-list links) count as time but not toward any footprint, since they land outside live blocks and would never be released. Without this, a program that allocates and frees 600,000 small blocks keeps 5.7 MB of them "live". The code is found by symbol name; if libc has no symbol table, only its public allocation functions are covered.
   - Not tracked: `mremap`, `brk`, and stack frames. Ordering across threads is the order in which their buffers are processed.
+  - **Other allocators** (tested: jemalloc 5.3.0, gperftools 2.18 `tcmalloc_minimal`, through `LD_PRELOAD` or linking): the first image other than libc that defines `malloc` is taken as the allocator, and all its code is excluded as above. Blocks are released over their usable size (`malloc_usable_size`) at `free`. Exits through jumps into other functions are caught at the jump targets' returns, at the return address of direct calls, and at return addresses learned at run time (calls through the GOT or a function pointer). tcmalloc keeps 4–5 MB of metadata writes "live" that are made outside its own code. Set `MEMPRINT_VERBOSE=1` to print the allocator and the functions hooked.
   - The page index this needs roughly doubles the tool's memory use. miniVite 8192 uses about 14 GB.
 - **Footprint definition.** With `-track_frees` or `-window`, footprints count bytes touched (`-footprint bytes`). The paper's definition (`-footprint starts`, the default otherwise) adds up the largest access at each start address, so accesses that overlap count more than once: an 8-byte read at every byte offset of a 1 MB buffer gives 8.5 MB, against 1.15 MB of bytes touched. Spatial and windowed sampling in bytes mode select aligned 8-byte words rather than start addresses, and keep the bytes of each access inside selected words, so selected bytes × i is unbiased.
 - **Overhead** on 2mm SMALL:

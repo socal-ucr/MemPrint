@@ -113,6 +113,8 @@
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
+#include <elf.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <map>
 #include <set>
@@ -171,6 +173,21 @@ KNOB< UINT64 > KnobPeriod(KNOB_MODE_WRITEONCE, "pintool", "period", "0", "spatia
 KNOB< UINT64 > KnobWindowAlloc(KNOB_MODE_WRITEONCE, "pintool", "window_alloc", "1048576",
                                "spatial with -window: an allocation of at least N bytes opens a window, at most one "
                                "per period on top of the periodic ones (0: off)");
+KNOB< string > KnobWindowSwitch(KNOB_MODE_WRITEONCE, "pintool", "window_switch", "auto",
+                                "windowed: flush (discard all translated code at every window change) | version (two "
+                                "instrumented versions of the code, switched at trace entry) | auto (flush, until a window "
+                                "change retranslates more than -version_traces traces; then version)");
+KNOB< UINT64 > KnobVersionTraces(KNOB_MODE_WRITEONCE, "pintool", "version_traces", "10000",
+                                 "windowed, -window_switch auto: traces retranslated after one window change that make "
+                                 "the tool switch to versions");
+KNOB< BOOL > KnobEdgeCorrection(KNOB_MODE_WRITEONCE, "pintool", "edge_correction", "1",
+                                 "windowed: count half a page less for every touched page inside a block that borders an "
+                                 "untouched one (it is probably partly used)");
+KNOB< BOOL > KnobBlockSlack(KNOB_MODE_WRITEONCE, "pintool", "block_slack", "0",
+                            "windowed: measure heap blocks over their whole glibc chunk (requested size plus slack)");
+KNOB< BOOL > KnobPagesOnly(KNOB_MODE_WRITEONCE, "pintool", "pages_only", "0",
+                          "spatial with -snapshot: no windows at all; estimate from the pages of live blocks and of "
+                          "the program's writable segments and stack");
 KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
                               "spatial with -window: clear the kernel's soft-dirty page bits every N memory references "
                               "(default: every 10 snapshots; 0: off, reused blocks are measured by residency)");
@@ -438,10 +455,28 @@ struct Block
     vector< UINT8 > written; // reused blocks: per page, written since the block was allocated (soft-dirty)
     UINT64 sampled = 0, covered = 0; // selected footprint in the block and the bytes it covers (last Attribute)
     BOOL allWritten = FALSE;         // every page of `written` is set, so harvests can skip it
+    // Heap blocks: the end of the usable chunk (requested size plus the allocator's slack), which
+    // string and copy functions read and write past the requested size. 0: the block's size.
+    ADDRINT span = 0;
+    ADDRINT Extent() const { return span ? span : size; }
 };
 BOOL windowed = FALSE;
+BOOL pagesOnly = FALSE; // -pages_only: windowed bookkeeping, but never a window
+// The program's writable image sections (.data, .bss) of every loaded image, for -pages_only.
+vector< std::pair< ADDRINT, ADDRINT > > dataRegions;
 volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
 BOOL flushPending = FALSE;     // instrumentation must be redone for a window change
+// -window_switch version: every trace exists in a watching and a not-watching version. CheckTime,
+// which every thread runs every checkStep references, loads `watching` into a tool register, and
+// a version case at each trace entry moves to the other version if they differ, so no translated
+// code is discarded.
+// Versions cost a test at every trace entry (2mm LARGE with nothing watched: 63 s against 16 s),
+// flushing costs retranslating all code that runs (cc1 at 5% watched: 658 s against 127 s), so
+// -window_switch auto starts with flushing and switches when a window change was expensive.
+BOOL versioned = FALSE, autoSwitch = FALSE;
+UINT64 tracesSinceChange = 0; // traces instrumented since the last window change
+REG watchReg;
+enum { VERSION_IDLE = 0, VERSION_WATCH = 1 };
 UINT64 windowStart = 0, windowEnd = 0, nextPeriodic = 0, windowsDone = 0, checkStep = 0;
 // Windows opened by large allocations (-window_alloc): how many, when the last one ended, and
 // whether the current window is one; references watched in closed windows.
@@ -591,6 +626,12 @@ static VOID ApplyRelease(ADDRINT lo, ADDRINT hi);
 // Its accesses are chunk headers and free-list links, which land outside live blocks and
 // would never be released, so they count as time but not toward any footprint.
 ADDRINT mallocCodeLo = 0, mallocCodeHi = 0;
+// The allocator in use is the first loaded library (not the program) that defines malloc. If it is
+// not glibc (e.g. jemalloc or tcmalloc, usually preloaded), its whole image counts as allocator code,
+// glibc's chunk headers do not apply, and a freed block releases up to the allocator's own
+// malloc_usable_size (usableFn), called at free's entry.
+BOOL foreignAllocator = FALSE;
+ADDRINT usableFn = 0;
 const UINT32 MALLOC_REF = ~0u; // buffered size of an allocator reference
 
 static BOOL InMallocCode(INS ins) { return INS_Address(ins) >= mallocCodeLo && INS_Address(ins) < mallocCodeHi; }
@@ -645,7 +686,7 @@ static ADDRINT PIN_FAST_ANALYSIS_CALL CountRefs(THREADID tid, UINT32 n)
     return t.refs >= t.checkAt;
 }
 
-static VOID CheckTime(THREADID tid, CONTEXT* ctxt);
+static ADDRINT CheckTime(THREADID tid, CONTEXT* ctxt);
 
 // windowed: select 1-in-i 64-byte chunks (every address in a selected chunk; with
 // countBytes, 8-byte words), without counting (CountRefs counts). Seeing whole chunks gives the bytes the
@@ -666,7 +707,13 @@ static UINT32 MemoryReferences(INS ins)
 
 static VOID TraceWindowed(TRACE trace)
 {
-    BOOL watch = watching;
+    tracesSinceChange++;
+    BOOL watch = versioned ? TRACE_Version(trace) == VERSION_WATCH : watching;
+    if (versioned)
+    {
+        INS head = BBL_InsHead(TRACE_BblHead(trace));
+        INS_InsertVersionCase(head, watchReg, watch ? 0 : 1, watch ? VERSION_IDLE : VERSION_WATCH, IARG_END);
+    }
     for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
     {
         UINT32 n = 0;
@@ -674,7 +721,11 @@ static VOID TraceWindowed(TRACE trace)
             n += MemoryReferences(ins);
         if (n == 0) continue;
         BBL_InsertIfCall(bbl, IPOINT_BEFORE, AFUNPTR(CountRefs), IARG_FAST_ANALYSIS_CALL, IARG_THREAD_ID, IARG_UINT32, n, IARG_END);
-        BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_END);
+        if (versioned)
+            BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_RETURN_REGS, watchReg,
+                               IARG_END);
+        else
+            BBL_InsertThenCall(bbl, IPOINT_BEFORE, AFUNPTR(CheckTime), IARG_THREAD_ID, IARG_CONTEXT, IARG_END);
         if (!watch) continue;
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
         {
@@ -750,10 +801,23 @@ static VOID QueueRelease(THREADID tid, CONTEXT* ctxt, ADDRINT lo, ADDRINT hi)
 
 static VOID MaybeTriggerWindow(ADDRINT size);
 
-static VOID AddBlock(ADDRINT ptr, ADDRINT size, BOOL mapped, BOOL fresh)
+static ADDRINT ChunkHeader(ADDRINT ptr);
+static VOID ChunkRange(ADDRINT ptr, ADDRINT size, ADDRINT header, ADDRINT* lo, ADDRINT* hi);
+
+// Usable bytes of a heap block from its glibc chunk header, or `size` if the header does not fit
+static ADDRINT UsableSize(ADDRINT ptr, ADDRINT size)
+{
+    if (!KnobBlockSlack.Value()) return size;
+    ADDRINT lo, hi;
+    ChunkRange(ptr, size, ChunkHeader(ptr), &lo, &hi);
+    return lo == ptr ? size : hi - ptr;
+}
+
+static VOID AddBlock(ADDRINT ptr, ADDRINT size, BOOL mapped, BOOL fresh, ADDRINT span = 0)
 {
     if (ptr == 0 || size == 0) return;
     blocks[ptr] = {size, mapped, fresh};
+    if (span > size) blocks[ptr].span = span;
     MaybeTriggerWindow(size);
 }
 
@@ -778,7 +842,7 @@ static VOID UnmapBlocks(ADDRINT lo, ADDRINT hi)
     {
         auto next     = std::next(it);
         Block b       = it->second;
-        ADDRINT start = it->first, end = start + b.size;
+        ADDRINT start = it->first, end = start + b.Extent();
         if (b.mapped && end > lo)
         {
             blocks.erase(it);
@@ -806,7 +870,7 @@ static VOID Attribute()
         kv.second.sampled = kv.second.covered = 0;
     footprint.ForEach([&inBlocks, &outside](ADDRINT address, UINT32 size) {
         auto it = blocks.upper_bound(address);
-        if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.size)
+        if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.Extent())
             inBlocks.push_back({address, size, &std::prev(it)->second});
         else if (countBytes)
             outside.push_back({address, size, NULL});
@@ -849,7 +913,10 @@ static VOID ForgetResidency() { pageBits.clear(); }
 // Bytes of [lo, hi) on pages that have been touched (are resident or swapped).
 // With `written`, also marks the pages written since the last soft-dirty clear
 // (pagemap bit 55) and returns in *writtenBytes the bytes on pages marked so far.
-static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, UINT64* writtenBytes = NULL)
+// With `edges`, also adds the number of places inside [lo, hi) where a touched page (written, with
+// `written`; else resident) borders an untouched one: the touched page there is probably partly used.
+static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, UINT64* writtenBytes = NULL,
+                       UINT64* edges = NULL)
 {
     const ADDRINT page = 1 << PAGE_BITS, chunk = 512;
     ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
@@ -870,17 +937,22 @@ static UINT64 Resident(ADDRINT lo, ADDRINT hi, vector< UINT8 >* written = NULL, 
     }
     if (written) written->resize(last - first + 1, 0);
     UINT64 bytes = 0, wbytes = 0;
+    int prev = -1;
     for (ADDRINT p = first; p <= last; p++)
     {
         UINT64 bits = pageBits[p - cachedFirst];
         ADDRINT a = p << PAGE_BITS, overlap = std::min(hi, a + page) - std::max(lo, a);
+        int touched = (bits >> 62) != 0; // bit 63: present, bit 62: swapped
         if (written)
         {
             UINT8& w = (*written)[p - first];
             if ((bits >> 55) & 1) w = 1;
             if (w) wbytes += overlap;
+            touched = w;
         }
-        if (bits >> 62) bytes += overlap; // bit 63: present, bit 62: swapped
+        if (bits >> 62) bytes += overlap;
+        if (edges && prev >= 0 && touched != prev) ++*edges;
+        prev = touched;
     }
     if (writtenBytes) *writtenBytes = wbytes;
     return bytes;
@@ -895,8 +967,8 @@ static VOID Harvest()
         Block& b = kv.second;
         if (b.fresh || b.allWritten) continue;
         UINT64 w = 0;
-        Resident(kv.first, kv.first + b.size, &b.written, &w);
-        b.allWritten = w == b.size;
+        Resident(kv.first, kv.first + b.Extent(), &b.written, &w);
+        b.allWritten = w == b.Extent();
     }
     ForgetResidency();
 }
@@ -927,7 +999,7 @@ static VOID HarvestAndClear()
 static ADDRINT ChunkHeader(ADDRINT ptr)
 {
     ADDRINT header = 0;
-    if (mallocCodeHi == 0 || ptr < 8 || PIN_SafeCopy(&header, (VOID*)(ptr - 8), sizeof(header)) != sizeof(header)) return 0;
+    if (foreignAllocator || mallocCodeHi == 0 || ptr < 8 || PIN_SafeCopy(&header, (VOID*)(ptr - 8), sizeof(header)) != sizeof(header)) return 0;
     return header;
 }
 
@@ -962,7 +1034,7 @@ static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
     if (windowed)
     {
         PIN_GetLock(&stateLock, tid + 1);
-        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh);
+        if (!finished) AddBlock(ptr, size, FALSE, threads[tid].allocFresh, UsableSize(ptr, size));
         PIN_ReleaseLock(&stateLock);
         ApplyWindowChange();
     }
@@ -975,7 +1047,12 @@ static BOOL ResizeBlock(THREADID tid, ADDRINT ptr, ADDRINT size)
     PIN_GetLock(&stateLock, tid + 1);
     auto it  = blocks.find(ptr);
     BOOL got = !finished && it != blocks.end() && !threads[tid].allocFresh;
-    if (got) it->second.size = size, it->second.allWritten = FALSE; // the page bitmap follows at the next scan
+    if (got) // the page bitmap follows at the next scan
+    {
+        it->second.size = size, it->second.allWritten = FALSE;
+        ADDRINT usable  = UsableSize(ptr, size);
+        it->second.span = usable > size ? usable : 0;
+    }
     PIN_ReleaseLock(&stateLock);
     return got;
 }
@@ -1012,6 +1089,8 @@ static BOOL InAllocator(ADDRINT pc)
     return FALSE;
 }
 
+static VOID NoteReturnSite(ADDRINT ret, int kind);
+
 static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike, ADDRINT size, ADDRINT ptr, ADDRINT out)
 {
     ThreadData& t = threads[tid];
@@ -1031,6 +1110,7 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
     t.allocPtr    = ptr;
     t.allocHeader = ptr ? ChunkHeader(ptr) : 0; // realloc: the old chunk, before it changes
     t.allocOut  = out;
+    if (foreignAllocator) NoteReturnSite(caller, mallocLike ? 1 : out ? 3 : 2);
 }
 
 static BOOL AllocLeave(THREADID tid)
@@ -1074,6 +1154,15 @@ static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
     ADDRINT size = ForgetAllocation(ptr), lo, hi;
     ForgetBlock(tid, ptr);
     ChunkRange(ptr, size, size ? ChunkHeader(ptr) : 0, &lo, &hi);
+    if (foreignAllocator && usableFn && ptr)
+    {
+        // the bytes the allocator gave the block, which string and copy functions read past `size`;
+        // also the size of a block whose allocation was missed (an exit through a path not hooked)
+        size_t usable = 0;
+        PIN_CallApplicationFunction(ctxt, tid, CALLINGSTD_DEFAULT, AFUNPTR(usableFn), NULL, PIN_PARG(size_t), &usable,
+                                    PIN_PARG(void*), (void*)ptr, PIN_PARG_END());
+        if (usable > size && usable < size + (1 << 20)) lo = ptr, hi = ptr + usable;
+    }
     QueueRelease(tid, ctxt, lo, hi);
 }
 
@@ -1110,21 +1199,251 @@ static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     RememberAllocation(tid, ret, size);
 }
 
+// Calls f(name, value, size, dynamic) for every defined function symbol of an ELF file, from its
+// symbol table (.symtab) and its dynamic symbol table (.dynsym; dynamic = TRUE).
+template < typename F > static VOID ElfFunctions(const string& file, F f)
+{
+    int fd = open(file.c_str(), O_RDONLY);
+    if (fd < 0) return;
+    struct stat st;
+    if (fstat(fd, &st) == 0 && st.st_size > (off_t)sizeof(Elf64_Ehdr))
+    {
+        vector< char > data(st.st_size);
+        if (read(fd, data.data(), data.size()) == (ssize_t)data.size() && memcmp(data.data(), ELFMAG, SELFMAG) == 0)
+        {
+            const Elf64_Ehdr* eh = (const Elf64_Ehdr*)data.data();
+            const Elf64_Shdr* sh = (const Elf64_Shdr*)(data.data() + eh->e_shoff);
+            for (int i = 0; i < eh->e_shnum; i++)
+            {
+                if ((sh[i].sh_type != SHT_DYNSYM && sh[i].sh_type != SHT_SYMTAB) || sh[i].sh_link >= eh->e_shnum) continue;
+                const Elf64_Sym* sym = (const Elf64_Sym*)(data.data() + sh[i].sh_offset);
+                const char* str      = data.data() + sh[sh[i].sh_link].sh_offset;
+                for (size_t k = 0; k < sh[i].sh_size / sizeof(Elf64_Sym); k++)
+                    if (sym[k].st_shndx != SHN_UNDEF && ELF64_ST_TYPE(sym[k].st_info) == STT_FUNC)
+                        f(str + sym[k].st_name, sym[k].st_value, sym[k].st_size, sh[i].sh_type == SHT_DYNSYM);
+            }
+        }
+    }
+    close(fd);
+}
+
+// Value of a defined function `name` in the dynamic symbol table (.dynsym) of an ELF file, 0 if absent.
+static ADDRINT DynamicSymbol(const string& file, const char* name)
+{
+    ADDRINT value = 0;
+    ElfFunctions(file, [&](const char* n, ADDRINT v, ADDRINT, BOOL dynamic) {
+        if (dynamic && !value && strcmp(n, name) == 0) value = v;
+    });
+    return value;
+}
+
+// Sizes of the allocator's functions by address, from its ELF symbols. Pin may not know the
+// allocator's symbols (jemalloc's), and a routine it creates then runs on to the next symbol it
+// knows, over other functions (memalign over realloc): its returns are not all memalign's.
+std::map< ADDRINT, ADDRINT > functionSizes;
+
+// End of the function at the start of `rtn`.
+static ADDRINT RoutineEnd(RTN rtn)
+{
+    auto it = functionSizes.find(RTN_Address(rtn));
+    if (it == functionSizes.end() || it->second == 0) return RTN_Address(rtn) + RTN_Size(rtn);
+    return RTN_Address(rtn) + std::min(it->second, (ADDRINT)RTN_Size(rtn));
+}
+
+// Hooks `exit` (with `ifCall` as condition, if given) before each return of the function at the start of `rtn`.
+static VOID HookReturns(RTN rtn, AFUNPTR ifCall, AFUNPTR exit, IARGLIST exitArgs)
+{
+    ADDRINT end = RoutineEnd(rtn);
+    for (INS ins = RTN_InsHead(rtn); INS_Valid(ins) && INS_Address(ins) < end; ins = INS_Next(ins))
+        if (INS_IsRet(ins))
+        {
+            if (ifCall)
+            {
+                INS_InsertIfCall(ins, IPOINT_BEFORE, ifCall, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_END);
+                INS_InsertThenCall(ins, IPOINT_BEFORE, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+            }
+            else
+                INS_InsertCall(ins, IPOINT_BEFORE, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+        }
+}
+
+// The routine named `name`. Pin keeps one name per address and may not list a library's exported
+// aliases at all (jemalloc's malloc, which its own symbol table calls je_malloc), so the image's
+// symbols and then its .dynsym are searched; a routine is created at the address if Pin has none.
+static RTN FindRoutine(IMG img, const char* name)
+{
+    auto real = [](RTN r) { return RTN_Valid(r) && SEC_Name(RTN_Sec(r)).find(".plt") != 0; }; // not a PLT stub
+    RTN rtn   = RTN_FindByName(img, name);
+    if (real(rtn)) return rtn;
+    for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym); sym = SYM_Next(sym))
+        if (SYM_Name(sym) == name && real(RTN_FindByAddress(SYM_Address(sym)))) return RTN_FindByAddress(SYM_Address(sym));
+    if (IMG_IsMainExecutable(img)) return RTN_Invalid();
+    ADDRINT value = DynamicSymbol(IMG_Name(img), name);
+    if (!value) return RTN_Invalid();
+    ADDRINT address = IMG_LoadOffset(img) + value;
+    rtn             = RTN_FindByAddress(address);
+    if (RTN_Valid(rtn) && RTN_Address(rtn) == address) return rtn;
+    return RTN_CreateAt(address, name);
+}
+
+// Hook the exit of every function that `rtn` jumps to (not calls) inside the allocator's code.
+// A return instruction executing with the stack pointer of the outermost allocator call's entry
+// returns to that call's caller.
+static ADDRINT AtOuterReturn(THREADID tid, ADDRINT sp)
+{
+    return threads[tid].allocDepth == 1 && sp == threads[tid].allocSp;
+}
+
+// The exit of the outermost call, through a function that several allocation functions jump to
+// (jemalloc's realloc and malloc share one): the exit of the kind of call that was entered.
+static VOID TailExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
+{
+    ThreadData& t = threads[tid];
+    if (t.allocMallocLike)
+        MallocExit(tid, ret);
+    else if (t.allocOut)
+        PosixMemalignExit(tid, ret);
+    else
+        ReallocExit(tid, ctxt, ret);
+}
+
+static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args);
+
+static VOID HookTailJumps(RTN rtn, int depth, std::set< ADDRINT >& instrumented)
+{
+    static IARGLIST tailExitArgs = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
+    if (depth == 0) return;
+    vector< ADDRINT > targets;
+    RTN_Open(rtn);
+    ADDRINT end = RoutineEnd(rtn);
+    for (INS ins = RTN_InsHead(rtn); INS_Valid(ins) && INS_Address(ins) < end; ins = INS_Next(ins))
+        if (INS_IsDirectControlFlow(ins) && !INS_IsCall(ins))
+        {
+            ADDRINT t = INS_DirectControlFlowTargetAddress(ins);
+            if ((t < RTN_Address(rtn) || t >= end) && t >= mallocCodeLo && t < mallocCodeHi)
+                targets.push_back(t);
+        }
+    RTN_Close(rtn);
+    for (ADDRINT t : targets)
+    {
+        RTN target = RTN_FindByAddress(t);
+        if (!RTN_Valid(target) || RTN_Address(target) != t || !instrumented.insert(t).second) continue;
+        RTN_Open(target);
+        if (allocatorCode.size() < allocatorCode.capacity())
+            allocatorCode.push_back({RTN_Address(target), RoutineEnd(target)});
+        // Only a return to the outermost call's caller is that call's exit: the function is also called
+        // normally from inside the allocator (e.g. by realloc), where its return exits nothing.
+        HookReturns(target, AFUNPTR(AtOuterReturn), AFUNPTR(TailExit), tailExitArgs);
+        RTN_Close(target);
+        HookTailJumps(target, depth - 1, instrumented);
+    }
+}
+
 static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLIST enterArgs, AFUNPTR exit,
                                 IARGLIST exitArgs)
 {
     static std::set< ADDRINT > instrumented; // aliases (e.g. memalign, aligned_alloc) share an address
-    RTN rtn = RTN_FindByName(img, name);
+    RTN rtn = FindRoutine(img, name);
     // Skip PLT stubs: they jump to the real function and never return.
     if (!RTN_Valid(rtn) || SEC_Name(RTN_Sec(rtn)).find(".plt") == 0) return;
     if (!instrumented.insert(RTN_Address(rtn)).second) return;
+    if (getenv("MEMPRINT_VERBOSE"))
+        cerr << "memprint_trace: hook " << name << " = " << RTN_Name(rtn) << " in " << IMG_Name(img) << endl;
     RTN_Open(rtn);
     // read by analysis routines of other threads: reserved in main, so pushing never moves it
-    if (allocatorCode.size() < allocatorCode.capacity()) allocatorCode.push_back({RTN_Address(rtn), RTN_Address(rtn) + RTN_Size(rtn)});
+    if (allocatorCode.size() < allocatorCode.capacity()) allocatorCode.push_back({RTN_Address(rtn), RoutineEnd(rtn)});
     RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP, IARG_BOOL,
                    exit == AFUNPTR(MallocExit), IARG_IARGLIST, enterArgs, IARG_END);
-    RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
+    if (foreignAllocator)
+        HookReturns(rtn, NULL, exit, exitArgs);
+    else
+        RTN_InsertCall(rtn, IPOINT_AFTER, exit, IARG_THREAD_ID, IARG_IARGLIST, exitArgs, IARG_END);
     RTN_Close(rtn);
+    // Allocators other than glibc's leave some calls through a jump to another function of theirs
+    // (jemalloc's malloc to je_malloc_default on its slow path; tcmalloc two levels deep), whose
+    // return is the call's exit: follow such jumps within the allocator's code, three levels deep.
+    if (foreignAllocator) HookTailJumps(rtn, 3, instrumented);
+}
+
+
+// Allocators other than glibc's leave some calls through paths whose return Pin's routine exits
+// do not see (a jump into code without a symbol, as in tcmalloc). So, with such an allocator, the
+// exit is also taken on the caller's side: before the instruction at the return address of every
+// call to an allocation function, where RAX holds the result. A second exit for the same call is
+// ignored (the call's depth is already 0). Direct calls (and calls of PLT stubs) are found when
+// their code is translated; any other call (through the GOT, as code built with -fno-plt does, or
+// through a function pointer) when the allocation function is entered, from its return address:
+// that code is then translated again, with the exit, before the call returns.
+std::map< ADDRINT, int > returnSites; // return address -> 1 malloc-like, 2 realloc, 3 posix_memalign
+std::map< ADDRINT, int > callTargets; // call target -> kind (0: not an allocation function)
+PIN_LOCK siteLock;                    // returnSites, written by analysis routines too
+
+static VOID NoteReturnSite(ADDRINT ret, int kind)
+{
+    if (ret >= mallocCodeLo && ret < mallocCodeHi) return; // the allocator calling itself
+    PIN_GetLock(&siteLock, 1);
+    BOOL added = returnSites.emplace(ret, kind).second;
+    PIN_ReleaseLock(&siteLock);
+    if (added) PIN_RemoveInstrumentationInRange(ret, ret + 1);
+}
+
+static int AllocationKind(ADDRINT target)
+{
+    auto it = callTargets.find(target);
+    if (it != callTargets.end()) return it->second;
+    int kind = 0;
+    RTN rtn  = RTN_FindByAddress(target);
+    if (RTN_Valid(rtn) && RTN_Address(rtn) == target)
+    {
+        string name = RTN_Name(rtn);
+        name        = name.substr(0, name.find('@')); // malloc@plt
+        if (name == "malloc" || name == "calloc" || name == "valloc" || name == "pvalloc" || name == "memalign" ||
+            name == "aligned_alloc")
+            kind = 1;
+        else if (name == "realloc")
+            kind = 2;
+        else if (name == "posix_memalign")
+            kind = 3;
+    }
+    return callTargets[target] = kind;
+}
+
+static VOID InsertReturnSite(INS ins, int kind)
+{
+    if (kind == 1)
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(MallocExit), IARG_THREAD_ID, IARG_REG_VALUE, REG_GAX, IARG_END);
+    else if (kind == 2)
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(ReallocExit), IARG_THREAD_ID, IARG_CONTEXT, IARG_REG_VALUE, REG_GAX, IARG_END);
+    else if (kind == 3)
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(PosixMemalignExit), IARG_THREAD_ID, IARG_REG_VALUE, REG_GAX, IARG_END);
+}
+
+static VOID CallSites(TRACE trace, VOID* v)
+{
+    if (!foreignAllocator) return;
+    for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+        for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+        {
+            PIN_GetLock(&siteLock, 1);
+            auto site = returnSites.find(INS_Address(ins));
+            int siteKind = site != returnSites.end() ? site->second : 0;
+            PIN_ReleaseLock(&siteLock);
+            if (siteKind) InsertReturnSite(ins, siteKind);
+            if (!INS_IsCall(ins) || !INS_IsDirectControlFlow(ins)) continue;
+            int kind = AllocationKind(INS_DirectControlFlowTargetAddress(ins));
+            if (!kind) continue;
+            ADDRINT ret = INS_NextAddress(ins);
+            PIN_GetLock(&siteLock, 1);
+            BOOL added = returnSites.emplace(ret, kind).second;
+            PIN_ReleaseLock(&siteLock);
+            if (added)
+            {
+                // later in this trace, the loop hooks it; elsewhere, code translated before is redone
+                INS next = INS_Next(ins);
+                if (!INS_Valid(next) && BBL_Valid(BBL_Next(bbl))) next = BBL_InsHead(BBL_Next(bbl));
+                if (!INS_Valid(next) || INS_Address(next) != ret) PIN_RemoveInstrumentationInRange(ret, ret + 1);
+            }
+        }
 }
 
 static IARGLIST Args(std::initializer_list< std::pair< IARG_TYPE, UINT32 > > args)
@@ -1159,6 +1478,26 @@ static IARGLIST EnterArgs(INT32 sizeArg, INT32 ptrArg, INT32 outArg)
 // need the library's symbol table; without one only the public functions are covered.
 static VOID FindMallocCode(IMG img)
 {
+    static BOOL chosen = FALSE; // a non-glibc allocator was found: later images (libc) do not count
+    if (chosen || IMG_IsMainExecutable(img)) return;
+    RTN m = FindRoutine(img, "malloc");
+    string imgName = IMG_Name(img);
+    imgName = imgName.substr(imgName.find_last_of('/') + 1);
+    if (RTN_Valid(m) && SEC_Name(RTN_Sec(m)).find(".plt") != 0 && imgName.compare(0, 5, "libc.") != 0 &&
+        imgName.compare(0, 5, "libc-") != 0)
+    {
+        chosen = foreignAllocator = TRUE;
+        mallocCodeLo = IMG_LowAddress(img), mallocCodeHi = IMG_HighAddress(img) + 1;
+        RTN u = FindRoutine(img, "malloc_usable_size");
+        usableFn = RTN_Valid(u) ? RTN_Address(u) : 0;
+        ElfFunctions(IMG_Name(img), [&](const char*, ADDRINT value, ADDRINT size, BOOL) {
+            if (size) functionSizes[IMG_LoadOffset(img) + value] = size;
+        });
+        if (getenv("MEMPRINT_VERBOSE"))
+            cerr << "memprint_trace: allocator " << IMG_Name(img) << " [" << std::hex << mallocCodeLo << ", " << mallocCodeHi
+                 << ") malloc_usable_size " << usableFn << std::dec << endl;
+        return;
+    }
     // names without leading underscores and "libc_" (aliases such as __libc_malloc)
     static const std::set< string > names = {
         "malloc", "free", "cfree", "realloc", "calloc", "memalign", "valloc", "pvalloc", "aligned_alloc", "posix_memalign",
@@ -1192,6 +1531,14 @@ static VOID FindMallocCode(IMG img)
 VOID ImageLoad(IMG img, VOID* v)
 {
     FindMallocCode(img);
+    if (windowed)
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+            if (SEC_Mapped(sec) && SEC_IsWriteable(sec) && SEC_Size(sec) > 0)
+            {
+                PIN_GetLock(&stateLock, 1);
+                dataRegions.push_back({SEC_Address(sec), SEC_Address(sec) + SEC_Size(sec)});
+                PIN_ReleaseLock(&stateLock);
+            }
     IARGLIST ret = Args({{IARG_FUNCRET_EXITPOINT_VALUE, 0}});
     IARGLIST ctxtRet = Args({{IARG_CONTEXT, 0}, {IARG_FUNCRET_EXITPOINT_VALUE, 0}});
 
@@ -1205,7 +1552,7 @@ VOID ImageLoad(IMG img, VOID* v)
     InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
     InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
 
-    RTN free = RTN_FindByName(img, "free");
+    RTN free = FindRoutine(img, "free");
     if (RTN_Valid(free) && SEC_Name(RTN_Sec(free)).find(".plt") != 0)
     {
         RTN_Open(free);
@@ -1405,7 +1752,38 @@ static VOID WriteSnapshot()
 
 static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
-                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs";
+                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges";
+
+// Resident bytes of the program's writable image sections and of its main thread's stack (other
+// threads' stacks are anonymous mmaps, tracked as blocks). The stack is the 8 MB (the usual limit)
+// below the top of "[stack]" in /proc/self/maps, which is read once: under Pin the file is long
+// and Pin's C library slow (reading it at every snapshot made 2mm LARGE take 75 s instead of 20).
+static UINT64 RegionsResident()
+{
+    static ADDRINT stackTop = 0;
+    if (!stackTop)
+    {
+        ifstream maps("/proc/self/maps");
+        string line;
+        while (std::getline(maps, line))
+            if (line.find("[stack]") != string::npos)
+                stackTop = strtoull(line.substr(line.find('-') + 1).c_str(), NULL, 16);
+        if (!stackTop) stackTop = 1; // no [stack]: do not look again
+    }
+    vector< std::pair< ADDRINT, ADDRINT > > regions = dataRegions;
+    if (stackTop > (8 << 20)) regions.push_back({stackTop - (8 << 20), stackTop});
+    std::sort(regions.begin(), regions.end());
+    UINT64 total = 0;
+    ADDRINT coveredTo = 0;
+    ForgetResidency();
+    for (const auto& r : regions) // sections can overlap (.tbss inside .bss); count each page once
+    {
+        ADDRINT lo = std::max(r.first, coveredTo);
+        if (r.second > lo) total += Resident(lo, r.second), coveredTo = r.second;
+    }
+    ForgetResidency();
+    return total;
+}
 
 // windowed: the footprint estimate (see "Windows" at the top)
 static VOID WriteWindowed()
@@ -1414,6 +1792,7 @@ static VOID WriteWindowed()
     const UINT64 R = KnobSamplingInterval.Value();
     double reusedDensity = R * kindCovered[0] >= 65536 ? (double)kindSampled[0] / kindCovered[0] : 1.0;
     UINT64 bytes[2] = {0, 0}, resident[2] = {0, 0}, reusedWritten = 0; // reused [0], fresh [1]
+    UINT64 edges = 0; // touched pages that border untouched ones inside blocks (probably partly used)
     double blocksEstimate = 0;
     ForgetResidency();
     for (auto& kv : blocks)
@@ -1421,7 +1800,7 @@ static VOID WriteWindowed()
         Block& b = kv.second;
         bytes[b.fresh] += b.size;
         UINT64 w = 0;
-        UINT64 r = Resident(kv.first, kv.first + b.size, b.fresh || clearRefsFd < 0 ? NULL : &b.written, &w);
+        UINT64 r = Resident(kv.first, kv.first + b.Extent(), b.fresh || clearRefsFd < 0 ? NULL : &b.written, &w, &edges);
         resident[b.fresh] += r;
         if (!b.fresh) reusedWritten += w;
         // touched bytes x density: the block's own once its sample covers 64 KB / i, else that of all
@@ -1442,26 +1821,48 @@ static VOID WriteWindowed()
     // them; the pages written since they were allocated do not (heap memory is written before it
     // is read). Without soft-dirty tracking, residency is used.
     double density  = reusedDensity;
-    double estimate = blocksEstimate + R * otherSampled;
+    // -pages_only: memory outside blocks from the pages of the program's segments and stack;
+    // with windows, from the bytes the windows selected outside blocks
+    UINT64 regions  = pagesOnly ? RegionsResident() : 0; // (reads /proc/self/maps: only when used)
+    // -pages_only: discard the translated code once, after the first snapshot. Without this, gemm
+    // and 2mm LARGE ran 8x slower (gemm: 104 s against 12.6 s); windowed runs, which flush when
+    // their first window closes, did not. Not the snapshot work (10x fewer snapshots: 104 s) nor
+    // soft-dirty tracking (-dirty_every 0: 103 s); the cause is unknown.
+    static BOOL flushedOnce = FALSE;
+    if (pagesOnly && !flushedOnce) flushedOnce = TRUE, flushPending = TRUE, epoch++;
+    double estimate = blocksEstimate + (pagesOnly ? (double)regions : (double)R * otherSampled);
+    // a touched page next to an untouched one inside a block is, on average, half used
+    if (KnobEdgeCorrection.Value()) estimate = std::max(0.0, estimate - (double)edges * (1 << (PAGE_BITS - 1)));
     windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << bytes[0] + bytes[1] << ","
                  << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
                  << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
                  << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
                  << KnobPeriod.Value() << "," << reusedWritten << "," << triggeredWindows << ","
-                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "\n";
+                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "," << regions << "," << edges << "\n";
 }
 
 // windowed: windows are periodic (one of -window references at every multiple of -period)
 // or triggered by a large allocation (-window_alloc). Opening or closing one changes the
 // instrumentation, which the caller applies after releasing stateLock (flushPending).
+// A window opened or closed. Flushing: discard translated code, and make threads restart in
+// fresh code (epoch). -window_switch auto: after an expensive flush, switch to versions (one last
+// flush installs them).
+static VOID WindowChanged()
+{
+    if (!versioned && autoSwitch && tracesSinceChange > KnobVersionTraces.Value()) versioned = TRUE;
+    else if (versioned) return;
+    tracesSinceChange = 0;
+    flushPending      = TRUE;
+    epoch++;
+}
+
 static VOID OpenWindow(UINT64 start, BOOL triggered)
 {
     watching        = TRUE;
     triggeredWindow = triggered;
     windowStart     = start;
     windowEnd       = start + KnobWindow.Value();
-    flushPending    = TRUE;
-    epoch++;
+    WindowChanged();
 }
 
 static VOID CloseWindow()
@@ -1471,8 +1872,7 @@ static VOID CloseWindow()
     watchedRefs += windowEnd - windowStart;
     if (triggeredWindow) lastTriggeredEnd = windowEnd;
     watching     = FALSE;
-    flushPending = TRUE;
-    epoch++;
+    WindowChanged();
 }
 
 // windowed: open or close windows when time reaches them
@@ -1504,7 +1904,7 @@ static VOID AdvanceWindows()
 static VOID MaybeTriggerWindow(ADDRINT size)
 {
     UINT64 threshold = KnobWindowAlloc.Value();
-    if (!threshold || size < threshold || watching) return;
+    if (pagesOnly || !threshold || size < threshold || watching) return;
     if (triggeredWindows && timeNow < lastTriggeredEnd + KnobPeriod.Value()) return;
     OpenWindow(timeNow, TRUE);
     triggeredWindows++;
@@ -1563,7 +1963,8 @@ static VOID RecordSelected(THREADID tid, ADDRINT address, UINT32 size)
 // back into its old translation. So each thread, at its next check after a
 // window change, restarts at the current instruction, in code instrumented
 // for the new state.
-static VOID CheckTime(THREADID tid, CONTEXT* ctxt)
+// returns whether a window is open (-window_switch version: into the version register)
+static ADDRINT CheckTime(THREADID tid, CONTEXT* ctxt)
 {
     ThreadData& t = threads[tid];
     t.checkAt     = t.refs + checkStep;
@@ -1578,6 +1979,7 @@ static VOID CheckTime(THREADID tid, CONTEXT* ctxt)
         t.epoch = epoch;
         PIN_ExecuteAt(ctxt);
     }
+    return watching;
 }
 
 VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UINT64 numElements, VOID* v)
@@ -1810,10 +2212,21 @@ int main(int argc, char* argv[])
         numBins = KnobNumSplits.Value();
         if (KnobSamplingInterval.Value() == 0 || numBins == 0) return Usage("-i and -s must be positive");
         spatialThreshold = ~(UINT64)0 / KnobSamplingInterval.Value();
-        if (KnobWindow.Value())
+        if (KnobWindow.Value() || KnobPagesOnly.Value())
         {
-            if (KnobPeriod.Value() <= KnobWindow.Value()) return Usage("-period must be larger than -window");
-            if (!KnobSnapshot.Value()) return Usage("-window needs -snapshot");
+            pagesOnly = KnobPagesOnly.Value();
+            const string& sw = KnobWindowSwitch.Value();
+            if (sw != "version" && sw != "flush" && sw != "auto") return Usage("-window_switch must be auto, version or flush");
+            versioned  = sw == "version" && !pagesOnly;
+            autoSwitch = sw == "auto" && !pagesOnly;
+            if (versioned || autoSwitch)
+            {
+                watchReg = PIN_ClaimToolRegister();
+                if (!REG_valid(watchReg)) return Usage("no tool register for -window_switch version");
+            }
+            if (pagesOnly && KnobWindow.Value()) return Usage("-pages_only and -window exclude each other");
+            if (!pagesOnly && KnobPeriod.Value() <= KnobWindow.Value()) return Usage("-period must be larger than -window");
+            if (!KnobSnapshot.Value()) return Usage("-window and -pages_only need -snapshot");
             windowed   = TRUE;
             // residency of fresh blocks is their touched pages, at 4 KB granularity only without huge pages
             syscall(SYS_prctl, PR_SET_THP_DISABLE, 1, 0, 0, 0); // Pin's CRT has no prctl()
@@ -1828,13 +2241,15 @@ int main(int argc, char* argv[])
                 if (clearRefsFd >= 0 && write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1;
                 nextDirtyClear = dirtyEvery;
             }
-            // the first periodic window opens at time 0
-            nextPeriodic = KnobPeriod.Value();
+            // the first periodic window opens at time 0 (-pages_only: none ever does)
+            nextPeriodic = pagesOnly ? ~(UINT64)0 : KnobPeriod.Value();
             windowEnd    = KnobWindow.Value();
+            if (pagesOnly) watching = FALSE;
             // Threads advance time every checkStep references: well inside a window, the gap
             // between windows and a snapshot, but not so often that the lock costs (a window
             // shorter than 8 x 10^4 references lasts longer than asked).
-            UINT64 shortest = std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), KnobSnapshot.Value()});
+            UINT64 shortest = pagesOnly ? KnobSnapshot.Value()
+                                        : std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), KnobSnapshot.Value()});
             checkStep       = std::max< UINT64 >(10000, shortest / 8);
         }
         UINT64 base      = KnobSeed.Value().empty() ? PIN_GetPid() : strtoull(KnobSeed.Value().c_str(), NULL, 10);
@@ -1857,6 +2272,7 @@ int main(int argc, char* argv[])
     allocatorCode.reserve(64);
     PIN_InitLock(&stateLock);
     PIN_InitLock(&allocLock);
+    PIN_InitLock(&siteLock);
     if (KnobTrackFrees.Value() || windowed)
     {
         footprint.SetIndexed(TRUE);
@@ -1865,6 +2281,7 @@ int main(int argc, char* argv[])
         for (Footprint& u : unions)
             u.SetIndexed(TRUE);
         IMG_AddInstrumentFunction(ImageLoad, 0);
+        TRACE_AddInstrumentFunction(CallSites, 0);
         PIN_AddSyscallEntryFunction(SyscallEntry, 0);
         PIN_AddSyscallExitFunction(SyscallExit, 0);
     }

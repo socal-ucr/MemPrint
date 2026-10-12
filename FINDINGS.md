@@ -468,6 +468,185 @@ Every workload's true peak (full trace, bytes touched) and the tool's tracked li
 - Heap profilers agree with the truth only where a program touches what it allocates. They are 1.5–3.8× too high on miniVite, darknet and the churn test, and 0.15× on GCC, whose collector maps its own pages.
 - **Over time** (`timeline_curves_vs_valgrind.pdf`; Massif's time axis is instructions, the truth's memory references, both as fractions of the run): Massif's heap is a step above the truth as soon as an array is allocated (2mm's second array is touched halfway through), stays at the allocation on darknet and the churn test, and follows the truth on Lua and SQLite. DHAT's maximum lands at the same moment as Massif's: 25% into darknet's run, 88% into miniVite's, 49% into Lua's.
 
+### Next round (branch `windowed-next`): fewer windows, cheaper switching, page corrections
+
+Four changes to the windowed tool, measured on 2026-10-10 against the same full traces as above (each cell mean error / peak error, %, 1-in-100 words, periodic windows):
+
+- **`-pages_only 1`:** no windows at all. Memory outside blocks comes from the resident pages of the program's writable image sections (`.data`, `.bss` of every loaded image) and of its main stack (the 8 MB below the top of `[stack]`, read once from `/proc/self/maps`). Other threads' stacks are anonymous mmaps, already tracked as blocks.
+- **Partial-page correction (`-edge_correction 1`, the default):** a touched page inside a block that borders an untouched one is counted as half used. The tool writes the number of such pages per snapshot (`PartialEdges`).
+- **`-window_switch auto` (the default):** windows open and close by flushing translated code, until one change retranslates more than `-version_traces` traces (default 10,000); from then on the tool uses Pin's trace versions, a watching and a not-watching version of every trace, chosen at trace entry from a tool register that `CheckTime` sets. `flush` and `version` can be forced.
+- **`-block_slack 1`** (off by default): measure each heap block over its whole glibc chunk (requested size plus the allocator's slack).
+
+| Run | Before: nothing watched | Pages only | Before: 1% | 1% | Before: 5% | 5% | 5%, without the correction |
+|---|---|---|---|---|---|---|---|
+| 2mm LARGE | 0.0 / +0.0 | 0.1 / -0.1 | 0.1 / +0.0 | 0.0 / +0.0 | 0.1 / +0.1 | 0.0 / +0.0 | 0.0 / +0.0 |
+| gemm LARGE | 0.1 / +0.0 | 0.1 / -0.1 | 0.0 / +0.0 | 0.1 / +0.1 | 0.1 / +0.1 | 0.0 / +0.0 | 0.1 / +0.1 |
+| jacobi-2d LARGE | 0.1 / +0.1 | 0.1 / -0.1 | 0.1 / +0.1 | 0.1 / +0.1 | 0.1 / +0.1 | 0.1 / +0.0 | 0.1 / +0.1 |
+| miniVite 65536, 1 thread | 10.1 / -3.8 | 5.0 / -1.9 | 2.8 / +1.1 | 1.8 / +0.7 | 3.9 / +1.5 | 2.9 / +1.1 | 3.8 / +1.4 |
+| miniVite 65536, 4 threads | 9.8 / -3.7 | 5.0 / -1.9 | 2.4 / +0.9 | 2.0 / +0.8 | 3.6 / +1.3 | 2.8 / +1.0 | 3.6 / +1.4 |
+| miniVite 32768, 1 thread | 14.7 / -6.9 | 7.4 / -3.5 | 1.0 / +0.5 | 0.9 / +0.4 | 3.3 / +1.5 | 2.1 / +1.0 | 3.4 / +1.6 |
+| miniVite 32768, 4 threads | 14.6 / -6.9 | 7.4 / -3.5 | 1.8 / +0.8 | 0.5 / +0.2 | 4.0 / +1.8 | 2.1 / +1.0 | 3.4 / +1.6 |
+| churn, 25% touched | 22.8 / +22.2 | 3.0 / -1.2 | 25.5 / +24.0 | 1.1 / +1.6 | 24.1 / +22.8 | 1.4 / +1.5 | 23.6 / +22.4 |
+| churn, 50% touched | 12.4 / +12.0 | 1.6 / -0.3 | 14.0 / +13.1 | 1.2 / +1.7 | 12.9 / +12.2 | 1.1 / +1.4 | 12.9 / +12.2 |
+| churn, 100% touched | 0.7 / +0.3 | 0.8 / -0.6 | 0.7 / +0.4 | 0.7 / +0.4 | 0.2 / +0.1 | 0.4 / +0.2 | 0.5 / +0.3 |
+| GAP bfs | 5.0 / -0.3 | 4.5 / -0.3 | — | 3.0 / -0.1 | 2.2 / +0.2 | 1.8 / +0.2 | 2.0 / +0.2 |
+| GAP pr | 3.8 / -0.0 | 3.3 / +0.0 | — | 1.7 / +0.4 | 1.7 / +0.5 | 1.5 / +0.5 | 1.7 / +0.5 |
+| GAP cc | 4.9 / -0.3 | 4.4 / -0.3 | — | 2.9 / -0.0 | 2.2 / +0.2 | 2.0 / +0.2 | 2.3 / +0.2 |
+| GAP sssp | 3.6 / -0.2 | 3.3 / -0.2 | — | 2.2 / +0.1 | 2.4 / +0.1 | 1.8 / +0.0 | 2.2 / +0.0 |
+| GAP bfs, 4 threads | 4.7 / -0.3 | 4.4 / -0.3 | — | 3.2 / -0.1 | 2.7 / +0.2 | 2.1 / +0.2 | 2.6 / +0.2 |
+| GAP pr, 4 threads | 8.3 / -0.0 | 10.1 / +0.0 | — | 2.0 / +0.3 | 5.6 / +0.6 | 7.5 / +0.5 | 7.9 / +0.5 |
+| darknet | 3.1 / +4.0 | 3.1 / +4.0 | — | 3.1 / +4.0 | 3.2 / +4.1 | 3.1 / +4.0 | 3.2 / +4.1 |
+| python | 3.4 / +2.8 | 4.4 / +3.8 | — | 5.6 / +3.7 | 4.0 / +3.8 | 6.2 / +4.0 | 6.3 / +4.0 |
+| lua | 5.9 / -5.4 | 5.9 / -5.4 | — | 4.7 / -4.9 | 6.7 / -4.0 | 6.1 / -4.1 | 6.1 / -4.0 |
+| perl | 1.9 / -3.5 | 1.9 / -3.4 | — | 1.8 / -2.9 | 1.7 / -2.8 | 1.8 / -2.1 | 1.8 / -2.1 |
+| sqlite | 6.4 / -0.7 | 6.7 / -2.7 | — | 8.3 / -2.5 | 8.2 / -2.8 | 8.1 / -2.1 | 8.3 / -2.0 |
+| cc1 -O0 | 3.6 / +3.5 | 6.4 / +5.4 | — | 7.7 / +5.9 | 8.5 / +6.3 | 8.2 / +6.5 | 8.5 / +6.6 |
+
+"Before" is the 2026-10-08 tool (1% was measured only on PolyBench, miniVite and the churn test).
+
+**Pages only** costs nothing in windows and is within −5.4% to +5.4% of every peak (miniVite 32768 was −6.9% with the windows' bookkeeping alone). Its weak spots are memory that only windows see: the slack after Lua's blocks (−5.4%), and GAP pr with 4 threads (10.1% mean error).
+
+**1% watched with the correction** is the best setting overall: within 3.2% mean error on PolyBench, miniVite, GAP and the churn test, and −4.9% to +5.9% at the peak on the interpreters and the compiler. 5% watched is no better.
+
+**The partial-page correction** removes the churn test's page-granularity error (+22.4% → +1.5% at the peak with 25% of each block touched, +12.2% → +1.4% with 50%) and changes the other runs by at most a point. It does not fix darknet (+4%, its partly touched pages are at the ends of blocks, where only the block's own bytes count anyway) or cc1 (+6%: GCC's collector uses parts of pages, below what residency can see).
+
+**Block slack** (`-block_slack 1`) fixes Lua's peak (−5.4% → +5.1%) and helps miniVite (pages only: 6.1% → 3.6% mean error) but makes Lua's curve worse (5.9% → 14.2% mean error): every block's slack counts once its page is written, whereas only some of it is ever read. It stays off.
+
+**Why watching moved cc1 and Lua.** A debug build classified the selected bytes outside blocks by their distance from the end of the nearest live block. In Lua 5.9 of 6.2 MB lie within 16 bytes past a block's end: string and copy functions read past the requested size into the allocator's slack, in 650,000 small blocks. The truth counts those bytes and only windows see them, so Lua's peak rises from −5% to +5% as more of the run is watched. In cc1, 3.1 of 3.3 MB lie far from any block (globals and stack), and the pages of its blocks overcount by about 8 MB (GCC's collector pages are partly used); with nothing watched the two cancel. So watching does not overcount; it reveals memory that the page-based part cannot attribute, while the page-based part overcounts.
+
+**Cost** (seconds, one run at a time; the machine was shared with another session's jobs at load 4–7, so these are rough):
+
+| Workload | Native | Pages only | 1%, auto | 5%, auto | 5%, flush |
+|---|---|---|---|---|---|
+| 2mm LARGE | 9.6–13.4 | 23.2 | 20.2 | 35.5 | 45.4 |
+| gemm LARGE | 5.3–5.6 | 11.8 | 15.3 | 25.9 | 27.6 |
+| jacobi-2d LARGE | 11.9–12.5 | 22.6 | 28.0 | 44.9 | 47.7 |
+| miniVite 65536, 1 thread | 6.8–7.3 | 69.6 | 88.7 | 108.0 | 110.2 |
+| miniVite 65536, 4 threads | 6.4–6.8 | 85.8 | 114.0 | 137.4 | 123.5 |
+| cc1 `-O0` | 1.7–1.9 | 81.7 | 137.5 | 152.7 | 706.3 |
+| lua | 3.3–3.7 | 34.4 | 57.8 | 56.5 | 58.2 |
+
+- **Auto switching** makes cc1 4.6× faster at 5% watched (706 → 153 s); the others never switch, and their auto and flush timings differ only within run-to-run variation (2mm 35 against 45 s, miniVite with 4 threads 137 against 124 s): per window change cc1 retranslates about 47,000 traces, Lua 1,300, miniVite 210 and 2mm 11.
+- **Versions everywhere would not do:** the version test at every trace entry made 2mm LARGE with nothing watched take 63 s instead of 16 s.
+- **Pages only** is the cheapest mode on every workload except 2mm (23 s against 20 s at 1% watched), at 1.7–2.4× native on PolyBench and 10–13× on miniVite.
+- **An unexplained slowdown:** a pages-only run that never discards its translated code ran gemm and 2mm LARGE 8× slower (gemm: 104 s against 12.6 s). It is not the snapshot work (10× fewer snapshots: 104 s) nor soft-dirty tracking (`-dirty_every 0`: 103 s). Flushing once after the first snapshot removes it, and the tool now does that.
+
+**Spatial error bars are calibrated** (item 6 of the last open questions). 20 runs of miniVite 4096 (1 thread) with different salts, at 1-in-100 and 1-in-250 words: at a given snapshot, 93.9% and 95.0% of the runs have the truth within ±2 standard errors (nominal 95%), the z-scores have a standard deviation of 1.03 and 1.10 across runs, and their mean is −0.09 and +0.14. A single run's error persists over its snapshots (lag-1 correlation 0.82), because the same words stay selected, so the share of one run's snapshots within ±2 standard errors is nearly all or nothing (0.10 to 1.00 across the 20 runs) and says nothing about calibration.
+
+**Not done:** a sample-based refinement of the partial-page correction.
+
+### MPI applications at scale (branch `windowed-next`)
+
+Each MPI rank runs under its own Pin and writes its own files (`-name r<rank>`, from `OMPI_COMM_WORLD_RANK`), with spack OpenMPI 5.0.5, `--bind-to none`, 8 or 4 ranks oversubscribed on one node. Two medium runs have full traces (splitter, `-track_frees`); two long ones, where a full trace is not feasible, are compared with each rank's peak RSS (`/usr/bin/time %M`). 1-in-100 words, snapshots every 2–50 M references; `w1` is 1% watched (periodic windows, no allocation windows). Per-rank ranges (MB; error cells mean / peak, %):
+
+| Run | Ranks | True peak | Peak RSS | Live allocated | Pages only | 1% watched |
+|---|---|---|---|---|---|---|
+| LULESH 2.0 `-s 20 -i 100` | 8 | 8.98–9.06 | 20.2–21.8 | 18.0–18.1 | 20.7–22.4 / −8.7 to −9.4 | 12.9–15.5 / −0.8 to −2.1 |
+| miniVite `-n 131072` | 4 | 16.4–17.1 | 33.4–34.4 | 30.9–31.5 | 9.2–11.9 / −5.4 to −6.0 | 3.2–5.4 / −2.0 to +0.2 |
+| LULESH 2.0 `-s 50 -i 500` | 8 | — | 105.3–107.2 | 100.3–100.4 | 90.5–90.6 | 92.4–92.6 |
+| miniVite `-n 524288`, 4 threads | 4 | — | 76.4–79.5 | 88.7–90.9 | 58.6–60.8 | 59.3–61.6 |
+
+- **1% watched holds at scale:** within 2.1% of every rank's true peak where a full trace exists. The ranks agree with each other within a point.
+- **Pages only underestimates MPI codes by 5–9% at the peak.** MPI's memory (shared-memory segments, which are file mappings rather than anonymous ones, and the library's buffers) is outside blocks and outside the image sections, so only windows see it. For MPI programs, watch 1%.
+- **Against RSS:** the true live footprint is 0.41–0.50 of peak RSS on the medium runs (RSS counts the loader, the MPI library's code and data, and whole pages); on the long runs the windowed peak is 0.86–0.88 (LULESH) and 0.77–0.79 (miniVite) of RSS, and below it on every rank. RSS is an upper bound only; it cannot check the estimate more closely than that.
+- **Live allocated bytes** are 2× the truth on the medium runs and above RSS on miniVite 524288: both programs allocate more than they touch.
+- **Cost** (wall time of the whole job, 8 or 4 ranks on one shared node): LULESH 20: native 3 s, pages only 54 s, 1% 102 s, full trace 578 s. miniVite 131072: native 8 s, 90 s, 88 s, 2623 s. LULESH 50: native 156 s, pages only 715 s (4.6×), 1% 1613 s (10.3×). miniVite 524288: native 146 s, 811 s (5.6×), 755 s (5.2×). Long runs are cheaper relative to native, because the fixed cost of starting Pin is amortized.
+- Data: `~/memprint-data/scale/` (`rank.sh`, `exp.sh`, `list.txt`, `score.py`, `results.csv`).
+
+### Other allocators: jemalloc and tcmalloc (branch `windowed-next`)
+
+The tool now tracks blocks, excludes the allocator's code and releases freed blocks for an allocator preloaded or linked in place of glibc's (tested with jemalloc 5.3.0 and gperftools 2.18 `tcmalloc_minimal`, both through `LD_PRELOAD`):
+
+- **Recognition:** the first image other than libc that defines `malloc` (not a PLT stub) is the allocator. All of its code is the allocator's code for the exclusion of the truth's bookkeeping accesses.
+- **Finding its functions:** Pin may not list a library's exported functions at all (jemalloc's `malloc`; Pin's symbol view shows the `je_`-prefixed internal names at other addresses). The tool falls back to the image's `.dynsym` and creates the routine at that address. Such a routine runs on to the next symbol Pin knows, over other functions (jemalloc's `memalign` spans `realloc`), so return hooks are placed only within the function's size from the ELF symbol tables.
+- **Exits:** jemalloc's and tcmalloc's allocation functions leave their slow paths by a jump into another function, sometimes one without a symbol (tcmalloc). Three mechanisms, the first exit of a call winning:
+  - returns of the jump targets (3 levels deep), only when the stack pointer is that of the outermost call's entry, dispatched by the kind of call that was entered (jemalloc's `malloc` and `realloc` jump to the same function);
+  - the instruction at the return address of every direct call to an allocation function;
+  - return addresses learned at run time, for calls through the GOT (`-fno-plt`, as the system's `sqlite3` is built) or through function pointers: an allocation function's entry records its return address and has that code retranslated with the exit before the call returns.
+- **Freeing:** a block's whole usable size (`malloc_usable_size`, called in the application) is released at `free`, which also releases blocks whose allocation was missed.
+
+Unit checks (`re2`: 20,000 blocks, malloc or realloc(NULL) → grow by realloc → free or realloc(p, 0)): blocks tracked at the end are 2 with glibc, 8–9 with jemalloc and tcmalloc (their own initial mappings, 1.9–2.3 MB), against 16,468 leaked by the earlier build for jemalloc's realloc. The 600,000-block test ends with 1.70 MB live under glibc, 2.15 MB under jemalloc and 5.75 MB under tcmalloc.
+
+Workloads (mean / peak error, %; truth and estimates from the same tool):
+
+| Allocator | Workload | True peak | Peak RSS | Pages only | 1% watched |
+|---|---|---|---|---|---|
+| glibc | Lua | 55.5 | — | 5.9 / −5.4 | 4.7 / −4.8 |
+| jemalloc | Lua | 51.7 | 93.2 | 7.6 / +1.9 | 8.3 / +2.8 |
+| tcmalloc | Lua | 55.3 | 69.4 | 6.1 / +1.3 | 7.4 / −0.9 |
+| glibc | SQLite | 76.2 | — | 6.8 / −2.7 | 8.5 / −2.5 |
+| jemalloc | SQLite | 81.0 | 144.1 | 10.7 / −6.4 | 10.0 / −7.0 |
+| tcmalloc | SQLite | 79.2 | 112.1 | 2.2 / −0.9 | 8.5 / −2.7 |
+
+- Every peak is within −7.0% to +2.8%. The true peaks differ by allocator because size classes and layouts differ (slack read past the requested size, pages shared by blocks).
+- Lua's peak is −5% under glibc (bytes read in the slack of 650,000 small blocks, which the pages of blocks do not cover) but +1% to +3% under jemalloc and tcmalloc. We have not checked why; packing small blocks into size-class slabs, so that the slack shares pages with neighbouring blocks, is the likely reason.
+- **Limits:**
+  - tcmalloc keeps 4–5 MB "live" at the end of the 600,000-block test and of Lua (glibc: 1.7 and 0.3 MB): writes to its metadata that are made outside its own code (likely `memset` and `memcpy` in libc on its behalf) are counted and never released.
+  - The allocator's initial mappings (1.9–2.3 MB) count as blocks.
+  - Allocators that manage regions of their own inside the program (pymalloc, GCC's collector) are still not recognized.
+  - The fixes were developed on these two allocators; others (mimalloc, Hoard) are untested.
+- Data: `~/memprint-data/2026-10-10-next/allocwl/`, `allocwl_results.csv`, `alloc/` (unit tests); earlier builds' runs in `allocwl-v1`–`v4`.
+
+
+### Overhead of every method (branch `windowed-next`, 2026-10-10)
+
+Every method of the paper, run with the final tool on eight programs; wall time and peak RSS of the whole process (`/usr/bin/time`). Runs of a few minutes or less were repeated three times (median). Up to six runs at once (briefly ten) on the 32-core machine, which another session was also using: native runs in the mix were 1.1–1.3× slower than alone (2mm 1.8×). Slowdowns are relative to the median native run made alone. Late in the experiment another session's NPB `mg.A` under Pin took 62 GB and filled memory and swap: the miniVite complete recordings overlapped it (possibly slowed), and three of our runs were stopped and repeated after it finished (Lua's truth on a quieter machine, load 2.5); OOM = Pin aborted ("Freepages: Out of memory") at about 5 GB.
+
+**Time / native time** (first row: native seconds):
+
+| Method | 2mm | gemm | jacobi-2d | miniVite 1t | miniVite 4t | Lua | SQLite | GCC cc1 |
+|---|---|---|---|---|---|---|---|---|
+| Native (s) | 7.4 | 5.0 | 11.2 | 6.4 | 6.0 | 2.5 | 0.9 | 1.6 |
+| Pin, no tool | 1.6 | 1.2 | 1.1 | 2.2 | 2.3 | 2.8 | 3.9 | 13 |
+| Per-reference instrumentation only | 26 | 28 | 24 | 26 | 28 | 13 | 27 | 54 |
+| MemPrint splitter (13 intervals × 20 bins) | 665 | 781 | 540 | 863 | 866 | 347 | 554 | 502 |
+| Complete recording (truth) | 299 | 291 | 285 | 341 | 398 | 134 | 217 | 210 |
+| Reference sampling, 1 in 100 | 54 | 79 | 42 | 44 | 46 | 29 | 47 | 109 |
+| Reference sampling, 1 in 25 | OOM | OOM | 86 | 81 | 87 | 52 | 107 | 132 |
+| Word sampling, 1 in 100 | 48 | 59 | 36 | 37 | 54 | 27 | 49 | 68 |
+| Windowed, pages only | 3.2 | 2.5 | 2.0 | 12 | 14 | 13 | 17 | 50 |
+| Windowed, 1\% watched | 3.4 | 3.2 | 2.5 | 14 | 18 | 22 | 52 | 85 |
+| Windowed, 5\% watched | 6.0 | 5.6 | 4.0 | 18 | 20 | 22 | 54 | 99 |
+| Windowed, 20\% watched | 13 | 13 | 10 | 23 | 26 | 25 | 62 | 108 |
+| Windowed, 5\%, flushing | 4.8 | 5.4 | 4.0 | 18 | 20 | 29 | 53 | 395 |
+| Massif | 5.6 | 6.1 | 7.9 | 20 | 23 | 6.6 | 9.8 | 11 |
+| DHAT | 16 | 17 | 15 | 32 | 34 | 44 | 43 | 74 |
+
+**Peak memory, MB:**
+
+| Method | 2mm | gemm | jacobi-2d | miniVite 1t | miniVite 4t | Lua | SQLite | GCC cc1 |
+|---|---|---|---|---|---|---|---|---|
+| Native | 36 | 29 | 27 | 46 | 48 | 63 | 79 | 128 |
+| Pin, no tool | 70 | 62 | 60 | 261 | 266 | 125 | 170 | 747 |
+| Per-reference instrumentation only | 78 | 77 | 74 | 348 | 353 | 144 | 202 | 776 |
+| MemPrint splitter (13 intervals × 20 bins) | 21,131 | 17,420 | 20,502 | 3,456 | 3,459 | 7,818 | 8,516 | 9,984 |
+| Complete recording (truth) | 750 | 611 | 728 | 764 | 621 | 1,197 | 3,466 | 2,946 |
+| Reference sampling, 1 in 100 | 2,785 | 2,662 | 3,805 | 700 | 698 | 387 | 666 | 2,024 |
+| Reference sampling, 1 in 25 | OOM | OOM | 5,050 | 850 | 846 | 596 | 1,322 | 2,975 |
+| Word sampling, 1 in 100 | 121 | 105 | 102 | 452 | 444 | 247 | 355 | 1,263 |
+| Windowed, pages only | 77 | 69 | 67 | 400 | 411 | 265 | 227 | 1,289 |
+| Windowed, 1\% watched | 105 | 97 | 100 | 447 | 455 | 278 | 269 | 1,728 |
+| Windowed, 5\% watched | 114 | 103 | 102 | 462 | 479 | 285 | 288 | 1,858 |
+| Windowed, 20\% watched | 115 | 103 | 100 | 477 | 491 | 303 | 317 | 1,990 |
+| Windowed, 5\%, flushing | 113 | 104 | 100 | 436 | 442 | 277 | 287 | 1,587 |
+| Massif | 60 | 53 | 51 | 90 | 90 | 137 | 111 | 223 |
+| DHAT | 64 | 56 | 54 | 98 | 101 | 275 | 120 | 236 |
+
+- **Pin alone** is cheap on long runs (1.1–2.3×) but 2.8–13× on the short Lua, SQLite and GCC runs (code translation).
+- **Per-reference instrumentation** (the sampler with nothing sampled) costs 13–54×: the floor of every method that looks at every reference.
+- **MemPrint's splitter** (260 bins) costs 347–866× (540–781× on PolyBench) and 3.5–21 GB: 580–760× the program's memory on PolyBench, 73–125× elsewhere. The complete recording (1 bin, frees, snapshots) costs 134–398× and 0.6–3.5 GB (13–44× the program's memory).
+- **Reference sampling** costs 29–109× at 1 in 100 and 52–132× at 1 in 25, with 2.7–3.8 GB on PolyBench LARGE at 1 in 100; at 1 in 25 it ran out of Pin memory on 2mm and gemm. Training the α model or the hybrid adds complete recordings of the smaller sizes (2mm, MINI to MEDIUM: 128 s against 0.1 s natively) and 190–220 s of fitting and evaluation per workload (`timeline build`).
+- **Word sampling** costs 27–68× with 3–10× the program's memory.
+- **Windowed:**
+  - PolyBench: pages only 2.0–3.2×; 1% watched 2.5–3.4×; 20% watched 10–13×. Each percent watched costs about as much as word sampling on that fraction of the run.
+  - miniVite: 12–14× with pages only, 14–18× at 1% watched.
+  - Lua and SQLite: 13–17× with pages only, 22–52× at 1% watched.
+  - GCC: 50–108×, and 395× at 5% if every window change flushes, against 99× with auto switching.
+  - Memory: 2.1–3.8× on PolyBench and 2.9–16× elsewhere, close to Pin's own.
+- **Massif** costs 5.6–23× and **DHAT** 15–74×, both with under 2.2× the memory (DHAT on Lua: 4.4×). Windowed at 1% is cheaper than DHAT everywhere except SQLite and GCC, cheaper than Massif on PolyBench and miniVite, and 3–8× dearer than Massif on the interpreters and the compiler.
+- Only windowed sampling gets below the per-reference floor: 7–10× below on PolyBench, 1.6–1.8× on miniVite. On the short interpreter and compiler runs, the allocator hooks and code translation dominate every method.
+- Data and scripts: `~/memprint-data/2026-10-10-overhead/` (`job.sh`, `wl.txt`, `res/times.txt`, `summarize.py`, `latex.py`); figure `paper/figures/overhead.pdf` from `paper/overhead_figure.py --data .../res/summary.csv`.
+
 ### Why
 
 Spatial sampling still checks every memory access, even when it records only 1 in 100 words. On 2mm LARGE that alone takes 284 s against 8.0 s native, and Pin itself costs almost nothing (8.2 s). For long real workloads that overhead is the obstacle, not the sampling rate.
@@ -734,7 +913,7 @@ Every spatial run is compared with the full trace of the same size and the same 
 (MAPE range over the three sizes.)
 
 - **Peaks hold under threads.** Error of peak is ≤ 7.7% in every case and ≤ 3.6% at 1/25 and 1/100.
-- **The error bars are not always honest.** The truth lies within ±2 standard errors in 98–100% of snapshots for most runs, but for a few (1 thread at 1/25 to 1/250, 4 and 16 threads at 1/100) in only 1–69%: those runs are off by more than their 20 buckets suggest. Under the paper's definition the coverage was 94–100%.
+- **The error bars are calibrated across salts** but not within one run: the share of a run's snapshots within ±2 standard errors ranges from 1% to 100% here, because the selected words, and so the error, stay the same over the run. Across 20 salts the truth is within ±2 standard errors in 94–95% of runs at a given snapshot ("Next round" above).
 - **Cost, 8192 vertices:**
 
   | Threads | Native | Splitter | Spatial (1/25 … 1/1000) |
@@ -903,11 +1082,10 @@ Measured before miniVite was rebuilt against spack's OpenMPI 5.0.5, under the pa
 
 ## Open questions / next steps
 
-- **Window switching cost:** opening or closing a window retranslates all code, which makes cc1 slower with windows than fully traced. With bytes touched, 1% watched (or none, where memory outside blocks is small) is as accurate as 5%, so far fewer windows would do; alternatively switch with Pin's per-trace versioning instead of flushing the code cache.
-- **Windowless mode:** pages alone are within 8% of every peak tested except where memory lies outside blocks. A mode that drops windows entirely would cost little more than the allocator hooks.
-- **Watching adds a few points on cc1 and Lua** (selected bytes outside blocks); find what is counted there.
-- **Spatial error bars on miniVite** are too narrow in a few runs; check whether word selection correlates buckets with miniVite's layout.
-- **Ground truth:** allocator accesses are excluded for glibc only. Other allocators (jemalloc, tcmalloc, pymalloc's arenas inside Python) are neither tracked as blocks nor excluded.
+- **Slack and partly used pages:** Lua's bytes in its blocks' slack (−5% at the peak) and cc1's partly used collector pages (+6%) are the remaining errors of the windowed estimate. A sample-based estimate of each block's slack and of the used part of its boundary pages could replace the half-page rule.
+- **The pages-only slowdown** without an early flush on gemm and 2mm is unexplained.
+- **Other allocators:** jemalloc and tcmalloc are tracked and excluded (see above); tcmalloc keeps 4–5 MB of metadata writes made outside its code. Region allocators inside the program (pymalloc's arenas, GCC's collector) are neither tracked as blocks nor excluded.
+- **MPI:** pages-only runs miss MPI's memory (5–9% low at the peak); a cheaper source for it than windows (the shared-memory segments' resident pages) would make pages-only usable for MPI codes.
 - **Windowed density** is moot with bytes touched. It still applies to `-footprint starts`.
 - **Hybrid below `-i 5`:** the correction overshoots once it extrapolates past its training range (`-i 8` and sparser); constraining it might move the fall-off.
 - **Generalisation:** the correction is trained per workload on its smaller sizes, like the paper's α model. It has not been tested across workloads, or on miniVite.
