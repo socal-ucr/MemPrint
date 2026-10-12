@@ -1,0 +1,275 @@
+@inproceedings{Luk2005Pin,
+author = {Luk, Chi-Keung and Cohn, Robert and Muth, Robert and Patil, Harish and Klauser, Artur and Lowney, Geoff and Wallace, Steven and Reddi, Vijay Janapa and Hazelwood, Kim},
+title = {Pin: building customized program analysis tools with dynamic instrumentation},
+year = {2005},
+isbn = {1595930566},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1065010.1065034},
+doi = {10.1145/1065010.1065034},
+abstract = {Robust and powerful software instrumentation tools are essential for program analysis tasks such as profiling, performance evaluation, and bug detection. To meet this need, we have developed a new instrumentation system called Pin. Our goals are to provide easy-to-use, portable, transparent, and efficient instrumentation. Instrumentation tools (called Pintools) are written in C/C++ using Pin's rich API. Pin follows the model of ATOM, allowing the tool writer to analyze an application at the instruction level without the need for detailed knowledge of the underlying instruction set. The API is designed to be architecture independent whenever possible, making Pintools source compatible across different architectures. However, a Pintool can access architecture-specific details when necessary. Instrumentation with Pin is mostly transparent as the application and Pintool observe the application's original, uninstrumented behavior. Pin uses dynamic compilation to instrument executables while they are running. For efficiency, Pin uses several techniques, including inlining, register re-allocation, liveness analysis, and instruction scheduling to optimize instrumentation. This fully automated approach delivers significantly better instrumentation performance than similar tools. For example, Pin is 3.3x faster than Valgrind and 2x faster than DynamoRIO for basic-block counting. To illustrate Pin's versatility, we describe two Pintools in daily use to analyze production software. Pin is publicly available for Linux platforms on four architectures: IA32 (32-bit x86), EM64T (64-bit x86), Itanium®, and ARM. In the ten months since Pin 2 was released in July 2004, there have been over 3000 downloads from its website.},
+booktitle = {Proceedings of the 2005 ACM SIGPLAN Conference on Programming Language Design and Implementation},
+pages = {190–200},
+numpages = {11},
+keywords = {program analysis tools, instrumentation, dynamic compilation},
+location = {Chicago, IL, USA},
+series = {PLDI '05}
+}
+
+@inproceedings{Nethercote2007Valgrind,
+author = {Nethercote, Nicholas and Seward, Julian},
+title = {Valgrind: a framework for heavyweight dynamic binary instrumentation},
+year = {2007},
+isbn = {9781595936332},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1250734.1250746},
+doi = {10.1145/1250734.1250746},
+abstract = {Dynamic binary instrumentation (DBI) frameworks make it easy to build dynamic binary analysis (DBA) tools such as checkers and profilers. Much of the focus on DBI frameworks has been on performance; little attention has been paid to their capabilities. As a result, we believe the potential of DBI has not been fully exploited.In this paper we describe Valgrind, a DBI framework designed for building heavyweight DBA tools. We focus on its unique support for shadow values-a powerful but previously little-studied and difficult-to-implement DBA technique, which requires a tool to shadow every register and memory value with another value that describes it. This support accounts for several crucial design features that distinguish Valgrind from other DBI frameworks. Because of these features, lightweight tools built with Valgrind run comparatively slowly, but Valgrind can be used to build more interesting, heavyweight tools that are difficult or impossible to build with other DBI frameworks such as Pin and DynamoRIO.},
+booktitle = {Proceedings of the 28th ACM SIGPLAN Conference on Programming Language Design and Implementation},
+pages = {89–100},
+numpages = {12},
+keywords = {Memcheck, Valgrind, dynamic binary analysis, dynamic binary instrumentation, shadow values},
+location = {San Diego, California, USA},
+series = {PLDI '07}
+}
+
+@manual{ValgrindMassif,
+  title        = {Valgrind Massif: Heap Profiler},
+  author       = {Julian Seward and Nicholas Nethercote},
+  year         = {2015},
+  note         = {Available at \url{http://valgrind.org/docs/manual/ms-manual.html}}
+}
+
+@unpublished{memprint,
+  author = {Mustakin, Nafis and Manzano, Joseph and Wong, Daniel},
+  title  = {{MemPrint}: Constructing Program Memory Footprint Estimations using Statistical Methods from Sparsely Sampled {Pin}-based Memory Traces},
+  note   = {Manuscript},
+  year   = {2025}
+}
+@misc{polybench,
+  author = {Pouchet, Louis-No{\"e}l},
+  title  = {{PolyBench/C} 4.2.1: The Polyhedral Benchmark Suite},
+  year   = {2016},
+  note   = {\url{https://sourceforge.net/projects/polybench/}}
+}
+@inproceedings{minivite,
+  author    = {Ghosh, Sayan and Halappanavar, Mahantesh and Tumeo, Antonino and Kalyanaraman, Ananth and Gebremedhin, Assefaw H.},
+  title     = {{miniVite}: A Graph Analytics Benchmarking Tool for Massively Parallel Systems},
+  booktitle = {Proceedings of the IEEE/ACM Performance Modeling, Benchmarking and Simulation of High Performance Computer Systems Workshop (PMBS)},
+  year      = {2018}
+}
+
+@manual{ValgrindDHAT,
+  title        = {{DHAT}: a dynamic heap analysis tool},
+  organization = {Valgrind Developers},
+  note         = {Available at \url{https://valgrind.org/docs/manual/dh-manual.html}}
+}
+
+@misc{heaptrack,
+  author       = {Milian Wolff},
+  title        = {heaptrack: a heap memory profiler for {Linux}},
+  howpublished = {\url{https://github.com/KDE/heaptrack}},
+  note         = {Version 1.3.0}
+}
+
+@misc{gperftools,
+  key          = {gperftools},
+  title        = {gperftools: {TCMalloc} and heap profiler},
+  howpublished = {\url{https://github.com/gperftools/gperftools}},
+  note         = {Version 2.18}
+}
+
+@inproceedings{Puri2024DRackSim,
+  author    = {Amit Puri and others},
+  title     = {{DRackSim}: Simulator for Rack-scale Memory Disaggregation},
+  booktitle = {ACM SIGSIM Conference on Principles of Advanced Discrete Simulation (SIGSIM-PADS)},
+  year      = {2024},
+  note      = {arXiv:2305.09977}
+}
+
+@misc{CXLClusterSim,
+  key          = {CXL-ClusterSim},
+  title        = {{CXL-ClusterSim}: Modeling {CXL}-based Disaggregated Memory Cluster using gem5 and {SST}},
+  howpublished = {arXiv:2605.27745},
+  year         = {2026}
+}
+
+@misc{CXLDMSim,
+  key          = {CXL-DMSim},
+  title        = {{CXL-DMSim}: A Full-System {CXL} Disaggregated Memory Simulator},
+  howpublished = {arXiv:2411.02282},
+  year         = {2024}
+}
+
+@misc{Yang2023CXLMemSim,
+  author       = {Yiwei Yang and others},
+  title        = {{CXLMemSim}: A pure software simulated {CXL.mem}},
+  howpublished = {arXiv:2303.06153},
+  year         = {2023}
+}
+
+@misc{Zacarias2021Throughput,
+  author       = {Felippe Vieira Zacarias and Paul Carpenter and Vinicius Petrucci},
+  title        = {Improving {HPC} System Throughput and Response Time using Memory Disaggregation},
+  howpublished = {\url{https://upcommons.upc.edu/}},
+  year         = {2021}
+}
+
+@inproceedings{Zacarias2021Accurate,
+  author    = {Felippe Vieira Zacarias and Paul Carpenter and Vinicius Petrucci},
+  title     = {Memory Demands in Disaggregated {HPC}: How Accurate Do We Need to Be?},
+  booktitle = {International Workshop on Performance Modeling, Benchmarking and Simulation of High Performance Computer Systems (PMBS)},
+  year      = {2021}
+}
+
+@inproceedings{Zacarias2023Dynamic,
+  author    = {Felippe Vieira Zacarias and Paul Carpenter and Vinicius Petrucci},
+  title     = {Dynamic Memory Provisioning on Disaggregated {HPC} Systems},
+  booktitle = {Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC-W)},
+  year      = {2023}
+}
+
+@inproceedings{Boezennec2024,
+  author    = {Robin Boezennec and others},
+  title     = {Allocation Strategies for Disaggregated Memory in {HPC} Systems},
+  booktitle = {IEEE International Conference on High Performance Computing, Data, and Analytics (HiPC)},
+  year      = {2024}
+}
+
+@inproceedings{Amaro2020CFM,
+  author    = {Emmanuel Amaro and others},
+  title     = {Can Far Memory Improve Job Throughput?},
+  booktitle = {European Conference on Computer Systems (EuroSys)},
+  year      = {2020}
+}
+
+@inproceedings{Li2023Pond,
+  author    = {Huaicheng Li and others},
+  title     = {Pond: {CXL}-Based Memory Pooling Systems for Cloud Platforms},
+  booktitle = {International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS)},
+  year      = {2023}
+}
+
+@inproceedings{Peng2020Underutilization,
+  author    = {Ivy Peng and others},
+  title     = {On the Memory Underutilization: Exploring Disaggregated Memory on {HPC} Systems},
+  booktitle = {International Symposium on Computer Architecture and High Performance Computing (SBAC-PAD)},
+  year      = {2020}
+}
+
+@misc{KSplus2024,
+  key          = {KS+},
+  title        = {{KS+}: Predicting Workflow Task Memory Usage Over Time},
+  howpublished = {arXiv:2408.12290},
+  year         = {2024}
+}
+
+@misc{PWA,
+  author       = {Dror G. Feitelson and Dan Tsafrir and David Krakov},
+  title        = {Parallel Workloads Archive},
+  howpublished = {\url{https://www.cs.huji.ac.il/labs/parallel/workload/}},
+  note         = {Logs LANL CM5 (LANL-CM5-1994-4.1-cln) and MetaCentrum2 (METACENTRUM-2013-3)}
+}
+
+@misc{Lifka1995EASY,
+  author       = {David A. Lifka},
+  title        = {The {ANL/IBM} {SP} Scheduling System},
+  howpublished = {Job Scheduling Strategies for Parallel Processing (JSSPP), LNCS 949},
+  year         = {1995}
+}
+
+@inproceedings{Lattner2004LLVM,
+  author    = {Chris Lattner and Vikram Adve},
+  title     = {{LLVM}: A Compilation Framework for Lifelong Program Analysis and Transformation},
+  booktitle = {Proceedings of the International Symposium on Code Generation and Optimization (CGO)},
+  year      = {2004}
+}
+
+@inproceedings{Powers2019Mesh,
+  author    = {Bobby Powers and David Tench and Emery D. Berger and Andrew McGregor},
+  title     = {Mesh: Compacting Memory Management for {C/C++} Applications},
+  booktitle = {Proceedings of the 40th ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI)},
+  year      = {2019}
+}
+
+@inproceedings{Maas2020Llama,
+  author    = {Martin Maas and David G. Andersen and Michael Isard and Mohammad Mahdi Javanmard and Kathryn S. McKinley and Colin Raffel},
+  title     = {Learning-based Memory Allocation for {C++} Server Workloads},
+  booktitle = {Proceedings of the 25th International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS)},
+  year      = {2020}
+}
+
+@inproceedings{Savage2020HALO,
+  author    = {Joe Savage and Timothy M. Jones},
+  title     = {{HALO}: Post-Link Heap-Layout Optimisation},
+  booktitle = {Proceedings of the 18th ACM/IEEE International Symposium on Code Generation and Optimization (CGO)},
+  year      = {2020}
+}
+
+@inproceedings{Kwon2023vLLM,
+  author    = {Woosuk Kwon and Zhuohan Li and Siyuan Zhuang and Ying Sheng and Lianmin Zheng and Cody Hao Yu and Joseph E. Gonzalez and Hao Zhang and Ion Stoica},
+  title     = {Efficient Memory Management for Large Language Model Serving with {PagedAttention}},
+  booktitle = {Proceedings of the 29th Symposium on Operating Systems Principles (SOSP)},
+  year      = {2023}
+}
+
+@inproceedings{Evans2006jemalloc,
+  author    = {Jason Evans},
+  title     = {A Scalable Concurrent malloc(3) Implementation for {FreeBSD}},
+  booktitle = {BSDCan},
+  year      = {2006}
+}
+
+@manual{LinuxOvercommit,
+  title        = {Overcommit Accounting},
+  organization = {The Linux Kernel Documentation},
+  note         = {Documentation/mm/overcommit-accounting.rst}
+}
+
+@manual{LinuxTHP,
+  title        = {Transparent Hugepage Support},
+  organization = {The Linux Kernel Documentation},
+  note         = {Documentation/admin-guide/mm/transhuge.rst}
+}
+
+@manual{LinuxPagemap,
+  title        = {Examining Process Page Tables},
+  organization = {The Linux Kernel Documentation},
+  note         = {Documentation/admin-guide/mm/pagemap.rst}
+}
+
+@misc{darknet,
+  author       = {Joseph Redmon},
+  title        = {Darknet: Open Source Neural Networks in {C}},
+  howpublished = {\url{https://pjreddie.com/darknet/}},
+  year         = {2016}
+}
+
+@misc{llamacpp,
+  author       = {Georgi Gerganov and {ggml contributors}},
+  title        = {llama.cpp: {LLM} inference in {C/C++}},
+  howpublished = {\url{https://github.com/ggml-org/llama.cpp}, release b11500},
+  year         = {2026}
+}
+
+@misc{llama2c,
+  author       = {Andrej Karpathy},
+  title        = {llama2.c: Inference {Llama} 2 in one file of pure {C}},
+  howpublished = {\url{https://github.com/karpathy/llama2.c}},
+  year         = {2023}
+}
+
+@misc{SmolLM2,
+  author       = {Loubna Ben Allal and others},
+  title        = {{SmolLM2}: When Smol Goes Big -- Data-Centric Training of a Small Language Model},
+  howpublished = {arXiv:2502.02737},
+  year         = {2025}
+}
+
+@unpublished{memprintsched,
+  author = {Nafis Mustakin},
+  title  = {What Is an Exact Memory Footprint Worth to a Scheduler? Measured Footprints and Job Scheduling on Disaggregated Memory},
+  note   = {MemPrint repository, paper\_sched},
+  year   = {2026}
+}

@@ -41,3 +41,12 @@ paper_sched/*.log
 paper_sched/*.bbl
 paper_sched/*.blg
 paper_sched/*.out
+# The resizing paper keeps its figures (paper_resize/make_figures.py) and its PDF
+!paper_resize/figures/
+!paper_resize/figures/*.pdf
+!paper_resize/main.pdf
+paper_resize/*.aux
+paper_resize/*.log
+paper_resize/*.bbl
+paper_resize/*.blg
+paper_resize/*.out

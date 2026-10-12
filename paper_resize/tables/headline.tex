@@ -1,0 +1,16 @@
+\begin{tabular}{lrrrrrrc}
+\toprule
+ & \multicolumn{2}{c}{glibc} & \multicolumn{2}{c}{libmpr, own profile} & \multicolumn{2}{c}{libmpr, held out} & Output \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Workload & RSS & Commit & RSS & Commit & RSS & Commit & identical \\
+\midrule
+darknet AlexNet & 287.3 & 534.7 & 287.6 & 284.6 & 287.5 & 519.1 & yes \\
+miniVite 32768 (pass) & 30.3 & 46.2 & 27.0 & 26.1 & 27.0 & 45.8 & yes \\
+llama.cpp 135M, 32 tok & 379.9 & 404.5 & 193.2 & 265.1 & 191.0 & 265.1 & yes \\
+llama.cpp 135M, 128 tok & 379.9 & 404.5 & 193.3 & 265.1 & 194.0 & 265.1 & yes \\
+llama.cpp 360M, 64 tok & 768.1 & 560.5 & 435.4 & 419.9 & 436.1 & 425.6 & yes \\
+llama2.c 15M & 66.9 & 6.3 & 67.1 & 6.2 & 67.1 & 4.1 & yes \\
+llama2.c 42M & 201.2 & 36.2 & 197.6 & 32.8 & 199.3 & 34.0 & yes \\
+llama2.c 110M & 498.3 & 78.2 & 486.8 & 72.8 & 496.1 & 69.9 & yes \\
+\bottomrule
+\end{tabular}
