@@ -71,6 +71,8 @@ static double scale = 1;
 static int serve_all;
 static const char *report;
 static atomic_size_t committed;
+static int debug; /* MPR_DEBUG=1: every runtime block's events on stderr */
+#define TRACE(...) do { if (debug) dprintf(2, "libmpr: " __VA_ARGS__); } while (0)
 
 static uint64_t hash(uintptr_t x)
 {
@@ -255,13 +257,21 @@ static void *resize_block(char *p, size_t len, size_t commit, size_t newlen)
     if (tail != MAP_FAILED) munmap(tail, newlen - len); /* an old kernel took the flag as a hint */
     char *q = mmap(NULL, newlen, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (q == MAP_FAILED) return MAP_FAILED;
+    /* A piece moves as one mapping, or, when the kernel kept it as several (tails added in place
+       and written separately are not merged), is copied: the data is always kept */
     size_t pieces[2][2] = {{0, commit}, {commit, len - commit}};
     for (int i = 0; i < 2; i++) {
         size_t off = pieces[i][0], n = pieces[i][1];
-        if (n && mremap(p + off, n, n, MREMAP_MAYMOVE | MREMAP_FIXED, q + off) == MAP_FAILED) {
+        if (!n || mremap(p + off, n, n, MREMAP_MAYMOVE | MREMAP_FIXED, q + off) != MAP_FAILED) continue;
+        TRACE("move piece %d of %p (+%zu, %zu bytes): errno %d, copied\n", i, (void *)p, off, n, errno);
+        /* a failed mremap(MREMAP_FIXED) has already unmapped its destination: map it again */
+        if (mmap(q + off, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0)
+            == MAP_FAILED) {
             munmap(q, newlen);
             return MAP_FAILED;
         }
+        memcpy(q + off, p + off, n);
+        munmap(p + off, n);
     }
     return q;
 }
@@ -309,6 +319,7 @@ static void *serve(size_t size, struct site *s, size_t align)
     s->count++, s->requested += size, s->predicted += commit;
     pthread_mutex_unlock(&lock);
     atomic_fetch_add(&committed, commit);
+    TRACE("serve %p len %zu commit %zu site %s\n", p, len, commit, s->key);
     return p;
 }
 
@@ -342,6 +353,7 @@ static int ours_free(void *ptr)
     retire(b);
     unslot(b);
     pthread_mutex_unlock(&lock);
+    TRACE("free %p len %zu\n", ptr, copy.len);
     munmap(ptr, copy.len);
     return 1;
 }
@@ -354,7 +366,12 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
         struct block *b = slot((uintptr_t)ptr, 0);
         if (b) {
             /* ours: the pages move without a copy */
+            /* growth: at least half as much again, so a block grown a little at a time is
+               resized (and its mappings split) a logarithmic number of times */
             size_t len = ROUND(size ? size : 1);
+            if (len > b->len && len < b->len + b->len / 2) len = ROUND(b->len + b->len / 2);
+            /* and a shrink keeps the pages unless it halves the block (no unmap-map churn) */
+            if (len < b->len && len >= b->len / 2) len = b->len;
             void *q = resize_block(ptr, b->len, b->commit, len);
             if (q == MAP_FAILED) {
                 pthread_mutex_unlock(&lock);
@@ -362,11 +379,20 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
                 return NULL;
             }
             struct block moved = *b;
+            size_t old_len = b->len;
+            (void)old_len;
             unslot(b);
             moved.ptr = (uintptr_t)q, moved.len = len, moved.requested = size;
             if (moved.commit > len) {
                 atomic_fetch_sub(&committed, moved.commit - len);
                 moved.commit = len;
+            }
+            TRACE("realloc %p len %zu -> %p len %zu (asked %zu)\n", ptr, old_len, q, len, size);
+            if (debug) {
+                unsigned char v[1024];
+                for (size_t off = 0; off < len; off += 1024 * PAGE)
+                    if (mincore((char *)q + off, len - off < 1024 * PAGE ? len - off : 1024 * PAGE, v) != 0)
+                        TRACE("HOLE in %p len %zu at +%zu (errno %d)\n", q, len, off, errno);
             }
             *slot((uintptr_t)q, 1) = moved;
             nlive++;
@@ -573,6 +599,7 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_MIN"))) min_size = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_SCALE"))) scale = strtod(v, NULL);
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
+    if ((v = getenv("MPR_DEBUG"))) debug = atoi(v);
     report = getenv("MPR_REPORT");
     if ((v = getenv("MPR_RESERVATIONS")))
         load(v);

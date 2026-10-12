@@ -106,6 +106,26 @@ int main(void)
     free(dead), free(quarter), free(z), free(aligned);
     CHECK(__mpr_committed() == base, "committed back to %zu after the frees", base);
 
+    /* a table grown one element at a time past the threshold, with other large blocks around it
+       (libpciaccess's pattern): growths in place, moves, and moves of blocks the kernel keeps as
+       several mappings, whose data is copied */
+    for (int round = 0; round < 3; round++) {
+        struct { unsigned id; char pad[28]; } *d = NULL;
+        void *others[16];
+        int nothers = 0, bad_grow = 0;
+        for (size_t i = 0; i < 8000 && !bad_grow; i++) {
+            d = realloc(d, (i + 1) * sizeof *d);
+            d[i].id = (unsigned)i;
+            if (i % 500 == 0 && nothers < 16) others[nothers++] = malloc(70000 + i);
+            for (size_t k = 0; k <= i; k += 97)
+                if (d[k].id != k) bad_grow = 1;
+        }
+        for (int k = 0; k < nothers; k++) free(others[k]);
+        free(d);
+        if (bad_grow) failed = 1;
+        if (round == 2) CHECK(!failed, "a table grown one element at a time, 3 rounds: data kept");
+    }
+
     /* preloaded allocator (MPR_ALL: every large block served), 8 threads */
     pthread_t t[8];
     for (uintptr_t i = 0; i < 8; i++) pthread_create(&t[i], NULL, worker, (void *)i);
