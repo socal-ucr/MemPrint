@@ -83,12 +83,11 @@ class Setup:
         curves at scale 1; the ratio does not depend on the scale)."""
         key = (scenario, name)
         if key not in self._required:
-            truth_method = "rss" if scenario == "rss" else "truth"
+            truth_method = real.TRUTHS[scenario][0]
             out = {}
             for prog, g in self.curves.groupby("prog"):
                 wide = {m: h.sort_values("k").bytes.to_numpy() for m, h in g.groupby("method")}
-                if "rss" in wide:
-                    wide["rss"] = np.maximum(wide["rss"] - wide.get("rssbase", wide["rss"]).min(), 0)  # as make_jobs
+                wide = real.rebase(wide)  # as make_jobs
                 if truth_method not in wide:
                     continue
                 j = Job(id=0, arrival=0, cores=1, base=60, resident=wide[truth_method], info=dict(wide))

@@ -9,8 +9,9 @@
   largest input): all of that program's curves are scaled by the one factor that puts the truth's peak at the
   job's peak, so each estimator keeps its own over- or under-estimate.
 
-Two truths (scenario): "rss", the resident set (what the kernel charges and OOM-kills on), and "bytes", bytes
-touched (MemPrint's definition: what a page-perfect system would need).
+Truths (scenario): "rss", the resident set (what the kernel charges and OOM-kills on); "bytes", bytes
+touched (MemPrint's definition: what a page-perfect system would need); and "rssmpr", the resident set of the
+program run with libmpr serving its allocations by MemPrint's reservations (resize/).
 """
 
 import numpy as np
@@ -67,13 +68,26 @@ def scale_arrivals(t, load, cluster, gbmin):
     return np.floor(np.asarray(t) / max(np.max(t), 1) * span).astype(int)
 
 
+# scenario -> (the truth's method in the corpus, the method holding its runtime baseline, if any)
+TRUTHS = {"rss": ("rss", "rssbase"), "bytes": ("truth", None), "rssmpr": ("rssmpr", "rssmprbase")}
+
+
+def rebase(info):
+    """The runtime's fixed footprint (loader, libraries, MPI, interpreter: the run's smallest RSS) does not
+    grow with the job, so only the RSS above it is scaled."""
+    for method, base in TRUTHS.values():
+        if base and method in info:
+            info[method] = np.maximum(info[method] - info.get(base, info[method]).min(), 0)
+    return info
+
+
 def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
     """Jobs whose resident curve is the corpus truth of a random program, scaled to the job's peak.
 
     curves: corpus curves (prog, input, method, k, bytes), largest input per program. info gets every method's
     curve on the same scale, the user request, and the CM5 record (u and features)."""
     rng = np.random.default_rng(seed + 1)
-    truth_method = "rss" if scenario == "rss" else "truth"
+    truth_method = TRUTHS[scenario][0]
     wide = {(p, m): g.sort_values("k").bytes.to_numpy() for (p, m), g in curves.groupby(["prog", "method"])}
     progs = sorted(p for p in {p for p, _ in wide} if (p, truth_method) in wide)
     if programs:
@@ -84,10 +98,7 @@ def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
         c = cm5.iloc[rng.integers(len(cm5))]
         peak = r.req_gb * c.u
         info = {m: wide[(p_, m)] for (p_, m) in wide if p_ == prog}
-        if "rss" in info:
-            # the runtime's fixed footprint (loader, libraries, MPI, interpreter: the run's smallest RSS) does not
-            # grow with the job, so only the RSS above it is scaled
-            info["rss"] = np.maximum(info["rss"] - info.get("rssbase", info["rss"]).min(), 0)
+        info = rebase(info)
         t = info[truth_method]
         s = peak / t.max()
         info = {m: c * s for m, c in info.items()}

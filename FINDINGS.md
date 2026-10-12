@@ -37,6 +37,17 @@ Results (mean of 3 runs; peak RSS and peak commit, the size of the mappings smap
 - **Bugs found and fixed on the way:** mremap cannot move a range the kernel keeps as several mappings, and a failed `mremap(MREMAP_FIXED)` has already unmapped its destination (Open MPI's start-up grows a table one element at a time: realloc returned NULL, then crashed); libmpr's exit handler deadlocked on its own lock through fclose.
 - **Not done:** the static route (per-site profiles from the interpreter, `interp.py`/`interp_cpp.py`) and windowed or spatial `-sites` (exact mode only). Small blocks are left to glibc.
 
+### The whole scheduling corpus (23 programs, largest inputs)
+
+Each program ran under glibc and under libmpr preloaded with repeat-run reservations (its own `-sites` profile) and held-out ones (its two smaller inputs; darknet: the reference and Extraction nets), 3 runs each (`~/memprint-data/2026-10-12-resize/runs/corpus/summary.csv`). Every run of every program gave glibc's output (where a program prints a result; Quicksilver's tallies are random and only its exit status is compared).
+
+- **Most programs already commit and hold about what they touch.** Under glibc, the median program commits 1.01x its bytes touched and holds 1.05x in RSS, so there is little for a resizer to take. The exceptions: darknet commits 1.98x, miniVite 3.00x (outside its large heap blocks), Quicksilver 1.25x, cc1 1.13x, Python 1.13x, Lua 1.12x.
+- **Repeat-run reservations** cut the corpus's total peak commit from 2,506 to 2,247 MB (-10%, nearly all darknet's 250 MB: 1.98x to 1.05x) and its total peak RSS by 0.3%. miniVite's RSS falls from 1.99x to 1.66x its bytes touched; cc1's commit from 1.13x to 1.08x. Lua's commit rises from 1.12x to 1.16x (about 2 MB; its tables grow by realloc and leave the heap).
+- **Held-out reservations** save 0.8% of the commit (2,506 to 2,487 MB): most saving sites are on code paths the smaller inputs reach the same way, but darknet's are not (see above).
+- **Time:** within +-3% of glibc on every program.
+
+**Scheduling with the RSS under libmpr as the truth** (`rssmpr`, the scheduler of `paper_sched`, load 0.8, calibrated margins; `results/grid_rssmpr.csv`): the results hardly move from the RSS truth, because the programs' resident memory hardly moved. The exact curve gives 103 min (91 under the RSS truth), the exact peak 457 (436), MemPrint windowed 1,727 (1,807), the DHAT peak 1,230 (1,277) and the request 2,204 (2,197). So the scheduling study's conclusions do not depend on resizing allocations: its gain comes from what the scheduler reserves (a curve against a peak), and the programs already hold about what they touch. Resizing matters for the few programs that commit much more than they touch (darknet), and for commit-limited systems (strict overcommit, `vm.overcommit_memory=2`), where the saved commit is memory other jobs can be promised.
+
 ### Reproduce
 
     tests/pintool/run_tests.sh && resize/tests/run_tests.sh                    # with PIN_ROOT set
