@@ -39,6 +39,19 @@ static int same(const unsigned char *p, size_t n, unsigned seed)
     return 1;
 }
 
+/* pages of [p, p + n) the process holds itself (pagemap bit 56; not the shared zero page): RSS */
+static size_t own_pages(const void *p, size_t n)
+{
+    uint64_t e[256];
+    int fd = open("/proc/self/pagemap", O_RDONLY);
+    size_t k = n / PAGE_SIZE_TEST, own = 0;
+    if (fd < 0 || k > 256 || pread(fd, e, k * 8, (off_t)((uintptr_t)p / PAGE_SIZE_TEST) * 8) != (ssize_t)(k * 8)) own = ~0UL;
+    else
+        for (size_t i = 0; i < k; i++) own += e[i] >> 56 & 1;
+    if (fd >= 0) close(fd);
+    return own;
+}
+
 static void *worker(void *arg)
 {
     unsigned seed = (unsigned)(uintptr_t)arg;
@@ -102,6 +115,29 @@ int main(void)
     char *small = __mpr_alloc(100, 0x2, MPR_MALLOC, 0);
     strcpy(small, "glibc");
     free(small);
+
+    /* memset(0) over a runtime block writes only the pages the program has touched; the others are
+       zero already and stay untouched (memset through a pointer: a real call, as from another
+       library) */
+    unsigned char *clr = __mpr_alloc(1 * MB, 0x3, MPR_MALLOC, 0);
+    void *(*volatile set)(void *, int, size_t) = memset;
+    set(clr + 8 * KB, 0xab, 4 * KB);
+    clr[100 * KB] = 9;
+    set(clr + 16, 0, 1 * MB - 16); /* from inside the first page: that page is written */
+    size_t resident = own_pages(clr, 1 * MB), nonzero = 0;
+    for (size_t i = 0; i < 1 * MB; i++) nonzero += clr[i] != 0;
+    CHECK(nonzero == 0 && resident == 3, "memset 0 of a runtime block: all zero, %zu pages resident (3: those written)",
+          resident);
+    /* pages read but never written map the zero page: still untouched after a clear */
+    volatile unsigned char sum = 0;
+    for (size_t i = 0; i < 1 * MB; i += 4 * KB) sum += clr[i];
+    set(clr, 0, 1 * MB);
+    resident = own_pages(clr, 1 * MB);
+    CHECK(resident == 3, "memset 0 after reading every page: %zu pages resident (3: those written)", resident);
+    set(clr, 1, 1 * MB);
+    for (size_t i = 0; i < 1 * MB; i++) nonzero += clr[i] != 1;
+    CHECK(nonzero == 0, "memset 1 of a runtime block: all written");
+    free(clr);
 
     free(dead), free(quarter), free(z), free(aligned);
     CHECK(__mpr_committed() == base, "committed back to %zu after the frees", base);

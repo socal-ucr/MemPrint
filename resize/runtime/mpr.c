@@ -7,7 +7,16 @@
      MPR_ALL=1                serve every large block, with a reservation or not (no reservation:
                               committed in full); measures mmap, zero pages and mremap alone
      MPR_REPORT=<file>        at exit, per site: blocks, requested, predicted (committed), resident
-                              at free (mincore), blocks that used more than was predicted
+                              at free (mincore), blocks that used more than was predicted, bytes
+                              of zeroing skipped
+     MPR_THP=0|1|2            transparent huge pages for runtime blocks: 0 none (MADV_NOHUGEPAGE),
+                              1 as the system sets them, 2 (default) none on the pages whose zeroing
+                              was skipped (below). With THP, one touch backs 2 MB, so a block cleared
+                              while untouched and then used sparsely (a KV cache written a few rows
+                              per layer) would become resident in 2 MB pieces after all
+     MPR_ZERO=0               do not skip zeroing (default 1: memset(p, 0, n) over a runtime block
+                              leaves the pages the program has never touched alone; they are
+                              zero already, and writing zeros would make them resident)
 
    A site is the id the MemPrintResize pass passes (key "id:0x..."), or in a preloaded run the
    caller's return address as "image+0xaddress", the address in the image file: the key MemPrint's
@@ -27,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -47,6 +57,7 @@ struct site {
     double a, b;
     /* telemetry */
     uint64_t count, requested, predicted, resident, under;
+    atomic_uint_least64_t elided; /* bytes of memset(0) skipped on untouched pages */
     double max_resident_ratio;
 };
 
@@ -72,6 +83,10 @@ static int serve_all;
 static const char *report;
 static atomic_size_t committed;
 static int debug; /* MPR_DEBUG=1: every runtime block's events on stderr */
+static int zero_skip = 1; /* MPR_ZERO */
+static int thp = 2;       /* MPR_THP */
+static int pagemap = -1;  /* /proc/self/pagemap, for zero_skip */
+static void *(*libc_memset)(void *, int, size_t);
 #define TRACE(...) do { if (debug) dprintf(2, "libmpr: " __VA_ARGS__); } while (0)
 
 static uint64_t hash(uintptr_t x)
@@ -233,6 +248,7 @@ static void *map_block(size_t len, size_t commit, size_t align)
         munmap(p, len);
         return NULL;
     }
+    if (thp == 0) madvise(p, len, MADV_NOHUGEPAGE);
     return p;
 }
 
@@ -253,10 +269,14 @@ static void *resize_block(char *p, size_t len, size_t commit, size_t newlen)
     }
     char *tail = mmap(p + len, newlen - len, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
-    if (tail == p + len) return p;
+    if (tail == p + len) {
+        if (thp == 0) madvise(tail, newlen - len, MADV_NOHUGEPAGE);
+        return p;
+    }
     if (tail != MAP_FAILED) munmap(tail, newlen - len); /* an old kernel took the flag as a hint */
     char *q = mmap(NULL, newlen, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (q == MAP_FAILED) return MAP_FAILED;
+    if (thp == 0) madvise(q, newlen, MADV_NOHUGEPAGE); /* (mremap carries each moved piece's own flag) */
     /* A piece moves as one mapping, or, when the kernel kept it as several (tails added in place
        and written separately are not merged), is copied: the data is always kept */
     size_t pieces[2][2] = {{0, commit}, {commit, len - commit}};
@@ -356,6 +376,88 @@ static int ours_free(void *ptr)
     TRACE("free %p len %zu\n", ptr, copy.len);
     munmap(ptr, copy.len);
     return 1;
+}
+
+/* ---- zeroing ---- */
+
+/* Before init has found glibc's memset (other libraries' constructors may run first). A plain loop
+   that GCC must not turn back into a memset call. */
+__attribute__((optimize("no-tree-loop-distribute-patterns"))) static void *bytewise_memset(void *d, int c, size_t n)
+{
+    volatile unsigned char *p = d;
+    while (n--) *p++ = (unsigned char)c;
+    return d;
+}
+
+static void *real_memset(void *d, int c, size_t n)
+{
+    return libc_memset ? libc_memset(d, c, n) : bytewise_memset(d, c, n);
+}
+
+/* memset(d, 0, n) inside a runtime block: whole pages that are neither resident nor swapped have
+   never been touched since the block was mapped (private anonymous memory), so they read as zero
+   and are skipped. A page that is present but not mapped exclusively (pagemap bit 56) is the
+   kernel's shared zero page, which a read of an untouched page maps (a page shared with a forked
+   process looks the same): it is skipped if it reads as zero. The rest is written. Returns 0 when
+   [d, d + n) is not inside a runtime block.
+   The block is found by its first page: d must lie in the block's first page (clearing a whole
+   buffer, e.g. ggml_backend_buffer_clear). */
+static int page_needs_zeroing(const char *page, uint64_t entry)
+{
+    if (!(entry >> 62)) return 0;                      /* neither present (63) nor swapped (62) */
+    if ((entry >> 62 & 1) || (entry >> 56 & 1)) return 1; /* swapped, or the process's own page */
+    const uint64_t *w = (const uint64_t *)page;        /* shared: the zero page if it reads as zero */
+    for (size_t i = 0; i < PAGE / sizeof *w; i++)
+        if (w[i]) return 1;
+    return 0;
+}
+
+static int zero_block(char *d, size_t n)
+{
+    uintptr_t base = (uintptr_t)d & ~(PAGE - 1);
+    pthread_mutex_lock(&lock);
+    struct block *b = slot(base, 0);
+    size_t len      = b ? b->len : 0;
+    struct site *s  = b ? b->site : NULL;
+    pthread_mutex_unlock(&lock);
+    if (!b || (uintptr_t)d + n > base + len) return 0;
+    char *lo = (char *)ROUND((uintptr_t)d), *hi = (char *)(((uintptr_t)d + n) & ~(PAGE - 1));
+    if (hi <= lo) return 0;
+    real_memset(d, 0, lo - d);
+    uint64_t entries[512];
+    size_t skipped = 0;
+    for (char *p = lo; p < hi;) {
+        size_t k = (size_t)(hi - p) / PAGE;
+        if (k > 512) k = 512;
+        off_t at = (off_t)((uintptr_t)p / PAGE) * sizeof(uint64_t);
+        if (pread(pagemap, entries, k * sizeof(uint64_t), at) != (ssize_t)(k * sizeof(uint64_t))) {
+            real_memset(p, 0, hi - p); /* cannot tell: write it all */
+            break;
+        }
+        for (size_t i = 0; i < k;) { /* runs of pages to write */
+            size_t j = i;
+            int touched = page_needs_zeroing(p + i * PAGE, entries[i]);
+            while (j < k && page_needs_zeroing(p + j * PAGE, entries[j]) == touched) j++;
+            if (touched)
+                real_memset(p + i * PAGE, 0, (j - i) * PAGE);
+            else {
+                skipped += (j - i) * PAGE;
+                if (thp == 2) madvise(p + i * PAGE, (j - i) * PAGE, MADV_NOHUGEPAGE);
+            }
+            i = j;
+        }
+        p += k * PAGE;
+    }
+    real_memset(hi, 0, d + n - hi);
+    atomic_fetch_add(&s->elided, skipped);
+    TRACE("memset %p %zu: %zu bytes on untouched pages skipped\n", (void *)d, n, skipped);
+    return 1;
+}
+
+void *memset(void *d, int c, size_t n)
+{
+    if (c == 0 && zero_skip && pagemap >= 0 && ready && n >= min_size && nlive && zero_block(d, n)) return d;
+    return real_memset(d, c, n);
 }
 
 static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int by_id)
@@ -600,7 +702,11 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_SCALE"))) scale = strtod(v, NULL);
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
     if ((v = getenv("MPR_DEBUG"))) debug = atoi(v);
+    if ((v = getenv("MPR_ZERO"))) zero_skip = atoi(v);
+    if ((v = getenv("MPR_THP"))) thp = atoi(v);
     report = getenv("MPR_REPORT");
+    libc_memset = (void *(*)(void *, int, size_t))dlsym(RTLD_NEXT, "memset");
+    if (zero_skip) pagemap = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
     if ((v = getenv("MPR_RESERVATIONS")))
         load(v);
     else if (__mpr_embedded_reservations)
@@ -625,14 +731,15 @@ __attribute__((destructor)) static void fini(void)
     pthread_mutex_unlock(&lock); /* fclose frees its buffer through free(): no lock held from here */
     FILE *f = fopen(report, "w");
     if (f) {
-        fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio\n");
+        fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio,elided\n");
         static const char *names[] = {"none", "dead", "ratio", "affine", "const"};
         for (int i = 0; i < nsites; i++)
             if (sites[i].count)
-                fprintf(f, "%s,%s,%lu,%lu,%lu,%lu,%lu,%.4f\n", sites[i].key, names[sites[i].model],
+                fprintf(f, "%s,%s,%lu,%lu,%lu,%lu,%lu,%.4f,%lu\n", sites[i].key, names[sites[i].model],
                         (unsigned long)sites[i].count, (unsigned long)sites[i].requested,
                         (unsigned long)sites[i].predicted, (unsigned long)sites[i].resident,
-                        (unsigned long)sites[i].under, sites[i].max_resident_ratio);
+                        (unsigned long)sites[i].under, sites[i].max_resident_ratio,
+                        (unsigned long)atomic_load(&sites[i].elided));
         fclose(f);
     }
 }
