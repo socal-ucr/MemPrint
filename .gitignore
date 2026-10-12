@@ -50,3 +50,6 @@ paper_resize/*.log
 paper_resize/*.bbl
 paper_resize/*.blg
 paper_resize/*.out
+# lit output
+resize/tests/pass/Output/
+resize/tests/pass/.lit_test_times.txt

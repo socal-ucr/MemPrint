@@ -1,5 +1,0 @@
-2.374029e-02 alloc.ll
-2.340078e-02 growth.ll
-2.399611e-02 containers.ll
-2.356243e-02 thunk.ll
-2.329755e-02 zero.ll
