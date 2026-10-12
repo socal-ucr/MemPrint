@@ -332,6 +332,38 @@ class Footprint
         }
     }
 
+    // countBytes: the runs of pages of [lo, hi) holding a touched byte, as (first page, pages) from
+    // lo's page; at most maxRuns, the closest runs merged when there are more (-sites)
+    VOID Runs(ADDRINT lo, ADDRINT hi, vector< std::pair< UINT64, UINT64 > >& runs, size_t maxRuns) const
+    {
+        runs.clear();
+        if (!countBytes || hi <= lo) return;
+        ADDRINT first = lo >> PAGE_BITS, last = (hi - 1) >> PAGE_BITS;
+        for (ADDRINT page = first; page <= last; page++)
+        {
+            auto it = touched.find(page);
+            if (it == touched.end()) continue;
+            BOOL any = FALSE;
+            for (UINT64 w : it->second.word)
+                if (w) { any = TRUE; break; }
+            if (!any) continue;
+            UINT64 rel = page - first;
+            if (!runs.empty() && runs.back().first + runs.back().second == rel)
+                runs.back().second++;
+            else
+                runs.push_back({rel, 1});
+        }
+        while (runs.size() > maxRuns) // merge the two runs with the smallest gap between them
+        {
+            size_t best = 0;
+            for (size_t i = 1; i + 1 < runs.size(); i++)
+                if (runs[i + 1].first - (runs[i].first + runs[i].second) < runs[best + 1].first - (runs[best].first + runs[best].second))
+                    best = i;
+            runs[best].second = runs[best + 1].first + runs[best + 1].second - runs[best].first;
+            runs.erase(runs.begin() + best + 1);
+        }
+    }
+
   private:
     struct Entry
     {
@@ -1300,12 +1332,18 @@ static VOID SiteSummarize(ADDRINT ptr, const SiteBlock& b, UINT64 died)
     double ratio = b.size ? double(highWater) / b.size : 0;
     s.maxHighWaterRatio = std::max(s.maxHighWaterRatio, ratio);
     s.minHighWaterRatio = std::min(s.minHighWaterRatio, ratio);
-    if (b.size >= KnobSitesBlockMin.Value() && blocksFile.is_open())
-        blocksFile << SiteKey(b.site, b.siteId) << ',' << (UINT32)b.kind << ',' << b.size << ',' << b.born << ',' << died
+    if (b.size < KnobSitesBlockMin.Value() || !blocksFile.is_open()) return;
+    blocksFile << SiteKey(b.site, b.siteId) << ',' << (UINT32)b.kind << ',' << b.size << ',' << b.born << ',' << died
                    << ',' << touched << ',' << highWater << ',' << pagesTouched << ',' << pages << ',' << b.allocTouched
                    << ',' << b.grownFrom << ',' << (b.moved ? 1 : 0) << ',';
     for (UINT32 i = 0; i < b.ctxN; i++)
         blocksFile << (i ? "|" : "") << SiteKey(b.ctx[i], FALSE);
+    // the touched page runs (first page:pages from the block's first page), for shaped reservations
+    vector< std::pair< UINT64, UINT64 > > runs;
+    footprint.Runs(ptr, ptr + b.size, runs, 64);
+    blocksFile << ',';
+    for (size_t i = 0; i < runs.size(); i++)
+        blocksFile << (i ? ";" : "") << runs[i].first << ':' << runs[i].second;
     blocksFile << '\n';
 }
 
@@ -1386,6 +1424,14 @@ static VOID SitesFinish()
                 cap << (i ? ";" : "") << e.second.large[i].second;
             cap << '\n';
         }
+    }
+    {
+        // the images the site keys name (image+0x<address in the file>), with their paths: an
+        // address key is only meaningful for that build (sites.py records each one's build-id)
+        ofstream img(outputFileNamePrefix + "_images.csv");
+        img << "name,path\n";
+        for (const ImageRange& i : images)
+            img << i.name.substr(i.name.rfind('/') + 1) << ',' << i.name << '\n';
     }
     ofstream out(outputFileNamePrefix + "_sites.csv");
     out << "site,kinds,count,requested,requested_max,touched,high_water,pages_touched,pages,never_touched,"
@@ -2763,7 +2809,8 @@ BOOL InitOutputFiles()
     if (sitesOn)
     {
         blocksFile.open(outputFileNamePrefix + "_blocks.csv");
-        blocksFile << "site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,grown_from,moved,context\n";
+        blocksFile << "site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,grown_from,moved,context,"
+                      "runs\n";
     }
     return TRUE;
 }

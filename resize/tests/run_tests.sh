@@ -9,7 +9,7 @@ failed=0
 echo "runtime"
 gcc -O2 -g -Wall -fPIC -shared -o "$WORK/libmpr.so" "$HERE/../runtime/mpr.c" -ldl -lpthread || exit 1
 gcc -O1 -g -o "$WORK/test_runtime" "$HERE/test_runtime.c" -L"$WORK" -lmpr -lpthread || exit 1
-printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\n' > "$WORK/reservations.txt"
+printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\nid:0x4 runs 2 0 0.25 0.5 0.75\n' > "$WORK/reservations.txt"
 LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_ALL=1 MPR_REPORT="$WORK/report.csv" \
     "$WORK/test_runtime" || failed=1
 if grep -q '^id:0x1,dead,1,1048576,0,1048576,1,' "$WORK/report.csv"; then
@@ -92,6 +92,46 @@ if [[ -n "${PIN_ROOT:-}" && -f "$HERE/../../pintool/obj-intel64/memprint_trace.s
         echo "    ok   wrapper split by calling context (1 MB and dead), memset zeroing skipped (64 KB committed)"
     else
         echo "    FAIL calling contexts / zeroing:"; cat "$WORK/ctx_res.txt" "$WORK/ctx.csv"; failed=1
+    fi
+    # address keys are tied to the build they were profiled on: another build of the program (other
+    # flags, other build-id) has its address sites ignored, with a warning
+    mkdir -p "$WORK/rebuilt"
+    cc -O2 -g -I"$HERE/../../tests/pintool" -o "$WORK/rebuilt/ctx" "$HERE/../../tests/pintool/sites_ctx.c"
+    warn=$(LD_PRELOAD="$WORK/libmpr.so" MPR_RESERVATIONS="$WORK/ctx_res.txt" MPR_MIN=4096 MPR_REPORT="$WORK/ctx2.csv" \
+        "$WORK/rebuilt/ctx" 2>&1 >/dev/null)
+    if grep -q "# image ctx build-id" "$WORK/ctx_res.txt" && [[ $warn == *"not the build"* ]] &&
+       [[ $(awk 'END {print NR}' "$WORK/ctx2.csv") -le 1 ]]; then
+        echo "    ok   reservations of another build: address sites ignored ($warn)" | cut -c1-150
+    else
+        echo "    FAIL build check: '$warn'"; cat "$WORK/ctx2.csv"; failed=1
+    fi
+    # the same, with the wrapper in a shared library the program's build does not compile
+    cc -O1 -g -fPIC -shared -o "$WORK/libwrap.so" "$HERE/../../tests/pintool/libwrap.c"
+    cc -O1 -g -I"$HERE/../../tests/pintool" -o "$WORK/lib" "$HERE/../../tests/pintool/sites_lib.c" -L"$WORK" -lwrap \
+        -Wl,-rpath,"$WORK"
+    "$PIN_ROOT/pin" -t "$HERE/../../pintool/obj-intel64/memprint_trace.so" -mode splitter -track_frees 1 -sites 1 \
+        -sites_block_min 4096 -outdir "$WORK/pinlib" -name lib -- "$WORK/lib" > /dev/null 2>&1
+    (cd "$HERE/../../analysis" && "$PY" -m memprint.sites "$WORK/pinlib" -o "$WORK/lib_res.txt" --min 4096 > /dev/null)
+    LD_PRELOAD="$WORK/libmpr.so" MPR_RESERVATIONS="$WORK/lib_res.txt" MPR_MIN=4096 MPR_REPORT="$WORK/lib.csv" "$WORK/lib"
+    if awk -F, 'NR > 1 && $1 ~ /^libwrap.so\+.*@lib\+/ && $2 == "dead" {d++} NR > 1 && $1 ~ /^libwrap.so\+.*@lib\+/ && $5 == 1048576 {h++}
+                END {exit !(d == 1 && h == 1)}' "$WORK/lib.csv"; then
+        echo "    ok   wrapper in a shared library split by the program's calling contexts"
+    else
+        echo "    FAIL library wrapper:"; cat "$WORK/lib_res.txt" "$WORK/lib.csv"; failed=1
+    fi
+    # a block used in ranges (8 layers, the first 64 KB of each written): a shaped reservation
+    cc -O1 -g -I"$HERE/../../tests/pintool" -o "$WORK/strided" "$HERE/../../tests/pintool/sites_strided.c"
+    "$PIN_ROOT/pin" -t "$HERE/../../pintool/obj-intel64/memprint_trace.so" -mode splitter -track_frees 1 -sites 1 \
+        -outdir "$WORK/pinstrided" -name strided -- "$WORK/strided" > /dev/null 2>&1
+    (cd "$HERE/../../analysis" && "$PY" -m memprint.sites "$WORK/pinstrided" -o "$WORK/strided_res.txt" > /dev/null)
+    LD_PRELOAD="$WORK/libmpr.so" MPR_RESERVATIONS="$WORK/strided_res.txt" MPR_REPORT="$WORK/strided.csv" "$WORK/strided"
+    status=$?
+    if [[ $status == 0 ]] && grep -q " runs 8 " "$WORK/strided_res.txt" &&
+       awk -F, 'NR > 1 && $2 == "runs" && $5 >= 524288 && $5 <= 655360 {ok = 1; c = $5} END {exit !ok}' "$WORK/strided.csv"; then
+        # (17 pages per layer: the profiled block started 16 bytes into a page)
+        echo "    ok   shaped reservation: 8 ranges, $(awk -F, 'NR > 1 {print $5 / 1024}' "$WORK/strided.csv") KB of 8 MB committed (a prefix: 7.1 MB)"
+    else
+        echo "    FAIL shaped reservation (status $status):"; cat "$WORK/strided_res.txt" "$WORK/strided.csv"; failed=1
     fi
     # capacities profiled per call site: the big vector, the string and the bucket array are
     # allocated once; the 2000 small vectors at another call site keep their own growth

@@ -30,7 +30,8 @@ gcc -O2 -g -fPIC -shared -o "$out/libmpr.so" "$HERE/resize/runtime/mpr.c" -ldl -
 GCC=${MPR_GCC_INSTALL:-/usr/lib/gcc/x86_64-redhat-linux/8}
 export CC="$LLVM_BIN/clang --gcc-install-dir=$GCC" CXX="$LLVM_BIN/clang++ --gcc-install-dir=$GCC"
 export MPR_CFLAGS="-g -fpass-plugin=$out/pass/libMemPrintResize.so -DSTBI_NO_SIMD"
-export MPR_LDFLAGS="-L$out -lmpr -Wl,-rpath,$out"
+# --build-id: libmpr checks that address-keyed reservations were profiled on this build
+export MPR_LDFLAGS="-L$out -lmpr -Wl,-rpath,$out -Wl,--build-id"
 export MPR_PASS_MODE=$mode MPR_PASS_RESERVATIONS="$res" MPR_PASS_SITEMAP="$out/sitemap-$mode.txt"
 rm -f "$MPR_PASS_SITEMAP"
 "$@"

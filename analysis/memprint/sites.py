@@ -14,6 +14,10 @@ training blocks, by requested bytes (1.0: all of them) and, among the models tha
     const    a                (the high water does not grow with the request)
     ratio    a * size
     affine   a * size + b     (fitted as the lowest line above the covered blocks)
+    runs     k ranges of the block, as fractions of its size: the union of the training blocks'
+             touched page runs (column runs), when the blocks are used sparsely across their whole
+             length (a KV cache written a few rows per layer) and committing those ranges costs less
+             than --runs of the best prefix model
 A site is left out when its best model would commit at least --keep of what was requested (no
 saving). Writes "site model a b" lines, which libmpr reads (MPR_RESERVATIONS), and a summary CSV.
 
@@ -95,12 +99,89 @@ def fit(size, hw, q):
     return best
 
 
-def row(site, g, q, keep, context=""):
+PAGE = 4096
+MAX_RUNS = 32
+
+
+def runs_fit(g):
+    """(fractional ranges, committed bytes over the training blocks) of the runs model, or None."""
+    if "runs" not in g or g["runs"].fillna("").eq("").all():
+        return None
+    spans = []
+    for size, pages, runs in zip(g["size"], g["pages"], g["runs"].fillna("").astype(str)):
+        for r in filter(None, runs.split(";")):
+            first, n = (int(x) for x in r.split(":"))
+            spans.append((first / pages, (first + n) / pages))
+    if not spans:
+        return None
+    spans.sort()
+    merged = [list(spans[0])]
+    for lo, hi in spans[1:]:
+        if lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    while len(merged) > MAX_RUNS:  # join the two ranges with the smallest gap
+        i = min(range(len(merged) - 1), key=lambda k: merged[k + 1][0] - merged[k][1])
+        merged[i][1] = merged[i + 1][1]
+        del merged[i + 1]
+    cost = 0.0
+    for size in g["size"]:
+        n = -(-size // PAGE)
+        cost += min(size, sum((-(-int(hi * n * PAGE) // PAGE) - int(lo * n * PAGE) // PAGE) * PAGE for lo, hi in merged))
+    return merged, cost
+
+
+def row(site, g, q, keep, context="", runs_ratio=0.7):
     model, a, b, cost = fit(g["size"], g["high_water"], q)
+    ranges = None
+    shaped = runs_fit(g) if model != "dead" else None
+    if shaped and shaped[1] < runs_ratio * cost and cost - shaped[1] >= 65536:
+        ranges, cost = shaped
+        model, a, b = "runs", float(len(ranges)), 0.0
     requested = float(g["size"].sum())
-    return dict(site=site, context=context, model=model, a=a, b=b, blocks=len(g), inputs=g["input"].nunique(),
-                requested=requested, committed=cost, touched=float(g["touched"].sum()),
+    return dict(site=site, context=context, model=model, a=a, b=b, ranges=ranges, blocks=len(g),
+                inputs=g["input"].nunique(), requested=requested, committed=cost, touched=float(g["touched"].sum()),
                 high_water=float(g["high_water"].sum()), keep=cost < keep * requested)
+
+
+def build_id(path):
+    """The GNU build-id of an ELF file (hex), or None."""
+    import struct
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if data[:4] != b"\x7fELF" or data[4] != 2:
+        return None
+    shoff, = struct.unpack_from("<Q", data, 0x28)
+    shentsize, shnum = struct.unpack_from("<HH", data, 0x3A)
+    for i in range(shnum):
+        sh_type, = struct.unpack_from("<I", data, shoff + i * shentsize + 4)
+        if sh_type != 7:  # SHT_NOTE
+            continue
+        off, size = struct.unpack_from("<QQ", data, shoff + i * shentsize + 0x18)
+        pos = off
+        while pos + 12 <= off + size:
+            namesz, descsz, ntype = struct.unpack_from("<III", data, pos)
+            name = data[pos + 12:pos + 12 + namesz]
+            desc_at = pos + 12 + ((namesz + 3) & ~3)
+            if ntype == 3 and name.rstrip(b"\0") == b"GNU":
+                return data[desc_at:desc_at + descsz].hex()
+            pos = desc_at + ((descsz + 3) & ~3)
+    return None
+
+
+def images(dirs):
+    """name -> build-id of the images the profiles' address keys name (from *_images.csv)."""
+    out = {}
+    for d in dirs:
+        for f in glob.glob(os.path.join(d, "*_images.csv")):
+            for r in pd.read_csv(f).itertuples():
+                if r.name not in out:
+                    out[r.name] = build_id(r.path)
+    return out
 
 
 def capacities(dirs, q, min_size):
@@ -137,7 +218,7 @@ def split(site, g, q, keep, frac, max_depth=2):
     `frac` of the requested bytes (within 1% of the best depth's); [] when no depth saves that much."""
     if "context" not in g or g["context"].fillna("").eq("").all():
         return []
-    merged = fit(g["size"], g["high_water"], q)[3]
+    merged = row(site, g, q, keep)["committed"]
     best = []
     for depth in range(1, max_depth + 1):
         c = contexts(g, depth)
@@ -178,9 +259,18 @@ def main(argv=None):
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
         for x in r[r.keep].itertuples():
-            f.write(f"{x.site} {x.model} {x.a:.6g} {x.b:.6g}\n")
+            if x.model == "runs":
+                f.write(f"{x.site} runs {len(x.ranges)} " + " ".join(f"{lo:.6f} {hi:.6f}" for lo, hi in x.ranges) + "\n")
+            else:
+                f.write(f"{x.site} {x.model} {x.a:.6g} {x.b:.6g}\n")
         for c in caps:
             f.write(f"{c['site']} cap {c['a']:.0f} {c['b']:.0f}\n")
+        # the builds the address keys (image+0x...) were profiled on: libmpr ignores an image's
+        # address keys when the image it loads has another build-id
+        named = {k.split("+")[0] for k in r[r.keep].site for k in k.split("@") if "+" in k}
+        for name, bid in sorted(images(a.dirs).items()):
+            if name in named and bid:
+                f.write(f"# image {name} build-id {bid}\n")
     if caps:
         print(f"{len(caps)} container capacities: " + ", ".join(
             f"{c['site']} {c['a'] / 1e6:.2f} MB after {c['b'] / 1e3:.0f} KB ({c['large_chains']} of {c['chains']} chains)"

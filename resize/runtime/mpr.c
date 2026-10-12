@@ -53,7 +53,8 @@ extern void *__libc_memalign(size_t, size_t);
 #define PAGE 4096UL
 #define ROUND(n) (((n) + PAGE - 1) & ~(PAGE - 1))
 
-enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP };
+enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS };
+#define MAX_RUNS 32
 
 struct site {
     char key[128];
@@ -64,6 +65,8 @@ struct site {
     atomic_uint_least64_t elided; /* bytes of memset(0) skipped on untouched pages */
     double max_resident_ratio;
     int ctx_depth; /* >0: the site has per-context lines of up to this many frames */
+    int nruns;     /* M_RUNS: the committed ranges, as fractions of the block */
+    float runs[MAX_RUNS][2];
     int has_model; /* the site has a line of its own (else: a base for context lines only) */
 };
 
@@ -79,7 +82,7 @@ static struct cache_entry { uintptr_t ret; struct site *site; int known; } *cach
 
 /* live blocks served by the runtime */
 #define LIVE (1 << 16)
-static struct block { uintptr_t ptr; size_t len, commit, requested; struct site *site; } *live;
+static struct block { uintptr_t ptr; size_t len, commit, requested; struct site *site; int shaped; } *live;
 static size_t nlive;
 static uintptr_t *starts; /* the live blocks' addresses, sorted: the block holding an address (zeroing) */
 
@@ -120,6 +123,67 @@ static struct site *add_site(const char *key, int model, double a, double b)
     return s;
 }
 
+/* Builds: "# image NAME build-id HEX" lines in the reservations give the build each image's
+   address keys were profiled on. An image loaded with another build-id (or none) has its address
+   keys ignored: an address in one build is unrelated code in another. Ids from the pass do not
+   depend on the build. */
+#define MAX_IMAGES 64
+static struct image { char name[96], want[48]; int state; /* 0 unchecked, 1 same build, -1 another */ } images[MAX_IMAGES];
+static int nimages;
+
+static void parse_image(const char *line)
+{
+    char name[96], id[48];
+    if (nimages < MAX_IMAGES && sscanf(line, "# image %95s build-id %47s", name, id) == 2) {
+        snprintf(images[nimages].name, sizeof images[nimages].name, "%s", name);
+        snprintf(images[nimages].want, sizeof images[nimages].want, "%s", id);
+        nimages++;
+    }
+}
+
+/* the GNU build-id of the loaded ELF image whose header is at `base` (hex), or "" */
+static void loaded_build_id(uintptr_t base, char *out, size_t len)
+{
+    out[0] = 0;
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *)base;
+    if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0) return;
+    uintptr_t bias = eh->e_type == ET_EXEC ? 0 : base;
+    const Elf64_Phdr *ph = (const Elf64_Phdr *)(base + eh->e_phoff);
+    for (int i = 0; i < eh->e_phnum; i++) {
+        if (ph[i].p_type != PT_NOTE) continue;
+        const char *p = (const char *)(bias + ph[i].p_vaddr), *end = p + ph[i].p_memsz;
+        while (p + sizeof(Elf64_Nhdr) <= end) {
+            const Elf64_Nhdr *n = (const Elf64_Nhdr *)p;
+            const char *name = p + sizeof *n, *desc = name + ((n->n_namesz + 3) & ~3u);
+            if (n->n_type == NT_GNU_BUILD_ID && n->n_namesz == 4 && !memcmp(name, "GNU", 4)) {
+                size_t k = 0;
+                for (unsigned j = 0; j < n->n_descsz && k + 3 <= len; j++)
+                    k += (size_t)snprintf(out + k, len - k, "%02x", (unsigned char)desc[j]);
+                return;
+            }
+            p = desc + ((n->n_descsz + 3) & ~3u);
+        }
+    }
+}
+
+/* whether address keys of the image named `name` (loaded at `base`) may be used */
+static int image_ok(const char *name, uintptr_t base)
+{
+    for (int i = 0; i < nimages; i++) {
+        if (strcmp(images[i].name, name)) continue;
+        if (!images[i].state) {
+            char got[48];
+            loaded_build_id(base, got, sizeof got);
+            images[i].state = strcmp(got, images[i].want) ? -1 : 1;
+            if (images[i].state < 0)
+                fprintf(stderr, "libmpr: %s is not the build its reservations were profiled on (build-id %s, "
+                        "profiled %s): its address sites are ignored\n", name, *got ? got : "none", images[i].want);
+        }
+        return images[i].state > 0;
+    }
+    return 1; /* no build recorded: as before */
+}
+
 /* "image+0xaddress" for a return address: the address in the image file (Pin's IMG_LoadOffset) */
 static int key_of(uintptr_t ret, char *key, size_t len)
 {
@@ -137,6 +201,7 @@ static int key_of(uintptr_t ret, char *key, size_t len)
         }
         name = exe, slash = strrchr(exe, '/');
     }
+    if (!image_ok(slash ? slash + 1 : name, base)) return 0;
     snprintf(key, len, "%s+0x%lx", slash ? slash + 1 : name, (unsigned long)(ret - bias));
     return 1;
 }
@@ -236,6 +301,7 @@ static double model_value(const struct site *s, size_t n)
     case M_RATIO: p = s->a * n; break;
     case M_AFFINE: p = s->a * n + s->b; break;
     case M_CONST: p = s->a; break;
+    case M_RUNS: p = 0; for (int i = 0; i < s->nruns; i++) p += (s->runs[i][1] - s->runs[i][0]) * n; break;
     default: p = n; /* no reservation (MPR_ALL): all of it */
     }
     if (s->model != M_NONE) p *= scale;
@@ -395,12 +461,28 @@ static void retire(struct block *b)
 }
 
 /* serve a large block for site s; NULL: let glibc do it */
+/* M_RUNS: commit the site's ranges of a block mapped MAP_NORESERVE; returns the bytes committed */
+static size_t commit_runs(char *p, size_t len, const struct site *s)
+{
+    size_t total = 0, pages = len / PAGE;
+    for (int i = 0; i < s->nruns; i++) {
+        size_t lo = (size_t)(s->runs[i][0] * pages) * PAGE, hi = ROUND((size_t)(s->runs[i][1] * pages + 0.999999) * PAGE);
+        if (hi > len) hi = len;
+        if (hi <= lo) continue;
+        if (mmap(p + lo, hi - lo, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+            continue; /* stays MAP_NORESERVE: backed on touch all the same */
+        total += hi - lo;
+    }
+    return total;
+}
+
 static void *serve(size_t size, struct site *s, size_t align)
 {
-    size_t len = ROUND(size), commit = ROUND(predict(s, size));
+    size_t len = ROUND(size), commit = s->model == M_RUNS ? 0 : ROUND(predict(s, size));
     if (commit > len) commit = len;
     void *p = map_block(len, commit, align);
     if (!p) return NULL;
+    if (s->model == M_RUNS) commit = commit_runs(p, len, s);
     pthread_mutex_lock(&lock);
     struct block *b = slot((uintptr_t)p, 1);
     if (!b) {
@@ -408,7 +490,7 @@ static void *serve(size_t size, struct site *s, size_t align)
         munmap(p, len);
         return NULL;
     }
-    *b = (struct block){(uintptr_t)p, len, commit, size, s};
+    *b = (struct block){(uintptr_t)p, len, commit, size, s, s->model == M_RUNS};
     add_start((uintptr_t)p), nlive++;
     s->count++, s->requested += size, s->predicted += commit;
     pthread_mutex_unlock(&lock);
@@ -561,6 +643,20 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
     if (MAYBE_OURS(ptr)) {
         pthread_mutex_lock(&lock);
         struct block *b = slot((uintptr_t)ptr, 0);
+        if (b && b->shaped) {
+            /* a block committed in ranges is many mappings: a new block and a copy */
+            struct block old = *b;
+            pthread_mutex_unlock(&lock);
+            void *q = size >= min_size ? serve(size, old.site, 0) : NULL;
+            if (!q) q = __libc_malloc(size ? size : 1);
+            if (!q) {
+                errno = ENOMEM;
+                return NULL;
+            }
+            memcpy(q, ptr, old.requested < size ? old.requested : size);
+            ours_free(ptr);
+            return q;
+        }
         if (b) {
             /* ours: the pages move without a copy */
             /* growth: at least half as much again, so a block grown a little at a time is
@@ -773,16 +869,31 @@ static void parse_line(const char *line)
 {
     char key[128], model[32];
     double a, b;
+    if (!strncmp(line, "# image ", 8)) parse_image(line);
     if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) return;
     int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
           : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST
-          : !strcmp(model, "cap") ? M_CAP : M_NONE;
+          : !strcmp(model, "cap") ? M_CAP : !strcmp(model, "runs") ? M_RUNS : M_NONE;
     if (m == M_NONE) return;
     struct site *s = find_key(key);
     if (s) /* a base created for a context line before its own line */
         s->model = m, s->a = a, s->b = b, s->has_model = 1;
     else
-        add_site(key, m, a, b);
+        s = add_site(key, m, a, b);
+    if (s && m == M_RUNS) { /* "key runs K lo1 hi1 ... loK hiK" */
+        const char *p = line;
+        for (int skip = 0; skip < 3 && *p; skip++) { /* past the key, the model and K */
+            while (*p && *p != ' ' && *p != '\t') p++;
+            while (*p == ' ' || *p == '\t') p++;
+        }
+        int k = (int)a < MAX_RUNS ? (int)a : MAX_RUNS;
+        for (s->nruns = 0; s->nruns < k; s->nruns++) {
+            char *end;
+            float lo = strtof(p, &end), hi = strtof(end, &end);
+            if (end == p) break;
+            s->runs[s->nruns][0] = lo, s->runs[s->nruns][1] = hi, p = end;
+        }
+    }
     /* a context line: its base site must look at the calling context */
     char *at = strchr(key, '@');
     if (at) {
@@ -873,7 +984,7 @@ __attribute__((destructor)) static void fini(void)
     FILE *f = fopen(report, "w");
     if (f) {
         fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio,elided\n");
-        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap"};
+        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap", "runs"};
         for (int i = 0; i < nsites; i++)
             if (sites[i].count)
                 fprintf(f, "%s,%s,%lu,%lu,%lu,%lu,%lu,%.4f,%lu\n", sites[i].key, names[sites[i].model],

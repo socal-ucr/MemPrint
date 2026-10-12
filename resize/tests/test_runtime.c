@@ -116,6 +116,15 @@ int main(void)
     strcpy(small, "glibc");
     free(small);
 
+    /* a block committed in ranges ("runs 2 0 0.25 0.5 0.75": its first and third quarters) */
+    size_t committed0 = __mpr_committed();
+    unsigned char *shaped = __mpr_alloc(1 * MB, 0x4, MPR_MALLOC, 0);
+    CHECK(__mpr_committed() - committed0 == 512 * KB, "shaped site: 2 ranges, 512 KB of 1 MB committed");
+    fill(shaped, 1 * MB, 5);
+    shaped = realloc(shaped, 2 * MB); /* many mappings: grown by a copy */
+    CHECK(shaped && same(shaped, 1 * MB, 5), "shaped block written in full and grown: data kept");
+    free(shaped);
+
     /* memset(0) over a runtime block writes only the pages the program has touched; the others are
        zero already and stay untouched (memset through a pointer: a real call, as from another
        library) */
