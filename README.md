@@ -292,10 +292,11 @@ MemPrint's per-site footprints, passed to the compiler and the runtime as non-bi
 
 | Piece | What it does |
 |---|---|
-| `pintool -sites` | per allocation site: requested, touched and high-water bytes (`*_sites.csv`), large blocks one by one (`*_blocks.csv`) |
+| `pintool -sites` | per allocation site: requested, touched and high-water bytes (`*_sites.csv`); large blocks one by one with their caller frames (`-site_context`, default 2) and touched page runs (`*_blocks.csv`); container growth chains of programs built with the pass (`*_capacity.csv`); the images site keys name (`*_images.csv`). `-skip_zeroing` (on with `-sites`) leaves zeros written over untouched memory by memset/bzero out of the footprint |
+| `analysis/memprint/sites.py` (more) | splits a site by calling context when that commits less (`site@frame1[@frame2]`); a `runs` model commits ranges of a block used sparsely across its length; `cap A B` container capacities per call site; records each image's GNU build-id |
 | `analysis/memprint/sites.py` | reservations (dead, const, ratio, affine per site) from one or more `-sites` runs |
 | `resize/runtime/mpr.c` | `libmpr`: commits a block's predicted part, maps the rest `MAP_NORESERVE`; zero pages for calloc, realloc without copies; `memset(p, 0, n)` over its blocks skips the pages never touched (they are zero already) and keeps them out of transparent huge pages; telemetry (`MPR_RESERVATIONS`, `MPR_REPORT`, `MPR_SCALE`, `MPR_ALL`, `MPR_MIN`, `MPR_ZERO`, `MPR_THP`, `MPR_DEBUG`) |
-| `resize/pass/` | `MemPrintResize` LLVM plugin: allocation calls through libmpr with stable site ids; std::vector capacity through `__mpr_capacity`; apply mode embeds the reservations |
+| `resize/pass/` | `MemPrintResize` LLVM plugin: allocation calls through libmpr with site ids that survive edits elsewhere (lines relative to the function, file base names); address-taken allocators through thunks; zeroing of >= 4 KB through `__mpr_zero`; growth points of std::vector, std::string and hash tables (libstdc++, libc++) through `__mpr_capacity` with the element size from the debug information, one capacity per call site (inlined chain, or `__mpr_growth` around calls to container members); apply mode embeds the reservations. `scripts/check_reservations.py` lists reservations a new build no longer has |
 | `scripts/resize_build.sh`, `scripts/resize_eval.sh` | build a program with the pass; measure RSS, commit, time and output under glibc or libmpr |
 | `resize/tests/run_tests.sh` | runtime tests, `opt` + FileCheck tests of the pass, and a program built with the pass end to end |
 

@@ -10,7 +10,7 @@ echo "runtime"
 gcc -O2 -g -Wall -fPIC -shared -o "$WORK/libmpr.so" "$HERE/../runtime/mpr.c" -ldl -lpthread || exit 1
 gcc -O1 -g -o "$WORK/test_runtime" "$HERE/test_runtime.c" -L"$WORK" -lmpr -lpthread || exit 1
 printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\nid:0x4 runs 2 0 0.25 0.5 0.75\n' > "$WORK/reservations.txt"
-LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_ALL=1 MPR_REPORT="$WORK/report.csv" \
+LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_ALL=1 MPR_ZERO_MIN=16384 MPR_REPORT="$WORK/report.csv" \
     "$WORK/test_runtime" || failed=1
 if grep -q '^id:0x1,dead,1,1048576,0,1048576,1,' "$WORK/report.csv"; then
     echo "    ok   telemetry: the dead site's block was all resident, an under-prediction"

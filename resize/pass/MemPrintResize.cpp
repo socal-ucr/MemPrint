@@ -210,14 +210,15 @@ const char* ContainerPrefixes[] = {"std::vector<", "std::__cxx11::basic_string<"
                                    "std::__detail::_Map_base<", "std::__detail::_Insert_base<",
                                    "std::__detail::_Insert<", "std::__1::vector<", "std::__1::basic_string<",
                                    "std::__1::__hash_table<", "std::__1::unordered_map<", "std::__1::unordered_set<"};
+// The containers' growth paths (out of line in libstdc++ and libc++): a call to one of them from the
+// program's code is a container growing there. The public members (push_back, insert, operator[]) are
+// left alone: they run on every call, and when they are inlined their growth path is called from the
+// program's code anyway.
 const std::set< std::string > GrowingMembers = {
-    "push_back", "emplace_back", "emplace", "emplace_hint", "insert", "resize", "reserve", "append", "assign",
-    "operator+=", "operator=", "operator[]", "_M_realloc_insert", "_M_realloc_append", "_M_default_append",
-    "_M_fill_insert", "_M_range_insert", "_M_insert_aux", "_M_fill_assign", "_M_assign_aux", "_M_create",
-    "_M_mutate", "_M_append", "_M_replace", "_M_replace_aux", "_M_construct", "_M_assign", "_M_rehash",
-    "_M_insert_unique_node", "_M_insert_multi_node", "_M_emplace", "_M_insert", "__push_back_slow_path",
-    "__emplace_back_slow_path", "__append", "__grow_by", "__grow_by_and_replace", "__init", "__rehash",
-    "__emplace_unique_key_args", "__insert_unique"};
+    "_M_realloc_insert", "_M_realloc_append", "_M_default_append", "_M_fill_insert", "_M_range_insert",
+    "_M_insert_aux", "_M_fill_assign", "_M_assign_aux", "_M_create", "_M_mutate", "_M_replace_aux",
+    "_M_rehash", "_M_insert_unique_node", "_M_insert_multi_node", "__push_back_slow_path",
+    "__emplace_back_slow_path", "__append", "__grow_by", "__grow_by_and_replace", "__rehash"};
 
 bool GrowingCall(Function* callee)
 {

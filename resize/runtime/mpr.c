@@ -14,6 +14,7 @@
                               was skipped (below). With THP, one touch backs 2 MB, so a block cleared
                               while untouched and then used sparsely (a KV cache written a few rows
                               per layer) would become resident in 2 MB pieces after all
+     MPR_ZERO_MIN=<bytes>     skip zeroing only in clears of at least this many bytes (default 1 MB)
      MPR_ZERO=0               do not skip zeroing (default 1: memset(p, 0, n) over a runtime block
                               leaves the pages the program has never touched alone; they are
                               zero already, and writing zeros would make them resident)
@@ -254,7 +255,7 @@ static struct site *site_of_id(uint64_t id)
     return s;
 }
 
-static __thread int in_backtrace; /* backtrace() may allocate (it loads libgcc_s on first use) */
+static __thread int in_backtrace __attribute__((tls_model("initial-exec"))); /* backtrace() may allocate (it loads libgcc_s on first use) */
 
 /* A site with per-context lines: the line for the frames above the call that returns to `ret`
    (deepest first), else the site's own line, else none. */
@@ -614,7 +615,10 @@ static int zero_block(char *d, size_t n)
     return 1;
 }
 
-#define CLEARS(c, n) ((c) == 0 && zero_skip && pagemap >= 0 && ready && (n) >= 4 * PAGE && nlive)
+/* Clears of at least zero_min bytes (MPR_ZERO_MIN, default 1 MB): a clear costs a pagemap read, which
+   a program clearing a buffer of a few hundred KB in a loop (a hash table's buckets) would pay each time */
+static size_t zero_min = 1 << 20;
+#define CLEARS(c, n) ((c) == 0 && zero_skip && pagemap >= 0 && ready && (n) >= zero_min && nlive)
 
 void *memset(void *d, int c, size_t n)
 {
@@ -833,7 +837,7 @@ int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site)
 
 /* The program's call site that is growing a container on this thread (the pass brackets calls to
    container members from the program's own code with __mpr_growth(id) ... __mpr_growth(0)). */
-static __thread uint64_t growth_site;
+static __thread uint64_t growth_site __attribute__((tls_model("initial-exec")));
 
 void __mpr_growth(uint64_t site) { growth_site = site; }
 
@@ -964,6 +968,7 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
     if ((v = getenv("MPR_DEBUG"))) debug = atoi(v);
     if ((v = getenv("MPR_ZERO"))) zero_skip = atoi(v);
+    if ((v = getenv("MPR_ZERO_MIN"))) zero_min = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_THP"))) thp = atoi(v);
     report = getenv("MPR_REPORT");
     libc_memset = (void *(*)(void *, int, size_t))dlsym(RTLD_NEXT, "memset");
