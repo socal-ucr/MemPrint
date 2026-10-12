@@ -74,6 +74,9 @@ def reactive(j, m, interval=5):
 reactive.elastic = True
 
 
+CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",
+               "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec"}
+
 REAL = {
     "reactive": reactive,
     "exact": lambda j, m: curve(j.resident),
@@ -82,6 +85,9 @@ REAL = {
     "memprint-W1": _curve("W1"), "memprint-W5": _curve("W5"), "memprint-P": _curve("P"),
     "memprint-W5-peak": _peak("W5"),
     "memprint-static": _curve("static"),
+    # the clock and footprint options (Pin tool -clock seconds, -footprint pages): the full trace (T) and W5,
+    # on the references or wall-time clock, counting bytes or pages
+    **{f"memprint-{n}": _curve(m) for n, m in CLOCK_PAGES.items()},
     "massif": _curve("massif"), "massif-pages": _curve("massifpages"),
     "massif-i": _curve("massifi"), "massif-pages-i": _curve("massifpagesi"), "heaptrack": _curve("heaptrack"),
     "dhat": _peak("dhat"), "dhat-curve": _curve("dhatcurve"), "dhat-hold": _curve("dhathold"), "gperf": _peak("gperf"), "rss-peak": _peak("rss"),
@@ -95,7 +101,8 @@ def available(jobs, name):
             "massif": "massif", "massif-pages": "massifpages", "massif-i": "massifi",
             "massif-pages-i": "massifpagesi", "heaptrack": "heaptrack", "dhat": "dhat",
             "gperf": "gperf", "rss-peak": "rss",
-            "dhat-curve": "dhatcurve", "dhat-hold": "dhathold"}.get(name)
+            "dhat-curve": "dhatcurve", "dhat-hold": "dhathold",
+            **{f"memprint-{n}": m for n, m in CLOCK_PAGES.items()}}.get(name)
     return need is None or all(need in j.info for j in jobs)
 
 

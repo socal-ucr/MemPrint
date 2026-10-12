@@ -2,7 +2,9 @@
 curve over progress p in [0, 1].
 
 Each method has its own clock, so each curve is put on progress by linear rescaling of its own run: memory
-references (MemPrint), milliseconds under Valgrind (Massif), seconds (RSS). A method that gives only a peak
+references (MemPrint), milliseconds under Valgrind (Massif), seconds (RSS). A MemPrint run whose output has the
+Seconds column (wall time under Pin) also gives the method's curve on that clock, as method + "sec" (W5sec: a W5
+run kept for that curve only). A method that gives only a peak
 (DHAT at t-gmax, gperftools' in-use dumps) is a flat curve at that peak. Curves are resampled to K points by
 taking the largest value in each step, so a reservation that follows the curve covers every sample in it.
 
@@ -47,21 +49,39 @@ def _one(pattern):
     return f[0] if f else None
 
 
-def truth(d):
+def truth(d, clock="Time"):
     f = _one(f"{d}/Buffered_*_timeline.csv")
     if not f:
         return None
     t = pd.read_csv(f)
     t = t[t.Bin == -1]
-    return t.Time, t.MemUsageObs
+    if clock not in t:
+        return None
+    t = t.dropna(subset=[clock, "MemUsageObs"])   # (a run still writing: its last line)
+    return t[clock], t.MemUsageObs
 
 
-def windowed(d):
+def windowed(d, clock="Time"):
     f = _one(f"{d}/Spatial_*_windowed.csv")
     if not f:
         return None
     w = pd.read_csv(f)
-    return w.Time, np.maximum(w.Estimate - HALF_PAGE * w.PartialEdges, 0)
+    if clock not in w:
+        return None
+    w = w.dropna(subset=[clock, "Estimate", "PartialEdges"])
+    return w[clock], np.maximum(w.Estimate - HALF_PAGE * w.PartialEdges, 0)
+
+
+def windowed_pages(d, clock="Time"):
+    """-footprint pages: the Estimate counts whole resident pages (no partial-page correction)."""
+    f = _one(f"{d}/Spatial_*_windowed.csv")
+    if not f:
+        return None
+    w = pd.read_csv(f)
+    if clock not in w:
+        return None
+    w = w.dropna(subset=[clock, "Estimate"])
+    return w[clock], w.Estimate
 
 
 def rss(d):
@@ -145,7 +165,8 @@ def static(d):
     return s.p, s.bytes
 
 
-PARSERS = {"static": static, "native": rss, "truth": truth, "W1": windowed, "W5": windowed, "P": windowed, "massif": massif,
+PARSERS = {"static": static, "native": rss, "truth": truth, "W1": windowed, "W5": windowed, "P": windowed,
+           "truthpages": truth, "W5pages": windowed_pages, "W5sec": windowed, "massif": massif,
            "massifpages": massif, "massifi": massif, "massifpagesi": massif, "dhat": dhat, "heaptrack": heaptrack, "gperf": gperf}
 
 
@@ -165,8 +186,15 @@ def curves(root):
         c = resample(*got)
         if c is None:
             continue
-        rows.append(pd.DataFrame(dict(prog=prog, input=inp, method="rss" if method == "native" else method,
-                                      k=np.arange(K), bytes=c)))
+        if not method.endswith("sec"):   # W5sec: a W5 run for its Seconds column only
+            rows.append(pd.DataFrame(dict(prog=prog, input=inp, method="rss" if method == "native" else method,
+                                          k=np.arange(K), bytes=c)))
+        if PARSERS[method] in (truth, windowed, windowed_pages):
+            got = PARSERS[method](d.rstrip("/"), clock="Seconds")
+            if got is not None:
+                name = method[:-3] if method.endswith("sec") else method
+                rows.append(pd.DataFrame(dict(prog=prog, input=inp, method=name + "sec", k=np.arange(K),
+                                              bytes=resample(*got))))
         if method == "dhat":
             for name, hold in (("dhatcurve", False), ("dhathold", True)):
                 rows.append(pd.DataFrame(dict(prog=prog, input=inp, method=name, k=np.arange(K),

@@ -68,7 +68,8 @@ pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler|spatial [kno
 | `-name` | binary name | trace name, `<workload>-<config>` (run.sh sets it) |
 | `-seed` | process id | RNG seed base |
 | `-track_frees` | 0 | remove freed ranges (malloc family, munmap) from every footprint; see "Footprint over time" |
-| `-snapshot` | 0 | append every footprint to `*_timeline.csv` every N memory references |
+| `-snapshot` | 0 | append every footprint to `*_timeline.csv` every N memory references (N milliseconds with `-clock seconds`) |
+| `-clock` | `refs` | `refs` or `seconds`: what `-snapshot` counts. Every snapshot row ends with `Seconds`, the wall time since the tool started (under Pin: instrumented time, slower than a native run and not uniformly so), whatever the clock; windows, `-period` and `-stop` stay in references |
 | `-stop` | 0 | write the outputs after N references and detach |
 | `-window`, `-period` | 0 | spatial: watch accesses only for W of every P references, tracking allocations and page residency in between (needs `-snapshot`) |
 | `-window_alloc` | 1048576 | windowed: an allocation of at least N bytes opens a window (0: off) |
@@ -77,7 +78,7 @@ pin -t pintool/obj-intel64/memprint_trace.so -mode splitter|sampler|spatial [kno
 | `-window_switch` | `auto` | windowed: `flush` (discard translated code at each window change), `version` (Pin trace versions, a test at every trace entry), `auto` (flush until a change retranslates more than `-version_traces` traces, default 10000, then version) |
 | `-edge_correction` | 1 | windowed: count half a page less for each touched page inside a block that borders an untouched one |
 | `-block_slack` | 0 | windowed: measure heap blocks over their whole glibc chunk, slack included |
-| `-footprint` | see text | `bytes`: bytes touched, the union of every access's byte range. `starts`: the paper's definition, the sum of the largest access size at each start address. Default: `bytes` with `-track_frees` or `-window`, else `starts` |
+| `-footprint` | see text | `bytes`: bytes touched, the union of every access's byte range. `starts`: the paper's definition, the sum of the largest access size at each start address. `pages`: the 4 KB pages holding a touched byte, × 4096 (what the kernel backs; splitter: the exact footprint, Bin -1, while sampled bins stay in bytes; `-window`/`-pages_only`: the resident pages of live blocks and of the program's writable sections and main stack, with no density or partial-page correction). Default: `bytes` with `-track_frees` or `-window`, else `starts` |
 
 The tool writes one CSV per footprint: `Buffered_<name>_1_<pid>.csv` (splitter, exact) or `Sampled_<name>_<i>_<pid>.csv` (sampler), plus `..._SubSample_<interval>_bin_<j>.csv` for every bin. Each file contains a single row:
 
@@ -293,7 +294,7 @@ MemPrint's per-site footprints, passed to the compiler and the runtime as non-bi
 |---|---|
 | `pintool -sites` | per allocation site: requested, touched and high-water bytes (`*_sites.csv`), large blocks one by one (`*_blocks.csv`) |
 | `analysis/memprint/sites.py` | reservations (dead, const, ratio, affine per site) from one or more `-sites` runs |
-| `resize/runtime/mpr.c` | `libmpr`: commits a block's predicted part, maps the rest `MAP_NORESERVE`; zero pages for calloc, realloc without copies, telemetry (`MPR_RESERVATIONS`, `MPR_REPORT`, `MPR_SCALE`, `MPR_ALL`, `MPR_MIN`, `MPR_DEBUG`) |
+| `resize/runtime/mpr.c` | `libmpr`: commits a block's predicted part, maps the rest `MAP_NORESERVE`; zero pages for calloc, realloc without copies; `memset(p, 0, n)` over its blocks skips the pages never touched (they are zero already) and keeps them out of transparent huge pages; telemetry (`MPR_RESERVATIONS`, `MPR_REPORT`, `MPR_SCALE`, `MPR_ALL`, `MPR_MIN`, `MPR_ZERO`, `MPR_THP`, `MPR_DEBUG`) |
 | `resize/pass/` | `MemPrintResize` LLVM plugin: allocation calls through libmpr with stable site ids; std::vector capacity through `__mpr_capacity`; apply mode embeds the reservations |
 | `scripts/resize_build.sh`, `scripts/resize_eval.sh` | build a program with the pass; measure RSS, commit, time and output under glibc or libmpr |
 | `resize/tests/run_tests.sh` | runtime tests, `opt` + FileCheck tests of the pass, and a program built with the pass end to end |

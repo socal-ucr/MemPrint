@@ -10,6 +10,9 @@
 #   truth        MemPrint splitter, live bytes touched over time (-track_frees), the full Pin estimate
 #   W1 | W5      MemPrint windowed, 1% / 5% of the run watched
 #   P            MemPrint pages only (page residency x density, nothing watched)
+#   truthpages   truth counting 4 KB pages touched (-footprint pages)
+#   W5pages      W5 estimating resident pages (-footprint pages)
+#   W5sec        W5 again (with a tool that writes the Seconds column)
 #   massif       Massif, heap, time in ms
 #   massifpages  Massif --pages-as-heap
 #   massifi | massifpagesi   the same with Massif's default clock, instructions executed (--time-unit=i)
@@ -51,6 +54,9 @@ case $method in
   native)      perf stat -x, -e instructions:u -o "$out/perf.txt" "${args[@]}" < $stdin > /dev/null 2>&1
                timed python3 "$HERE/rss_sampler.py" -i 0.005 -o "$out/rss.csv" -- "${args[@]}" ;;
   truth)       timed "$PIN" -t "$TOOL" -mode splitter -intervals 1000 -bins 1 -track_frees 1 -snapshot $snap -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
+  truthpages)  timed "$PIN" -t "$TOOL" -mode splitter -intervals 1000 -bins 1 -track_frees 1 -snapshot $snap -footprint pages -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
+  W5pages)     timed "$PIN" -t "$TOOL" -mode spatial -i 100 -s 20 -snapshot $snap -window $((period / 20)) -period $period -window_alloc 0 -footprint pages -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
+  W5sec)       timed "$PIN" -t "$TOOL" -mode spatial -i 100 -s 20 -snapshot $snap -window $((period / 20)) -period $period -window_alloc 0 -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
   W1)          timed "$PIN" -t "$TOOL" -mode spatial -i 100 -s 20 -snapshot $snap -window $((period / 100)) -period $period -window_alloc 0 -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
   W5)          timed "$PIN" -t "$TOOL" -mode spatial -i 100 -s 20 -snapshot $snap -window $((period / 20)) -period $period -window_alloc 0 -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
   P)           timed "$PIN" -t "$TOOL" -mode spatial -i 100 -s 20 -snapshot $snap -pages_only 1 -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;

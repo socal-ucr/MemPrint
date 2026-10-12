@@ -48,6 +48,94 @@ Each program ran under glibc and under libmpr preloaded with repeat-run reservat
 
 **Scheduling with the RSS under libmpr as the truth** (`rssmpr`, the scheduler of `paper_sched`, load 0.8, calibrated margins; `results/grid_rssmpr.csv`): the results hardly move from the RSS truth, because the programs' resident memory hardly moved. The exact curve gives 103 min (91 under the RSS truth), the exact peak 457 (436), MemPrint windowed 1,727 (1,807), the DHAT peak 1,230 (1,277) and the request 2,204 (2,197). So the scheduling study's conclusions do not depend on resizing allocations: its gain comes from what the scheduler reserves (a curve against a peak), and the programs already hold about what they touch. Resizing matters for the few programs that commit much more than they touch (darknet), and for commit-limited systems (strict overcommit, `vm.overcommit_memory=2`), where the saved commit is memory other jobs can be promised.
 
+### Where miniVite's extra memory comes from (32768 vertices, 4 OpenMP threads)
+
+miniVite touches 15.4 MB at its peak (17.7 MB counted in whole pages), but peaks at 30.6 MB RSS and 46.2 MB commit. From smaps at the peak and the `-sites` profile (`corpus-sites/miniVite-32768`):
+
+- **RSS: code, not data, is a third of it.** At peak RSS (29.0 MB): 10.7 MB brk heap, 8.0 MB in one anonymous mapping (the `edgeList` buffer), 9.4 MB of library and program code (Open MPI, libstdc++, libgomp; MemPrint counts data references, not instruction fetches), and almost nothing in thread stacks. The scheduling study's `rssbase` is the run's smallest RSS sample (1.4 MB, before MPI_Init loads its libraries), so this code counts as footprint there. That is why miniVite needs the largest margin of any program.
+- **Vector growth.** `edgeList` (`graph.hpp:777`, `emplace_back` without `reserve`) is the only large heap site live at the peak. Its doubling leaves the old 6.3 MB buffer live beside the new 12.6 MB one (18.9 MB requested, 12.8 MB touched), and transparent huge pages back the new buffer's 6.5 touched MB with 8 MB.
+- **Small blocks pay glibc's chunk overhead.** 1.8 million blocks under 64 KB (hash table nodes of 24–47 bytes, small vectors) request 57 MB over the run but occupy 81 MB of chunks (1.42x; 8-byte blocks take 32). They are never all live at once; at the peak, the heap holds them in 10.7 MB.
+- **Untouched library memory.** Open MPI's start-up allocates 1.6 MB it never touches (`libopen-pal`), plus 0.1 MB in libstdc++'s emergency pool.
+- **Commit: OpenMP thread stacks.** At peak commit (44 MB), 32 MB is 4 thread stacks of 8 MB each, of which 2 MB is resident. A smaller `OMP_STACKSIZE` would remove the commit, which no allocator change can.
+
+### Clock and footprint options: wall time and pages (Pin tool `-clock seconds`, `-footprint pages`)
+
+- **`-clock seconds`:** `-snapshot N` counts milliseconds of wall time instead of memory references. Whatever the clock, every timeline and windowed row now ends with `Seconds`, the wall time since the tool started. This is instrumented time, so it runs slower than native and not uniformly.
+- **`-footprint pages`:** counts the 4 KB pages that hold a touched byte, the memory the kernel backs.
+  - Splitter: the exact footprint counts pages; its sampled bins stay in bytes.
+  - Windowed and `-pages_only`: the estimate is the resident pages of live blocks and of the program's writable sections and stack, each page counted once, with no density or partial-page correction.
+- **Tests:** a sparse program (8 bytes on each of 512 pages: 4 KB as bytes, 2 MB as pages) in the splitter and in windowed mode, and a seconds-clock run.
+
+**Do they bring MemPrint closer to the RSS truth?** I reran the corpus's largest inputs with `truthpages`, `W5pages` and `W5sec` (`scripts/footprint_corpus.sh`; `~/memprint-data/2026-10-12-resize/corpus-pages`, `sched-pages/`, `pages_clock.py`). The bytes truth reaches the seconds clock through the `truthpages` run of the same program. Below, "margin" is the headroom (as a share of the curve's peak) each program needs for the oracle never to fall below its RSS:
+
+| Oracle (curve, 20 windows widened by 1) | Median margin | 90th percentile | Response time, load 0.8, calibrated margins (min) |
+|---|---|---|---|
+| full trace, bytes, references (`memprint-T`) | 0.06 | 0.58 | 1,847 |
+| full trace, bytes, seconds | 0.08 | 0.44 | 1,476 |
+| full trace, pages, references | 0.03 | 0.56 | 1,942 |
+| full trace, pages, seconds | 0.05 | 0.41 | 1,423 |
+| W5, bytes, references (`memprint-W5`) | 0.04 | 0.58 | 1,807 |
+| W5, bytes, seconds | 0.04 | 0.56 | 1,820 |
+| W5, pages, references | 0.04 | 0.58 | 1,979 |
+| W5, pages, seconds | 0.04 | 0.49 | 1,705 |
+| exact RSS peak / exact RSS curve | | | 436 / 91 |
+
+(`results/grid_pages.csv`; RSS truth, 3 seeds, synthetic stream.)
+
+- **The clock matters more than the unit.** The worst programs are worst because their footprint is drawn on a different time axis from RSS. On wall time, the full trace's 90th-percentile margin falls from 0.58 to 0.44, and the response time from 1,847 to 1,476 minutes. The programs that gain are those whose instrumented phases are short in references but long in time: gap-bfs (margin 0.53 to 0.06), gap-cc (0.56 to 0.09) and Lua (0.70 to 0.05).
+- **Pages help the programs whose bytes are scattered** (cc1 0.25 to 0.13, Perl 0.29 to 0.13, miniVite 1.12 to 0.84), but alone they make the calibrated margin no smaller.
+- **W5's sampled windows gain less** (0.58 to 0.49 with both). Its estimate mixes residency, which already counts pages, with sampled bytes, and the windows' time coverage is what limits it.
+- **Neither closes the gap to an exact peak (436 min).** The calibrated margin is set by a few programs whose RSS holds memory MemPrint does not count: code (miniVite, above), allocator caches, and interpreter arenas. A better baseline (`rssbase` taken after start-up) would address more of it than either option.
+
+### LLM inference: llama2.c and llama.cpp
+
+**Workloads:**
+- **llama2.c** (`run.c`, greedy, 128 steps): stories15M, 42M and 110M.
+- **llama.cpp** b11500 (`llama-completion`, CPU, 4 threads, greedy, the model's full 8192-token context): SmolLM2-135M-Instruct Q8_0 with 32 and with 128 tokens, and SmolLM2-360M with 64 tokens.
+
+**Method:** each input was profiled with `-sites`. Reservations came from the input's own profile (self) and from the program's other inputs (held out). Each configuration ran 3 times (`~/memprint-data/2026-10-12-resize/runs/ml`, `ml/eval.sh`). The weights are mmapped from the model file, so they count in RSS but not in commit.
+
+**Where the over-allocation is:**
+- **llama2.c:**
+  - Its KV caches are sized for the full sequence: 37.7 MB each for 110M, of which 4.7 MB is touched (128 of 1024 positions).
+  - They are laid out [layer][position][dim]. So every layer's first rows are touched, and the high-water mark lies at 93% of the block.
+  - The untouched rows were never resident, so there is no RSS to save; a prefix reservation saves little commit.
+- **llama.cpp (135M):** three large buffers:
+  - its 189 MB KV cache;
+  - a 115 MB compute buffer, of which 0.3 MB is touched (high water 20.6 MB);
+  - two 44 MB scheduler arrays (`ggml_backend_sched_new`), never touched.
+
+  It clears the whole KV cache with `memset` at start-up and again after its warm-up decode. So 189 MB is resident although a 32-token completion uses 0.4% of it, and MemPrint's truth counts the zeroing as touched (353 MB at the peak, the mmapped weights included).
+
+**libmpr: skipping zeroing.**
+- `memset(p, 0, n)` over a libmpr block now writes only the pages the program has touched.
+  - A page that is neither present nor swapped (pagemap) is still zero.
+  - So is the kernel's shared zero page: present but not mapped exclusively, and checked by reading it.
+- With transparent huge pages set to `always`, one row written per layer would still back 2 MB per K or V tensor (123 MB here). So libmpr marks the pages whose zeroing it skipped `MADV_NOHUGEPAGE` (`MPR_THP=2`, the default).
+- `MPR_ZERO=0` turns it off (config `selfnz` below).
+- Tests: `resize/tests/test_runtime.c`.
+
+| Program | glibc RSS / commit (MB) | libmpr, self | libmpr, held out | libmpr, no zero skipping | Output |
+|---|---|---|---|---|---|
+| llama.cpp 135M, 32 tokens | 379.9 / 404.5 | 193.2 / 265.1 | 191.0 / 265.1 | 378.9 / 265.1 | identical |
+| llama.cpp 135M, 128 tokens | 379.9 / 404.5 | 193.3 / 265.1 | 194.0 / 265.1 | 378.2 / 265.1 | identical |
+| llama.cpp 360M, 64 tokens | 768.1 / 560.5 | 435.4 / 419.9 | 436.1 / 425.6 | 766.7 / 419.9 | identical |
+| llama2.c 15M | 66.9 / 6.3 | 67.1 / 6.2 | 67.1 / 4.1 | 67.1 / 6.2 | identical |
+| llama2.c 42M | 201.2 / 36.2 | 197.6 / 32.8 | 199.3 / 34.0 | 197.6 / 32.8 | identical |
+| llama2.c 110M | 498.3 / 78.2 | 486.8 / 72.8 | 496.1 / 69.9 | 511.0 / 72.5 | identical |
+
+(Mean of 3 runs; time within 5% of glibc everywhere.)
+
+- **llama.cpp is darknet-like and more.**
+  - Reservations cut its commit by 25–34%: the dead scheduler arrays, and the compute buffer's prefix.
+  - Skipping the zeroing halves its RSS (380 to 193 MB; 768 to 435 MB), with identical output, at no cost in time.
+  - Held-out profiles do as well, because the sites are the same code paths at every model size.
+  - Here RSS falls below MemPrint's bytes-touched truth: writing zeros to fresh memory is a touch MemPrint counts but no reader can tell from untouched memory.
+- **llama2.c is not.**
+  - Its one large waste is laid out across layers, so the prefix models (dead, ratio, affine, const of the high-water offset) cut commit by only 7–10%.
+  - Committing only the touched pages would need a reservation shaped like the use, e.g. a period and a prefix per period.
+- **On the corpus, the new libmpr changes nothing.** I reran all 23 programs: outputs identical, total RSS 2,286 to 2,285 MB, commit 2,247 to 2,249 MB, time between -9% and +6% (`runs/corpus` against `runs/corpus-v1`).
+
 ### Reproduce
 
     tests/pintool/run_tests.sh && resize/tests/run_tests.sh                    # with PIN_ROOT set
