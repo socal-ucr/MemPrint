@@ -16,6 +16,14 @@ training blocks, by requested bytes (1.0: all of them) and, among the models tha
     affine   a * size + b     (fitted as the lowest line above the covered blocks)
 A site is left out when its best model would commit at least --keep of what was requested (no
 saving). Writes "site model a b" lines, which libmpr reads (MPR_RESERVATIONS), and a summary CSV.
+
+Calling contexts: a site reached through an allocation wrapper (a function that calls malloc for
+several callers, such as ggml_aligned_malloc) holds blocks that are used differently by each
+caller. The Pin tool writes the caller frames above each large block's allocation call (column
+context, -site_context). When fitting the site's blocks separately per caller (one frame, then two)
+commits less by at least --split of the requested bytes, the site gets one line per context,
+"site@frame1[@frame2] model a b", besides its merged line, which serves contexts not profiled.
+libmpr takes the same frames at run time with backtrace().
 """
 
 import argparse
@@ -81,14 +89,47 @@ def fit(size, hw, q):
     return best
 
 
-def reservations(blocks, q, keep):
+def row(site, g, q, keep, context=""):
+    model, a, b, cost = fit(g["size"], g["high_water"], q)
+    requested = float(g["size"].sum())
+    return dict(site=site, context=context, model=model, a=a, b=b, blocks=len(g), inputs=g["input"].nunique(),
+                requested=requested, committed=cost, touched=float(g["touched"].sum()),
+                high_water=float(g["high_water"].sum()), keep=cost < keep * requested)
+
+
+def contexts(g, depth):
+    """Each block's first `depth` caller frames, joined by '@' ('' when the profile has none)."""
+    return g["context"].fillna("").astype(str).map(lambda c: "@".join(c.split("|")[:depth]) if c else "")
+
+
+def split(site, g, q, keep, frac, max_depth=2):
+    """Per-context rows of a site, at the smallest depth whose saving over the merged fit is at least
+    `frac` of the requested bytes (within 1% of the best depth's); [] when no depth saves that much."""
+    if "context" not in g or g["context"].fillna("").eq("").all():
+        return []
+    merged = fit(g["size"], g["high_water"], q)[3]
+    best = []
+    for depth in range(1, max_depth + 1):
+        c = contexts(g, depth)
+        if c.nunique() < 2 or c.eq("").any():
+            continue
+        rows = [row(f"{site}@{ctx}", h, q, keep, ctx) for ctx, h in g.groupby(c)]
+        cost = sum(r["committed"] for r in rows)
+        if merged - cost >= frac * g["size"].sum():
+            if not best or cost < best[0] - 0.01 * g["size"].sum():
+                best = (cost, rows)
+    if not best:
+        return []
+    for r in best[1]:
+        r["keep"] = True   # a context line overrides the merged one, even when it saves nothing
+    return best[1]
+
+
+def reservations(blocks, q, keep, frac=0.05):
     rows = []
     for site, g in blocks.groupby("site"):
-        model, a, b, cost = fit(g["size"], g["high_water"], q)
-        requested = float(g["size"].sum())
-        rows.append(dict(site=site, model=model, a=a, b=b, blocks=len(g), inputs=g["input"].nunique(),
-                         requested=requested, committed=cost, touched=float(g["touched"].sum()),
-                         high_water=float(g["high_water"].sum()), keep=cost < keep * requested))
+        rows.append(row(site, g, q, keep))
+        rows.extend(split(site, g, q, keep, frac))
     return pd.DataFrame(rows).sort_values("requested", ascending=False)
 
 
@@ -99,15 +140,20 @@ def main(argv=None):
     ap.add_argument("--quantile", type=float, default=0.9)
     ap.add_argument("--min", type=int, default=65536)
     ap.add_argument("--keep", type=float, default=0.95)
+    ap.add_argument("--split", type=float, default=0.05,
+                    help="split a site by calling context when that commits less by this share of its requested bytes")
     a = ap.parse_args(argv)
-    r = reservations(load(a.dirs, a.min), a.quantile, a.keep)
+    r = reservations(load(a.dirs, a.min), a.quantile, a.keep, a.split)
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
         for x in r[r.keep].itertuples():
             f.write(f"{x.site} {x.model} {x.a:.6g} {x.b:.6g}\n")
     r.to_csv(os.path.splitext(a.out)[0] + "_summary.csv", index=False)
     kept = r[r.keep]
-    print(f"{len(kept)} of {len(r)} sites reserved; on the training blocks they commit "
+    # totals over the blocks once: a split site's context rows replace its merged row
+    split_sites = {s.split("@")[0] for s in kept.site if "@" in s}
+    kept = kept[[("@" in s) or (s not in split_sites) for s in kept.site]]
+    print(f"{len(kept)} of {len(r)} sites reserved ({len(split_sites)} split by calling context); on the training blocks they commit "
           f"{kept.committed.sum() / 1e6:.1f} MB of {kept.requested.sum() / 1e6:.1f} MB requested "
           f"(high water {kept.high_water.sum() / 1e6:.1f} MB)")
     return r

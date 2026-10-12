@@ -28,6 +28,9 @@ int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site);
 extern const char __mpr_embedded_reservations[] __attribute__((weak));
 /* std::vector growth: the capacity to allocate, at least `len` (MemPrint's predicted final size) */
 size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site);
+/* Zeroing of n bytes at d (memset(d, 0, n), bzero, llvm.memset with a zero value), routed here by the
+   pass: pages of a runtime block that were never touched are left alone (they read as zero). */
+void __mpr_zero(void *d, size_t n, uint64_t site);
 /* Bytes committed for the live blocks the runtime serves, as predicted (a scheduler could read it). */
 size_t __mpr_committed(void);
 

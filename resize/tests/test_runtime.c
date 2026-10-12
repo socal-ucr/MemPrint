@@ -134,6 +134,11 @@ int main(void)
     set(clr, 0, 1 * MB);
     resident = own_pages(clr, 1 * MB);
     CHECK(resident == 3, "memset 0 after reading every page: %zu pages resident (3: those written)", resident);
+    /* a clear that starts inside the block (not in its first page), and one through __mpr_zero */
+    set(clr + 300 * KB, 0, 600 * KB);
+    __mpr_zero(clr + 128 * KB, 64 * KB, 0x9);
+    resident = own_pages(clr, 1 * MB);
+    CHECK(resident == 3, "memset 0 and __mpr_zero inside a block: %zu pages resident (3)", resident);
     set(clr, 1, 1 * MB);
     for (size_t i = 0; i < 1 * MB; i++) nonzero += clr[i] != 1;
     CHECK(nonzero == 0, "memset 1 of a runtime block: all written");

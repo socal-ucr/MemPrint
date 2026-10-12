@@ -20,7 +20,10 @@
 
    A site is the id the MemPrintResize pass passes (key "id:0x..."), or in a preloaded run the
    caller's return address as "image+0xaddress", the address in the image file: the key MemPrint's
-   Pin tool writes (-sites).
+   Pin tool writes (-sites). A site reached through an allocation wrapper can have reservations per
+   calling context, "site@frame1[@frame2]" (frames: the return addresses above the allocation call,
+   as keys); its blocks are then matched by the frames glibc's backtrace() finds, and a context with
+   no line falls back to the site's own line, if it has one.
 
    Models (bytes predicted for a request of n bytes, clamped to [0, n]): dead (0), ratio (a n),
    affine (a n + b), const (a). */
@@ -28,6 +31,7 @@
 #include "mpr.h"
 
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <elf.h>
 #include <errno.h>
 #include <pthread.h>
@@ -59,6 +63,8 @@ struct site {
     uint64_t count, requested, predicted, resident, under;
     atomic_uint_least64_t elided; /* bytes of memset(0) skipped on untouched pages */
     double max_resident_ratio;
+    int ctx_depth; /* >0: the site has per-context lines of up to this many frames */
+    int has_model; /* the site has a line of its own (else: a base for context lines only) */
 };
 
 /* sites: from the reservation file, plus (MPR_ALL) sites without one; read-only keys after init */
@@ -75,6 +81,7 @@ static struct cache_entry { uintptr_t ret; struct site *site; int known; } *cach
 #define LIVE (1 << 16)
 static struct block { uintptr_t ptr; size_t len, commit, requested; struct site *site; } *live;
 static size_t nlive;
+static uintptr_t *starts; /* the live blocks' addresses, sorted: the block holding an address (zeroing) */
 
 static int ready;
 static size_t min_size = 65536;
@@ -109,6 +116,7 @@ static struct site *add_site(const char *key, int model, double a, double b)
     memset(s, 0, sizeof *s);
     snprintf(s->key, sizeof s->key, "%s", key);
     s->model = model, s->a = a, s->b = b;
+    s->has_model = 1;
     return s;
 }
 
@@ -181,6 +189,41 @@ static struct site *site_of_id(uint64_t id)
     return s;
 }
 
+static __thread int in_backtrace; /* backtrace() may allocate (it loads libgcc_s on first use) */
+
+/* A site with per-context lines: the line for the frames above the call that returns to `ret`
+   (deepest first), else the site's own line, else none. */
+static struct site *with_context(struct site *s, uintptr_t ret)
+{
+    if (!s || !s->ctx_depth || !ret || in_backtrace) return s && s->has_model ? s : NULL;
+    void *frames[24];
+    in_backtrace = 1;
+    int n = backtrace(frames, 24);
+    in_backtrace = 0;
+    int i = 0;
+    while (i < n && (uintptr_t)frames[i] != ret) i++;
+    for (int depth = s->ctx_depth; depth > 0; depth--) {
+        if (i + depth >= n) continue;
+        char key[sizeof s->key];
+        size_t len = (size_t)snprintf(key, sizeof key, "%s", s->key);
+        int ok = 1;
+        for (int d = 1; d <= depth && ok && len < sizeof key; d++) {
+            key[len++] = '@';
+            ok = key_of((uintptr_t)frames[i + d], key + len, sizeof key - len);
+            len += strlen(key + len);
+        }
+        if (!ok) continue;
+        pthread_mutex_lock(&lock);
+        struct site *c = find_key(key);
+        pthread_mutex_unlock(&lock);
+        if (c) {
+            TRACE("context %s\n", key);
+            return c;
+        }
+    }
+    return s->has_model ? s : NULL;
+}
+
 /* the runtime's blocks start on a page; glibc's (16 bytes into a chunk) almost never do */
 #define MAYBE_OURS(p) ((p) && nlive && ((uintptr_t)(p) & (PAGE - 1)) == 0)
 
@@ -218,8 +261,39 @@ static struct block *slot(uintptr_t ptr, int insert)
     return NULL;
 }
 
+/* position of the first start >= p in the sorted starts; lock held */
+static size_t start_index(uintptr_t p)
+{
+    size_t lo = 0, hi = nlive;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (starts[mid] < p) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+
+/* a block enters the table (after it is slotted, before nlive counts it); lock held */
+static void add_start(uintptr_t p)
+{
+    size_t i = start_index(p);
+    memmove(starts + i + 1, starts + i, (nlive - i) * sizeof *starts);
+    starts[i] = p;
+}
+
+/* the runtime block holding [p, p + n), or NULL; lock held */
+static struct block *holding(uintptr_t p, size_t n)
+{
+    size_t i = start_index(p + 1);
+    if (i == 0) return NULL;
+    struct block *b = slot(starts[i - 1], 0);
+    return b && p + n <= b->ptr + b->len ? b : NULL;
+}
+
 static void unslot(struct block *b)
 {
+    /* the sorted starts first */
+    size_t k = start_index(b->ptr);
+    if (k < nlive && starts[k] == b->ptr) memmove(starts + k, starts + k + 1, (nlive - k - 1) * sizeof *starts);
     /* backward-shift deletion keeps probe chains whole */
     size_t i = b - live;
     b->ptr = 0;
@@ -335,7 +409,7 @@ static void *serve(size_t size, struct site *s, size_t align)
         return NULL;
     }
     *b = (struct block){(uintptr_t)p, len, commit, size, s};
-    nlive++;
+    add_start((uintptr_t)p), nlive++;
     s->count++, s->requested += size, s->predicted += commit;
     pthread_mutex_unlock(&lock);
     atomic_fetch_add(&committed, commit);
@@ -346,7 +420,7 @@ static void *serve(size_t size, struct site *s, size_t align)
 static void *alloc_at(size_t size, uintptr_t ret, uint64_t id, int by_id, size_t align, int zero)
 {
     if (ready && size >= min_size) {
-        struct site *s = by_id ? site_of_id(id) : site_of_return(ret);
+        struct site *s = with_context(by_id ? site_of_id(id) : site_of_return(ret), ret);
         if (s) {
             void *p = serve(size, s, align);
             if (p) return p; /* fresh pages are zero: calloc needs no memset */
@@ -399,9 +473,7 @@ static void *real_memset(void *d, int c, size_t n)
    and are skipped. A page that is present but not mapped exclusively (pagemap bit 56) is the
    kernel's shared zero page, which a read of an untouched page maps (a page shared with a forked
    process looks the same): it is skipped if it reads as zero. The rest is written. Returns 0 when
-   [d, d + n) is not inside a runtime block.
-   The block is found by its first page: d must lie in the block's first page (clearing a whole
-   buffer, e.g. ggml_backend_buffer_clear). */
+   [d, d + n) is not inside a runtime block (found by address: anywhere in the block). */
 static int page_needs_zeroing(const char *page, uint64_t entry)
 {
     if (!(entry >> 62)) return 0;                      /* neither present (63) nor swapped (62) */
@@ -414,13 +486,11 @@ static int page_needs_zeroing(const char *page, uint64_t entry)
 
 static int zero_block(char *d, size_t n)
 {
-    uintptr_t base = (uintptr_t)d & ~(PAGE - 1);
     pthread_mutex_lock(&lock);
-    struct block *b = slot(base, 0);
-    size_t len      = b ? b->len : 0;
+    struct block *b = holding((uintptr_t)d, n);
     struct site *s  = b ? b->site : NULL;
     pthread_mutex_unlock(&lock);
-    if (!b || (uintptr_t)d + n > base + len) return 0;
+    if (!b) return 0;
     char *lo = (char *)ROUND((uintptr_t)d), *hi = (char *)(((uintptr_t)d + n) & ~(PAGE - 1));
     if (hi <= lo) return 0;
     real_memset(d, 0, lo - d);
@@ -454,10 +524,35 @@ static int zero_block(char *d, size_t n)
     return 1;
 }
 
+#define CLEARS(c, n) ((c) == 0 && zero_skip && pagemap >= 0 && ready && (n) >= 4 * PAGE && nlive)
+
 void *memset(void *d, int c, size_t n)
 {
-    if (c == 0 && zero_skip && pagemap >= 0 && ready && n >= min_size && nlive && zero_block(d, n)) return d;
+    if (CLEARS(c, n) && zero_block(d, n)) return d;
     return real_memset(d, c, n);
+}
+
+/* _FORTIFY_SOURCE turns memset into __memset_chk where the destination's size is known */
+void *__memset_chk(void *d, int c, size_t n, size_t dlen)
+{
+    if (n > dlen) {
+        fprintf(stderr, "libmpr: __memset_chk: buffer overflow\n");
+        abort();
+    }
+    return memset(d, c, n);
+}
+
+void bzero(void *d, size_t n) { memset(d, 0, n); }
+
+/* the MemPrintResize pass routes zeroing of at least 4 KB (memset/bzero calls and llvm.memset with
+   a zero value) here; site: the call's id (for MPR_DEBUG) */
+void __mpr_zero(void *d, size_t n, uint64_t site)
+{
+    if (CLEARS(0, n) && zero_block(d, n)) {
+        TRACE("zero site id:0x%lx\n", (unsigned long)site);
+        return;
+    }
+    real_memset(d, 0, n);
 }
 
 static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int by_id)
@@ -497,7 +592,7 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
                         TRACE("HOLE in %p len %zu at +%zu (errno %d)\n", q, len, off, errno);
             }
             *slot((uintptr_t)q, 1) = moved;
-            nlive++;
+            add_start((uintptr_t)q), nlive++;
             pthread_mutex_unlock(&lock);
             return q;
         }
@@ -505,7 +600,7 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
     }
     if (ready && size >= min_size) {
         /* a glibc block growing past the threshold at a site with a reservation */
-        struct site *s = by_id ? site_of_id(id) : site_of_return(ret);
+        struct site *s = with_context(by_id ? site_of_id(id) : site_of_return(ret), ret);
         if (s) {
             void *q = serve(size, s, 0);
             if (q) {
@@ -603,7 +698,7 @@ void *_ZnamSt11align_val_t(size_t size, size_t align) { return new_at(size, RET,
 
 void *__mpr_alloc(size_t size, uint64_t site, int kind, size_t align)
 {
-    void *p = alloc_at(size ? size : 1, 0, site, 1, align, kind == MPR_CALLOC);
+    void *p = alloc_at(size ? size : 1, RET, site, 1, align, kind == MPR_CALLOC);
     if (!p && kind == MPR_NEW) {
         fprintf(stderr, "libmpr: operator new(%zu) failed\n", size);
         abort();
@@ -611,7 +706,7 @@ void *__mpr_alloc(size_t size, uint64_t site, int kind, size_t align)
     return p;
 }
 
-void *__mpr_realloc(void *ptr, size_t size, uint64_t site) { return realloc_at(ptr, size, 0, site, 1); }
+void *__mpr_realloc(void *ptr, size_t size, uint64_t site) { return realloc_at(ptr, size, RET, site, 1); }
 
 void *__mpr_calloc(size_t n, size_t size, uint64_t site)
 {
@@ -620,13 +715,13 @@ void *__mpr_calloc(size_t n, size_t size, uint64_t site)
         errno = ENOMEM;
         return NULL;
     }
-    return alloc_at(total, 0, site, 1, 0, 1);
+    return alloc_at(total, RET, site, 1, 0, 1);
 }
 
 int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site)
 {
     if (align < sizeof(void *) || (align & (align - 1))) return EINVAL;
-    void *p = alloc_at(size, 0, site, 1, align, 0);
+    void *p = alloc_at(size, RET, site, 1, align, 0);
     if (!p && size) return ENOMEM;
     *out = p;
     return 0;
@@ -654,7 +749,22 @@ static void parse_line(const char *line)
     if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) return;
     int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
           : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST : M_NONE;
-    if (m != M_NONE) add_site(key, m, a, b);
+    if (m == M_NONE) return;
+    struct site *s = find_key(key);
+    if (s) /* a base created for a context line before its own line */
+        s->model = m, s->a = a, s->b = b, s->has_model = 1;
+    else
+        add_site(key, m, a, b);
+    /* a context line: its base site must look at the calling context */
+    char *at = strchr(key, '@');
+    if (at) {
+        int depth = 0;
+        for (char *c = at; c; c = strchr(c + 1, '@')) depth++;
+        *at = 0;
+        struct site *base = find_key(key);
+        if (!base && (base = add_site(key, M_NONE, 0, 0))) base->has_model = 0;
+        if (base && depth > base->ctx_depth) base->ctx_depth = depth;
+    }
 }
 
 /* reservations built into the program by the pass (apply mode) */
@@ -697,7 +807,8 @@ __attribute__((constructor)) static void init(void)
     sites = table(MAX_SITES * sizeof *sites);
     cache = table(CACHE * sizeof *cache);
     live  = table(LIVE * sizeof *live);
-    if (!sites || !cache || !live) return; /* not ready: everything goes to glibc */
+    starts = table(LIVE * sizeof *starts);
+    if (!sites || !cache || !live || !starts) return; /* not ready: everything goes to glibc */
     if ((v = getenv("MPR_MIN"))) min_size = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_SCALE"))) scale = strtod(v, NULL);
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
@@ -706,6 +817,8 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_THP"))) thp = atoi(v);
     report = getenv("MPR_REPORT");
     libc_memset = (void *(*)(void *, int, size_t))dlsym(RTLD_NEXT, "memset");
+    void *prime[2];
+    in_backtrace = 1, backtrace(prime, 2), in_backtrace = 0; /* load libgcc_s now, not inside an allocation */
     if (zero_skip) pagemap = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
     if ((v = getenv("MPR_RESERVATIONS")))
         load(v);

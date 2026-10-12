@@ -120,8 +120,12 @@ fi
 echo "sites"
 cc -O1 -g -o "$WORK/sites" "$HERE/sites.c"
 c++ -O1 -g -o "$WORK/sites_vec" "$HERE/sites_vec.cpp"
-for program in sites sites_vec; do
-    "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode splitter -track_frees 1 -sites 1 -sites_block_min 4096 \
+cc -O1 -g -o "$WORK/sites_ctx" "$HERE/sites_ctx.c"
+for program in sites sites_vec sites_ctx; do
+    # sites.c checks calloc's own zeroing of a reused chunk (alloc_touched), which -skip_zeroing
+    # (on with -sites) leaves out of the footprint
+    zero=(); [[ $program == sites ]] && zero=(-skip_zeroing 0)
+    "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode splitter -track_frees 1 -sites 1 -sites_block_min 4096 "${zero[@]}" \
         -outdir "$WORK/out/sites-$program" -name "$program" -- "$WORK/$program" > /dev/null 2>&1 || failed=1
     python3 "$HERE/check_sites.py" "$WORK/out/sites-$program" "$WORK/$program" "$program" || failed=1
 done

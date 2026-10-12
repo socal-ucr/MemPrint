@@ -50,6 +50,22 @@ if [[ -n "${PIN_ROOT:-}" && -f "$HERE/../../pintool/obj-intel64/memprint_trace.s
     else
         echo "    FAIL Pin -sites: no site id:$alloc"; cat "$WORK"/pin/*_sites.csv; failed=1
     fi
+    # an allocation wrapper with two callers (one writes its block, one does not) and a buffer
+    # cleared with memset: profiled, fitted per calling context, served by libmpr preloaded
+    PY=${MPR_PY:-$HOME/environments/memfp/bin/python}
+    cc -O1 -g -I"$HERE/../../tests/pintool" -o "$WORK/ctx" "$HERE/../../tests/pintool/sites_ctx.c"
+    "$PIN_ROOT/pin" -t "$HERE/../../pintool/obj-intel64/memprint_trace.so" -mode splitter -track_frees 1 -sites 1 \
+        -sites_block_min 4096 -outdir "$WORK/pinctx" -name ctx -- "$WORK/ctx" > /dev/null 2>&1
+    (cd "$HERE/../../analysis" && "$PY" -m memprint.sites "$WORK/pinctx" -o "$WORK/ctx_res.txt" --min 4096 > /dev/null)
+    LD_PRELOAD="$WORK/libmpr.so" MPR_RESERVATIONS="$WORK/ctx_res.txt" MPR_MIN=4096 MPR_REPORT="$WORK/ctx.csv" "$WORK/ctx"
+    # expected: the hot caller's block committed (1 MB), the cold caller's not (dead), the cleared
+    # block 64 KB with its 1 MB of zeroing skipped
+    if awk -F, 'NR > 1 && $1 ~ /@/ && $2 == "dead" {d++} NR > 1 && $1 ~ /@/ && $5 == 1048576 {h++}
+                NR > 1 && $5 == 65536 && $9 == 1048576 {z++} END {exit !(d == 1 && h == 1 && z == 1)}' "$WORK/ctx.csv"; then
+        echo "    ok   wrapper split by calling context (1 MB and dead), memset zeroing skipped (64 KB committed)"
+    else
+        echo "    FAIL calling contexts / zeroing:"; cat "$WORK/ctx_res.txt" "$WORK/ctx.csv"; failed=1
+    fi
 fi
 
 [[ $failed == 0 ]] && echo "all resize tests passed" || { echo "some resize tests FAILED"; exit 1; }

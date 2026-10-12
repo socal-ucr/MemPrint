@@ -210,6 +210,12 @@ KNOB< string > KnobClock(KNOB_MODE_WRITEONCE, "pintool", "clock", "refs",
 KNOB< BOOL > KnobSites(KNOB_MODE_WRITEONCE, "pintool", "sites", "0",
                        "splitter with -track_frees: per allocation site, requested against touched bytes (*_sites.csv, "
                        "*_blocks.csv)");
+KNOB< UINT32 > KnobSiteContext(KNOB_MODE_WRITEONCE, "pintool", "site_context", "2",
+                                "-sites: caller frames above each large block's allocation call written with it (*_blocks.csv "
+                                "context), so that analysis/memprint/sites.py can split a site reached through a wrapper");
+KNOB< INT32 > KnobSkipZeroing(KNOB_MODE_WRITEONCE, "pintool", "skip_zeroing", "-1",
+                              "splitter: zeros that memset/bzero (and libmpr's __mpr_zero) write over at least 4 KB do not "
+                              "count as touching untouched bytes (-1: on with -sites)");
 KNOB< UINT64 > KnobSitesBlockMin(KNOB_MODE_WRITEONCE, "pintool", "sites_block_min", "65536",
                                  "-sites: blocks of at least this many bytes are also written one by one (*_blocks.csv)");
 KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
@@ -469,6 +475,7 @@ struct Release
     VOID* position;
     ADDRINT lo, hi;
     BOOL probe = FALSE; // -sites: not a release, a look at the block at lo (calloc's zeroing, see SiteProbe)
+    BOOL zero  = FALSE; // -skip_zeroing: not a release; [lo, hi) is the range the thread's next memset clears (or empty)
 };
 
 // Per-thread state; each slot is only touched by its own thread (except refs, read by
@@ -490,6 +497,12 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     ADDRINT pendingSite = 0;     // -sites: the id passed to __mpr_* by a program built with the pass,
     BOOL pendingSiteSet = FALSE; // taken by the next outermost allocator call of the thread
     UINT8 allocKind     = 0; // -sites: SITE_MALLOC, SITE_CALLOC, ...
+    // -sites: caller frames above the allocation call (return addresses), for the outermost call
+    ADDRINT allocCtx[4] = {0}, pendingCtx[4] = {0}, scratchCtx[4] = {0};
+    UINT32 allocCtxN = 0, pendingCtxN = 0, scratchCtxN = 0;
+    ADDRINT scratchFor = 0;           // the return address scratchCtx was taken for
+    ADDRINT zeroLo = 0, zeroHi = 0;   // -skip_zeroing: the range the memset being processed clears
+    BOOL zeroQueued = FALSE;          // the last range queued is not empty
     BOOL allocMallocLike = FALSE; // the outermost call returns its block (malloc, calloc, memalign, ...)
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
@@ -546,6 +559,8 @@ struct SiteBlock
     ADDRINT grownFrom = 0; // realloc that moved: the old block's size
     BOOL moved       = FALSE; // freed by a realloc that moved it
     UINT64 allocTouched = 0; // calloc: bytes the allocator itself touched (zeroing), see SiteProbe
+    ADDRINT ctx[4] = {0};    // caller frames above the allocation call (-site_context)
+    UINT32 ctxN = 0;
 };
 unordered_map< ADDRINT, SiteBlock > siteLive; // address -> block
 unordered_map< ADDRINT, SiteBlock > dying;    // freed, waiting for the release to be applied
@@ -755,6 +770,16 @@ ADDRINT mallocCodeLo = 0, mallocCodeHi = 0;
 BOOL foreignAllocator = FALSE;
 ADDRINT usableFn = 0;
 const UINT32 MALLOC_REF = ~0u; // buffered size of an allocator reference
+const UINT32 ZERO_REF   = 1u << 30; // -skip_zeroing: flag on the buffered size of a store made by memset/bzero code
+BOOL skipZeroing = FALSE;
+vector< std::pair< ADDRINT, ADDRINT > > zeroCode; // -skip_zeroing: memset/bzero routines (reserved in main)
+UINT64 zeroSkipped = 0;                            // bytes of zeroing left out of the footprint
+static BOOL InZeroCode(INS ins)
+{
+    for (const auto& r : zeroCode)
+        if (INS_Address(ins) >= r.first && INS_Address(ins) < r.second) return TRUE;
+    return FALSE;
+}
 
 static BOOL InMallocCode(INS ins) { return INS_Address(ins) >= mallocCodeLo && INS_Address(ins) < mallocCodeHi; }
 
@@ -773,6 +798,8 @@ static VOID InsertRecord(INS ins, UINT32 memOp, UINT32 refSize, BOOL isRead)
         }
         refSize = MALLOC_REF;
     }
+    else if (skipZeroing && !isRead && InZeroCode(ins))
+        refSize |= ZERO_REF; // BufferFull drops it if it falls in the range the memset call clears
     if (mode == SPATIAL)
     {
         if (countBytes)
@@ -1162,6 +1189,9 @@ static VOID SiteBorn(THREADID tid, ADDRINT ptr, ADDRINT size, ADDRINT grownFrom 
         SiteBlock b;
         b.site = t.allocSite, b.siteId = t.allocSiteId, b.size = size, b.born = timeNow, b.kind = t.allocKind;
         b.grownFrom = grownFrom;
+        b.ctxN      = t.allocCtxN;
+        for (UINT32 i = 0; i < t.allocCtxN; i++)
+            b.ctx[i] = t.allocCtx[i];
         siteLive[ptr] = b;
     }
     PIN_ReleaseLock(&blockSiteLock);
@@ -1232,7 +1262,10 @@ static VOID SiteSummarize(ADDRINT ptr, const SiteBlock& b, UINT64 died)
     if (b.size >= KnobSitesBlockMin.Value() && blocksFile.is_open())
         blocksFile << SiteKey(b.site, b.siteId) << ',' << (UINT32)b.kind << ',' << b.size << ',' << b.born << ',' << died
                    << ',' << touched << ',' << highWater << ',' << pagesTouched << ',' << pages << ',' << b.allocTouched
-                   << ',' << b.grownFrom << ',' << (b.moved ? 1 : 0) << '\n';
+                   << ',' << b.grownFrom << ',' << (b.moved ? 1 : 0) << ',';
+    for (UINT32 i = 0; i < b.ctxN; i++)
+        blocksFile << (i ? "|" : "") << SiteKey(b.ctx[i], FALSE);
+    blocksFile << '\n';
 }
 
 // A release [lo, hi) is about to clear the footprint's bits: summarize the freed block it holds.
@@ -1372,6 +1405,11 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
     t.allocMallocLike = mallocLike;
     t.allocSite       = t.pendingSiteSet ? t.pendingSite : caller;
     t.allocSiteId     = t.pendingSiteSet;
+    // the caller frames: above the __mpr_* call (pass builds), or above this call (SiteContext)
+    t.allocCtxN = t.pendingSiteSet ? t.pendingCtxN : (t.scratchFor == caller ? t.scratchCtxN : 0);
+    for (UINT32 i = 0; i < t.allocCtxN; i++)
+        t.allocCtx[i] = t.pendingSiteSet ? t.pendingCtx[i] : t.scratchCtx[i];
+    t.scratchFor = 0;
     t.pendingSiteSet  = FALSE;
     t.allocKind       = mallocLike ? SITE_MALLOC : (out ? SITE_MEMALIGN : SITE_REALLOC);
     t.allocFresh      = FALSE;
@@ -1416,10 +1454,49 @@ static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLik
 // __mpr_alloc(size, site, ...) and the other entry points of libmpr, called by a program built with
 // the MemPrintResize pass: the site id it passes is the next block's site (libmpr then calls glibc's
 // allocator, or maps the block itself, which -sites does not see)
-static VOID MprEnter(THREADID tid, ADDRINT site)
+static VOID Backtrace(const CONTEXT* ctxt, ADDRINT ret, ADDRINT* out, UINT32* n);
+
+static VOID MprEnter(THREADID tid, const CONTEXT* ctxt, ADDRINT ret, ADDRINT site, ADDRINT a, ADDRINT b)
 {
-    threads[tid].pendingSite    = site;
-    threads[tid].pendingSiteSet = TRUE;
+    ThreadData& t    = threads[tid];
+    t.pendingSite    = site;
+    t.pendingSiteSet = TRUE;
+    t.pendingCtxN    = 0;
+    if (KnobSiteContext.Value() && a * (b ? b : 1) >= KnobSitesBlockMin.Value()) Backtrace(ctxt, ret, t.pendingCtx, &t.pendingCtxN);
+}
+
+// The -site_context frames above a call whose return address is `ret`: the application's backtrace
+// (libunwind, from the call frame information, so frame pointers are not needed) from the frame
+// after `ret`. libmpr takes the same frames with glibc's backtrace() at run time.
+static VOID Backtrace(const CONTEXT* ctxt, ADDRINT ret, ADDRINT* out, UINT32* n)
+{
+    void* frames[16];
+    PIN_LockClient();
+    int got = PIN_Backtrace(ctxt, frames, 16);
+    PIN_UnlockClient();
+    *n      = 0;
+    UINT32 want = std::min< UINT32 >(KnobSiteContext.Value(), 4);
+    for (int i = 0; i < got; i++)
+        if ((ADDRINT)frames[i] == ret)
+        {
+            for (int j = i + 1; j < got && *n < want; j++)
+                out[(*n)++] = (ADDRINT)frames[j];
+            return;
+        }
+}
+
+// -sites, before an allocation function's entry: the caller frames of a large request, for
+// AllocEnter's outermost call (taken only for blocks -sites writes one by one)
+static BOOL InAllocator(ADDRINT pc);
+
+static VOID SiteContext(THREADID tid, const CONTEXT* ctxt, ADDRINT sp, ADDRINT ret, ADDRINT a, ADDRINT b)
+{
+    ThreadData& t = threads[tid];
+    // outermost: as AllocEnter decides (a depth left by a call whose exit was missed does not count)
+    BOOL nested = t.allocDepth > 0 && sp < t.allocSp && InAllocator(ret);
+    if (nested || t.pendingSiteSet || a * (b ? b : 1) < KnobSitesBlockMin.Value()) return;
+    Backtrace(ctxt, ret, t.scratchCtx, &t.scratchCtxN);
+    t.scratchFor = ret;
 }
 
 // operator new(size, ...): as malloc
@@ -1447,6 +1524,23 @@ static VOID CallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     probe.position = PIN_GetBufferPointer(ctxt, bufId), probe.lo = ret, probe.hi = ret + 1, probe.probe = TRUE;
     threads[tid].pending.push_back(probe);
 }
+
+// -skip_zeroing: a memset(p, c, n) / bzero(p, n) is entered. In order with the thread's buffered
+// references, the range its stores clear is set: [p, p + n) when it writes zeros over at least 4 KB,
+// else empty. Stores made by memset code (ZERO_REF) into that range do not touch the footprint.
+static VOID ZeroEnter(THREADID tid, const CONTEXT* ctxt, ADDRINT p, ADDRINT c, ADDRINT n)
+{
+    ThreadData& t = threads[tid];
+    BOOL clears   = (c & 0xff) == 0 && n >= 4096;
+    if (!clears && !t.zeroQueued) return; // the range is empty already
+    Release z;
+    z.position = PIN_GetBufferPointer(const_cast< CONTEXT* >(ctxt), bufId), z.zero = TRUE;
+    z.lo = p, z.hi = clears ? p + n : p;
+    t.pending.push_back(z);
+    t.zeroQueued = clears;
+}
+
+static VOID BzeroEnter(THREADID tid, const CONTEXT* ctxt, ADDRINT p, ADDRINT n) { ZeroEnter(tid, ctxt, p, 0, n); }
 
 // posix_memalign(&out, align, size)
 static VOID PosixMemalignExit(THREADID tid, ADDRINT ret)
@@ -1672,6 +1766,22 @@ static VOID InstrumentAllocator(IMG img, const char* name, AFUNPTR enter, IARGLI
     RTN_Open(rtn);
     // read by analysis routines of other threads: reserved in main, so pushing never moves it
     if (allocatorCode.size() < allocatorCode.capacity()) allocatorCode.push_back({RTN_Address(rtn), RoutineEnd(rtn)});
+    if (sitesOn && KnobSiteContext.Value())
+    {
+        // the size: argument 0 (malloc, new), 1 (memalign, realloc), 2 (posix_memalign), or 0 x 1 (calloc)
+        UINT32 sizeArg = 0, second = 0;
+        if (!strcmp(name, "memalign") || !strcmp(name, "aligned_alloc") || !strcmp(name, "realloc")) sizeArg = 1;
+        if (!strcmp(name, "posix_memalign")) sizeArg = 2;
+        if (!strcmp(name, "calloc")) second = 1;
+        if (second)
+            RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(SiteContext), IARG_THREAD_ID, IARG_CONST_CONTEXT,
+                           IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+        else
+            RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(SiteContext), IARG_THREAD_ID, IARG_CONST_CONTEXT,
+                           IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, sizeArg, IARG_ADDRINT, (ADDRINT)0, IARG_END);
+    }
     RTN_InsertCall(rtn, IPOINT_BEFORE, enter, IARG_THREAD_ID, IARG_REG_VALUE, REG_STACK_PTR, IARG_RETURN_IP, IARG_BOOL,
                    exit == AFUNPTR(MallocExit), IARG_IARGLIST, enterArgs, IARG_END);
     if (foreignAllocator)
@@ -1883,18 +1993,59 @@ VOID ImageLoad(IMG img, VOID* v)
                                  "_ZnamSt11align_val_tRKSt9nothrow_t"})
             InstrumentAllocator(img, name, AFUNPTR(NewEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     if (sitesOn)
-        for (auto entry : {std::make_pair("__mpr_alloc", 1), std::make_pair("__mpr_calloc", 2),
-                           std::make_pair("__mpr_realloc", 2), std::make_pair("__mpr_posix_memalign", 3)})
+    {
+        // name, site argument, size argument(s) (calloc: count x size)
+        struct MprEntry { const char* name; UINT32 site, size; INT32 size2; };
+        for (MprEntry e : {MprEntry{"__mpr_alloc", 1, 0, -1}, MprEntry{"__mpr_calloc", 2, 0, 1},
+                           MprEntry{"__mpr_realloc", 2, 1, -1}, MprEntry{"__mpr_posix_memalign", 3, 2, -1}})
         {
-            RTN rtn = FindRoutine(img, entry.first);
+            RTN rtn = FindRoutine(img, e.name);
             if (!RTN_Valid(rtn)) continue;
             RTN_Open(rtn);
-            RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(MprEnter), IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE,
-                           entry.second, IARG_END);
+            if (e.size2 >= 0)
+                RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(MprEnter), IARG_THREAD_ID, IARG_CONST_CONTEXT, IARG_RETURN_IP,
+                               IARG_FUNCARG_ENTRYPOINT_VALUE, e.site, IARG_FUNCARG_ENTRYPOINT_VALUE, e.size,
+                               IARG_FUNCARG_ENTRYPOINT_VALUE, (UINT32)e.size2, IARG_END);
+            else
+                RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(MprEnter), IARG_THREAD_ID, IARG_CONST_CONTEXT, IARG_RETURN_IP,
+                               IARG_FUNCARG_ENTRYPOINT_VALUE, e.site, IARG_FUNCARG_ENTRYPOINT_VALUE, e.size,
+                               IARG_ADDRINT, (ADDRINT)0, IARG_END);
             RTN_Close(rtn);
         }
+    }
     InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
     InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
+
+    if (skipZeroing)
+    {
+        // memset's implementations (glibc picks one with an IFUNC: memset itself is the resolver
+        // there, called once by the loader, and is skipped), bzero, and libmpr's memset and __mpr_zero
+        string imgName = IMG_Name(img);
+        imgName        = imgName.substr(imgName.find_last_of('/') + 1);
+        BOOL libc      = imgName.compare(0, 5, "libc.") == 0 || imgName.compare(0, 5, "libc-") == 0;
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+        {
+            if (SEC_Name(sec).find(".plt") == 0) continue;
+            for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn))
+            {
+                const string& name = RTN_Name(rtn);
+                BOOL isMemset = name == "memset" || name.compare(0, 9, "__memset_") == 0;
+                BOOL isBzero  = name == "bzero" || name == "__bzero" || name == "__mpr_zero" || name.compare(0, 8, "__bzero_") == 0;
+                if (!isMemset && !isBzero) continue;
+                if (libc && (name == "memset" || name == "__memset_chk" || name == "bzero")) continue; // IFUNC resolvers
+                if (zeroCode.size() < zeroCode.capacity()) zeroCode.push_back({RTN_Address(rtn), RTN_Address(rtn) + RTN_Size(rtn)});
+                RTN_Open(rtn);
+                if (isMemset)
+                    RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(ZeroEnter), IARG_THREAD_ID, IARG_CONST_CONTEXT,
+                                   IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                                   IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
+                else
+                    RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BzeroEnter), IARG_THREAD_ID, IARG_CONST_CONTEXT,
+                                   IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+                RTN_Close(rtn);
+            }
+        }
+    }
 
     RTN free = FindRoutine(img, "free");
     if (RTN_Valid(free) && SEC_Name(RTN_Sec(free)).find(".plt") != 0)
@@ -2042,8 +2193,13 @@ static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
 }
 
 // A queued release, or a -sites probe
-static VOID ApplyPending(const Release& r)
+static VOID ApplyPending(THREADID tid, const Release& r)
 {
+    if (r.zero)
+    {
+        threads[tid].zeroLo = r.lo, threads[tid].zeroHi = r.hi;
+        return;
+    }
     if (r.probe)
         SiteProbe(r.lo);
     else
@@ -2394,11 +2550,22 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
     for (UINT64 i = 0; i < numElements && !finished; i++, reference++)
     {
         for (; nextRelease < pending.size() && pending[nextRelease].position <= (VOID*)reference; nextRelease++)
-            ApplyPending(pending[nextRelease]);
+            ApplyPending(tid, pending[nextRelease]);
 
         ADDRINT address = reference->ea;
         UINT32 size     = reference->size;
         if (address == 0) continue;
+        if (size != MALLOC_REF && (size & ZERO_REF))
+        {
+            size &= ~ZERO_REF;
+            const ThreadData& t = threads[tid];
+            if (address >= t.zeroLo && address < t.zeroHi) // zeros over [zeroLo, zeroHi): time only
+            {
+                ++observations, zeroSkipped += size;
+                if (!Tick(timeNow + MainInterval())) break;
+                continue;
+            }
+        }
 
         ++observations;
         if (size == MALLOC_REF)
@@ -2410,7 +2577,7 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
         if (!Tick(timeNow + MainInterval())) break;
     }
     for (; nextRelease < pending.size() && !finished; nextRelease++)
-        ApplyPending(pending[nextRelease]);
+        ApplyPending(tid, pending[nextRelease]);
     pending.clear();
     PIN_ReleaseLock(&stateLock);
     return buf;
@@ -2495,7 +2662,7 @@ BOOL InitOutputFiles()
     if (sitesOn)
     {
         blocksFile.open(outputFileNamePrefix + "_blocks.csv");
-        blocksFile << "site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,grown_from,moved\n";
+        blocksFile << "site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,grown_from,moved,context\n";
     }
     return TRUE;
 }
@@ -2533,11 +2700,11 @@ VOID Fini(INT32 code, VOID* v)
 {
     PIN_GetLock(&stateLock, 0);
     if (mode == SPATIAL && TotalRefs() > timeNow) timeNow = TotalRefs();
-    for (ThreadData& t : threads)
+    for (UINT32 tid = 0; tid < MAX_THREADS; tid++)
     {
-        for (const Release& r : t.pending)
-            ApplyPending(r);
-        t.pending.clear();
+        for (const Release& r : threads[tid].pending)
+            ApplyPending(tid, r);
+        threads[tid].pending.clear();
     }
     WriteOutputs();
     PIN_ReleaseLock(&stateLock);
@@ -2690,6 +2857,9 @@ int main(int argc, char* argv[])
     else
         return Usage("-footprint must be bytes, starts or pages");
     sitesOn = KnobSites.Value();
+    skipZeroing = mode == SPLITTER && (KnobSkipZeroing.Value() < 0 ? sitesOn : KnobSkipZeroing.Value() != 0);
+    if (KnobSkipZeroing.Value() > 0 && mode != SPLITTER) return Usage("-skip_zeroing needs -mode splitter");
+    zeroCode.reserve(256);
     if (sitesOn && (mode != SPLITTER || !KnobTrackFrees.Value() || !countBytes))
         return Usage("-sites needs -mode splitter -track_frees 1 with the bytes footprint");
 

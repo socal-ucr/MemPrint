@@ -1,6 +1,6 @@
 """Check a -sites run of tests/pintool/sites.c (or sites_vec.cpp) against the sizes it was written with.
 
-usage: check_sites.py OUTDIR BINARY {sites,sites_vec}
+usage: check_sites.py OUTDIR BINARY {sites,sites_vec,sites_ctx}
 
 Sites are named by the function their return address is in (addr2line -f on BINARY), so the
 binary must be built with -g.
@@ -60,6 +60,23 @@ if which == "sites":
         print(f"    ok   realloc growth: {grow['count']} blocks, {grow['moves']} moves, all touched")
     else:
         print(f"    FAIL realloc growth: {grow}")
+        failed = True
+elif which == "sites_ctx":
+    blocks = list(csv.DictReader(open(glob.glob(f"{outdir}/*_blocks.csv")[0])))
+    # the wrapper's blocks: one site, two contexts whose first frame is in hot() and in cold()
+    wrapped = [b for b in blocks if "my_alloc" in function(b["site"]).split(" < ")]
+    callers = {function(b["context"].split("|")[0]).split(" < ")[-1] if b["context"] else "": int(b["touched"])
+               for b in wrapped}
+    if len({b["site"] for b in wrapped}) == 1 and callers.get("hot") == 1 * MB and callers.get("cold") == 0:
+        print(f"    ok   one wrapper site, two contexts: hot touched 1 MB, cold 0")
+    else:
+        print(f"    FAIL wrapper contexts: {[(b['site'], b['context'], b['touched']) for b in wrapped]} -> {callers}")
+        failed = True
+    cleared = [b for b in blocks if "cleared" in function(b["site"]).split(" < ")]
+    if cleared and int(cleared[0]["touched"]) == 64 * KB and int(cleared[0]["high_water"]) == 64 * KB:
+        print("    ok   memset to zero over untouched memory: touched 64 KB of 1 MB (high water 64 KB)")
+    else:
+        print(f"    FAIL cleared block: {cleared}")
         failed = True
 else:
     vec = [r for f, rs in by_function.items() for r in rs if "grow_vector" in f or "_M_realloc_insert" in f]
