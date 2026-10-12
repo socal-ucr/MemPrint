@@ -3,7 +3,8 @@
 #   scripts/resize_eval.sh <out dir> <config> <reservations|-> "<cwd> <stdin|-> <grep pattern> <cmd...>" [label]
 # config: base (glibc), mpr (libmpr with the reservations), mprall (libmpr serving every large block),
 #         mprscaled (reservations x MPR_SCALE, default 0.1: deliberate under-prediction),
-#         mprnz (mpr without skipping the zeroing of untouched pages, MPR_ZERO=0).
+#         mprnz (mpr without skipping the zeroing of untouched pages, MPR_ZERO=0), linked (a program built
+#         with the pass, which links libmpr: only the reservations; - or /dev/null for none).
 # Writes <out dir>/<config>.csv (rss_sampler --commit), .out (the program's output), .report (libmpr's
 # per-site telemetry) and appends "label peak_rss peak_commit seconds result_hash status" to <out dir>/summary.txt
 # (label: the config unless given). The grep pattern ALL takes every output line except those that report
@@ -23,6 +24,7 @@ case $config in
   base) ;;
   mpr) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_REPORT="$out/$label.report") ;;
   mprall) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_ALL=1 MPR_REPORT="$out/$label.report") ;;
+  linked) env=(MPR_RESERVATIONS="$res" MPR_REPORT="$out/$label.report") ;; # a build with the pass (libmpr linked)
   mprnz) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_ZERO=0 MPR_REPORT="$out/$label.report") ;;
   mprscaled) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_SCALE="${MPR_SCALE:-0.1}" MPR_REPORT="$out/$label.report") ;;
   *) echo "unknown config $config" >&2; exit 2 ;;

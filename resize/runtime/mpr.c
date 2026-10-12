@@ -54,7 +54,7 @@ extern void *__libc_memalign(size_t, size_t);
 #define ROUND(n) (((n) + PAGE - 1) & ~(PAGE - 1))
 
 enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS };
-#define MAX_RUNS 32
+#define MAX_RUNS 128
 
 struct site {
     char key[128];

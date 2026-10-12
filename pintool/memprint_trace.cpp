@@ -1340,7 +1340,7 @@ static VOID SiteSummarize(ADDRINT ptr, const SiteBlock& b, UINT64 died)
         blocksFile << (i ? "|" : "") << SiteKey(b.ctx[i], FALSE);
     // the touched page runs (first page:pages from the block's first page), for shaped reservations
     vector< std::pair< UINT64, UINT64 > > runs;
-    footprint.Runs(ptr, ptr + b.size, runs, 64);
+    footprint.Runs(ptr, ptr + b.size, runs, 256);
     blocksFile << ',';
     for (size_t i = 0; i < runs.size(); i++)
         blocksFile << (i ? ";" : "") << runs[i].first << ':' << runs[i].second;

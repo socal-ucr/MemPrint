@@ -100,7 +100,7 @@ def fit(size, hw, q):
 
 
 PAGE = 4096
-MAX_RUNS = 32
+MAX_RUNS = 128
 
 
 def runs_fit(g):
