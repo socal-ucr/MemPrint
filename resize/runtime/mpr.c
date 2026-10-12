@@ -53,7 +53,7 @@ extern void *__libc_memalign(size_t, size_t);
 #define PAGE 4096UL
 #define ROUND(n) (((n) + PAGE - 1) & ~(PAGE - 1))
 
-enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST };
+enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP };
 
 struct site {
     char key[128];
@@ -727,14 +727,41 @@ int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site)
     return 0;
 }
 
+/* The program's call site that is growing a container on this thread (the pass brackets calls to
+   container members from the program's own code with __mpr_growth(id) ... __mpr_growth(0)). */
+static __thread uint64_t growth_site;
+
+void __mpr_growth(uint64_t site) { growth_site = site; }
+
+/* A container's new capacity: `len` elements of `elem` bytes, at growth point `site` (a template
+   instantiation). The reservation is the call site's ("cap:0x<growth site>"), else the growth
+   point's ("id:0x<site>"). A cap model, "cap A B", reserves A bytes (the final size the profile saw)
+   once the container asks for more than B bytes (the largest the call site's small containers ever
+   grew to), so that small containers at the same call site keep their own growth. Other models
+   predict the final bytes from the request. Capacity only grows: a wrong prediction cannot shrink a
+   container, and an excess is backed lazily. */
 size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site)
 {
     (void)size;
     if (!ready || !elem) return len;
-    struct site *s = site_of_id(site);
-    /* a growth site's model predicts the final bytes from the first request: reserve them at once */
+    struct site *s = NULL;
+    if (growth_site) {
+        char key[64];
+        snprintf(key, sizeof key, "cap:0x%lx", (unsigned long)growth_site);
+        pthread_mutex_lock(&lock);
+        s = find_key(key);
+        pthread_mutex_unlock(&lock);
+    }
+    if (!s) s = site_of_id(site);
     if (!s || s->model == M_NONE || s->model == M_DEAD) return len;
-    size_t final = (size_t)(model_value(s, len * elem) / elem); /* above the request: that is the point */
+    double bytes;
+    if (s->model == M_CAP) {
+        if ((double)len * elem <= s->b) return len;
+        bytes = s->a * scale;
+    } else
+        bytes = model_value(s, len * elem);
+    size_t final = (size_t)((bytes + elem - 1) / elem); /* above the request: that is the point */
+    TRACE("capacity %zu x %zu -> %zu (%s)\n", len, elem, final > len ? final : len, s->key);
     return final > len ? final : len;
 }
 
@@ -748,7 +775,8 @@ static void parse_line(const char *line)
     double a, b;
     if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) return;
     int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
-          : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST : M_NONE;
+          : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST
+          : !strcmp(model, "cap") ? M_CAP : M_NONE;
     if (m == M_NONE) return;
     struct site *s = find_key(key);
     if (s) /* a base created for a context line before its own line */
@@ -845,7 +873,7 @@ __attribute__((destructor)) static void fini(void)
     FILE *f = fopen(report, "w");
     if (f) {
         fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio,elided\n");
-        static const char *names[] = {"none", "dead", "ratio", "affine", "const"};
+        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap"};
         for (int i = 0; i < nsites; i++)
             if (sites[i].count)
                 fprintf(f, "%s,%s,%lu,%lu,%lu,%lu,%lu,%.4f,%lu\n", sites[i].key, names[sites[i].model],

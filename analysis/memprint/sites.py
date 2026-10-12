@@ -24,6 +24,12 @@ context, -site_context). When fitting the site's blocks separately per caller (o
 commits less by at least --split of the requested bytes, the site gets one line per context,
 "site@frame1[@frame2] model a b", besides its merged line, which serves contexts not profiled.
 libmpr takes the same frames at run time with backtrace().
+
+Container capacities (programs built with the MemPrintResize pass): the Pin tool links a growing
+container's successive buffers into growth chains per call site (*_capacity.csv). For a call site
+whose containers grow past --min, the line "cap:0x<call site> cap A B" reserves A bytes, the
+--quantile of the final buffers' used bytes (high water), once a container asks for more than B
+bytes, the largest any of the call site's small containers grew to (0 when it has none).
 """
 
 import argparse
@@ -97,6 +103,30 @@ def row(site, g, q, keep, context=""):
                 high_water=float(g["high_water"].sum()), keep=cost < keep * requested)
 
 
+def capacities(dirs, q, min_size):
+    """'key cap A B' rows from the Pin tool's *_capacity.csv files (one per profiling run)."""
+    rows = {}
+    for d in dirs:
+        for f in glob.glob(os.path.join(d, "*_capacity.csv")):
+            for r in pd.read_csv(f, dtype=str).fillna("").itertuples():
+                a = rows.setdefault(r.key, dict(elem=int(r.elem), chains=0, small=0, small_max=0, finals=[]))
+                a["chains"] += int(r.chains)
+                a["small"] += int(r.small_chains)
+                a["small_max"] = max(a["small_max"], int(r.small_max_size))
+                a["finals"] += [int(x) for x in str(r.final_high_waters).split(";") if x]
+    out = []
+    for key, a in rows.items():
+        if not a["finals"]:
+            continue
+        final = float(np.quantile(a["finals"], q, method="higher"))
+        trigger = float(a["small_max"])
+        if final < min_size or final <= trigger:
+            continue
+        out.append(dict(site=key, model="cap", a=final, b=trigger, chains=a["chains"], small_chains=a["small"],
+                        large_chains=len(a["finals"]), elem=a["elem"]))
+    return out
+
+
 def contexts(g, depth):
     """Each block's first `depth` caller frames, joined by '@' ('' when the profile has none)."""
     return g["context"].fillna("").astype(str).map(lambda c: "@".join(c.split("|")[:depth]) if c else "")
@@ -144,10 +174,17 @@ def main(argv=None):
                     help="split a site by calling context when that commits less by this share of its requested bytes")
     a = ap.parse_args(argv)
     r = reservations(load(a.dirs, a.min), a.quantile, a.keep, a.split)
+    caps = capacities(a.dirs, a.quantile, a.min)
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
         for x in r[r.keep].itertuples():
             f.write(f"{x.site} {x.model} {x.a:.6g} {x.b:.6g}\n")
+        for c in caps:
+            f.write(f"{c['site']} cap {c['a']:.0f} {c['b']:.0f}\n")
+    if caps:
+        print(f"{len(caps)} container capacities: " + ", ".join(
+            f"{c['site']} {c['a'] / 1e6:.2f} MB after {c['b'] / 1e3:.0f} KB ({c['large_chains']} of {c['chains']} chains)"
+            for c in caps))
     r.to_csv(os.path.splitext(a.out)[0] + "_summary.csv", index=False)
     kept = r[r.keep]
     # totals over the blocks once: a split site's context rows replace its merged row
