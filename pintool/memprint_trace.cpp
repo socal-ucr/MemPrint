@@ -2044,6 +2044,9 @@ static VOID FindMallocCode(IMG img)
 {
     static BOOL chosen = FALSE; // a non-glibc allocator was found: later images (libc) do not count
     if (chosen || IMG_IsMainExecutable(img)) return;
+    // libmpr (resize/runtime) defines malloc but hands the blocks it does not serve to glibc's: glibc
+    // stays the allocator, and libmpr's entry points are hooked like any other allocation function
+    if (RTN_Valid(FindRoutine(img, "__mpr_alloc"))) return;
     RTN m = FindRoutine(img, "malloc");
     string imgName = IMG_Name(img);
     imgName = imgName.substr(imgName.find_last_of('/') + 1);

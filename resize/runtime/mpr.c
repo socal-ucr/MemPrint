@@ -509,7 +509,15 @@ static void *alloc_at(size_t size, uintptr_t ret, uint64_t id, int by_id, size_t
         }
     }
     if (align > 16) {
-        void *p = __libc_memalign(align, size);
+        /* glibc's posix_memalign rather than __libc_memalign: it returns through a ret, where tools
+           that hook allocation exits (MemPrint's Pin tool) see it; __libc_memalign ends in a tail jump */
+        static int (*libc_posix_memalign)(void **, size_t, size_t);
+        if (!libc_posix_memalign) libc_posix_memalign = (int (*)(void **, size_t, size_t))dlsym(RTLD_NEXT, "posix_memalign");
+        void *p = NULL;
+        if (libc_posix_memalign) {
+            if (libc_posix_memalign(&p, align < sizeof(void *) ? sizeof(void *) : align, size)) p = NULL;
+        } else
+            p = __libc_memalign(align, size);
         if (p && zero) memset(p, 0, size);
         return p;
     }
