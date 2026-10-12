@@ -20,6 +20,7 @@ cc -O1 -o "$WORK/reuse" "$HERE/reuse.c"
 cc -O1 -pthread -o "$WORK/parallel" "$HERE/parallel.c"
 cc -O1 -o "$WORK/churn" "$HERE/churn.c"
 cc -O1 -o "$WORK/first_calloc" "$HERE/first_calloc.c"
+cc -O1 -o "$WORK/sparse" "$HERE/sparse.c"
 
 failed=0
 # run <test name> <program> <pin knobs> -- <check.py arguments>
@@ -27,8 +28,10 @@ run() {
     local name=$1 program=$2; shift 2
     local knobs=()
     while [[ $1 != -- ]]; do knobs+=("$1"); shift; done; shift
+    local snapshot=(-snapshot 5000)
+    [[ " ${knobs[*]} " == *" -snapshot "* ]] && snapshot=()
     echo "$name"
-    if ! "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode splitter -snapshot 5000 "${knobs[@]}" -outdir "$WORK/out/$name" \
+    if ! "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode splitter "${snapshot[@]}" "${knobs[@]}" -outdir "$WORK/out/$name" \
             -name "$name-test" -- "$WORK/$program" > "$WORK/$name.out" 2>&1; then
         echo "    FAIL program exited with an error"; failed=1; return
     fi
@@ -44,6 +47,11 @@ run threads threads -track_frees 1 -- --peak 2 --freed 2
 run first-calloc first_calloc -track_frees 1 -- --peak 4 --freed 6 --slack 0.6
 run small-blocks small_blocks -track_frees 1 -- --peak 0.125 --freed 2
 run parallel parallel -track_frees 1 -- --peak 12 --freed 12 --slack 1
+# -footprint pages: 8 bytes on each of 512 pages count 2 MB (bytes: 4 KB)
+run pages sparse -track_frees 1 -footprint pages -- --peak 2 --freed 2
+run pages-bytes sparse -track_frees 1 -footprint bytes -- --peak 0 --tolerance 0 --slack 0.3
+# -clock seconds: snapshots every 2 ms of wall time, the same footprints
+run seconds free -track_frees 1 -clock seconds -snapshot 2 -- --peak 2 --freed 3 --seconds 2
 # Chao1 is checked before the final free (footprint 0 at exit), so run without -track_frees
 run chao reuse -track_frees 0 -- --peak 4 --final-max 4.5 --chao 50
 
@@ -89,6 +97,12 @@ if [[ $allocated -ge 4194304 ]]; then
 else
     echo "    FAIL largest allocated $allocated bytes < 4 MB"; failed=1
 fi
+
+# windowed, -footprint pages: the resident pages of the block (2 MB) and of the program's segments and stack
+echo "  pages"
+"$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 20000 -window 20000 -period 200000 -footprint pages \
+    -outdir "$WORK/out/windowed-pages" -name windowed-pages -- "$WORK/sparse" > /dev/null 2>&1 || failed=1
+python3 "$HERE/check.py" "$WORK/out/windowed-pages"/*_windowed.csv --windowed --peak 2 --slack 0.6 --final-max 0.6 || failed=1
 
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"

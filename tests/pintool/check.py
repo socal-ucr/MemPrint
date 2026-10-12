@@ -31,6 +31,9 @@ parser.add_argument("--windowed", action="store_true", help="check the Estimate 
 parser.add_argument("--chao", type=int, metavar="INTERVAL",
                     help="also check that Chao1 on the union row of this interval (Bin -2) "
                          "estimates the final unique addresses within --chao-error")
+parser.add_argument("--seconds", type=float, metavar="MS",
+                    help="-clock seconds -snapshot MS: also check that Seconds increases with at most one snapshot "
+                         "per MS slot of wall time (but the last, written at exit)")
 parser.add_argument("--chao-error", type=float, default=0.15)
 args = parser.parse_args()
 
@@ -57,6 +60,11 @@ if freed is not None:
 else:
     windows = int(rows[-1]["Windows"])
     checks.append((f"{windows} windows", windows >= 2))
+if args.seconds:
+    secs = [float(r["Seconds"]) for r in rows]
+    slots = [int(x * 1000 // args.seconds) for x in secs[:-1]]
+    checks.append((f"Seconds increase, one snapshot per {args.seconds:g} ms slot ({secs[-1]:.3f} s, {len(rows)} snapshots)",
+                   all(b >= a for a, b in zip(secs, secs[1:])) and all(b > a for a, b in zip(slots, slots[1:]))))
 if args.chao:
     last = rows[-1]["Time"]
     union = next(r for r in all_rows if r["Time"] == last and r["Bin"] == "-2" and r["SamplingInterval"] == str(args.chao))

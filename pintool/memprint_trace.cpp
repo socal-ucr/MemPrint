@@ -36,15 +36,24 @@
  *
  *   -track_frees 1  free/realloc/munmap remove the released address range
  *                   from every footprint, so footprints are live memory.
- *   -footprint bytes|starts  the bytes touched (union of every access's byte
+ *   -footprint bytes|starts|pages  the bytes touched (union of every access's byte
  *                   range), or the paper's sum of the largest access size per
- *                   start address. Default: bytes with -track_frees or
+ *                   start address, or the 4 KB pages with a touched byte (x 4096:
+ *                   what the kernel backs; splitter and -window/-pages_only only).
+ *                   Default: bytes with -track_frees or
  *                   -window, else starts. Spatial and windowed sampling with
  *                   bytes select aligned 8-byte words and keep the bytes of
  *                   each access inside selected words, so selected bytes x i
- *                   is unbiased.
+ *                   is unbiased. With pages, the splitter's exact footprint
+ *                   (Bin -1) counts pages and its sampled bins stay in bytes;
+ *                   the windowed Estimate is the resident pages of live blocks
+ *                   and of the program's writable segments and main stack.
  *   -snapshot N     every N memory references (time), append the current
  *                   footprints to a timeline CSV.
+ *   -clock seconds  -snapshot N is every N milliseconds of wall time instead
+ *                   (under Pin: instrumented time, slower than a native run and
+ *                   not uniformly so). Every snapshot row ends with Seconds, the
+ *                   wall time since the tool started, whatever the clock.
  *   -stop N         after N references, write all outputs and detach.
  *   -window W -period P  (spatial) watch accesses only for W of every P
  *                   memory references; between windows only a per-block
@@ -52,7 +61,8 @@
  *                   are tracked all the time and the windows measure how much
  *                   of each one is touched; see "Windows" below.
  *
- * Time counts memory references executed: one per reference in the
+ * Time counts memory references executed (with -clock seconds too: windows,
+ * -period and -stop stay in references): one per reference in the
  * splitter, i per sampled reference in the sampler (an estimate). With
  * -window, references are counted per basic block (a REP string instruction
  * counts once).
@@ -87,7 +97,7 @@
  * footprint x i in fresh blocks, reused blocks and outside blocks (FreshEst,
  * ReusedEst, OtherEst), the bytes covered x i in fresh and reused blocks
  * (FreshCovered, ReusedCovered), Density (ReusedEst / ReusedCovered, 1 until
- * 64 KB are covered), Estimate, Window and Period.
+ * 64 KB are covered), Estimate, Window and Period, ..., and Seconds.
  *
  * Output (in -outdir, which is created if missing):
  *   <Prefix>_<name>_<interval>_<pid>[_<args>].csv
@@ -96,7 +106,7 @@
  * with Prefix = Buffered (splitter), Sampled (sampler) or Spatial (spatial). Summary files have
  * the columns FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval;
  * the timeline has Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,
- * Singletons,Doubletons,Tripletons,Quadrupletons,Discovered. Bin -1 is the exact footprint in the splitter and the union of the
+ * Singletons,Doubletons,Tripletons,Quadrupletons,Discovered,Seconds. Bin -1 is the exact footprint in the splitter and the union of the
  * bins in the sampler; Bin -2 (splitter) is the union of one interval's bins, a
  * 1-in-(interval/bins) sample. Singletons..Quadrupletons count the addresses
  * sampled exactly 1..4 times, from which Chao1/iChao1 estimate the addresses
@@ -192,8 +202,11 @@ KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
                               "spatial with -window: clear the kernel's soft-dirty page bits every N memory references "
                               "(default: every 10 snapshots; 0: off, reused blocks are measured by residency)");
 KNOB< string > KnobFootprint(KNOB_MODE_WRITEONCE, "pintool", "footprint", "",
-                            "bytes (bytes touched) | starts (largest access per start address, the paper's); "
+                            "bytes (bytes touched) | starts (largest access per start address, the paper's) | pages "
+                            "(4 KB pages touched x 4096; splitter, -window, -pages_only); "
                             "default: bytes with -track_frees or -window, else starts");
+KNOB< string > KnobClock(KNOB_MODE_WRITEONCE, "pintool", "clock", "refs",
+                         "refs | seconds: -snapshot counts memory references, or milliseconds of wall time");
 KNOB< BOOL > KnobSites(KNOB_MODE_WRITEONCE, "pintool", "sites", "0",
                        "splitter with -track_frees: per allocation site, requested against touched bytes (*_sites.csv, "
                        "*_blocks.csv)");
@@ -214,8 +227,10 @@ KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
 // Footprint definition (-footprint): the paper's sum of the largest access size per start
 // address ("starts"), or the bytes touched, the union of [address, address + size) ("bytes").
 // Overlapping accesses (different widths or offsets) count once per start address in the
-// first, once per byte in the second.
+// first, once per byte in the second. -footprint pages also counts bytes (countBytes), and the
+// splitter's exact footprint reports the pages that hold them (SetPages).
 BOOL countBytes = FALSE;
+BOOL countPages = FALSE;
 
 class Footprint
 {
@@ -226,6 +241,7 @@ class Footprint
     UINT64 discovered = 0;   // times an address entered the sample (again after a free)
 
     VOID SetIndexed(BOOL on) { indexed = on; }
+    VOID SetPages(BOOL on) { pages4k = on; } // countBytes: bytes and freed count whole pages with a touched byte
     template < typename F > VOID ForEach(F f) const
     {
         for (const auto& e : entries)
@@ -244,7 +260,10 @@ class Footprint
         Count(e.count, -1);
         Count(++e.count, +1);
         if (countBytes)
-            bytes += Touch(address, address + size);
+        {
+            UINT64 newPages = 0, added = Touch(address, address + size, &newPages);
+            bytes += pages4k ? newPages << PAGE_BITS : added;
+        }
         else if (e.size < size)
             bytes += size - e.size;
         if (e.size < size) e.size = size;
@@ -318,6 +337,7 @@ class Footprint
     unordered_map< ADDRINT, Entry > entries;
     PageIndex pages; // page -> addresses recorded in it (when indexed)
     BOOL indexed = FALSE;
+    BOOL pages4k = FALSE; // see SetPages
 
     // countBytes: bytes touched, one bit per byte, per page
     struct Bits
@@ -345,14 +365,20 @@ class Footprint
         return changed;
     }
 
-    // Mark [lo, hi) touched; returns the bytes newly touched.
-    UINT64 Touch(ADDRINT lo, ADDRINT hi)
+    // Mark [lo, hi) touched; returns the bytes newly touched, and adds the pages newly touched to
+    // *newPages (a page is in `touched` iff it has a touched byte: Untouch erases empty ones).
+    UINT64 Touch(ADDRINT lo, ADDRINT hi, UINT64* newPages)
     {
         UINT64 added = 0;
         while (lo < hi)
         {
             ADDRINT page = lo >> PAGE_BITS, end = std::min(hi, (page + 1) << PAGE_BITS);
-            if (page != lastPage) lastBits = &touched[page], lastPage = page;
+            if (page != lastPage)
+            {
+                size_t before = touched.size();
+                lastBits = &touched[page], lastPage = page;
+                *newPages += touched.size() - before;
+            }
             added += Mark(*lastBits, lo, end, TRUE);
             lo = end;
         }
@@ -367,10 +393,11 @@ class Footprint
         auto clear = [&](unordered_map< ADDRINT, Bits >::iterator it) {
             ADDRINT start = it->first << PAGE_BITS;
             UINT64 n      = Mark(it->second, std::max(lo, start), std::min(hi, start + (1 << PAGE_BITS)), FALSE);
-            bytes -= n, freed += n;
+            if (!pages4k) bytes -= n, freed += n;
             for (UINT64 w : it->second.word)
                 if (w) return;
             touched.erase(it);
+            if (pages4k) bytes -= 1 << PAGE_BITS, freed += 1 << PAGE_BITS;
         };
         if (last - first + 1 < touched.size())
         {
@@ -480,8 +507,20 @@ vector< Footprint > unions; // splitter with -snapshot: union of each interval's
 vector< UINT64 > binObservations;
 UINT64 observations = 0; // references processed
 UINT64 timeNow = 0;      // memory references executed (estimated in the sampler)
-UINT64 nextSnapshot = 0;
+UINT64 nextSnapshot = 0;  // in references, or (-clock seconds) microseconds since the start
 UINT64 lastSnapshot = ~(UINT64)0; // time of the last snapshot written
+BOOL clockSeconds = FALSE;      // -clock seconds
+UINT64 startMicros = 0;         // wall time when the tool started
+UINT64 snapshotMicros = 0;      // since the start, at the snapshot being written
+UINT64 nextClockCheck = 0;      // -clock seconds: Tick reads the clock again at this many references
+const UINT64 CLOCK_CHECK_REFS = 1024; // (about 1 ms in the splitter; a clock read costs well under a microsecond)
+
+static UINT64 Micros()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (UINT64)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
 BOOL finished = FALSE;   // outputs written (end of run or -stop)
 
 // Live heap blocks (address -> size), for -track_frees.
@@ -572,6 +611,8 @@ ofstream windowedFile;
 int pagemapFd = -1;       // /proc/self/pagemap
 int clearRefsFd = -1;     // /proc/self/clear_refs, to clear soft-dirty bits (-dirty_every)
 UINT64 dirtyEvery = 0, nextDirtyClear = 0;
+BOOL dirtyBySnapshots = FALSE; // -clock seconds without -dirty_every: clear every 10 snapshots
+UINT64 snapshotsSinceClear = 0;
 vector< UINT64 > pageBits; // buffer for pagemap entries
 
 vector< UINT32 > intervals;          // splitter
@@ -589,7 +630,7 @@ ofstream timelineFile;
 static const char* CSV_HEADER      = "FunctionName,MemUsageObs,UniqueAddresses,CountObs,SamplingInterval";
 static const char* TIMELINE_HEADER =
     "Time,SamplingInterval,Bin,MemUsageObs,UniqueAddresses,CountObs,FreedBytes,Singletons,Doubletons,Tripletons,"
-    "Quadrupletons,Discovered";
+    "Quadrupletons,Discovered,Seconds";
 
 /* ===================================================================== */
 /* Random numbers                                                        */
@@ -2020,10 +2061,19 @@ static UINT64 BinInterval(UINT32 mapIndex)
 
 static VOID WriteWindowed();
 
+// microseconds as seconds with 6 decimals (hand-rolled, see WriteSnapshot)
+static string SecondsText(UINT64 us)
+{
+    string text = std::to_string(us / 1000000) + ".", frac = std::to_string(us % 1000000);
+    return text + string(6 - frac.size(), '0') + frac;
+}
+
 static VOID WriteSnapshot()
 {
     if (timeNow == lastSnapshot) return;
-    lastSnapshot = timeNow;
+    lastSnapshot   = timeNow;
+    snapshotMicros = Micros() - startMicros;
+    string seconds = SecondsText(snapshotMicros);
     // Hand-rolled formatting: streams and snprintf in Pin's C runtime cost
     // 10-30 us per row, which dominated runs with frequent snapshots.
     string text;
@@ -2047,7 +2097,7 @@ static VOID WriteSnapshot()
         text += ',', num(f.bytes), text += ',', num(f.Unique()), text += ',', num(count), text += ',', num(f.freed);
         for (int k = 1; k <= 4; k++)
             text += ',', num(f.sampled[k]);
-        text += ',', num(f.discovered), text += '\n';
+        text += ',', num(f.discovered), text += ',', text += seconds, text += '\n';
     };
     add(MainInterval(), -1, footprint, observations);
     for (UINT32 k = 0; k < unions.size(); k++)
@@ -2065,7 +2115,7 @@ static VOID WriteSnapshot()
 
 static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
-                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges";
+                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges,Seconds";
 
 // Resident bytes of the program's writable image sections and of its main thread's stack (other
 // threads' stacks are anonymous mmaps, tracked as blocks). The stack is the 8 MB (the usual limit)
@@ -2098,6 +2148,28 @@ static UINT64 RegionsResident()
     return total;
 }
 
+// -footprint pages, windowed: bytes of the resident pages that hold a byte of a live block
+static UINT64 BlockPagesResident()
+{
+    UINT64 total = 0;
+    ADDRINT lo = 0, hi = 0; // the page-aligned run of blocks being merged
+    ForgetResidency();
+    for (const auto& kv : blocks) // in address order
+    {
+        ADDRINT a = kv.first >> PAGE_BITS << PAGE_BITS;
+        ADDRINT b = (kv.first + kv.second.Extent() + (1 << PAGE_BITS) - 1) >> PAGE_BITS << PAGE_BITS;
+        if (a > hi)
+        {
+            if (hi > lo) total += Resident(lo, hi);
+            lo = a;
+        }
+        hi = std::max(hi, b);
+    }
+    if (hi > lo) total += Resident(lo, hi);
+    ForgetResidency();
+    return total;
+}
+
 // windowed: the footprint estimate (see "Windows" at the top)
 static VOID WriteWindowed()
 {
@@ -2124,8 +2196,9 @@ static VOID WriteWindowed()
     }
     // Clear the soft-dirty bits every dirtyEvery references (not at every snapshot: after a
     // clear the kernel write-protects pages, so each page's next write faults once).
-    if (clearRefsFd >= 0 && timeNow >= nextDirtyClear)
+    if (clearRefsFd >= 0 && (dirtyBySnapshots ? ++snapshotsSinceClear >= 10 : timeNow >= nextDirtyClear))
     {
+        snapshotsSinceClear = 0;
         if (write(clearRefsFd, "4", 1) != 1) clearRefsFd = -1; // the scan above harvested the bits
         while (nextDirtyClear <= timeNow)
             nextDirtyClear += dirtyEvery;
@@ -2136,7 +2209,7 @@ static VOID WriteWindowed()
     double density  = reusedDensity;
     // -pages_only: memory outside blocks from the pages of the program's segments and stack;
     // with windows, from the bytes the windows selected outside blocks
-    UINT64 regions  = pagesOnly ? RegionsResident() : 0; // (reads /proc/self/maps: only when used)
+    UINT64 regions  = pagesOnly || countPages ? RegionsResident() : 0; // (reads /proc/self/maps: only when used)
     // -pages_only: discard the translated code once, after the first snapshot. Without this, gemm
     // and 2mm LARGE ran 8x slower (gemm: 104 s against 12.6 s); windowed runs, which flush when
     // their first window closes, did not. Not the snapshot work (10x fewer snapshots: 104 s) nor
@@ -2146,12 +2219,16 @@ static VOID WriteWindowed()
     double estimate = blocksEstimate + (pagesOnly ? (double)regions : (double)R * otherSampled);
     // a touched page next to an untouched one inside a block is, on average, half used
     if (KnobEdgeCorrection.Value()) estimate = std::max(0.0, estimate - (double)edges * (1 << (PAGE_BITS - 1)));
+    // -footprint pages: the resident pages of live blocks (each page once, whoever touched it) and of
+    // the program's segments and stack; no densities, no partial pages
+    if (countPages) estimate = (double)(BlockPagesResident() + regions);
     windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << bytes[0] + bytes[1] << ","
                  << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
                  << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
                  << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
                  << KnobPeriod.Value() << "," << reusedWritten << "," << triggeredWindows << ","
-                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "," << regions << "," << edges << "\n";
+                 << watchedRefs + (watching ? timeNow - windowStart : 0) << "," << regions << "," << edges << ","
+                 << SecondsText(snapshotMicros) << "\n";
 }
 
 // windowed: windows are periodic (one of -window references at every multiple of -period)
@@ -2230,11 +2307,22 @@ static BOOL Tick(UINT64 now)
 {
     if (now > timeNow) timeNow = now;
     if (windowed) AdvanceWindows();
-    if (KnobSnapshot.Value() && timeNow >= nextSnapshot)
+    if (KnobSnapshot.Value() && !clockSeconds && timeNow >= nextSnapshot)
     {
         WriteSnapshot();
         while (nextSnapshot <= timeNow)
             nextSnapshot += KnobSnapshot.Value();
+    }
+    else if (KnobSnapshot.Value() && clockSeconds && timeNow >= nextClockCheck)
+    {
+        nextClockCheck = timeNow + CLOCK_CHECK_REFS;
+        UINT64 now     = Micros() - startMicros;
+        if (now >= nextSnapshot)
+        {
+            WriteSnapshot();
+            while (nextSnapshot <= now)
+                nextSnapshot += KnobSnapshot.Value() * 1000;
+        }
     }
     if (KnobStop.Value() && timeNow >= KnobStop.Value())
     {
@@ -2397,7 +2485,7 @@ BOOL InitOutputFiles()
     {
         timelineFile.open(outputFileNamePrefix + "_timeline.csv");
         timelineFile << TIMELINE_HEADER << "\n";
-        nextSnapshot = KnobSnapshot.Value();
+        nextSnapshot = KnobSnapshot.Value() * (clockSeconds ? 1000 : 1);
         if (windowed)
         {
             windowedFile.open(outputFileNamePrefix + "_windowed.csv");
@@ -2500,6 +2588,9 @@ int main(int argc, char* argv[])
 {
     PIN_InitSymbols();
     if (PIN_Init(argc, argv)) return Usage();
+    startMicros = Micros();
+    if (KnobClock.Value() != "refs" && KnobClock.Value() != "seconds") return Usage("-clock must be refs or seconds");
+    clockSeconds = KnobClock.Value() == "seconds";
 
     if (KnobMode.Value() == "splitter")
     {
@@ -2551,8 +2642,11 @@ int main(int argc, char* argv[])
             syscall(SYS_prctl, PR_SET_THP_DISABLE, 1, 0, 0, 0); // Pin's CRT has no prctl()
             pagemapFd = open("/proc/self/pagemap", O_RDONLY);
             if (pagemapFd < 0) return Usage("-window needs /proc/self/pagemap");
-            dirtyEvery = KnobDirtyEvery.Value().empty() ? 10 * KnobSnapshot.Value()
-                                                         : strtoull(KnobDirtyEvery.Value().c_str(), NULL, 10);
+            // (-clock seconds: every 10 snapshots, counted in WriteWindowed)
+            dirtyBySnapshots = clockSeconds && KnobDirtyEvery.Value().empty();
+            dirtyEvery       = dirtyBySnapshots              ? 1
+                               : KnobDirtyEvery.Value().empty() ? 10 * KnobSnapshot.Value()
+                                                                : strtoull(KnobDirtyEvery.Value().c_str(), NULL, 10);
             if (dirtyEvery)
             {
                 clearRefsFd = open("/proc/self/clear_refs", O_WRONLY);
@@ -2567,8 +2661,10 @@ int main(int argc, char* argv[])
             // Threads advance time every checkStep references: well inside a window, the gap
             // between windows and a snapshot, but not so often that the lock costs (a window
             // shorter than 8 x 10^4 references lasts longer than asked).
-            UINT64 shortest = pagesOnly ? KnobSnapshot.Value()
-                                        : std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), KnobSnapshot.Value()});
+            // (-clock seconds: snapshots are not in references; Tick reads the clock every CLOCK_CHECK_REFS)
+            UINT64 snapshotRefs = clockSeconds ? CLOCK_CHECK_REFS : KnobSnapshot.Value();
+            UINT64 shortest     = pagesOnly ? snapshotRefs
+                                            : std::min({KnobWindow.Value(), KnobPeriod.Value() - KnobWindow.Value(), snapshotRefs});
             checkStep       = std::max< UINT64 >(10000, shortest / 8);
         }
         UINT64 base      = KnobSeed.Value().empty() ? PIN_GetPid() : strtoull(KnobSeed.Value().c_str(), NULL, 10);
@@ -2583,10 +2679,16 @@ int main(int argc, char* argv[])
         countBytes = TRUE;
     else if (KnobFootprint.Value() == "starts")
         countBytes = FALSE;
+    else if (KnobFootprint.Value() == "pages")
+    {
+        if (mode != SPLITTER && !windowed) return Usage("-footprint pages needs -mode splitter, -window or -pages_only");
+        countBytes = countPages = TRUE;
+        if (mode == SPLITTER) footprint.SetPages(TRUE); // the exact footprint; sampled bins stay in bytes
+    }
     else if (KnobFootprint.Value().empty())
         countBytes = KnobTrackFrees.Value() || windowed;
     else
-        return Usage("-footprint must be bytes or starts");
+        return Usage("-footprint must be bytes, starts or pages");
     sitesOn = KnobSites.Value();
     if (sitesOn && (mode != SPLITTER || !KnobTrackFrees.Value() || !countBytes))
         return Usage("-sites needs -mode splitter -track_frees 1 with the bytes footprint");
