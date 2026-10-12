@@ -945,7 +945,10 @@ static void load(const char *file)
 static void *table(size_t bytes)
 {
     void *p = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    return p == MAP_FAILED ? NULL : p;
+    if (p == MAP_FAILED) return NULL;
+    /* entries are touched sparsely: with transparent huge pages, the first would back 2 MB */
+    madvise(p, bytes, MADV_NOHUGEPAGE);
+    return p;
 }
 
 __attribute__((constructor)) static void init(void)

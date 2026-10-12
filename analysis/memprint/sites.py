@@ -241,7 +241,9 @@ def reservations(blocks, q, keep, frac=0.05):
     for site, g in blocks.groupby("site"):
         rows.append(row(site, g, q, keep))
         rows.extend(split(site, g, q, keep, frac))
-    return pd.DataFrame(rows).sort_values("requested", ascending=False)
+    cols = ["site", "context", "model", "a", "b", "ranges", "blocks", "inputs", "requested", "committed", "touched",
+            "high_water", "keep"]
+    return pd.DataFrame(rows, columns=cols).sort_values("requested", ascending=False)
 
 
 def main(argv=None):
@@ -258,7 +260,7 @@ def main(argv=None):
     caps = capacities(a.dirs, a.quantile, a.min)
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
-        for x in r[r.keep].itertuples():
+        for x in r[r.keep.astype(bool)].itertuples():
             if x.model == "runs":
                 f.write(f"{x.site} runs {len(x.ranges)} " + " ".join(f"{lo:.6f} {hi:.6f}" for lo, hi in x.ranges) + "\n")
             else:
@@ -267,7 +269,7 @@ def main(argv=None):
             f.write(f"{c['site']} cap {c['a']:.0f} {c['b']:.0f}\n")
         # the builds the address keys (image+0x...) were profiled on: libmpr ignores an image's
         # address keys when the image it loads has another build-id
-        named = {k.split("+")[0] for k in r[r.keep].site for k in k.split("@") if "+" in k}
+        named = {k.split("+")[0] for k in r[r.keep.astype(bool)].site for k in k.split("@") if "+" in k}
         for name, bid in sorted(images(a.dirs).items()):
             if name in named and bid:
                 f.write(f"# image {name} build-id {bid}\n")
@@ -276,10 +278,10 @@ def main(argv=None):
             f"{c['site']} {c['a'] / 1e6:.2f} MB after {c['b'] / 1e3:.0f} KB ({c['large_chains']} of {c['chains']} chains)"
             for c in caps))
     r.to_csv(os.path.splitext(a.out)[0] + "_summary.csv", index=False)
-    kept = r[r.keep]
+    kept = r[r.keep.astype(bool)]
     # totals over the blocks once: a split site's context rows replace its merged row
     split_sites = {s.split("@")[0] for s in kept.site if "@" in s}
-    kept = kept[[("@" in s) or (s not in split_sites) for s in kept.site]]
+    kept = kept[kept.site.map(lambda s: ("@" in s) or (s not in split_sites)).astype(bool)]
     print(f"{len(kept)} of {len(r)} sites reserved ({len(split_sites)} split by calling context); on the training blocks they commit "
           f"{kept.committed.sum() / 1e6:.1f} MB of {kept.requested.sum() / 1e6:.1f} MB requested "
           f"(high water {kept.high_water.sum() / 1e6:.1f} MB)")
