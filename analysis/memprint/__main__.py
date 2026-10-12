@@ -151,6 +151,22 @@ def cmd_timeline(args, paths):
         summarize_timeline(recon, fcast)
         return
 
+    if args.action == "windowed":
+        results, curves = [], []
+        for w in workloads:
+            directory = Path(args.run) if args.run else paths.traces / w
+            r, c = timeline.evaluate_windowed(traces.load_timelines(directory, prefixes=("Buffered", "Spatial")),
+                                              traces.load_windowed(directory), w)
+            results.append(r)
+            curves.append(c)
+        results = pd.concat(results)
+        write(results, paths.data / "timeline_windowed.csv", index=False)
+        write(pd.concat(curves), paths.data / "timeline_windowed_curves.csv", index=False)
+        pd.set_option("display.width", 200)
+        print(results.pivot_table(index=["workload", "config", "sample_rate", "watched"], columns="estimate",
+                                  values=["mape", "peak_error"]).round(1).to_string())
+        return
+
     # estimate / forecast a single sampler run
     models = pd.read_csv(paths.data / "timeline_models.csv").set_index("workload")
     for w in workloads:
@@ -221,6 +237,188 @@ def cmd_plot(args, paths):
             paper.FIGURES[name](out)
 
 
+def _spectrum_job(polybench, workload, config, out, footprint):
+    from . import static
+
+    spec, result, errors, seconds = static.analyze_polybench(polybench, workload, config, footprint)
+    static.save(out, spec, result, errors, seconds)
+    return f"{workload} {config}: {seconds:.1f}s footprint {spec.footprint:.0f} B, coverage {result.coverage:.3f}"
+
+
+def cmd_static(args, paths):
+    from concurrent.futures import ProcessPoolExecutor
+
+    from . import lowo, static
+    from .static import idioms, runs
+
+    out = paths.data / "static"
+    workloads = args.workloads or [w for w in default_workloads() if w != "miniVite"]
+    if args.action == "spectra":
+        jobs = [(w, c) for w in workloads for c in static.POLYBENCH_CONFIGS
+                if args.force or not (out / f"{w}-{c}.npz").exists()]
+        with ProcessPoolExecutor(args.jobs) as pool:
+            futures = [pool.submit(_spectrum_job, args.polybench, w, c, out / f"{w}-{c}.npz", args.footprint)
+                       for w, c in jobs]
+            for (w, c), f in zip(jobs, futures):
+                try:
+                    print(f.result(), flush=True)
+                except Exception as e:  # a config the kernel does not define fails to parse
+                    print(f"{w} {c}: failed ({e})", flush=True)
+        return
+
+    if args.action == "idioms":
+        rows = {k: idioms.features([src], defines=["MEDIUM_DATASET"], includes=[Path(args.polybench) / "utilities"])
+                for k, src in static.polybench_sources(args.polybench).items()}
+        for spec in args.program or []:  # name=root:file[,file...]
+            name, rest = spec.split("=", 1)
+            root, files = rest.split(":", 1)
+            rows[name] = idioms.features(files.split(","), root=root, includes=args.include or [])
+        table = pd.DataFrame(rows).T
+        table["out_of_distribution"] = [idioms.out_of_distribution(r) for _, r in table.iterrows()]
+        write(table, paths.data / "static_idioms.csv")
+        print(table.round(3).to_string())
+        return
+
+    if args.action == "gap":
+        from . import irregular
+
+        kernels = [k for k in irregular.KERNELS if paths.all_data(k).exists()]
+        if args.source == "interp":                                    # serial workloads only
+            kernels = [k for k in kernels if runs.GAP_KERNEL.match(k) and (not args.workloads or k in args.workloads
+                                                                          or any(k in irregular.BASELINE_FROM[w]
+                                                                                 for w in args.workloads
+                                                                                 if w in irregular.BASELINE_FROM))]
+        all_data = {k: paths.read_all_data(k) for k in kernels}
+        scales = {k: sorted(all_data[k]["Config"].astype(str).unique(), key=int) for k in kernels}
+        if args.scales:
+            scales = {k: [s for s in v if s in args.scales] for k, v in scales.items()}
+            all_data = {k: d[d["Config"].astype(str).isin(scales[k])] for k, d in all_data.items()}
+        if args.source == "interp":
+            spectra = {}
+            for k in kernels:
+                spectra.update(runs.gap_spectra([k], scales[k], args.gapbs, paths.data / "static_auto", args.jobs))
+            all_data = {k: d[d["Config"].astype(str).isin(spectra[k])] for k, d in all_data.items()}
+            missing = [k for k, d in all_data.items() if d.empty]
+            if missing:
+                print("no spectra (interpreter failed) for:", " ".join(missing))
+            all_data = {k: d for k, d in all_data.items() if not d.empty}
+            kernels = [k for k in kernels if k in all_data]
+        else:
+            spectra = {k: irregular.skeleton_spectra(k, scales[k], paths.data / "static_gap") for k in kernels}
+        kernels = [k for k in kernels if all(b in all_data for b in irregular.BASELINE_FROM[k])]
+        borrow = {}
+        if args.borrow:
+            borrow = {w: pd.read_csv(Path(args.borrow) / f"{w}_allData.csv")
+                      for w in default_workloads() if w != "miniVite" and (Path(args.borrow) / f"{w}_allData.csv").exists()}
+        targets = [k for k in kernels if not args.workloads or k in args.workloads]
+        errors, footprints = irregular.evaluate(all_data, spectra, borrow, kernels=targets)
+        if args.workloads:
+            errors = errors[errors["kernel"].isin(args.workloads)]
+            footprints = footprints[footprints["kernel"].isin(args.workloads)]
+        stem = "gap_pilot" if args.source == "skeleton" else "gap_interp"
+        write(errors, paths.data / f"{stem}_errors.csv", index=False)
+        write(footprints, paths.data / f"{stem}_footprints.csv", index=False)
+        pd.set_option("display.width", 200)
+        print(footprints.round(2).to_string())
+        print(errors.pivot_table(index=["kernel", "split"], columns="method", values="mape").round(2).to_string())
+        return
+
+    if args.action == "programs":
+        # C programs the interpreter runs by itself (tests/static/*.c, traced as <name>-<SCALE>);
+        # the runtime baseline is fitted on the PolyBench traces and spectra under --borrow's root.
+        from . import irregular
+
+        programs = args.workloads or ["csr_pr", "csr_bfs"]
+        all_data = {k: paths.read_all_data(k) for k in programs}
+        spectra = {}
+        for k in programs:
+            spectra[k] = {}
+            for config in sorted(all_data[k]["Config"].astype(str).unique(), key=int):
+                path = out / f"{k}-{config}.npz"
+                if not path.exists():
+                    spec, result, errors, seconds = static.analyze(
+                        Path(__file__).resolve().parents[2] / "tests" / "static" / f"{k}.c", [f"SCALE={config}"],
+                        footprint="bytes")
+                    static.save(path, spec, result, errors, seconds)
+                spectra[k][config] = static.load(path)[0]
+        pb = Path(args.borrow)
+        pb_spectra = {tuple(f.stem.rsplit("-", 1)): static.load(f)[0] for f in sorted((pb / "static").glob("*.npz"))}
+        pb_data = {w: pd.read_csv(pb / f"{w}_allData.csv") for w in sorted({w for w, _ in pb_spectra})}
+        baseline = lowo.fit_baseline(list(lowo.load(pb_data, pb_spectra).values()))
+        errors, footprints = irregular.evaluate(all_data, spectra, pb_data, {k: baseline for k in programs})
+        write(errors, paths.data / "programs_errors.csv", index=False)
+        write(footprints, paths.data / "programs_footprints.csv", index=False)
+        pd.set_option("display.width", 200)
+        print(footprints.round(2).to_string())
+        print(errors.pivot_table(index=["kernel", "split"], columns="method", values="mape").round(2).to_string())
+        return
+
+    if args.action == "cpp":
+        # any C/C++ program: python -m memprint static cpp NAME --source FILE --configs ... --args ...
+        from . import irregular, similarity as sim
+        from .dataset import prepare
+
+        if not args.workloads or not args.source_file:
+            raise SystemExit("static cpp NAME --source FILE --configs C1 C2 ... [--args ARG ...]")
+        name = args.workloads[0]
+        import shlex
+        cmdline = shlex.split(args.argline) if args.argline else (args.args or [])
+        spectra, meta = runs.program_spectra(name, args.source_file, args.configs, cmdline,
+                                             args.define or [], args.include or [], heap_top=args.heap_top,
+                                             cache_dir=paths.data / "static_cpp", n_jobs=args.jobs)
+        base_root = Path(args.baseline_root or paths.data)
+        sources = []
+        for w in args.baseline_from or []:
+            a = pd.read_csv(base_root / f"{w}_allData.csv").assign(Config=lambda d: d["Config"].astype(str))
+            specs = {f.stem.rsplit("-", 1)[1]: static.load(f)[0]
+                     for f in sorted((base_root / args.baseline_spectra).glob(f"{w}-*.npz"))}
+            sources.append((prepare(a), specs, sim.bin_summary(a)))
+        baseline = irregular.fit_baseline(sources) if sources else None
+        if baseline is None:
+            from .static.spectrum import BASIS, Baseline
+            baseline = Baseline(np.zeros(len(BASIS)), np.zeros(len(BASIS)))
+        pred = runs.predictions(name, spectra, meta, baseline)
+        write(pred, paths.data / f"{name}_predicted.csv", index=False)
+        print(pred[pred.k == 1][["config", "footprint", "program_footprint", "coverage", "seconds"]].to_string())
+        if paths.all_data(name).exists():
+            scored = runs.score(pred, paths.read_all_data(name))
+            write(scored, paths.data / f"{name}_scored.csv", index=False)
+            print(scored.round(2).to_string())
+        return
+
+    # lowo: leave one workload out
+    spectra = {}
+    for f in sorted(out.glob("*.npz")):
+        w, c = f.stem.rsplit("-", 1)
+        if w in workloads:
+            spectra[(w, c)] = static.load(f)[0]
+    all_data = {w: paths.read_all_data(w) for w in sorted({w for w, _ in spectra})}
+    ast = None
+    if args.ast:
+        ast = pd.read_csv(args.ast)
+        ast.index = ast.pop("file").str.replace(".c.ast.json", "", regex=False)
+        ast = np.log1p(ast.astype(float))
+    known = lowo.load(all_data, spectra)
+    errors, validity, descriptors = lowo.evaluate(known, ast)
+    write(errors, paths.data / "lowo_errors.csv", index=False)
+    write(validity, paths.data / "lowo_validity.csv", index=False)
+    write(descriptors, paths.data / "lowo_descriptors.csv")
+    checks = [lowo.transfer_check(w, paths.read_all_data(w), known) for w in args.transfer or []]
+    if checks:
+        write(pd.DataFrame(checks), paths.data / "lowo_transfer.csv", index=False)
+    pd.set_option("display.width", 200)
+    print("\nMAPE (%) of alpha on the held-out workload's test config:")
+    print(lowo.summarize(errors).round(2).to_string())
+    print("\nSpearman rho between descriptor distance and transfer error (median over held-out workloads):")
+    print(validity.groupby("split")[["rho_static", "rho_measured", "rho_ast", "zhat_reuse_rmse"]].median()
+          .round(3).to_string())
+    for check in checks:
+        print(f"\n{check}")
+    from .plots.static import plot_lowo
+
+    plot_lowo(errors, validity, descriptors, paths.figures / "static")
+
+
 def cmd_paper_figures(args, paths):
     """Every data figure of the paper, under its file name in the paper."""
     from .plots import alpha, massif, paper, sd_config
@@ -276,17 +474,56 @@ def main(argv=None):
     p.set_defaults(func=cmd_plot)
 
     p = sub.add_parser("timeline", help="footprint over time (-snapshot traces)")
-    p.add_argument("action", choices=["preprocess", "build", "estimate", "forecast"],
+    p.add_argument("action", choices=["preprocess", "build", "estimate", "forecast", "windowed"],
                    help="preprocess: traces/<wl>/*_timeline.csv -> data/<wl>_timeline.csv; "
                         "build: evaluate and fit models -> data/timeline_*.csv; "
-                        "estimate/forecast: apply the model to sampler runs")
+                        "estimate/forecast: apply the model to sampler runs; "
+                        "windowed: evaluate -window runs against the splitter -> data/timeline_windowed.csv")
     p.add_argument("workloads", nargs="*")
     p.add_argument("--subset", choices=["NZ", "MT", "L2O"], default="L2O", help="build: training subset of the final model")
     p.add_argument("--variant", choices=list(timeline.VARIANTS), default="base",
                    help="build: model features (time adds log Time)")
-    p.add_argument("--run", help="estimate/forecast: directory with the sampler timelines (default traces/<wl>)")
+    p.add_argument("--run", help="estimate/forecast/windowed: directory with the timelines (default traces/<wl>)")
     p.add_argument("--upto", type=float, help="forecast: use the run up to this many memory references")
     p.set_defaults(func=cmd_timeline)
+
+    p = sub.add_parser("static", help="static analysis of workload sources and leave-one-workload-out evaluation")
+    p.add_argument("action", choices=["spectra", "idioms", "lowo", "gap", "programs", "cpp"],
+                   help="spectra: PolyBench access-count spectra -> data/static/<wl>-<config>.npz; "
+                        "idioms: access-idiom features -> data/static_idioms.csv; "
+                        "lowo: predict each workload from its source and the others -> data/lowo_*.csv; "
+                        "gap: GAP pilot, predict the GAP workloads from skeletons -> data/gap_pilot_*.csv; "
+                        "programs: C programs in tests/static run by the interpreter -> data/programs_*.csv")
+    p.add_argument("workloads", nargs="*", help="default: the PolyBench kernels in workloads.txt")
+    p.add_argument("--polybench", help="PolyBench/C source tree (spectra, idioms)")
+    p.add_argument("--jobs", type=int, default=8, help="spectra: parallel processes")
+    p.add_argument("--force", action="store_true", help="spectra: recompute existing spectra")
+    p.add_argument("--footprint", choices=["bytes", "starts"], default="bytes",
+                   help="spectra: footprint definition of the traces they are compared with (default bytes)")
+    p.add_argument("--program", nargs="*", help="idioms: more programs as name=root:file[,file...]")
+    p.add_argument("--include", nargs="*", help="idioms: include directories for --program")
+    p.add_argument("--ast", help="lowo: clang AST node counts per kernel (CSV) for the AST-similarity baseline")
+    p.add_argument("--transfer", nargs="*", help="lowo: workloads without a spectrum to check borrowed models on")
+    p.add_argument("--borrow", help="gap, programs: directory of PolyBench allData tables (and static/ spectra)")
+    p.add_argument("--source", choices=["skeleton", "interp"], default="skeleton",
+                   help="gap: hand-written skeleton (data/static_gap) or the C++ interpreter on GAP's source "
+                        "(data/static_auto; results in data/gap_interp_*.csv)")
+    p.add_argument("--gapbs", default="workloads/src/gapbs", help="gap --source interp: GAP source tree")
+    p.add_argument("--scales", nargs="*", help="gap: only these scales")
+    p.add_argument("--source-file", dest="source_file",
+                   help="cpp: the program's source file, or several comma-separated (compiled as one unity file)")
+    p.add_argument("--configs", nargs="*", default=[], help="cpp: input configs")
+    p.add_argument("--args", nargs="*", help="cpp: command line after the program name; {config} is replaced")
+    p.add_argument("--argline", help="cpp: the same as one string (for arguments that start with '-')")
+    p.add_argument("--define", nargs="*", help="cpp: preprocessor definitions (NAME=VALUE); {config} is replaced")
+    p.add_argument("--heap-top", dest="heap_top", type=int, default=0,
+                   help="cpp: free bytes in glibc's top chunk at the first large allocation")
+    p.add_argument("--baseline-from", dest="baseline_from", nargs="*",
+                   help="cpp: workloads of the same runtime whose traces and spectra fit the runtime baseline")
+    p.add_argument("--baseline-root", dest="baseline_root", help="cpp: directory with their allData tables")
+    p.add_argument("--baseline-spectra", dest="baseline_spectra", default="static_auto",
+                   help="cpp: subdirectory of --baseline-root with their spectra")
+    p.set_defaults(func=cmd_static)
 
     p = sub.add_parser("paper-figures", help="regenerate the paper's data figures into figures/paper/")
     p.add_argument("--massif-csv", help="CSV path, may contain {workload} (default results/<wl>/massif.csv)")

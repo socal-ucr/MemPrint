@@ -1,0 +1,7 @@
+,value
+one_time_s,3707.1666139999998
+kernels,27.0
+interp_slower_than_sampler_extra,2.0
+interp_slower_than_sampler_inter,1.0
+interp_x_native_max,412.0526108023459
+smallest_full_trace_s,0.908518

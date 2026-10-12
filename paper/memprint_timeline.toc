@@ -1,0 +1,86 @@
+\contentsline {section}{\numberline {1}Introduction}{4}{section.1}
+\contentsline {section}{\numberline {2}Terms}{5}{section.2}
+\contentsline {paragraph}{Memory reference.}{5}{section*.2}
+\contentsline {paragraph}{Footprint.}{5}{section*.3}
+\contentsline {paragraph}{Live footprint and peak.}{5}{section*.4}
+\contentsline {paragraph}{Time.}{6}{section*.5}
+\contentsline {paragraph}{Snapshot and timeline.}{6}{section*.6}
+\contentsline {paragraph}{Sample and sampling interval.}{6}{section*.7}
+\contentsline {paragraph}{Allocation, block and page.}{6}{section*.8}
+\contentsline {paragraph}{Native time and overhead.}{6}{section*.9}
+\contentsline {paragraph}{Ground truth.}{6}{section*.10}
+\contentsline {section}{\numberline {3}Background}{6}{section.3}
+\contentsline {subsection}{\numberline {3.1}Dynamic binary instrumentation with Pin}{6}{subsection.3.1}
+\contentsline {subsection}{\numberline {3.2}MemPrint{}}{7}{subsection.3.2}
+\contentsline {paragraph}{Splitter.}{7}{section*.11}
+\contentsline {paragraph}{Sampler.}{7}{section*.12}
+\contentsline {paragraph}{The $\alpha $ model.}{7}{section*.13}
+\contentsline {paragraph}{Reproduction.}{7}{section*.14}
+\contentsline {section}{\numberline {4}Measuring the live footprint over time}{8}{section.4}
+\contentsline {subsection}{\numberline {4.1}Removing freed memory}{8}{subsection.4.1}
+\contentsline {paragraph}{Ordering removals within a thread.}{8}{section*.15}
+\contentsline {subsection}{\numberline {4.2}The allocator's own memory}{9}{subsection.4.2}
+\contentsline {subsection}{\numberline {4.3}Counting bytes touched}{9}{subsection.4.3}
+\contentsline {subsection}{\numberline {4.4}Snapshots and partial recordings}{9}{subsection.4.4}
+\contentsline {subsection}{\numberline {4.5}Ordering events across threads}{10}{subsection.4.5}
+\contentsline {subsection}{\numberline {4.6}Tests}{10}{subsection.4.6}
+\contentsline {section}{\numberline {5}Evaluation method}{10}{section.5}
+\contentsline {subsection}{\numberline {5.1}Workloads, inputs and machine}{10}{subsection.5.1}
+\contentsline {paragraph}{PolyBench.}{10}{section*.16}
+\contentsline {paragraph}{miniVite.}{10}{section*.17}
+\contentsline {paragraph}{Building miniVite.}{11}{section*.18}
+\contentsline {paragraph}{Programs that reuse their heap.}{11}{section*.19}
+\contentsline {paragraph}{Machine.}{11}{section*.20}
+\contentsline {subsection}{\numberline {5.2}Ground truth and error metrics}{11}{subsection.5.2}
+\contentsline {paragraph}{Training and testing.}{11}{section*.21}
+\contentsline {subsection}{\numberline {5.3}Validation of the ground truth}{12}{subsection.5.3}
+\contentsline {section}{\numberline {6}Estimating from sampled references}{13}{section.6}
+\contentsline {subsection}{\numberline {6.1}The $\alpha $ model at every snapshot}{13}{subsection.6.1}
+\contentsline {subsection}{\numberline {6.2}Estimators of unseen species}{13}{subsection.6.2}
+\contentsline {subsection}{\numberline {6.3}An estimator that uses the known sampling rate}{14}{subsection.6.3}
+\contentsline {subsection}{\numberline {6.4}A hybrid of the known-rate estimate and a learned correction}{15}{subsection.6.4}
+\contentsline {paragraph}{Where the hybrid falls off.}{16}{section*.25}
+\contentsline {paragraph}{Forecasting.}{16}{section*.29}
+\contentsline {section}{\numberline {7}Sampling words}{17}{section.7}
+\contentsline {subsection}{\numberline {7.1}Method}{17}{subsection.7.1}
+\contentsline {paragraph}{Implementation.}{18}{section*.30}
+\contentsline {subsection}{\numberline {7.2}Results}{18}{subsection.7.2}
+\contentsline {paragraph}{PolyBench.}{18}{section*.31}
+\contentsline {paragraph}{miniVite and threads.}{18}{section*.32}
+\contentsline {paragraph}{Cost on large inputs.}{18}{section*.33}
+\contentsline {section}{\numberline {8}Windowed sampling}{19}{section.8}
+\contentsline {subsection}{\numberline {8.1}Counting time between windows}{20}{subsection.8.1}
+\contentsline {subsection}{\numberline {8.2}Switching between watching and not watching}{20}{subsection.8.2}
+\contentsline {subsection}{\numberline {8.3}Tracking live blocks}{21}{subsection.8.3}
+\contentsline {subsection}{\numberline {8.4}Page residency}{21}{subsection.8.4}
+\contentsline {subsection}{\numberline {8.5}Written pages of reused blocks}{21}{subsection.8.5}
+\contentsline {subsection}{\numberline {8.6}Word sampling inside windows}{22}{subsection.8.6}
+\contentsline {paragraph}{Density, under the start-address footprint.}{22}{section*.36}
+\contentsline {subsection}{\numberline {8.7}The estimate}{23}{subsection.8.7}
+\contentsline {subsection}{\numberline {8.8}Windows opened by large allocations}{23}{subsection.8.8}
+\contentsline {subsection}{\numberline {8.9}Approaches that did not work}{23}{subsection.8.9}
+\contentsline {section}{\numberline {9}Evaluation of windowed sampling}{24}{section.9}
+\contentsline {subsection}{\numberline {9.1}PolyBench}{24}{subsection.9.1}
+\contentsline {subsection}{\numberline {9.2}miniVite}{24}{subsection.9.2}
+\contentsline {paragraph}{Windows opened by large allocations.}{25}{section*.40}
+\contentsline {subsection}{\numberline {9.3}Heap churn}{25}{subsection.9.3}
+\contentsline {subsection}{\numberline {9.4}Programs that reuse their heap}{26}{subsection.9.4}
+\contentsline {subsection}{\numberline {9.5}Cost}{26}{subsection.9.5}
+\contentsline {section}{\numberline {10}Discussion and limitations}{28}{section.10}
+\contentsline {paragraph}{Why each part is needed.}{28}{section*.45}
+\contentsline {paragraph}{The definition of the footprint.}{28}{section*.46}
+\contentsline {paragraph}{Limitations of written pages.}{28}{section*.47}
+\contentsline {paragraph}{Limitations of the allocator handling.}{28}{section*.48}
+\contentsline {paragraph}{Other limitations.}{29}{section*.49}
+\contentsline {paragraph}{Generality of the evaluation.}{29}{section*.50}
+\contentsline {section}{\numberline {11}Related work}{29}{section.11}
+\contentsline {paragraph}{Measuring memory use.}{29}{section*.51}
+\contentsline {paragraph}{Hardware sampling of memory accesses.}{29}{section*.52}
+\contentsline {paragraph}{Page-level tracking by the operating system.}{29}{section*.53}
+\contentsline {paragraph}{Sampling locations in caches and simulation.}{29}{section*.54}
+\contentsline {paragraph}{Sampling over time.}{30}{section*.55}
+\contentsline {paragraph}{Estimating unseen elements.}{30}{section*.56}
+\contentsline {section}{\numberline {12}Next steps}{30}{section.12}
+\contentsline {section}{\numberline {13}Conclusion}{31}{section.13}
+\contentsline {section}{\numberline {A}Options of the Pin tool}{35}{appendix.A}
+\contentsline {section}{\numberline {B}Output files}{35}{appendix.B}

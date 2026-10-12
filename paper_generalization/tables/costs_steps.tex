@@ -1,0 +1,21 @@
+\begin{tabular}{lrrr}
+\toprule
+Step & median (ms) & max (ms) & runs \\
+\midrule
+runtime baseline (NNLS on 26) & 388.0 & 409.2 & 27 \\
+moments at 13 intervals (static $\alpha$) & 0.9 & 1.7 & 54 \\
+static $\alpha$ for the sampled bins & 1.0 & 1.9 & 54 \\
+descriptor $\hat z$ & 1.7 & 2.4 & 54 \\
+known programs' measured $z$ & 305.6 & 335.1 & 54 \\
+distances and RBF weights & 66.7 & 77.5 & 54 \\
+apply the 26 borrowed models & 0.6 & 0.7 & 54 \\
+nearest model (pick, apply) & 0.1 & 0.2 & 54 \\
+RBF mixture (combine) & 0.2 & 0.3 & 54 \\
+pooled regression with static $\alpha$ (fit and apply) & 253.2 & 270.5 & 54 \\
+own model: fit on 6 configs and apply & 6.3 & 6.9 & 54 \\
+fit the 27 per-program models & 115.7 & 115.7 & 1 \\
+AST node counts & 5.3 & 6.0 & 54 \\
+access-idiom features & 57.2 & 68.8 & 54 \\
+clang parse & 33.8 & 39.6 & 54 \\
+\bottomrule
+\end{tabular}

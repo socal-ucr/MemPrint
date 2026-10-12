@@ -1,0 +1,27 @@
+\begin{tabular}{lrrrrlrrr}
+\toprule
+Programs (size) & native & \multicolumn{3}{c}{Pin ($\times$native)} & Static method & s & $\times$native & $\times$trace \\
+\cmidrule(lr){3-5}\cmidrule(lr){7-9}
+ & s & instr. & sampled & full trace & & & & \\
+\midrule
+PolyBench (27 kernels, MEDIUM) & 65\,ms & 41 & 44 & 582 & C interpreter, symbolic & 174\,ms & 2.66 & 0.005 \\
+ & & & & & C interpreter, enumerated & 1.9 & 25 & 0.042 \\
+ & & & & & C interpreter, timeline & 4.7 & 62 & 0.11 \\
+GAP, 12 workloads (scale 16) & 302\,ms & 14 & 17 & 266 & hand skeleton & 15.0 & 70 & 0.21 \\
+ & & & & & C++ interpreter, alone & 58.0 & 176 & 0.68 \\
+ & & & & & C++ interpreter, 4--16 at a time & 68.9 & 291 & 1.18 \\
+GAP, 12 workloads (scale 18) & 1.6 & 5.56 & 7.89 & -- & hand skeleton & 66.9 & 46 & -- \\
+ & & & & & C++ interpreter, 4--16 at a time & 257 & 183 & -- \\
+csr\_pr (scale 16) & 111\,ms & 27 & 32 & 807 & C interpreter & 36.0 & 323 & 0.40 \\
+csr\_bfs (scale 14) & 18\,ms & 96 & 101 & 393 & C interpreter & 190 & 10260 & 26 \\
+HPCCG (28) & 109\,ms & 51 & 68 & 1639 & C++ interpreter & 48.4 & 445 & 0.27 \\
+LULESH (20) & 222\,ms & 30 & 39 & 1001 & C++ interpreter & 306 & 1376 & 1.37 \\
+NPB IS (S) & 15\,ms & 158 & 164 & 352 & C++ interpreter & 1007 & 65095 & 185 \\
+NPB IS (W) & 199\,ms & 17 & 20 & 335 & C++ interpreter & 4.0\,h & 71546 & 214 \\
+NPB CG (S) & 54\,ms & 61 & 76 & 1138 & C++ interpreter & 2905 & 53860 & 47 \\
+NPB CG (W) & 342\,ms & 21 & 38 & 1228 & C++ interpreter & 5.5\,h & 57537 & 47 \\
+NPB MG (S) & 13\,ms & 265 & 245 & 451 & C++ interpreter & 10.1 & 792 & 1.75 \\
+NPB MG (W) & 303\,ms & 19 & 28 & 818 & C++ interpreter & 67.6 & 224 & 0.27 \\
+NPB MG (A) & 2.5 & 12 & 23 & out of memory & C++ interpreter & 409 & 163 & -- \\
+\bottomrule
+\end{tabular}

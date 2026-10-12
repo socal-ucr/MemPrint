@@ -1,0 +1,24 @@
+\begin{tabular}{llrrrrrrrr}
+\toprule
+Method & Runs of $C$ & \multicolumn{4}{c}{EXTRA (MEDIUM)} & \multicolumn{4}{c}{INTER (SMALL2)} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+ & & s & $\times$native & $\times$trace & MAPE & s & $\times$native & $\times$trace & MAPE \\
+\midrule
+Native run (reference) & -- & 0.06 & 1 & 0.00 & -- & 0.01 & 1 & 0.00 & -- \\
+Pin, instrumentation only (reference) & -- & 2.76 & 41 & 0.06 & -- & 1.85 & 166 & 0.28 & -- \\
+Full trace, Pin splitter (exact footprint) & the full trace & 45 & 586 & 1.00 & 0 & 6.72 & 540 & 1.00 & 0 \\
+\addlinespace
+Static footprint & interpreter & 0.17 & 3 & 0.00 & 0.09 & 0.10 & 10 & 0.02 & 0.27 \\
+Static $\alpha$ & interpreter + sampled run & 3.41 & 54 & 0.09 & 1.19 & 2.05 & 203 & 0.32 & 5.50 \\
+Pooled regression + static $\alpha$ & interpreter + sampled run & 3.41 & 54 & 0.09 & 4.10 & 2.05 & 203 & 0.32 & 6.13 \\
+Nearest model by $\hat z$ & interpreter + sampled run & 3.41 & 54 & 0.09 & 12.24 & 2.05 & 203 & 0.32 & 11.11 \\
+RBF mixture by $\hat z$ & interpreter + sampled run & 3.41 & 54 & 0.09 & 14.07 & 2.05 & 203 & 0.32 & 12.11 \\
+Nearest model by AST counts & parse + sampled run & 3.29 & 44 & 0.07 & 26.01 & 1.96 & 171 & 0.29 & 17.44 \\
+Uniform mixture & sampled run & 3.26 & 44 & 0.07 & 92.03 & 1.92 & 167 & 0.29 & 43.99 \\
+\addlinespace
+Own model (\memprint{}) & 6 full traces + sampled run & 33 & 446 & 0.74 & 18.04 & 74 & 5765 & 10.88 & 10.85 \\
+Nearest model by measured $z$ & full trace + sampled run & 48 & 662 & 1.07 & 13.84 & 8.64 & 774 & 1.29 & 11.19 \\
+RBF mixture by measured $z$ & full trace + sampled run & 48 & 662 & 1.07 & 14.05 & 8.64 & 774 & 1.29 & 11.53 \\
+Best borrowed model (oracle) & full trace & 45 & 586 & 1.00 & 8.89 & 6.72 & 540 & 1.00 & 6.05 \\
+\bottomrule
+\end{tabular}

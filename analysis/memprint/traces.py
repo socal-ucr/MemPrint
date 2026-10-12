@@ -4,6 +4,7 @@ Trace file names (see pintool/memprint_trace.cpp):
 
     <Prefix>_<name>_<interval>_<pid>[_<args>][_SubSample_<binInterval>_bin_<bin>].csv
     <Prefix>_<name>_<interval>_<pid>[_<args>]_timeline.csv     (-snapshot)
+    <Prefix>_<name>_<interval>_<pid>[_<args>]_windowed.csv     (-window)
 
 Prefix is Buffered (splitter), Sampled (sampler) or Spatial (spatial). <name> is
 "<workload>-<config>" (set with -name), or, for traces recorded without -name,
@@ -17,6 +18,7 @@ import pandas as pd
 
 TRACE_NAME = re.compile(r"^(?P<prefix>Buffered|Sampled|Spatial)_(?P<name>.+?)_(?P<interval>\d+)_(?P<pid>\d+)(?P<args>_.*)?$")
 TIMELINE_SUFFIX = "_timeline"
+WINDOWED_SUFFIX = "_windowed"
 BIN_SUFFIX = re.compile(r"_SubSample_(?P<bin_interval>\d+)_bin_(?P<bin>\d+)$")
 
 
@@ -26,8 +28,9 @@ def parse_trace_name(filename):
     if not filename.endswith(".csv"):
         return None
     stem = filename[: -len(".csv")]
-    if stem.endswith(TIMELINE_SUFFIX):
-        stem = stem[: -len(TIMELINE_SUFFIX)]
+    for suffix in (TIMELINE_SUFFIX, WINDOWED_SUFFIX):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
     bin_match = BIN_SUFFIX.search(stem)
     if bin_match:
         stem = stem[: bin_match.start()]
@@ -47,7 +50,7 @@ def parse_trace_name(filename):
 
 
 def is_timeline(filename):
-    return filename.endswith(TIMELINE_SUFFIX + ".csv")
+    return filename.endswith((TIMELINE_SUFFIX + ".csv", WINDOWED_SUFFIX + ".csv"))
 
 
 def load_traces(directory, prefix="Buffered"):
@@ -101,7 +104,7 @@ def load_timelines(directory, prefixes=("Buffered", "Sampled", "Spatial")):
     frames = []
     for filename in sorted(os.listdir(directory)):
         prefix = filename.split("_", 1)[0]
-        if prefix not in prefixes or not is_timeline(filename):
+        if prefix not in prefixes or not filename.endswith(TIMELINE_SUFFIX + ".csv"):
             continue
         _, config, interval, pid = parse_trace_name(filename)
         frame = pd.read_csv(os.path.join(directory, filename))
@@ -112,4 +115,22 @@ def load_timelines(directory, prefixes=("Buffered", "Sampled", "Spatial")):
         frames.append(frame)
     if not frames:
         raise FileNotFoundError(f"no *_timeline.csv traces in {directory}")
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_windowed(directory):
+    """Read every *_windowed.csv (spatial runs with -window) in a directory,
+    with Config, PID and RunInterval (-i) added."""
+    frames = []
+    for filename in sorted(os.listdir(directory)):
+        if not filename.endswith(WINDOWED_SUFFIX + ".csv"):
+            continue
+        _, config, interval, pid = parse_trace_name(filename)
+        frame = pd.read_csv(os.path.join(directory, filename))
+        frame.insert(0, "Config", config)
+        frame.insert(1, "PID", pid)
+        frame.insert(2, "RunInterval", interval)
+        frames.append(frame)
+    if not frames:
+        raise FileNotFoundError(f"no *_windowed.csv traces in {directory}")
     return pd.concat(frames, ignore_index=True)

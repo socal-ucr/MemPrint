@@ -1,0 +1,8 @@
+NPB spectra computed at df6e536 against recomputed at 2ee17f3 (c, s, n, references, total, unresolved, uncertain)
+npb_is-S: identical True, program footprint 536780 B
+npb_cg-S: identical True, program footprint 1282060 B
+npb_mg-S: identical True, program footprint 945092 B
+npb_mg-W: identical True, program footprint 52742732 B
+npb_mg-A: identical True, program footprint 412188040 B
+npb_is-W: not recomputed (4-5.5 h each); program footprint 8659148 B
+npb_cg-W: not recomputed (4-5.5 h each); program footprint 7923228 B

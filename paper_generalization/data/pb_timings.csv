@@ -1,0 +1,406 @@
+workload,config,mode,native_s,pin_s
+2mm,MINI,splitter,0.003603,1.458959
+2mm,MINI2,splitter,0.002892,1.765762
+2mm,MINI3,splitter,0.003736,1.760925
+2mm,SMALL,splitter,0.005118,2.931514
+2mm,SMALL2,splitter,0.013063,8.445116
+2mm,SMALL3,splitter,0.034487,28.394963
+2mm,MEDIUM,splitter,0.087708,80.518535
+2mm,SMALL2,sampler,0.011804,1.79002
+2mm,MEDIUM,sampler,0.081923,3.92555
+2mm,SMALL2,instr,0.011817,1.649143
+2mm,MEDIUM,instr,0.075942,3.575763
+2mm,SMALL2,interpreter,,0.338
+2mm,SMALL2,clang parse,,0.04
+2mm,MEDIUM,interpreter,,2.579
+2mm,MEDIUM,clang parse,,0.028
+3mm,MINI,splitter,0.003264,1.481176
+3mm,MINI2,splitter,0.003481,1.645928
+3mm,MINI3,splitter,0.004273,2.005615
+3mm,SMALL,splitter,0.006205,3.742927
+3mm,SMALL2,splitter,0.01783,13.574931
+3mm,SMALL3,splitter,0.052433,49.916717
+3mm,MEDIUM,splitter,0.263765,105.382071
+3mm,SMALL2,sampler,0.017084,1.956367
+3mm,MEDIUM,sampler,0.127981,5.181983
+3mm,SMALL2,instr,0.016728,1.971115
+3mm,MEDIUM,instr,0.124079,3.683438
+3mm,SMALL2,interpreter,,0.46
+3mm,SMALL2,clang parse,,0.033
+3mm,MEDIUM,interpreter,,3.891
+3mm,MEDIUM,clang parse,,0.03
+adi,MINI,splitter,0.003947,1.564213
+adi,MINI2,splitter,0.004052,1.908972
+adi,MINI3,splitter,0.005235,2.702925
+adi,SMALL,splitter,0.009227,5.22713
+adi,SMALL2,splitter,0.020439,12.890345
+adi,SMALL3,splitter,0.054648,36.736257
+adi,MEDIUM,splitter,0.424119,136.838876
+adi,SMALL2,sampler,0.01821,1.916477
+adi,MEDIUM,sampler,0.188885,5.420475
+adi,SMALL2,instr,0.017879,1.757293
+adi,MEDIUM,instr,0.199709,4.030776
+adi,SMALL2,interpreter,,0.315
+adi,SMALL2,clang parse,,0.033
+adi,MEDIUM,interpreter,,4.145
+adi,MEDIUM,clang parse,,0.028
+atax,MINI,splitter,0.003389,1.384867
+atax,MINI2,splitter,0.003227,1.38469
+atax,MINI3,splitter,0.003068,1.480951
+atax,SMALL,splitter,0.002995,1.612212
+atax,SMALL2,splitter,0.003292,1.455916
+atax,SMALL3,splitter,0.00376,1.754358
+atax,MEDIUM,splitter,0.007782,3.003901
+atax,SMALL2,sampler,0.003612,1.633705
+atax,MEDIUM,sampler,0.006671,1.548078
+atax,SMALL2,instr,0.00332,1.483563
+atax,MEDIUM,instr,0.005863,1.514589
+atax,SMALL2,interpreter,,0.087
+atax,SMALL2,clang parse,,0.032
+atax,MEDIUM,interpreter,,0.326
+atax,MEDIUM,clang parse,,0.028
+bicg,MINI,splitter,0.002939,1.382595
+bicg,MINI2,splitter,0.003144,1.405255
+bicg,MINI3,splitter,0.002816,1.364316
+bicg,SMALL,splitter,0.003155,1.428216
+bicg,SMALL2,splitter,0.003864,1.527496
+bicg,SMALL3,splitter,0.004551,1.723982
+bicg,MEDIUM,splitter,0.0065,2.849521
+bicg,SMALL2,sampler,0.003414,1.683167
+bicg,MEDIUM,sampler,0.005806,2.235898
+bicg,SMALL2,instr,0.003299,1.57351
+bicg,MEDIUM,instr,0.005871,1.514034
+bicg,SMALL2,interpreter,,0.092
+bicg,SMALL2,clang parse,,0.03
+bicg,MEDIUM,interpreter,,0.312
+bicg,MEDIUM,clang parse,,0.028
+cholesky,MINI,splitter,0.003913,1.785274
+cholesky,MINI2,splitter,0.005445,2.557711
+cholesky,MINI3,splitter,0.006494,4.599569
+cholesky,SMALL,splitter,0.016593,10.006866
+cholesky,SMALL2,splitter,0.043463,31.876499
+cholesky,SMALL3,splitter,0.109447,85.082775
+cholesky,MEDIUM,splitter,0.602941,311.001577
+cholesky,SMALL2,sampler,0.033227,2.640242
+cholesky,MEDIUM,sampler,0.528459,12.78495
+cholesky,SMALL2,instr,0.031707,2.093804
+cholesky,MEDIUM,instr,0.481874,8.921889
+cholesky,SMALL2,interpreter,,1.113
+cholesky,SMALL2,clang parse,,0.031
+cholesky,MEDIUM,interpreter,,12.154
+cholesky,MEDIUM,clang parse,,0.028
+correlation,MINI,splitter,0.003784,1.566046
+correlation,MINI2,splitter,0.003585,1.658785
+correlation,MINI3,splitter,0.004995,2.137099
+correlation,SMALL,splitter,0.005751,3.151533
+correlation,SMALL2,splitter,0.010109,6.360489
+correlation,SMALL3,splitter,0.022056,16.032217
+correlation,MEDIUM,splitter,0.057704,43.208423
+correlation,SMALL2,sampler,0.010424,1.957153
+correlation,MEDIUM,sampler,0.055443,2.746586
+correlation,SMALL2,instr,0.01042,1.702837
+correlation,MEDIUM,instr,0.047537,2.616501
+correlation,SMALL2,interpreter,,0.217
+correlation,SMALL2,clang parse,,0.031
+correlation,MEDIUM,interpreter,,1.265
+correlation,MEDIUM,clang parse,,0.029
+covariance,MINI,splitter,0.003489,1.443003
+covariance,MINI2,splitter,0.003169,1.621309
+covariance,MINI3,splitter,0.004108,1.979499
+covariance,SMALL,splitter,0.004912,2.890841
+covariance,SMALL2,splitter,0.009757,6.17554
+covariance,SMALL3,splitter,0.022204,16.421553
+covariance,MEDIUM,splitter,0.057802,40.699073
+covariance,SMALL2,sampler,0.008854,1.63248
+covariance,MEDIUM,sampler,0.051422,2.546293
+covariance,SMALL2,instr,0.00936,1.556424
+covariance,MEDIUM,instr,0.054523,2.173956
+covariance,SMALL2,interpreter,,0.221
+covariance,SMALL2,clang parse,,0.03
+covariance,MEDIUM,interpreter,,1.289
+covariance,MEDIUM,clang parse,,0.029
+doitgen,MINI,splitter,0.003698,1.463596
+doitgen,MINI2,splitter,0.003289,1.713497
+doitgen,MINI3,splitter,0.003725,1.896569
+doitgen,SMALL,splitter,0.005352,3.286408
+doitgen,SMALL2,splitter,0.008049,5.645338
+doitgen,SMALL3,splitter,0.013981,8.400233
+doitgen,MEDIUM,splitter,0.046088,30.245853
+doitgen,SMALL2,sampler,0.007876,1.764158
+doitgen,MEDIUM,sampler,0.039795,4.219752
+doitgen,SMALL2,instr,0.007831,1.628131
+doitgen,MEDIUM,instr,0.040968,2.161392
+doitgen,SMALL2,interpreter,,0.208
+doitgen,SMALL2,clang parse,,0.033
+doitgen,MEDIUM,interpreter,,1.301
+doitgen,MEDIUM,clang parse,,0.028
+fdtd-2d,MINI,splitter,0.003417,1.545862
+fdtd-2d,MINI2,splitter,0.003721,1.768801
+fdtd-2d,MINI3,splitter,0.004385,2.555495
+fdtd-2d,SMALL,splitter,0.009728,4.567812
+fdtd-2d,SMALL2,splitter,0.018664,12.422983
+fdtd-2d,SMALL3,splitter,0.045905,38.40084
+fdtd-2d,MEDIUM,splitter,0.211687,88.644181
+fdtd-2d,SMALL2,sampler,0.016144,1.995945
+fdtd-2d,MEDIUM,sampler,0.109932,4.401167
+fdtd-2d,SMALL2,instr,0.017172,1.85533
+fdtd-2d,MEDIUM,instr,0.10602,3.558487
+fdtd-2d,SMALL2,interpreter,,0.368
+fdtd-2d,SMALL2,clang parse,,0.031
+fdtd-2d,MEDIUM,interpreter,,3.009
+fdtd-2d,MEDIUM,clang parse,,0.028
+floyd-warshall,MINI,splitter,0.004708,2.265064
+floyd-warshall,MINI2,splitter,0.006651,4.468142
+floyd-warshall,MINI3,splitter,0.014599,8.233127
+floyd-warshall,SMALL,splitter,0.031474,24.675118
+floyd-warshall,SMALL2,splitter,0.123999,71.277528
+floyd-warshall,SMALL3,splitter,0.217937,131.037743
+floyd-warshall,MEDIUM,splitter,0.507625,396.582053
+floyd-warshall,SMALL2,sampler,0.082561,3.678759
+floyd-warshall,MEDIUM,sampler,0.49785,21.000735
+floyd-warshall,SMALL2,instr,0.074064,2.645182
+floyd-warshall,MEDIUM,instr,0.485853,13.35964
+floyd-warshall,SMALL2,interpreter,,2.925
+floyd-warshall,SMALL2,clang parse,,0.03
+floyd-warshall,MEDIUM,interpreter,,25.323
+floyd-warshall,MEDIUM,clang parse,,0.028
+gemm,MINI,splitter,0.0037,1.472966
+gemm,MINI2,splitter,0.003973,1.680669
+gemm,MINI3,splitter,0.003734,2.002093
+gemm,SMALL,splitter,0.004973,2.885743
+gemm,SMALL2,splitter,0.013617,9.437023
+gemm,SMALL3,splitter,0.065874,27.326527
+gemm,MEDIUM,splitter,0.059688,60.946323
+gemm,SMALL2,sampler,0.012465,1.701099
+gemm,MEDIUM,sampler,0.054335,2.917468
+gemm,SMALL2,instr,0.012049,1.570939
+gemm,MEDIUM,instr,0.049998,2.513197
+gemm,SMALL2,interpreter,,0.309
+gemm,SMALL2,clang parse,,0.033
+gemm,MEDIUM,interpreter,,1.871
+gemm,MEDIUM,clang parse,,0.028
+gemver,MINI,splitter,0.003546,1.421213
+gemver,MINI2,splitter,0.003076,1.533117
+gemver,MINI3,splitter,0.003144,1.747597
+gemver,SMALL,splitter,0.003247,1.575435
+gemver,SMALL2,splitter,0.004054,1.954674
+gemver,SMALL3,splitter,0.005672,3.192013
+gemver,MEDIUM,splitter,0.007539,4.030385
+gemver,SMALL2,sampler,0.004274,1.518831
+gemver,MEDIUM,sampler,0.007304,2.268492
+gemver,SMALL2,instr,0.003731,1.483529
+gemver,MEDIUM,instr,0.007662,1.552015
+gemver,SMALL2,interpreter,,0.129
+gemver,SMALL2,clang parse,,0.03
+gemver,MEDIUM,interpreter,,0.344
+gemver,MEDIUM,clang parse,,0.029
+gesummv,MINI,splitter,0.003179,1.382459
+gesummv,MINI2,splitter,0.002819,1.53661
+gesummv,MINI3,splitter,0.002743,1.505864
+gesummv,SMALL,splitter,0.003233,1.416725
+gesummv,SMALL2,splitter,0.003274,1.522418
+gesummv,SMALL3,splitter,0.004396,1.733435
+gesummv,MEDIUM,splitter,0.006652,1.987497
+gesummv,SMALL2,sampler,0.003112,1.514439
+gesummv,MEDIUM,sampler,0.005092,1.60453
+gesummv,SMALL2,instr,0.003089,1.628903
+gesummv,MEDIUM,instr,0.004486,1.93813
+gesummv,SMALL2,interpreter,,0.095
+gesummv,SMALL2,clang parse,,0.03
+gesummv,MEDIUM,interpreter,,0.23
+gesummv,MEDIUM,clang parse,,0.029
+gramschmidt,MINI,splitter,0.003256,1.316133
+gramschmidt,MINI2,splitter,0.003601,1.531835
+gramschmidt,MINI3,splitter,0.003436,2.121174
+gramschmidt,SMALL,splitter,0.006399,3.156996
+gramschmidt,SMALL2,splitter,0.012754,7.484246
+gramschmidt,SMALL3,splitter,0.030277,23.375111
+gramschmidt,MEDIUM,splitter,0.08627,73.907577
+gramschmidt,SMALL2,sampler,0.011813,1.760241
+gramschmidt,MEDIUM,sampler,0.071636,3.642162
+gramschmidt,SMALL2,instr,0.011664,1.698525
+gramschmidt,MEDIUM,instr,0.075832,2.68121
+gramschmidt,SMALL2,interpreter,,0.277
+gramschmidt,SMALL2,clang parse,,0.03
+gramschmidt,MEDIUM,interpreter,,2.026
+gramschmidt,MEDIUM,clang parse,,0.028
+heat-3d,MINI,splitter,0.00333,1.436718
+heat-3d,MINI2,splitter,0.004896,1.930273
+heat-3d,MINI3,splitter,0.006334,3.110913
+heat-3d,SMALL,splitter,0.017141,7.352705
+heat-3d,SMALL2,splitter,0.033302,16.978715
+heat-3d,SMALL3,splitter,0.063457,48.533795
+heat-3d,MEDIUM,splitter,0.335695,138.371735
+heat-3d,SMALL2,sampler,0.028911,2.059557
+heat-3d,MEDIUM,sampler,0.282484,6.100459
+heat-3d,SMALL2,instr,0.031347,2.142715
+heat-3d,MEDIUM,instr,0.294255,5.139953
+heat-3d,SMALL2,interpreter,,0.496
+heat-3d,SMALL2,clang parse,,0.029
+heat-3d,MEDIUM,interpreter,,5.205
+heat-3d,MEDIUM,clang parse,,0.027
+jacobi-2d,MINI,splitter,0.003658,1.420462
+jacobi-2d,MINI2,splitter,0.004292,2.054397
+jacobi-2d,MINI3,splitter,0.005025,2.508471
+jacobi-2d,SMALL,splitter,0.009409,5.140352
+jacobi-2d,SMALL2,splitter,0.018475,10.162302
+jacobi-2d,SMALL3,splitter,0.042455,24.763855
+jacobi-2d,MEDIUM,splitter,0.198821,98.046129
+jacobi-2d,SMALL2,sampler,0.016462,1.77849
+jacobi-2d,MEDIUM,sampler,0.093439,4.12614
+jacobi-2d,SMALL2,instr,0.017604,1.777801
+jacobi-2d,MEDIUM,instr,0.096997,3.392379
+jacobi-2d,SMALL2,interpreter,,0.335
+jacobi-2d,SMALL2,clang parse,,0.029
+jacobi-2d,MEDIUM,interpreter,,3.025
+jacobi-2d,MEDIUM,clang parse,,0.027
+lu,MINI,splitter,0.003619,1.533097
+lu,MINI2,splitter,0.004928,2.51102
+lu,MINI3,splitter,0.00774,4.066487
+lu,SMALL,splitter,0.017571,11.403151
+lu,SMALL2,splitter,0.0412,48.384038
+lu,SMALL3,splitter,0.12615,87.386047
+lu,MEDIUM,splitter,0.68225,361.895881
+lu,SMALL2,sampler,0.037158,2.427681
+lu,MEDIUM,sampler,0.562858,14.123743
+lu,SMALL2,instr,0.034994,2.044491
+lu,MEDIUM,instr,0.574297,9.462274
+lu,SMALL2,interpreter,,1.155
+lu,SMALL2,clang parse,,0.029
+lu,MEDIUM,interpreter,,13.847
+lu,MEDIUM,clang parse,,0.028
+ludcmp,MINI,splitter,0.003462,1.565604
+ludcmp,MINI2,splitter,0.004905,3.160205
+ludcmp,MINI3,splitter,0.011712,5.300857
+ludcmp,SMALL,splitter,0.017536,16.822692
+ludcmp,SMALL2,splitter,0.039604,39.578912
+ludcmp,SMALL3,splitter,0.114484,73.942482
+ludcmp,MEDIUM,splitter,0.620811,308.590643
+ludcmp,SMALL2,sampler,0.036083,2.65931
+ludcmp,MEDIUM,sampler,0.564806,14.62934
+ludcmp,SMALL2,instr,0.037326,2.260926
+ludcmp,MEDIUM,instr,0.515808,9.838909
+ludcmp,SMALL2,interpreter,,1.159
+ludcmp,SMALL2,clang parse,,0.031
+ludcmp,MEDIUM,interpreter,,13.147
+ludcmp,MEDIUM,clang parse,,0.029
+mvt,MINI,splitter,0.005916,1.892915
+mvt,MINI2,splitter,0.003792,1.843356
+mvt,MINI3,splitter,0.005685,2.164228
+mvt,SMALL,splitter,0.005721,1.475206
+mvt,SMALL2,splitter,0.004398,2.374018
+mvt,SMALL3,splitter,0.006084,2.551549
+mvt,MEDIUM,splitter,0.0109,4.471827
+mvt,SMALL2,sampler,0.00344,1.564743
+mvt,MEDIUM,sampler,0.006258,1.601696
+mvt,SMALL2,instr,0.004181,1.713543
+mvt,MEDIUM,instr,0.006041,1.54902
+mvt,SMALL2,interpreter,,0.099
+mvt,SMALL2,clang parse,,0.03
+mvt,MEDIUM,interpreter,,0.318
+mvt,MEDIUM,clang parse,,0.028
+nussinov,MINI,splitter,0.005622,1.892484
+nussinov,MINI2,splitter,0.007113,3.378903
+nussinov,MINI3,splitter,0.004981,3.016355
+nussinov,SMALL,splitter,0.008783,5.630997
+nussinov,SMALL2,splitter,0.033562,12.566345
+nussinov,SMALL3,splitter,0.073277,24.315607
+nussinov,MEDIUM,splitter,0.125025,82.352942
+nussinov,SMALL2,sampler,0.016159,1.745325
+nussinov,MEDIUM,sampler,0.108461,4.281591
+nussinov,SMALL2,instr,0.016017,1.650003
+nussinov,MEDIUM,instr,0.106601,3.423344
+nussinov,SMALL2,interpreter,,2.575
+nussinov,SMALL2,clang parse,,0.032
+nussinov,MEDIUM,interpreter,,7.663
+nussinov,MEDIUM,clang parse,,0.028
+seidel-2d,MINI,splitter,0.005364,1.630324
+seidel-2d,MINI2,splitter,0.003224,1.422999
+seidel-2d,MINI3,splitter,0.008247,3.783221
+seidel-2d,SMALL,splitter,0.022847,6.978675
+seidel-2d,SMALL2,splitter,0.035876,18.822656
+seidel-2d,SMALL3,splitter,0.081336,42.486423
+seidel-2d,MEDIUM,splitter,0.300948,128.690984
+seidel-2d,SMALL2,sampler,0.03309,2.131328
+seidel-2d,MEDIUM,sampler,0.261039,7.6021
+seidel-2d,SMALL2,instr,0.030665,1.814207
+seidel-2d,MEDIUM,instr,0.246375,4.965626
+seidel-2d,SMALL2,interpreter,,0.759
+seidel-2d,SMALL2,clang parse,,0.03
+seidel-2d,MEDIUM,interpreter,,6.245
+seidel-2d,MEDIUM,clang parse,,0.028
+symm,MINI,splitter,0.002801,1.236589
+symm,MINI2,splitter,0.00312,1.325337
+symm,MINI3,splitter,0.003125,1.48753
+symm,SMALL,splitter,0.004843,2.317403
+symm,SMALL2,splitter,0.007556,4.689506
+symm,SMALL3,splitter,0.021863,16.979916
+symm,MEDIUM,splitter,0.060732,34.770205
+symm,SMALL2,sampler,0.006868,2.04512
+symm,MEDIUM,sampler,0.053854,2.658421
+symm,SMALL2,instr,0.007346,1.718474
+symm,MEDIUM,instr,0.056241,2.170844
+symm,SMALL2,interpreter,,0.166
+symm,SMALL2,clang parse,,0.03
+symm,MEDIUM,interpreter,,1.205
+symm,MEDIUM,clang parse,,0.028
+syr2k,MINI,splitter,0.003123,1.211829
+syr2k,MINI2,splitter,0.004008,1.535397
+syr2k,MINI3,splitter,0.003474,1.685478
+syr2k,SMALL,splitter,0.004737,2.514445
+syr2k,SMALL2,splitter,0.008482,5.671014
+syr2k,SMALL3,splitter,0.025295,17.930475
+syr2k,MEDIUM,splitter,0.071385,38.723729
+syr2k,SMALL2,sampler,0.008034,1.585888
+syr2k,MEDIUM,sampler,0.059778,2.587735
+syr2k,SMALL2,instr,0.008393,1.574588
+syr2k,MEDIUM,instr,0.060889,2.267648
+syr2k,SMALL2,interpreter,,0.293
+syr2k,SMALL2,clang parse,,0.029
+syr2k,MEDIUM,interpreter,,1.319
+syr2k,MEDIUM,clang parse,,0.027
+syrk,MINI,splitter,0.003097,1.221312
+syrk,MINI2,splitter,0.004143,1.281228
+syrk,MINI3,splitter,0.003207,1.556717
+syrk,SMALL,splitter,0.003876,2.080745
+syrk,SMALL2,splitter,0.008129,4.346487
+syrk,SMALL3,splitter,0.016804,12.534547
+syrk,MEDIUM,splitter,0.045069,26.287416
+syrk,SMALL2,sampler,0.006888,1.682225
+syrk,MEDIUM,sampler,0.038216,2.219349
+syrk,SMALL2,instr,0.007095,1.543991
+syrk,MEDIUM,instr,0.038045,2.207668
+syrk,SMALL2,interpreter,,0.156
+syrk,SMALL2,clang parse,,0.029
+syrk,MEDIUM,interpreter,,0.984
+syrk,MEDIUM,clang parse,,0.027
+trisolv,MINI,splitter,0.002358,1.185664
+trisolv,MINI2,splitter,0.002485,1.160597
+trisolv,MINI3,splitter,0.003037,1.132539
+trisolv,SMALL,splitter,0.002884,1.167277
+trisolv,SMALL2,splitter,0.002842,1.245589
+trisolv,SMALL3,splitter,0.00313,1.347562
+trisolv,MEDIUM,splitter,0.00448,1.65782
+trisolv,SMALL2,sampler,0.003277,1.617686
+trisolv,MEDIUM,sampler,0.004781,1.485275
+trisolv,SMALL2,instr,0.003161,1.599346
+trisolv,MEDIUM,instr,0.004532,1.486788
+trisolv,SMALL2,interpreter,,0.074
+trisolv,SMALL2,clang parse,,0.03
+trisolv,MEDIUM,interpreter,,0.178
+trisolv,MEDIUM,clang parse,,0.028
+trmm,MINI,splitter,0.003795,1.204072
+trmm,MINI2,splitter,0.002688,1.238148
+trmm,MINI3,splitter,0.003751,1.394325
+trmm,SMALL,splitter,0.003793,1.886808
+trmm,SMALL2,splitter,0.005883,3.555902
+trmm,SMALL3,splitter,0.014713,9.898463
+trmm,MEDIUM,splitter,0.037433,21.617657
+trmm,SMALL2,sampler,0.006032,1.676673
+trmm,MEDIUM,sampler,0.033217,2.246616
+trmm,SMALL2,instr,0.006226,1.474654
+trmm,MEDIUM,instr,0.032525,2.260849
+trmm,SMALL2,interpreter,,0.13
+trmm,SMALL2,clang parse,,0.029
+trmm,MEDIUM,interpreter,,0.846
+trmm,MEDIUM,clang parse,,0.029

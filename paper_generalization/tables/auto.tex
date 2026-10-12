@@ -1,0 +1,20 @@
+\begin{tabular}{llcrrrrr}
+\toprule
+Kernel & graph & scales & \multicolumn{2}{c}{max $|$footprint error$|$ (\%)} & \multicolumn{2}{c}{mean $\alpha$ MAPE (\%)} & interp./hand \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+ & & & hand & interp. & hand & interp. & refs \\
+\midrule
+pr & uniform & 10--18 & 0.31 & 0.32 & 2.3 & 2.3 & 1.00 \\
+pr & Kronecker & 10--18 & 0.29 & 0.30 & 2.5 & 3.0 & 1.00 \\
+bfs & uniform & 10--18 & 0.29 & 0.08 & 3.6 & 3.5 & 1.00 \\
+bfs & Kronecker & 10--18 & 0.31 & 0.50 & 3.5 & 4.3 & 1.01 \\
+cc & uniform & 10--18 & 0.57 & 0.58 & 3.7 & 3.9 & 1.01 \\
+cc & Kronecker & 10--18 & 0.72 & 0.84 & 3.1 & 4.0 & 1.01 \\
+bc & uniform & 10--18 & 0.18 & 1.69 & 4.6 & 4.4 & 0.97 \\
+bc & Kronecker & 10--18 & 0.34 & 1.48 & 4.9 & 3.9 & 0.99 \\
+tc & uniform & 10--18 & 0.41 & 0.42 & 9.6 & 10.4 & 1.00 \\
+tc & Kronecker & 10--18 & 2.93 & 2.94 & 9.6 & 10.0 & 1.01 \\
+sssp & uniform & 10--18 & 1.10 & 2.79 & 9.3 & 8.9 & 1.03 \\
+sssp & Kronecker & 10--18 & 1.07 & 2.91 & 8.1 & 8.8 & 1.03 \\
+\bottomrule
+\end{tabular}
