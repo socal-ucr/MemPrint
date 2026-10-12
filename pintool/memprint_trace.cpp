@@ -194,6 +194,11 @@ KNOB< string > KnobDirtyEvery(KNOB_MODE_WRITEONCE, "pintool", "dirty_every", "",
 KNOB< string > KnobFootprint(KNOB_MODE_WRITEONCE, "pintool", "footprint", "",
                             "bytes (bytes touched) | starts (largest access per start address, the paper's); "
                             "default: bytes with -track_frees or -window, else starts");
+KNOB< BOOL > KnobSites(KNOB_MODE_WRITEONCE, "pintool", "sites", "0",
+                       "splitter with -track_frees: per allocation site, requested against touched bytes (*_sites.csv, "
+                       "*_blocks.csv)");
+KNOB< UINT64 > KnobSitesBlockMin(KNOB_MODE_WRITEONCE, "pintool", "sites_block_min", "65536",
+                                 "-sites: blocks of at least this many bytes are also written one by one (*_blocks.csv)");
 KNOB< UINT64 > KnobStop(KNOB_MODE_WRITEONCE, "pintool", "stop", "0",
                         "after N memory references, write the outputs and detach (0: run to the end)");
 
@@ -268,6 +273,37 @@ class Footprint
                 if (it->first >= first && it->first <= last) ErasePage(it, lo, hi);
                 it = next;
             }
+        }
+    }
+
+    // countBytes: of [lo, hi), the bytes touched, the end offset of the last touched byte (0: none)
+    // and the pages with a touched byte (-sites)
+    VOID Summarize(ADDRINT lo, ADDRINT hi, UINT64* bytesTouched, ADDRINT* highWater, UINT64* pagesTouched) const
+    {
+        *bytesTouched = 0, *highWater = 0, *pagesTouched = 0;
+        if (!countBytes || hi <= lo) return;
+        for (ADDRINT page = lo >> PAGE_BITS; (page << PAGE_BITS) < hi; page++)
+        {
+            auto it = touched.find(page);
+            if (it == touched.end()) continue;
+            ADDRINT start = page << PAGE_BITS, a = std::max(lo, start), b = std::min(hi, start + (1 << PAGE_BITS));
+            UINT64 n = 0;
+            ADDRINT last = 0;
+            for (UINT32 w = 0; w < (1 << (PAGE_BITS - 6)); w++)
+            {
+                ADDRINT wlo = start + w * 64, whi = wlo + 64;
+                if (whi <= a || wlo >= b || !it->second.word[w]) continue;
+                UINT64 mask = ~0ULL;
+                if (wlo < a) mask &= ~0ULL << (a - wlo);
+                if (whi > b) mask &= ~0ULL >> (whi - b);
+                UINT64 bits = it->second.word[w] & mask;
+                if (!bits) continue;
+                n += __builtin_popcountll(bits);
+                last = wlo + 64 - __builtin_clzll(bits);
+            }
+            if (n == 0) continue;
+            *bytesTouched += n, ++*pagesTouched;
+            *highWater = last - lo;
         }
     }
 
@@ -405,6 +441,7 @@ struct Release
 {
     VOID* position;
     ADDRINT lo, hi;
+    BOOL probe = FALSE; // -sites: not a release, a look at the block at lo (calloc's zeroing, see SiteProbe)
 };
 
 // Per-thread state; each slot is only touched by its own thread (except refs, read by
@@ -421,6 +458,9 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     ADDRINT allocSp = 0; // stack pointer at the outermost call
     ADDRINT allocSize = 0, allocPtr = 0, allocOut = 0;
     ADDRINT allocHeader = 0; // realloc: the old chunk's size field at the entry
+    ADDRINT allocSite   = 0; // -sites: the outermost call's return address, or the id passed to __mpr_alloc
+    BOOL allocSiteId    = FALSE; // allocSite is an id from the MemPrintResize pass, not an address
+    UINT8 allocKind     = 0; // -sites: SITE_MALLOC, SITE_CALLOC, ...
     BOOL allocMallocLike = FALSE; // the outermost call returns its block (malloc, calloc, memalign, ...)
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
@@ -445,6 +485,45 @@ BOOL finished = FALSE;   // outputs written (end of run or -stop)
 // Live heap blocks (address -> size), for -track_frees.
 PIN_LOCK allocLock;
 unordered_map< ADDRINT, ADDRINT > allocations;
+
+/* -sites: requested against touched bytes per allocation site ----------- */
+// A block's touched bytes are read from the exact footprint (one bit per byte) when the block is
+// released, just before Untouch clears them (ApplyRelease), and at the end for blocks still live.
+// The site is the return address of the outermost allocator call, which with operator new hooked
+// as an allocator is in the program's code (STL code is instantiated there), or the id the
+// MemPrintResize pass passes to __mpr_alloc.
+enum { SITE_MALLOC = 1, SITE_CALLOC = 2, SITE_REALLOC = 4, SITE_MEMALIGN = 8, SITE_NEW = 16, SITE_MPR = 32 };
+BOOL sitesOn = FALSE;
+PIN_LOCK blockSiteLock; // siteLive, dying; never held while waiting for stateLock
+struct SiteBlock
+{
+    ADDRINT site     = 0;
+    BOOL siteId      = FALSE;
+    ADDRINT size     = 0;
+    UINT64 born      = 0; // timeNow at the allocation
+    UINT8 kind       = 0;
+    ADDRINT grownFrom = 0; // realloc that moved: the old block's size
+    BOOL moved       = FALSE; // freed by a realloc that moved it
+    UINT64 allocTouched = 0; // calloc: bytes the allocator itself touched (zeroing), see SiteProbe
+};
+unordered_map< ADDRINT, SiteBlock > siteLive; // address -> block
+unordered_map< ADDRINT, SiteBlock > dying;    // freed, waiting for the release to be applied
+struct SiteStats
+{
+    UINT32 kinds = 0;
+    UINT64 count = 0, requested = 0, requestedMax = 0, touched = 0, highWater = 0, pagesTouched = 0, pages = 0;
+    UINT64 neverTouched = 0, allocTouched = 0, moves = 0, grown = 0, lifetime = 0;
+    double maxHighWaterRatio = 0, minHighWaterRatio = 2;
+};
+std::map< std::pair< ADDRINT, BOOL >, SiteStats > siteStats; // (site, is an id) -> totals (stateLock)
+struct ImageRange
+{
+    ADDRINT lo, hi;
+    ADDRINT bias; // load offset: an address minus it is the address in the file (what addr2line takes)
+    string name;
+};
+vector< ImageRange > images; // for site addresses: image + offset (stateLock)
+ofstream blocksFile;          // *_blocks.csv
 
 // Windows (-window): live allocations.
 struct Block
@@ -1025,9 +1104,159 @@ static ADDRINT ForgetAllocation(ADDRINT ptr)
     return size;
 }
 
+/* -sites ------------------------------------------------------------------ */
+
+// A block is allocated; called again for the same block (a nested call's exit, then the outer
+// call's), it changes nothing.
+static VOID SiteBorn(THREADID tid, ADDRINT ptr, ADDRINT size, ADDRINT grownFrom = 0)
+{
+    if (!sitesOn || ptr == 0) return;
+    ThreadData& t = threads[tid];
+    PIN_GetLock(&blockSiteLock, tid + 1);
+    auto it = siteLive.find(ptr);
+    if (it == siteLive.end() || it->second.size != size)
+    {
+        SiteBlock b;
+        b.site = t.allocSite, b.siteId = t.allocSiteId, b.size = size, b.born = timeNow, b.kind = t.allocKind;
+        b.grownFrom = grownFrom;
+        siteLive[ptr] = b;
+    }
+    PIN_ReleaseLock(&blockSiteLock);
+}
+
+// A block is freed (or moved by realloc): summarized when its release is applied (SiteRelease)
+static VOID SiteDies(THREADID tid, ADDRINT ptr, BOOL moved)
+{
+    if (!sitesOn || ptr == 0) return;
+    PIN_GetLock(&blockSiteLock, tid + 1);
+    auto it = siteLive.find(ptr);
+    if (it != siteLive.end())
+    {
+        it->second.moved = moved;
+        dying[ptr]       = it->second;
+        siteLive.erase(it);
+    }
+    PIN_ReleaseLock(&blockSiteLock);
+}
+
+// realloc in place: the block goes on with its new size
+static VOID SiteResize(THREADID tid, ADDRINT ptr, ADDRINT size)
+{
+    if (!sitesOn) return;
+    PIN_GetLock(&blockSiteLock, tid + 1);
+    auto it = siteLive.find(ptr);
+    if (it != siteLive.end()) it->second.size = size;
+    PIN_ReleaseLock(&blockSiteLock);
+}
+
+// "image+0xaddress" (the address in the image file, for addr2line) for a return address, "id:0x..." for an id from the MemPrintResize pass
+static string SiteKey(ADDRINT site, BOOL isId)
+{
+    ostringstream s;
+    if (isId)
+    {
+        s << "id:0x" << std::hex << site;
+        return s.str();
+    }
+    for (const ImageRange& img : images)
+        if (site >= img.lo && site < img.hi)
+        {
+            size_t slash = img.name.rfind('/');
+            s << (slash == string::npos ? img.name : img.name.substr(slash + 1)) << "+0x" << std::hex << site - img.bias;
+            return s.str();
+        }
+    s << "0x" << std::hex << site;
+    return s.str();
+}
+
+// Fold a dead (or, at the end, live) block into its site's totals. stateLock and blockSiteLock held.
+static VOID SiteSummarize(ADDRINT ptr, const SiteBlock& b, UINT64 died)
+{
+    UINT64 touched = 0, pagesTouched = 0;
+    ADDRINT highWater = 0;
+    footprint.Summarize(ptr, ptr + b.size, &touched, &highWater, &pagesTouched);
+    UINT64 pages  = b.size ? ((ptr + b.size - 1) >> PAGE_BITS) - (ptr >> PAGE_BITS) + 1 : 0;
+    SiteStats& s  = siteStats[{b.site, b.siteId}];
+    s.kinds |= b.kind;
+    s.count++, s.requested += b.size, s.requestedMax = std::max< UINT64 >(s.requestedMax, b.size);
+    s.touched += touched, s.highWater += highWater, s.pagesTouched += pagesTouched, s.pages += pages;
+    s.neverTouched += touched == 0;
+    s.allocTouched += b.allocTouched, s.moves += b.moved, s.grown += b.grownFrom != 0;
+    s.lifetime += died > b.born ? died - b.born : 0;
+    double ratio = b.size ? double(highWater) / b.size : 0;
+    s.maxHighWaterRatio = std::max(s.maxHighWaterRatio, ratio);
+    s.minHighWaterRatio = std::min(s.minHighWaterRatio, ratio);
+    if (b.size >= KnobSitesBlockMin.Value() && blocksFile.is_open())
+        blocksFile << SiteKey(b.site, b.siteId) << ',' << (UINT32)b.kind << ',' << b.size << ',' << b.born << ',' << died
+                   << ',' << touched << ',' << highWater << ',' << pagesTouched << ',' << pages << ',' << b.allocTouched
+                   << ',' << b.grownFrom << ',' << (b.moved ? 1 : 0) << '\n';
+}
+
+// A release [lo, hi) is about to clear the footprint's bits: summarize the freed block it holds.
+// The block starts at lo, or 8 bytes in when [lo, hi) is its whole glibc chunk (ChunkRange).
+// stateLock held.
+static VOID SiteRelease(ADDRINT lo, ADDRINT hi)
+{
+    if (!sitesOn) return;
+    PIN_GetLock(&blockSiteLock, 1);
+    for (ADDRINT ptr : {lo, lo + 8})
+    {
+        auto it = dying.find(ptr);
+        if (it == dying.end() || ptr >= hi) continue;
+        SiteSummarize(ptr, it->second, timeNow);
+        dying.erase(it);
+        break;
+    }
+    PIN_ReleaseLock(&blockSiteLock);
+}
+
+// calloc's exit, applied in order with the thread's references: the bytes touched so far in the
+// block were touched by calloc itself (zeroing a reused chunk). stateLock held.
+static VOID SiteProbe(ADDRINT ptr)
+{
+    PIN_GetLock(&blockSiteLock, 1);
+    auto it = siteLive.find(ptr);
+    if (it != siteLive.end())
+    {
+        UINT64 touched = 0, pagesTouched = 0;
+        ADDRINT highWater = 0;
+        footprint.Summarize(ptr, ptr + it->second.size, &touched, &highWater, &pagesTouched);
+        it->second.allocTouched = touched;
+    }
+    PIN_ReleaseLock(&blockSiteLock);
+}
+
+// End of the run: summarize the blocks still live (and frees whose release was never applied),
+// then write *_sites.csv. stateLock held.
+static VOID SitesFinish()
+{
+    if (!sitesOn) return;
+    PIN_GetLock(&blockSiteLock, 1);
+    for (const auto& e : siteLive)
+        SiteSummarize(e.first, e.second, timeNow);
+    for (const auto& e : dying)
+        SiteSummarize(e.first, e.second, timeNow);
+    siteLive.clear(), dying.clear();
+    PIN_ReleaseLock(&blockSiteLock);
+    if (blocksFile.is_open()) blocksFile.close();
+    ofstream out(outputFileNamePrefix + "_sites.csv");
+    out << "site,kinds,count,requested,requested_max,touched,high_water,pages_touched,pages,never_touched,"
+           "alloc_touched,moves,grown,lifetime,max_high_water_ratio,min_high_water_ratio"
+        << endl;
+    for (const auto& e : siteStats)
+    {
+        const SiteStats& s = e.second;
+        out << SiteKey(e.first.first, e.first.second) << ',' << s.kinds << ',' << s.count << ',' << s.requested << ','
+            << s.requestedMax << ',' << s.touched << ',' << s.highWater << ',' << s.pagesTouched << ',' << s.pages << ','
+            << s.neverTouched << ',' << s.allocTouched << ',' << s.moves << ',' << s.grown << ',' << s.lifetime << ','
+            << s.maxHighWaterRatio << ',' << (s.minHighWaterRatio > 1 ? 0 : s.minHighWaterRatio) << endl;
+    }
+}
+
 static VOID RememberAllocation(THREADID tid, ADDRINT ptr, ADDRINT size)
 {
     if (ptr == 0) return;
+    SiteBorn(tid, ptr, size);
     PIN_GetLock(&allocLock, 1);
     allocations[ptr] = size;
     PIN_ReleaseLock(&allocLock);
@@ -1098,6 +1327,9 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
     if (t.allocDepth++ > 0) return;
     t.allocSp         = sp;
     t.allocMallocLike = mallocLike;
+    t.allocSite       = caller;
+    t.allocSiteId     = FALSE;
+    t.allocKind       = mallocLike ? SITE_MALLOC : (out ? SITE_MEMALIGN : SITE_REALLOC);
     t.allocFresh      = FALSE;
     // At the entry, before calloc zeroes or realloc copies the new block's memory: see DIRTY_CLEAR_MIN.
     if (clearRefsFd >= 0 && size >= DIRTY_CLEAR_MIN)
@@ -1134,6 +1366,33 @@ static VOID MallocExit(THREADID tid, ADDRINT ret)
 static VOID CallocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike, ADDRINT n, ADDRINT size)
 {
     AllocEnter(tid, sp, caller, mallocLike, n * size, 0, 0);
+    if (threads[tid].allocDepth == 1) threads[tid].allocKind = SITE_CALLOC;
+}
+
+// operator new(size, ...): as malloc
+static VOID NewEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike, ADDRINT size, ADDRINT ptr, ADDRINT out)
+{
+    AllocEnter(tid, sp, caller, TRUE, size, ptr, out);
+    if (threads[tid].allocDepth == 1) threads[tid].allocKind = SITE_NEW;
+}
+
+// calloc's exit: as malloc's, and (-sites) a look at the block once the references calloc made
+// (zeroing a reused chunk) have been counted
+static VOID CallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
+{
+    BOOL outer = threads[tid].allocDepth == 1;
+    MallocExit(tid, ret);
+    if (!sitesOn || !outer || ret == 0) return;
+    if (mode == SPATIAL)
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (!finished) SiteProbe(ret);
+        PIN_ReleaseLock(&stateLock);
+        return;
+    }
+    Release probe;
+    probe.position = PIN_GetBufferPointer(ctxt, bufId), probe.lo = ret, probe.hi = ret + 1, probe.probe = TRUE;
+    threads[tid].pending.push_back(probe);
 }
 
 // posix_memalign(&out, align, size)
@@ -1153,6 +1412,7 @@ static VOID FreeEnter(THREADID tid, CONTEXT* ctxt, ADDRINT ptr)
 {
     ADDRINT size = ForgetAllocation(ptr), lo, hi;
     ForgetBlock(tid, ptr);
+    SiteDies(tid, ptr, FALSE);
     ChunkRange(ptr, size, size ? ChunkHeader(ptr) : 0, &lo, &hi);
     if (foreignAllocator && usableFn && ptr)
     {
@@ -1178,6 +1438,13 @@ static VOID ReallocExit(THREADID tid, CONTEXT* ctxt, ADDRINT ret)
     }
     if (ret == 0 && size != 0) return; // failed: the old block is untouched
     ADDRINT oldSize = ForgetAllocation(ptr);
+    if (ret == ptr)
+        SiteResize(tid, ptr, size);
+    else
+    {
+        SiteDies(tid, ptr, ret != 0);
+        SiteBorn(tid, ret, size, oldSize);
+    }
     if (ret == ptr && ResizeBlock(tid, ptr, size))
     {
         // in place: the block keeps the pages it has written
@@ -1531,6 +1798,12 @@ static VOID FindMallocCode(IMG img)
 VOID ImageLoad(IMG img, VOID* v)
 {
     FindMallocCode(img);
+    if (sitesOn)
+    {
+        PIN_GetLock(&stateLock, 1);
+        images.push_back({IMG_LowAddress(img), IMG_HighAddress(img) + 1, IMG_LoadOffset(img), IMG_Name(img)});
+        PIN_ReleaseLock(&stateLock);
+    }
     if (windowed)
         for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
             if (SEC_Mapped(sec) && SEC_IsWriteable(sec) && SEC_Size(sec) > 0)
@@ -1547,8 +1820,15 @@ VOID ImageLoad(IMG img, VOID* v)
     InstrumentAllocator(img, "memalign", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "aligned_alloc", AFUNPTR(AllocEnter), EnterArgs(1, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "calloc", AFUNPTR(CallocEnter),
-                        Args({{IARG_FUNCARG_ENTRYPOINT_VALUE, 0}, {IARG_FUNCARG_ENTRYPOINT_VALUE, 1}}), AFUNPTR(MallocExit),
-                        ret);
+                        Args({{IARG_FUNCARG_ENTRYPOINT_VALUE, 0}, {IARG_FUNCARG_ENTRYPOINT_VALUE, 1}}),
+                        sitesOn ? AFUNPTR(CallocExit) : AFUNPTR(MallocExit), sitesOn ? ctxtRet : ret);
+    if (sitesOn)
+        // -sites: operator new is an allocator too, so the outermost call's return address is in the
+        // program (or in STL code instantiated there), not in libstdc++
+        for (const char* name : {"_Znwm", "_Znam", "_ZnwmRKSt9nothrow_t", "_ZnamRKSt9nothrow_t", "_ZnwmSt11align_val_t",
+                                 "_ZnamSt11align_val_t", "_ZnwmSt11align_val_tRKSt9nothrow_t",
+                                 "_ZnamSt11align_val_tRKSt9nothrow_t"})
+            InstrumentAllocator(img, name, AFUNPTR(NewEnter), EnterArgs(0, -1, -1), AFUNPTR(MallocExit), ret);
     InstrumentAllocator(img, "posix_memalign", AFUNPTR(AllocEnter), EnterArgs(2, -1, 0), AFUNPTR(PosixMemalignExit), ret);
     InstrumentAllocator(img, "realloc", AFUNPTR(AllocEnter), EnterArgs(1, 0, -1), AFUNPTR(ReallocExit), ctxtRet);
 
@@ -1689,11 +1969,21 @@ static VOID SpatialReference(ADDRINT address, UINT32 size)
 
 static VOID ApplyRelease(ADDRINT lo, ADDRINT hi)
 {
+    SiteRelease(lo, hi);
     footprint.Erase(lo, hi);
     for (Footprint& bin : bins)
         bin.Erase(lo, hi);
     for (Footprint& u : unions)
         u.Erase(lo, hi);
+}
+
+// A queued release, or a -sites probe
+static VOID ApplyPending(const Release& r)
+{
+    if (r.probe)
+        SiteProbe(r.lo);
+    else
+        ApplyRelease(r.lo, r.hi);
 }
 
 static UINT64 MainInterval() { return (mode == SPLITTER) ? 1 : KnobSamplingInterval.Value(); }
@@ -1993,7 +2283,7 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
     for (UINT64 i = 0; i < numElements && !finished; i++, reference++)
     {
         for (; nextRelease < pending.size() && pending[nextRelease].position <= (VOID*)reference; nextRelease++)
-            ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
+            ApplyPending(pending[nextRelease]);
 
         ADDRINT address = reference->ea;
         UINT32 size     = reference->size;
@@ -2009,7 +2299,7 @@ VOID* BufferFull(BUFFER_ID id, THREADID tid, const CONTEXT* ctxt, VOID* buf, UIN
         if (!Tick(timeNow + MainInterval())) break;
     }
     for (; nextRelease < pending.size() && !finished; nextRelease++)
-        ApplyRelease(pending[nextRelease].lo, pending[nextRelease].hi);
+        ApplyPending(pending[nextRelease]);
     pending.clear();
     PIN_ReleaseLock(&stateLock);
     return buf;
@@ -2091,6 +2381,11 @@ BOOL InitOutputFiles()
             windowedFile << WINDOWED_HEADER << "\n";
         }
     }
+    if (sitesOn)
+    {
+        blocksFile.open(outputFileNamePrefix + "_blocks.csv");
+        blocksFile << "site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,grown_from,moved\n";
+    }
     return TRUE;
 }
 
@@ -2100,6 +2395,7 @@ static VOID WriteOutputs()
 {
     if (finished) return;
     finished = TRUE;
+    SitesFinish();
 
     for (UINT32 m = 0; m < bins.size(); m++)
     {
@@ -2129,7 +2425,7 @@ VOID Fini(INT32 code, VOID* v)
     for (ThreadData& t : threads)
     {
         for (const Release& r : t.pending)
-            ApplyRelease(r.lo, r.hi);
+            ApplyPending(r);
         t.pending.clear();
     }
     WriteOutputs();
@@ -2268,11 +2564,15 @@ int main(int argc, char* argv[])
         countBytes = KnobTrackFrees.Value() || windowed;
     else
         return Usage("-footprint must be bytes or starts");
+    sitesOn = KnobSites.Value();
+    if (sitesOn && (mode != SPLITTER || !KnobTrackFrees.Value() || !countBytes))
+        return Usage("-sites needs -mode splitter -track_frees 1 with the bytes footprint");
 
     allocatorCode.reserve(64);
     PIN_InitLock(&stateLock);
     PIN_InitLock(&allocLock);
     PIN_InitLock(&siteLock);
+    PIN_InitLock(&blockSiteLock);
     if (KnobTrackFrees.Value() || windowed)
     {
         footprint.SetIndexed(TRUE);
