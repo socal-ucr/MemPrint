@@ -9,6 +9,7 @@
      MPR_REPORT=<file>        at exit, per site: blocks, requested, predicted (committed), resident
                               at free (mincore), blocks that used more than was predicted, bytes
                               of zeroing skipped
+     MPR_PARAMS=<k=v,...>     the run's parameters, for periodic reservations (below): MPR_PARAMS=tokens=548
      MPR_THP=0|1|2            transparent huge pages for runtime blocks: 0 none (MADV_NOHUGEPAGE),
                               1 as the system sets them, 2 (default) none on the pages whose zeroing
                               was skipped (below). With THP, one touch backs 2 MB, so a block cleared
@@ -27,7 +28,11 @@
    no line falls back to the site's own line, if it has one.
 
    Models (bytes predicted for a request of n bytes, clamped to [0, n]): dead (0), ratio (a n),
-   affine (a n + b), const (a). */
+   affine (a n + b), const (a). runs K lo1 hi1 ... commits K ranges given as fractions of the block.
+   periodic K a b PARAM DEFAULT (a hybrid of the profile and the run's parameters): the block is K
+   equal periods (a KV cache's per-layer tensors) and the first a T + b bytes of each are committed,
+   T the run's value of PARAM (MPR_PARAMS; DEFAULT when the run does not give it): a KV cache holds
+   a row per token, so its use grows with the tokens the run will process, not with its size. */
 #define _GNU_SOURCE
 #include "mpr.h"
 
@@ -54,7 +59,7 @@ extern void *__libc_memalign(size_t, size_t);
 #define PAGE 4096UL
 #define ROUND(n) (((n) + PAGE - 1) & ~(PAGE - 1))
 
-enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS };
+enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS, M_PERIODIC };
 #define MAX_RUNS 128
 
 struct site {
@@ -66,7 +71,8 @@ struct site {
     atomic_uint_least64_t elided; /* bytes of memset(0) skipped on untouched pages */
     double max_resident_ratio;
     int ctx_depth; /* >0: the site has per-context lines of up to this many frames */
-    int nruns;     /* M_RUNS: the committed ranges, as fractions of the block */
+    int nruns;     /* M_RUNS: the committed ranges, as fractions of the block; M_PERIODIC: the periods */
+    double per;    /* M_PERIODIC: bytes committed at the start of each period (a T + b) */
     float runs[MAX_RUNS][2];
     int has_model; /* the site has a line of its own (else: a base for context lines only) */
 };
@@ -303,6 +309,7 @@ static double model_value(const struct site *s, size_t n)
     case M_AFFINE: p = s->a * n + s->b; break;
     case M_CONST: p = s->a; break;
     case M_RUNS: p = 0; for (int i = 0; i < s->nruns; i++) p += (s->runs[i][1] - s->runs[i][0]) * n; break;
+    case M_PERIODIC: p = s->nruns * (s->per < (double)n / s->nruns ? s->per : (double)n / s->nruns); break;
     default: p = n; /* no reservation (MPR_ALL): all of it */
     }
     if (s->model != M_NONE) p *= scale;
@@ -477,13 +484,32 @@ static size_t commit_runs(char *p, size_t len, const struct site *s)
     return total;
 }
 
+/* M_PERIODIC: commit the first `per` bytes (times MPR_SCALE) of each of the block's periods */
+static size_t commit_periodic(char *p, size_t size, size_t len, const struct site *s)
+{
+    size_t total = 0, k = s->nruns > 0 ? (size_t)s->nruns : 1;
+    double per = s->per * scale;
+    for (size_t i = 0; i < k; i++) {
+        size_t start = size / k * i, end = i + 1 == k ? size : size / k * (i + 1);
+        size_t lo = start & ~(PAGE - 1), hi = ROUND(start + (per < (double)(end - start) ? (size_t)per : end - start));
+        if (hi > len) hi = len;
+        if (hi <= lo) continue;
+        if (mmap(p + lo, hi - lo, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+            continue;
+        total += hi - lo;   /* (adjacent periods may share a page: counted once per period, an upper bound) */
+    }
+    return total;
+}
+
 static void *serve(size_t size, struct site *s, size_t align)
 {
-    size_t len = ROUND(size), commit = s->model == M_RUNS ? 0 : ROUND(predict(s, size));
+    int shaped = s->model == M_RUNS || s->model == M_PERIODIC;
+    size_t len = ROUND(size), commit = shaped ? 0 : ROUND(predict(s, size));
     if (commit > len) commit = len;
     void *p = map_block(len, commit, align);
     if (!p) return NULL;
     if (s->model == M_RUNS) commit = commit_runs(p, len, s);
+    if (s->model == M_PERIODIC) commit = commit_periodic(p, size, len, s);
     pthread_mutex_lock(&lock);
     struct block *b = slot((uintptr_t)p, 1);
     if (!b) {
@@ -491,7 +517,7 @@ static void *serve(size_t size, struct site *s, size_t align)
         munmap(p, len);
         return NULL;
     }
-    *b = (struct block){(uintptr_t)p, len, commit, size, s, s->model == M_RUNS};
+    *b = (struct block){(uintptr_t)p, len, commit, size, s, shaped};
     add_start((uintptr_t)p), nlive++;
     s->count++, s->requested += size, s->predicted += commit;
     pthread_mutex_unlock(&lock);
@@ -897,16 +923,32 @@ size_t __mpr_committed(void) { return atomic_load(&committed); }
 
 /* ---- start and end ---- */
 
+/* the value of a run parameter (MPR_PARAMS=name=value,...), or dflt */
+static double param(const char *name, double dflt)
+{
+    const char *v = getenv("MPR_PARAMS");
+    size_t n = strlen(name);
+    for (const char *p = v; p && *p; p = strchr(p, ',') ? strchr(p, ',') + 1 : NULL)
+        if (!strncmp(p, name, n) && p[n] == '=') return strtod(p + n + 1, NULL);
+    return dflt;
+}
+
 static void parse_line(const char *line)
 {
-    char key[128], model[32];
-    double a, b;
+    char key[128], model[32], pname[32];
+    double a, b, a2, b2, dflt;
+    int k;
     if (!strncmp(line, "# image ", 8)) parse_image(line);
     if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) return;
     int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
           : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST
-          : !strcmp(model, "cap") ? M_CAP : !strcmp(model, "runs") ? M_RUNS : M_NONE;
+          : !strcmp(model, "cap") ? M_CAP : !strcmp(model, "runs") ? M_RUNS
+          : !strcmp(model, "periodic") ? M_PERIODIC : M_NONE;
     if (m == M_NONE) return;
+    if (m == M_PERIODIC) { /* "key periodic K a b PARAM DEFAULT" */
+        if (sscanf(line, "%127s %31s %d %lf %lf %31s %lf", key, model, &k, &a2, &b2, pname, &dflt) != 7 || k < 1) return;
+        a = k, b = a2 * param(pname, dflt) + b2;
+    }
     struct site *s = find_key(key);
     if (s) /* a base created for a context line before its own line */
         s->model = m, s->a = a, s->b = b, s->has_model = 1;
@@ -914,6 +956,7 @@ static void parse_line(const char *line)
         s = add_site(key, m, a, b);
     if (s && !strchr(key, '@') && (!strncmp(key, "cap:0x", 6) || !strncmp(key, "id:0x", 5)))
         idmap_add(key[0] == 'c' ? 1 : 2, strtoull(strchr(key, ':') + 1, NULL, 16), s);
+    if (s && m == M_PERIODIC) s->nruns = (int)a, s->per = b;
     if (s && m == M_RUNS) { /* "key runs K lo1 hi1 ... loK hiK" */
         const char *p = line;
         for (int skip = 0; skip < 3 && *p; skip++) { /* past the key, the model and K */
@@ -1022,7 +1065,7 @@ __attribute__((destructor)) static void fini(void)
     FILE *f = fopen(report, "w");
     if (f) {
         fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio,elided\n");
-        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap", "runs"};
+        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap", "runs", "periodic"};
         for (int i = 0; i < nsites; i++)
             if (sites[i].count)
                 fprintf(f, "%s,%s,%lu,%lu,%lu,%lu,%lu,%.4f,%lu\n", sites[i].key, names[sites[i].model],

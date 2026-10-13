@@ -1,6 +1,6 @@
 """Per-site reservations from MemPrint's -sites profiles (the input of libmpr and the MemPrintResize pass).
 
-    python -m memprint.sites DIR [DIR ...] -o reservations.txt [--quantile 0.9] [--min 65536]
+    python -m memprint.sites DIR [DIR ...] -o reservations.txt [--quantile 0.9] [--min 65536] [--param tokens]
 
 Each DIR is one -sites run of the same program (pintool -sites: *_sites.csv, *_blocks.csv), usually
 at different inputs. For every site with blocks of at least --min bytes (the ones libmpr serves),
@@ -18,6 +18,15 @@ training blocks, by requested bytes (1.0: all of them) and, among the models tha
              touched page runs (column runs), when the blocks are used sparsely across their whole
              length (a KV cache written a few rows per layer) and committing those ranges costs less
              than --runs of the best prefix model
+    periodic K a b PARAM DEFAULT
+             (with --param PARAM, a hybrid of the profile and the run's parameters) every block is K equal
+             periods, each touched in one prefix (a KV cache: a tensor per layer, a row per token), and the
+             prefix is a T + b bytes, T the profile's value of PARAM (DIR/params.txt, "tokens=516"); libmpr
+             takes T from the run (MPR_PARAMS=tokens=..., DEFAULT the largest T profiled when the run does
+             not give it). a and b are fitted through the profiles' points with three values of T or more
+             (shifted up to cover each), else through the origin (a: the largest prefix per unit of T).
+             Preferred over runs when the blocks have its shape: runs reserves what the profiled runs
+             touched, periodic follows T to longer runs
 A site is left out when its best model would commit at least --keep of what was requested (no
 saving). Writes "site model a b" lines, which libmpr reads (MPR_RESERVATIONS), and a summary CSV.
 
@@ -47,7 +56,19 @@ import numpy as np
 import pandas as pd
 
 
-def load(dirs, min_size):
+def read_params(d):
+    """A profile's run parameters: DIR/params.txt, "name=value" lines (e.g. tokens=516)."""
+    out = {}
+    p = os.path.join(d, "params.txt")
+    if os.path.exists(p):
+        for line in open(p):
+            if "=" in line:
+                k, v = line.strip().split("=", 1)
+                out[k.strip()] = float(v)
+    return out
+
+
+def load(dirs, min_size, param=None):
     blocks = []
     for i, d in enumerate(dirs):
         f = glob.glob(os.path.join(d, "*_blocks.csv"))
@@ -55,6 +76,8 @@ def load(dirs, min_size):
             raise SystemExit(f"{d}: no *_blocks.csv (run the Pin tool with -sites)")
         b = pd.read_csv(f[0])
         b["input"] = os.path.basename(os.path.normpath(d))
+        if param:                                                      # the run parameter of this profile
+            b["T"] = read_params(d).get(param, np.nan)
         blocks.append(b[b["size"] >= min_size])
     return pd.concat(blocks, ignore_index=True)
 
@@ -135,6 +158,42 @@ def runs_fit(g):
     return merged, cost
 
 
+def periodic_fit(g):
+    """(K, a, b, committed bytes over the training blocks) of the periodic model, or None: every block is
+    K equal periods (K >= 2) each touched in one prefix run of the same length, and the profiles give
+    the run parameter T (column T, from --param). The prefix is fitted as a T + b bytes: through the
+    blocks' points when there are three values of T or more (shifted up to cover each), else through the
+    origin (a = the largest prefix per unit of T, b = 0)."""
+    if "T" not in g or g["T"].isna().any() or "runs" not in g:
+        return None
+    ks, pts = set(), []
+    for pages, runs, t in zip(g["pages"], g["runs"].fillna("").astype(str), g["T"]):
+        spans = [tuple(int(x) for x in r.split(":")) for r in filter(None, runs.split(";"))]
+        k = len(spans)
+        if k < 2:
+            return None
+        period = pages / k
+        if any(abs(first - i * period) > 1 for i, (first, _) in enumerate(spans)):
+            return None
+        lens = [n for _, n in spans]
+        if max(lens) - min(lens) > 1:
+            return None
+        ks.add(k)
+        pts.append((float(t), max(lens) * PAGE))
+    if len(ks) != 1:
+        return None
+    k = ks.pop()
+    t, length = np.array(pts).T
+    if len(np.unique(t)) >= 3:
+        a, b = np.polyfit(t, length, 1)
+        a = max(a, 0.0)
+        b = float(np.max(length - a * t))
+    else:
+        a, b = float(np.max(length / np.maximum(t, 1e-9))), 0.0
+    per = np.minimum(-(-(a * g["T"].to_numpy(float) + b) // PAGE) * PAGE, g["size"].to_numpy(float) / k)
+    return k, float(a), float(b), float(np.minimum(k * per, g["size"].to_numpy(float)).sum())
+
+
 def row(site, g, q, keep, context="", runs_ratio=0.7):
     model, a, b, cost = fit(g["size"], g["high_water"], q)
     ranges = None
@@ -142,6 +201,12 @@ def row(site, g, q, keep, context="", runs_ratio=0.7):
     if shaped and shaped[1] < runs_ratio * cost and cost - shaped[1] >= 65536:
         ranges, cost = shaped
         model, a, b = "runs", float(len(ranges)), 0.0
+    periodic = periodic_fit(g) if model != "dead" else None
+    if periodic:
+        # preferred whenever the blocks have its shape, even when it commits more on the training blocks (a
+        # run that stopped before T, as llama2.c at the end of a story): it follows T to other inputs, which
+        # the training blocks' ranges do not
+        ranges, model, a, b, cost = periodic[0], "periodic", periodic[1], periodic[2], periodic[3]
     requested = float(g["size"].sum())
     return dict(site=site, context=context, model=model, a=a, b=b, ranges=ranges, blocks=len(g),
                 inputs=g["input"].nunique(), requested=requested, committed=cost, touched=float(g["touched"].sum()),
@@ -262,13 +327,20 @@ def main(argv=None):
     ap.add_argument("--hash-capacities", action="store_true", help="also reserve hash tables' bucket counts")
     ap.add_argument("--split", type=float, default=0.05,
                     help="split a site by calling context when that commits less by this share of its requested bytes")
+    ap.add_argument("--param", help="the run parameter periodic reservations follow (read from each DIR/params.txt); "
+                                     "libmpr takes the run's value from MPR_PARAMS=<param>=<value>")
     a = ap.parse_args(argv)
-    r = reservations(load(a.dirs, a.min), a.quantile, a.keep, a.split)
+    blocks = load(a.dirs, a.min, a.param)
+    param = a.param
+    default = float(blocks["T"].max()) if a.param and "T" in blocks and blocks["T"].notna().any() else 0.0
+    r = reservations(blocks, a.quantile, a.keep, a.split)
     caps = capacities(a.dirs, a.quantile, a.min, a.hash_capacities)
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
         for x in r[r.keep.astype(bool)].itertuples():
-            if x.model == "runs":
+            if x.model == "periodic":
+                f.write(f"{x.site} periodic {int(x.ranges)} {x.a:.6g} {x.b:.6g} {param} {default:.6g}\n")
+            elif x.model == "runs":
                 f.write(f"{x.site} runs {len(x.ranges)} " + " ".join(f"{lo:.6f} {hi:.6f}" for lo, hi in x.ranges) + "\n")
             else:
                 f.write(f"{x.site} {x.model} {x.a:.6g} {x.b:.6g}\n")

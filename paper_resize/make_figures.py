@@ -407,6 +407,92 @@ def table_sched(data, out):
     open(f"{out}/tables/sched_rssmpr.tex", "w").write("\n".join(lines) + "\n")
 
 
+# ---------------------------------------------------------------- unseen inputs and run parameters
+
+INPUT_LABEL = {"lc-135m-n16": "135M, 16 tokens", "lc-135m-p2": "135M, prompt 2", "lc-135m-p3": "135M, prompt 3",
+               "lc-135m-sampled": "135M, 128 sampled", "lc-135m-longprompt": "135M, 136-token prompt",
+               "lc-135m-n256": "135M, 256 tokens", "lc-135m-n512": "135M, 512 tokens",
+               "lc-135m-n1024": "135M, 1024 tokens", "lc-135m-c2048": "135M, context 2048",
+               "lc-135m-c4096": "135M, context 4096", "lc-360m-n256": "360M, 256 tokens",
+               "lc-360m-c4096": "360M, context 4096, long prompt",
+               "l2-15M-n32": "15M, 32 steps", "l2-15M-sampled": "15M, 128 sampled", "l2-15M-full": "15M, 256 steps",
+               "l2-42M-n64": "42M, 64 steps", "l2-42M-n512": "42M, 512 steps", "l2-42M-full": "42M, 1024 steps",
+               "l2-110M-n256": "110M, 256 steps", "l2-110M-sampled": "110M, 512 sampled",
+               "l2-110M-full": "110M, 1024 steps"}
+
+
+def inputs(data):
+    return pd.read_csv(f"{data}/runs/inputs-v2/summary.csv").set_index("input")
+
+
+def fig_inputs(data, out):
+    t = inputs(data)
+    fig, axes = plt.subplots(1, 2, figsize=(6.6, 2.4))
+    ax = axes[0]
+    g = t[t.index.str.startswith("lc-135m") & ~t.index.str.contains("c2048|c4096")].sort_values("tokens")
+    ax.plot(g.tokens, g.model_commit, "o-", color=HELD, ms=3, label="commit, per-model runs")
+    ax.plot(g.tokens, g.param_commit, "o-", color=LIBMPR, ms=3, label="commit, periodic ($T$ from the run)")
+    ax.plot(g.tokens, g.model_kv_beyond, "s--", color=HELD, ms=2.5, label="KV cache used beyond commit, runs")
+    ax.plot(g.tokens, g.param_kv_beyond, "s--", color=LIBMPR, ms=2.5, label="KV cache used beyond commit, periodic")
+    ax.set_xscale("log")
+    ax.set_xlabel("Tokens processed $T$ (prompt + generated)")
+    ax.set_ylabel("MB")
+    ax.set_title("llama.cpp, SmolLM2-135M (glibc commits 405 MB)")
+    ax.legend(loc="center left", fontsize=5.8)
+    ax = axes[1]
+    for i, m in enumerate(["15M", "42M", "110M"]):
+        g = t[t.index.str.startswith(f"l2-{m}-")].sort_values("tokens")
+        col = PAL[[2, 3, 6][i]]
+        ax.plot(g.tokens, g.param_commit, "o-", color=col, ms=3, label=f"{m}: periodic")
+        ax.plot(g.tokens, g.model_commit, "o:", color=col, ms=3, alpha=0.7, label=f"{m}: per-model runs")
+        ax.plot(g.tokens, g.base_commit, "_", color=col, ms=9, mew=1.5)
+    ax.set_xscale("log")
+    ax.set_xlabel("Steps (an upper bound on the tokens)")
+    ax.set_ylabel("Peak commit (MB)")
+    ax.set_title("llama2.c (bars: glibc)")
+    ax.legend(fontsize=5.8, ncol=1, loc="upper left")
+    save(fig, out, "inputs")
+
+
+def table_inputs(data, out):
+    t = inputs(data)
+    lines = [r"\begin{tabular}{lrrrrrrrr}", r"\toprule",
+             r" & & \multicolumn{2}{c}{glibc} & \multicolumn{3}{c}{per-model (\texttt{runs})} & \multicolumn{3}{c}{periodic, $T$ from the run} \\",
+             r"\cmidrule(lr){3-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}",
+             r"Input & $T$ & RSS & Commit & RSS & Commit & Beyond & RSS & Commit & Beyond \\", r"\midrule"]
+    lines[0] = r"\begin{tabular}{lrrrrrrrrr}"
+    for name in INPUT_LABEL:
+        if name not in t.index:
+            continue
+        x = t.loc[name]
+        prog = "llama.cpp" if name.startswith("lc") else "llama2.c"
+        lines.append(f"{prog} {INPUT_LABEL[name]} & {int(x.tokens)} & {x.base_rss:.0f} & {x.base_commit:.1f} & "
+                     f"{x.model_rss:.0f} & {x.model_commit:.1f} & {x.model_beyond:.1f} & "
+                     f"{x.param_rss:.0f} & {x.param_commit:.1f} & {x.param_beyond:.1f} \\\\")
+        if name == "lc-360m-c4096":
+            lines.append(r"\midrule")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/inputs.tex", "w").write("\n".join(lines) + "\n")
+    ok = bool(t[["model_ok", "param_ok"]].all().all())
+    print(f"inputs: {len(t)} inputs, outputs identical: {ok}, time model {t.model_time_x.min():.2f}-{t.model_time_x.max():.2f}, "
+          f"param {t.param_time_x.min():.2f}-{t.param_time_x.max():.2f}")
+
+
+# ---------------------------------------------------------------- per-site profiles from source
+
+
+def table_static(data, out):
+    f = pd.read_csv(f"{data}/static/fidelity.csv")
+    lines = [r"\begin{tabular}{llrrrrrrr}", r"\toprule",
+             r"Kernel & Scale & Sites & \multicolumn{2}{c}{Requested (MB)} & \multicolumn{2}{c}{High water (MB)} & Largest site & Profiling \\",
+             r" & & both / Pin & static & Pin & static & Pin & difference & static / Pin (s) \\", r"\midrule"]
+    for x in f.itertuples():
+        lines.append(f"{x.kernel} & {x.scale} & {x.sites_both} / {x.sites_pin} & {x.req_st:.1f} & {x.req_pin:.1f} & "
+                     f"{x.hw_st:.1f} & {x.hw_pin:.1f} & {100 * x.max_site_hw_err:.1f}\\% & {x.secs_st:.0f} / {x.secs_pin:.0f} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/static.tex", "w").write("\n".join(lines) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-12-resize"))
@@ -427,6 +513,11 @@ def main():
     table_corpus(a.data, a.out)
     fig_margins(a.data, a.out)
     table_sched(a.data, a.out)
+    if os.path.exists(f"{a.data}/runs/inputs-v2/summary.csv"):
+        fig_inputs(a.data, a.out)
+        table_inputs(a.data, a.out)
+    if os.path.exists(f"{a.data}/static/fidelity.csv"):
+        table_static(a.data, a.out)
     for name, b, s, h in rows:
         print(f"{name:26s} glibc {b.rss:7.1f} {b.commit:7.1f}  own {s.rss:7.1f} {s.commit:7.1f}  held {h.rss:7.1f} {h.commit:7.1f}  "
               f"time {s.secs / b.secs:.2f} same {s.same and h.same}")

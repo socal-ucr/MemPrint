@@ -1473,6 +1473,8 @@ class CppInterpreter(Containers, Interpreter):
                 break
         nbytes = int(np.max(count)) * esize if count is not UNK else 0
         obj = Obj(f"new#{len(self.objects)}", "heap", nbytes)
+        obj.site = self.site_of(c)
+        obj.alloc_kind = "new"
         self.objects.append(obj)
         self.heap_events.append(("new", obj))
         p = Ptr(obj, 0)
@@ -1525,7 +1527,12 @@ class CppInterpreter(Containers, Interpreter):
             if not args_c:                                             # implicit default constructor
                 self._default_fields(dest, call.type)
             return dest
-        self._invoke(cdef, args_c, this=dest, this_type=call.type, constructor=True)
+        stack = self.__dict__.setdefault("call_stack", [])
+        stack.append(call)                                             # the constructor's calling context (static.sites)
+        try:
+            self._invoke(cdef, args_c, this=dest, this_type=call.type, constructor=True)
+        finally:
+            stack.pop()
         return dest
 
     def _default_construct(self, dest, type_, depth=0):
@@ -1772,6 +1779,16 @@ class CppInterpreter(Containers, Interpreter):
     # ------------------------------------------------------------ calls
 
     def _call(self, c, sret=None):
+        # the call being made, for allocation sites and calling contexts (static.sites)
+        stack = self.__dict__.setdefault("call_stack", [])
+        stack.append(c)
+        self._site_cursor = c
+        try:
+            return self._call_inner(c, sret)
+        finally:
+            stack.pop()
+
+    def _call_inner(self, c, sret=None):
         ref = c.referenced
         kids = ca.children(c)
         if ref is None and c.spelling in MATH:                         # an overloaded name libclang left unresolved
@@ -1907,6 +1924,8 @@ class CppInterpreter(Containers, Interpreter):
 
     def _enter(self, fdef, bound, this, this_type, sret, parent=None):
         frame = Frame(fdef, len(self.frames) * 8192)
+        stack = self.__dict__.get("call_stack")
+        frame.call = stack[-1] if stack else None
         if parent is not None:
             frame.parent = parent
         if this is not None:

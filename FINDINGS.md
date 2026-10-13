@@ -35,7 +35,7 @@ Results (mean of 3 runs; peak RSS and peak commit, the size of the mappings smap
 - **RSS needs a change in how memory is obtained, not a smaller reservation:** untouched large blocks are already not resident. The RSS savings come from fresh zero pages, realloc without copies, and the vector capacity (one 6.5 MB allocation instead of 8 blocks totalling 25 MB).
 - **The vector capacity is per instantiation:** `_M_realloc_insert<T, Args...>` is shared by every vector of that element type and argument list, so a capacity reservation applies to all of them, and a capacity known for one input does not carry to another (the final size depends on the input, not on the request). Predicting it before the run needs the static route.
 - **Bugs found and fixed on the way:** mremap cannot move a range the kernel keeps as several mappings, and a failed `mremap(MREMAP_FIXED)` has already unmapped its destination (Open MPI's start-up grows a table one element at a time: realloc returned NULL, then crashed); libmpr's exit handler deadlocked on its own lock through fclose.
-- **Not done:** the static route (per-site profiles from the interpreter, `interp.py`/`interp_cpp.py`) and windowed or spatial `-sites` (exact mode only). Small blocks are left to glibc.
+- **Not done:** windowed or spatial `-sites` (exact mode only). Small blocks are left to glibc. (The static route's per-site profiles: see "Per-site profiles from source" below.)
 
 ### The whole scheduling corpus (23 programs, largest inputs)
 
@@ -157,13 +157,38 @@ Eight refinements, each tested (`tests/pintool`, `resize/tests`), and the effect
 - **Corpus** (re-profiled): commit 2,504 -> 2,236 MB (-10.7%), RSS unchanged, time 0.95 to 1.07.
 - Fixed on the way: Pin missed aligned blocks of pass builds (libmpr taken for an allocator; glibc's `__libc_memalign` tail-jumps); libmpr's 10 MB site table backed by a huge page (+2.2 MB RSS everywhere); `sites.py` with no reservable site. Never overwrite a Pin tool or libmpr that running jobs have loaded.
 
-Paper: `paper_resize/main.pdf`.
+### Unseen inputs and run parameters (LLMs)
+
+21 inputs no profile saw (other prompts, 16 to 1024 tokens, contexts 2048/4096, sampling at temperature 0.8; llama.cpp 135M/360M, llama2.c 15M/42M/110M), each under glibc, the per-model reservations (from the model's default-input profile) and the periodic ones, interleaved, 3 runs each (`runs/inputs-v2`, `ml/inputs_v2.sh`, `ml/inputs_v2_summary.py`). All 189 runs gave glibc's output; time 0.96-1.08 (per-model), 0.88-1.07 (periodic).
+
+- **The savings hold with one profile per model.** llama.cpp commits about 56 MB on every input (78-90% below glibc), RSS 24-53% lower; llama2.c 42M/110M about 80% less commit. Profiling the new input itself gains nothing (135M 512 tokens: own 54.9 MB vs per-model 56.0; 42M 512 steps: 10.0 vs 7.7). Pooling all models of an engine costs little for llama.cpp (56.3-57.8 MB) and much for llama2.c (49 vs 13 MB for 110M: 6, 8 and 12 layers, the ranges do not line up).
+- **But commit stops describing long runs.** The per-model `runs` reservation covers the KV rows of the profiled length; a 1024-token llama.cpp run uses 23.4 MB beyond it, llama2.c 110M at 1024 steps 27.2 MB (libmpr's report: resident beyond predicted at free). Safe, but a scheduler reading commit under-counts the job.
+- **The hybrid: `periodic K a b PARAM DEFAULT`** (`sites.py --param tokens`, each profile's `params.txt`; libmpr reads `MPR_PARAMS=tokens=T`). The profile gives the layout (K equal periods, one per layer tensor, each used in a prefix); the run gives T, and libmpr commits the first a T + b bytes of each period. Fitted from four 135M profiles: K = 60, a = 384 bytes/token (192 fp16 values), b = 2.5 KB. llama.cpp's T = prompt tokens (`llama-tokenize`: prompts 1-4 are 4, 5, 8, 136) + n_predict; llama2.c's T = steps (an upper bound: stories end at about 200 tokens).
+- **Result: no KV cache used beyond its commitment on any input** (0.25 MB on the 136-token prompt), commit following the run: 135M 56.7 MB at 20 tokens, 62.1 at 260, 68.0 at 516, 80.0 at 1032 (glibc 405). RSS unchanged. **One profile is enough:** fitted from the 32-token profile alone (455 bytes/token through the origin), 56.2-83.8 MB, again nothing beyond, identical outputs. llama2.c at its full sequence length commits the whole cache (78.9 MB for 110M; glibc 78.2), since steps over-states the tokens; at 256 steps 22.5 MB, covering the run exactly.
+- **What is left beyond the commitment:** a 1.35 MB `const` site, and llama.cpp's compute buffer, whose use follows the prompt batch (4.3 MB beyond with the 136-token prompt; 11.7 MB for 360M). A second parameter (prompt length) would cover it; no profile had a long prompt.
+
+### Per-site profiles from source (the static interpreter)
+
+`analysis/memprint/static/sites.py` writes the interpreter's per-site profile in the Pin tool's format (`Static_<name>_blocks.csv`, `_capacity.csv`), so `memprint.sites`, the pass and libmpr take it unchanged:
+- **Hooks:** each heap object gets the source location of its allocating expression and of the calls that entered the frames above it (`Frame.call`; constructor calls, including delegating ones, push their construct expression: without that a `pvector`'s buffer was charged to its builder's caller). Each std::vector buffer in the containers arena is recorded with its range, the call that made it and the buffer it replaced (growth chains). Touched bytes, high water, pages and page runs come from the references charged per byte.
+- **Keys:** with `--sitemap` (the pass's site map of the build that will run), each block gets the id whose location chain is the longest prefix of its own, among ids of the same allocation function, skipping C++ library header locations (modelled, not run) and matching a vector buffer's operation to the library function on the chain (`push_back` -> `_M_realloc_insert`, `resize` -> `_M_default_append`).
+- **Tests:** `tests/static/test_sites.py` (the Pin site tests' known sizes: dead, prefix, tail, calloc, contexts, a vector). Pass builds of `sites.c`, `sites_ctx.c` and `sites_cap.cpp` give Pin's ids and capacities.
+
+**GAP (pr, bfs, cc, sssp; Kronecker scales 16-18; pass builds; `~/memprint-data/2026-10-12-resize/static`, `fidelity.py`, `gap_eval.sh`, `gap_summary.py`):**
+- Every site of at least 64 KB in Pin's profile is found under the same id, and no other (10-13 per run). Requested bytes within 0.3%, total high water within 0.5%, each site's high water within 0.1% of its size, except BFS's three frontier queues (up to 77% of a 64 KB queue), where the interpreter's high water is always the larger (it follows both sides of data-dependent branches: the safe direction).
+- The one wasteful site, sssp's `frontier` pvector (sized to the edges, 7.3-30.4 MB per trial, 11-32 KB touched): static fit 0.000987 n + 2.1 KB, Pin 0.00103 n + 1.1 KB (three scales); both commit 12-32 KB per frontier with nothing beyond. From scale 16 alone both give a const that larger scales outgrow by 7-20 KB per block.
+- End to end (180 runs: none / static / Pin reservations, from scale 16 and from 16-18): identical outputs; same peak RSS and commit with either route; time 0.99-1.04. The frontier is not live at the peak (graph construction), so the peak commit falls only at scale 16 (32.5 -> 31.7 MB).
+- **Cost:** the interpreter took 23 s to 25 min (pr at 18: 1525 s) against Pin's 18-90 s, 1.2-17.5x. The value is that the per-site profile and the reservations can come from source with no instrumented run, not speed; and it only covers what the interpreter runs (not miniVite, darknet or the LLM engines).
+
+Paper: `paper_resize/main.pdf` (sections "Run parameters", "Per-site profiles from source", "Unseen inputs and run parameters", "Profiles from source").
 
 ### Reproduce
 
     tests/pintool/run_tests.sh && resize/tests/run_tests.sh                    # with PIN_ROOT set
     pin -t memprint_trace.so -mode splitter -track_frees 1 -sites 1 -outdir D -name N -- prog args
-    python -m memprint.sites D1 D2 D3 -o reservations.txt                      # from analysis/
+    python -m memprint.sites D1 D2 D3 -o reservations.txt [--param tokens]     # from analysis/; D/params.txt: tokens=T
+    python -m memprint.static.sites SRC OUT --gap gap_sssp_kron 16 --sitemap sitemap.txt   # a static profile (memprint-venv)
+    MPR_PARAMS=tokens=548 LD_PRELOAD=libmpr.so MPR_RESERVATIONS=reservations.txt prog args
     LD_PRELOAD=libmpr.so MPR_RESERVATIONS=reservations.txt prog args           # runtime alone
     scripts/resize_build.sh profile OUT -- make ...; scripts/resize_build.sh apply OUT reservations.txt -- make ...
     scripts/resize_eval.sh OUTDIR {base,mpr,mprall,mprscaled} reservations.txt "<cwd> <stdin> <pattern> <cmd>"

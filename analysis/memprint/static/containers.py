@@ -25,6 +25,12 @@ def element_type(container_type):
     return None
 
 
+def _callee(c):
+    """The name of the function a call expression calls (push_back, resize, a constructor)."""
+    ref = getattr(c, "referenced", None)
+    return (ref.spelling if ref is not None else c.spelling) or ""
+
+
 class Containers:
     """Mixin for CppInterpreter."""
 
@@ -36,6 +42,22 @@ class Containers:
             self.objects.append(self._arena_obj)
             self.heap_events.append(("new", self._arena_obj))
         return self._arena_obj
+
+    def _arena_buffer(self, start, nbytes, esize, grown_from=None):
+        """A vector buffer, for static.sites: its range in the arena, the call that made it (push_back,
+        resize, the constructor), when, and its growth chain (the buffers of one vector, oldest first)."""
+        live = self.__dict__.setdefault("arena_live", {})
+        bufs = self.__dict__.setdefault("arena_buffers", [])
+        stack = self.__dict__.get("call_stack")
+        prev = live.pop(grown_from, None) if grown_from is not None else None
+        if prev is not None:
+            prev["died"] = self.total
+        b = {"start": start, "nbytes": int(nbytes), "esize": int(esize), "born": self.total, "died": None,
+             "site": self.site_of(stack[-1] if stack else None), "chain": prev["chain"] if prev else len(bufs),
+             "grown_from": prev["nbytes"] if prev else 0,
+             "op": _callee(stack[-1]) if stack else ""}
+        bufs.append(b)
+        live[start] = b
 
     def _arena_alloc(self, nbytes):
         arena = self._arena()
@@ -68,6 +90,8 @@ class Containers:
         """An empty vector (n = 0) or one with n value-initialised elements."""
         n = int(np.max(_as_int(n))) if _as_int(n) is not UNK else 0
         start = self._arena_alloc(n * esize)
+        if n:
+            self._arena_buffer(start, n * esize, esize)
         arena = self._arena()
         p = Ptr(arena, start)
         self._vset(vec, 0, p)
@@ -103,6 +127,7 @@ class Containers:
         """Move one vector's elements to a buffer of newcap elements (libstdc++ reallocation)."""
         arena = self._arena()
         new = self._arena_alloc(newcap * esize)
+        self._arena_buffer(new, newcap * esize, esize, grown_from=start)
         if size:
             self._copy_object(Ptr(arena, new), Ptr(arena, start), size * esize, charge=False)
             arena.add(start + esize * np.arange(size), esize, np.ones(size))

@@ -9,8 +9,8 @@ failed=0
 echo "runtime"
 gcc -O2 -g -Wall -fPIC -shared -o "$WORK/libmpr.so" "$HERE/../runtime/mpr.c" -ldl -lpthread || exit 1
 gcc -O1 -g -o "$WORK/test_runtime" "$HERE/test_runtime.c" -L"$WORK" -lmpr -lpthread || exit 1
-printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\nid:0x4 runs 2 0 0.25 0.5 0.75\n' > "$WORK/reservations.txt"
-LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_ALL=1 MPR_ZERO_MIN=16384 MPR_REPORT="$WORK/report.csv" \
+printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\nid:0x4 runs 2 0 0.25 0.5 0.75\nid:0x5 periodic 4 1024 0 tokens 1\n' > "$WORK/reservations.txt"
+LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_PARAMS=steps=3,tokens=10 MPR_ALL=1 MPR_ZERO_MIN=16384 MPR_REPORT="$WORK/report.csv" \
     "$WORK/test_runtime" || failed=1
 if grep -q '^id:0x1,dead,1,1048576,0,1048576,1,' "$WORK/report.csv"; then
     echo "    ok   telemetry: the dead site's block was all resident, an under-prediction"
@@ -148,6 +148,24 @@ if [[ -n "${PIN_ROOT:-}" && -f "$HERE/../../pintool/obj-intel64/memprint_trace.s
         echo "    FAIL container capacities: $caps call sites, $n0 -> $n1 large blocks; output '$out0' / '$out1'"
         cat "$WORK/cap_res.txt"; failed=1
     fi
+fi
+
+# sites.py --param: blocks of 4 equal periods, each touched in a prefix of 1 KB per token plus a page, at three
+# token counts -> "periodic 4 1024 4096 tokens 64"
+echo "fitting"
+PYF=${PY:-$HOME/environments/memfp/bin/python}
+for t in 8 16 64; do
+    mkdir -p "$WORK/per$t"; echo "tokens=$t" > "$WORK/per$t/params.txt"
+    pages=$(( (t * 1024 + 4096 + 4095) / 4096 ))
+    runs=$(for i in 0 1 2 3; do printf '%s%d:%d' "$([[ $i -gt 0 ]] && echo ';')" $((i * 64)) $pages; done)
+    printf 'site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,grown_from,moved,context,runs\nid:0x9,1,1048576,0,1,%d,%d,%d,256,0,0,0,,%s\n' \
+        $((pages * 4 * 4096)) $((192 * 4096 + pages * 4096)) $((pages * 4)) "$runs" > "$WORK/per$t/T_blocks.csv"
+done
+(cd "$HERE/../../analysis" && "$PYF" -m memprint.sites "$WORK/per8" "$WORK/per16" "$WORK/per64" -o "$WORK/per.txt" --param tokens > /dev/null)
+if grep -q '^id:0x9 periodic 4 1024 4096 tokens 64$' "$WORK/per.txt"; then
+    echo "    ok   periodic fit: 4 periods, 1024 bytes per token plus a page"
+else
+    echo "    FAIL periodic fit:"; cat "$WORK/per.txt"; failed=1
 fi
 
 [[ $failed == 0 ]] && echo "all resize tests passed" || { echo "some resize tests FAILED"; exit 1; }

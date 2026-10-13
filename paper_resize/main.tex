@@ -58,7 +58,11 @@ are used in one range per layer, by 47\% on darknet AlexNet inference, and by 22
 per-call-site container capacities. Across a 23-program HPC and interpreter corpus, where most programs already
 hold about what they touch, it changes no output and no total RSS, keeps run time within $-5\%$ to $+7\%$, and
 reduces total peak commit by 10.7\%. The pass adds 0 to 3\% to compile time, and 96.6\% of its site identifiers
-survive an edit that changed 19\% of the previous ones.
+survive an edit that changed 19\% of the previous ones. On 21 LLM inputs that no profile saw, the savings hold
+with one profile per model, and a \term{periodic} reservation that combines the profile's layout with the run's
+token count leaves no KV cache used beyond its commitment, where a reservation from the profile alone left up to
+27\,MB. Finally, \memprint{}'s static interpreter now produces the same per-site profile from source: on GAP's
+kernels it finds every site Pin finds, with total high water within 0.5\%, and its reservations perform as Pin's do.
 \end{abstract}
 
 \section{Introduction}
@@ -109,9 +113,16 @@ In this work, we make the following contributions:
   \texttt{MAP\_NORESERVE}, matches reservations by calling context, grows blocks by moving page tables, skips the
   zeroing of pages that were never touched, and refuses address-keyed reservations profiled on another build
   (\secref{sec:runtime}).
+  \item We fit reservations as functions of a run parameter when a block's use depends on the run rather than on
+  its size: a \texttt{periodic} model takes the layout from the profile and the token count from the run
+  (\secref{sec:fit}).
+  \item We extend \memprint{}'s static interpreter to produce the per-site profile from source, keyed by the
+  pass's identifiers through its site map (\secref{sec:static}).
   \item We evaluate the system on darknet, miniVite, two LLM inference engines and a 23-program corpus. It cuts
   llama.cpp's commit by 86\% and its resident memory by 54\%, and llama2.c's commit by 85\%, with identical
-  outputs and no time cost, and we measure what each refinement adds (\secref{sec:eval}).
+  outputs and no time cost, and we measure what each refinement adds (\secref{sec:eval}). The savings hold on
+  21 unseen LLM inputs, and the parameterised reservation follows their lengths (\secref{sec:inputs}); the
+  static profiles of GAP agree with Pin's site by site (\secref{sec:staticeval}).
   \item We report what the measurements show about footprint estimation: where miniVite's extra memory comes
   from, why the bytes a program touches can exceed its resident set, and why the time axis of a footprint
   curve matters more than its unit (\secref{sec:discussion}).
@@ -408,10 +419,28 @@ commit at least 95\% of what was requested.
 KV caches are laid out as [layer][position][dimension], and a run of 128 tokens writes the first rows of every
 layer, so the highest touched offset lies at 93\% of the block while 12.5\% of it is used. The \texttt{runs}
 model commits a set of ranges of the block, given as fractions of its size: the union of the training blocks'
-touched page runs, with the closest ranges merged until at most 32 remain. Windows separates reserving address
+touched page runs, with the closest ranges merged until at most 128 remain. Windows separates reserving address
 space from committing it, so that a program can commit only the pages it will use in a reserved
 region~\cite{MSVirtualAlloc}, and the \texttt{runs} model applies the same split, chosen from a profile. The fit
 keeps \texttt{runs} when it commits less than 70\% of the best prefix model and saves at least 64\,KB.
+
+\textbf{Run parameters.} A KV cache shows the limit of fitting against the request alone: its size is fixed by
+the context length, and its use grows with the number of tokens the run processes, which no allocation reveals. A
+\texttt{runs} reservation commits what the profiled runs touched, so a longer run uses memory beyond it
+(\secref{sec:inputs}). The \texttt{periodic} model is a hybrid of the profile and the run's parameters. The
+profile gives the shape: every block is $K$ equal periods (one tensor per layer), each touched in a prefix of
+the same length. The run gives the size: the prefix is fitted as $a\,T + b$ bytes, where $T$ is a run parameter
+recorded with each profile (\texttt{params.txt}, here \texttt{tokens}). \libmpr{} reads the run's value from
+\texttt{MPR\_PARAMS=tokens=}$T$ at start-up and commits the first $a\,T + b$ bytes of each period. With three
+values of $T$ or more, $a$ and $b$ come from a least-squares line shifted up to cover every profile; with fewer, the
+line passes through the origin with the largest prefix per unit of $T$. For llama.cpp with SmolLM2-135M, four
+profiles (36 to 516 tokens, two context lengths) give $K = 60$, $a = 384$ bytes per token (a row of 192
+half-precision values) and $b = 2.5$\,KB. The fit prefers \texttt{periodic} whenever a site's blocks have its
+shape, also when it commits more on the training blocks, because only it follows $T$ to longer runs. The value of
+$T$ has to come from whoever starts the job; for llama.cpp it is the prompt's token count (from the model's
+tokenizer) plus the tokens to generate, and for llama2.c the number of steps, which is an upper bound because
+llama2.c stops at the end of a story. This answers, for the KV cache, the limitation that a range reservation
+transfers only between blocks of the same layout and use (\secref{sec:limits}).
 
 \textbf{Calling contexts.} When a site's blocks have caller frames, the fit groups them by their first caller
 frame, then by their first two, and fits each group separately. It keeps the shallowest grouping whose total
@@ -486,6 +515,7 @@ compile reach \libmpr{} through symbol interposition~\cite{OracleLinker}: \libmp
 siblings, so every library's calls resolve to it, with a return-address site and calling contexts.
 
 \subsection{Stable site identifiers}
+\label{sec:ids}
 
 A site identifier must name the same allocation in a profiling build and an apply build, distinguish
 allocations that the optimiser has inlined into different callers, and survive edits elsewhere in the program.
@@ -673,6 +703,44 @@ predicted (committed), resident at free, the blocks that used more than predicte
 reserved or not, to measure the mechanism alone. Two lock-related fixes were needed: \texttt{dladdr}, used to name
 a return-address site, is called outside \libmpr{}'s lock, and the exit handler releases the lock before it
 writes the report, because \texttt{fclose} frees its buffer through \texttt{free}.
+
+\section{Per-site profiles from source}
+\label{sec:static}
+
+\memprint{} has a second route to a footprint, which does not run the program: an abstract interpreter over the
+clang AST that executes the program's source with concrete sizes and vectorised loops, charges every reference
+to the object it touches, and reports the bytes touched~\cite{memprintstatic}. Its result was a footprint for the whole
+program, not per-site data, so the reservations above came from Pin. We extended the interpreter to produce the
+same per-site profile as the Pin tool, in the same files, so that \texttt{sites.py}, \pass{} and \libmpr{} take it
+unchanged.
+
+\textbf{Sites and contexts.} The interpreter records, for each heap object it creates (a \texttt{malloc}-family
+call or a \texttt{new} expression), the source location of the allocating expression and the locations of the
+calls that entered the functions above it, innermost first. Each interpreter frame keeps the call expression that
+entered it; constructor calls, including delegating constructors, enter frames without going through the
+interpreter's call path, and had to push their construct expressions explicitly, or a \texttt{pvector}'s buffer
+would have been attributed to the caller of the function that built the \texttt{pvector}.
+
+\textbf{Vectors.} The interpreter models \texttt{std::vector} instead of running libstdc++, and places every
+vector's elements in one arena object. Each buffer the model creates (construction, \texttt{push\_back},
+\texttt{resize}, growth) is recorded with its arena range, the call that made it and the buffer it replaced, which
+links the buffers of one vector into a growth chain, as the Pin tool does at run time.
+
+\textbf{Measures.} From the references the interpreter charged to each byte, a block's touched bytes, high water,
+touched pages and page runs follow as the Pin tool measures them. The module writes
+\texttt{Static\_<name>\_blocks.csv} and \texttt{\_capacity.csv}.
+
+\textbf{Keys.} A static site is a chain of source locations, and a reservation needs the key the running program
+will present. With the site map of the build that will run, which lists each identifier's allocation call and
+the locations it was inlined at (\secref{sec:ids}), each block gets the identifier whose location chain is the
+longest prefix of the block's chain, among identifiers of the same allocation function (a \texttt{realloc} and a
+\texttt{malloc} on the same line are different sites). Locations inside the C++ library's headers are skipped,
+since the interpreter models those functions rather than running them, and a vector's buffer is matched to an
+identifier whose chain passes through the library function that its operation calls (\texttt{push\_back} to
+\texttt{\_M\_realloc\_insert}, \texttt{resize} to \texttt{\_M\_default\_append}). Container chains are keyed by the
+growth context (\texttt{cap:}) or the inlined growth point (\texttt{id:}), as the Pin tool keys them. A static
+calling context beyond what the identifier inlined is dropped, because \libmpr{} matches further frames as
+return addresses, which a static profile does not know.
 
 \section{Evaluation}
 \label{sec:eval}
@@ -886,6 +954,64 @@ of the block (\figref{fig:sites}). A prefix reservation must cover it: the first
 78.2\,MB. The shaped reservation commits one range per layer, 12.1\,MB in all. The held-out profile, from models
 with 6 and 8 layers, places its ranges where a 12-layer model's are only in part, and commits 45.8\,MB.
 
+\subsection{Unseen inputs and run parameters}
+\label{sec:inputs}
+
+\begin{table*}[t]
+\centering\small
+\resizebox{\linewidth}{!}{\input{tables/inputs.tex}}
+\caption{The LLM engines on 21 inputs that were never profiled: other prompts, lengths, context sizes and sampling
+(temperature 0.8). Peak RSS and peak commit in MB, mean of 3 runs; "Beyond" is what \libmpr{}'s report found
+resident beyond the commitment in the reserved blocks at their release, in MB. Per-model: the \texttt{runs}
+reservations from the model's default-input profile. Periodic: the \texttt{periodic} reservations, with $T$ given
+to the run in \texttt{MPR\_PARAMS}; for llama.cpp $T$ is the prompt's tokens plus the tokens to generate, for
+llama2.c the steps (at most the model's sequence length). The three configurations ran interleaved. Every run
+produced glibc's output; time relative to glibc was 0.96 to 1.08 (per-model) and 0.88 to 1.07 (periodic).}
+\label{tab:inputs}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/inputs.pdf}
+\caption{Commit against the tokens a run processes. Left: llama.cpp 135M at its full 8192-token context; the
+per-model \texttt{runs} reservation commits the same at every length and the KV cache outgrows it, the
+\texttt{periodic} one follows $T$. Right: llama2.c, whose steps bound the tokens from above (a story ends earlier),
+so at the full sequence length the periodic reservation commits what glibc does.}
+\label{fig:inputs}
+\end{figure}
+
+A profile describes the input it was taken on. We ran both engines on 21 inputs that no profile saw, with the
+reservations from each model's default-input profile (\tabref{tab:inputs}). All 189 runs produced glibc's output.
+llama.cpp's commit stays at about 56\,MB on every input, 78 to 90\% below glibc's, and its RSS falls by 24 to 53\%.
+llama2.c's falls by about 80\% for the 42M and 110M models. Profiling the new input itself gains nothing: for
+llama.cpp at 512 tokens the input's own profile commits 54.9\,MB (56.0 per-model), at context 2048 56.2\,MB (55.7),
+and for llama2.c 42M at 512 steps 10.0\,MB (7.7), because its ranges cover the rows the longer run writes.
+Pooling the profiles of all models of an engine costs little for llama.cpp (56.3 to 57.8\,MB) and much for
+llama2.c (49\,MB instead of 13\,MB for 110M), whose models have 6, 8 and 12 layers, so the ranges of one fall
+elsewhere in another's blocks.
+
+The commit, however, stops describing the run when the run is longer than the profile. The per-model reservation
+of llama.cpp's KV cache covers the rows of a 36-token run, so a 1{,}024-token run writes 23.4\,MB beyond it, and
+llama2.c 110M writes 27.2\,MB beyond it at 1{,}024 steps (\figref{fig:inputs}). This is safe, since the kernel
+backs those pages on touch, but a scheduler reading the commit would under-count the job. The \texttt{periodic}
+reservation (\secref{sec:fit}) removes it. With $T$ from the run, no KV cache was used beyond its commitment on
+any input, except 0.25\,MB on the 136-token prompt, and the commit grows with the run: 56.7\,MB at 20 tokens, 62.1
+at 260, 68.0 at 516 and 80.0 at 1{,}032 for llama.cpp 135M, against 405\,MB under glibc. RSS does not change, since
+the same pages are touched either way. The four profiles are not needed: fitted from the 32-token profile
+alone (through the origin, 455 instead of 384 bytes per token), the reservation commits 56.2 to 83.8\,MB on the
+same inputs, 3.7\,MB more than the four-profile fit at 1{,}032 tokens, and again no KV cache was used beyond its
+commitment, with identical outputs. For llama2.c the parameter is the number of steps, which bounds the tokens
+from above, because a story usually ends after about 200 tokens. A 1{,}024-step run therefore commits the whole
+cache (78.9\,MB for 110M, glibc's 78.2\,MB plus the page rounding of 12 periods), where the per-model reservation
+commits 12.5\,MB and the run uses 27.2\,MB beyond it; at 256 steps the periodic reservation commits 22.5\,MB and
+covers the run exactly.
+
+What remains beyond the commitment is outside the KV cache. 1.35\,MB is a small site whose \texttt{const}
+reservation came from one profile. The rest is llama.cpp's compute buffer, whose used ranges grow with the number
+of prompt tokens processed in one batch, not with the run's length: 4.3\,MB beyond its ranges with the 136-token
+prompt, and 11.7\,MB for the 360M model with the same prompt. A second parameter, the prompt length, would cover
+it; our profiles all had prompts of 4 to 8 tokens, so the fit had nothing to relate it to.
+
 \subsection{Built with the pass, or preloaded}
 \label{sec:passpreload}
 
@@ -954,6 +1080,47 @@ produced glibc's output in every run, and run time stayed between 0.95$\times$ a
 profiles. One regression appeared while we built the refined runtime and was fixed: \libmpr{}'s site table, larger
 once each site can hold 128 ranges, was backed by a 2\,MB huge page at its first entry, which added 2.2\,MB of RSS
 to every program until the table was marked \texttt{MADV\_NOHUGEPAGE}.
+
+\subsection{Profiles from source}
+\label{sec:staticeval}
+
+\begin{table}[t]
+\centering\small
+\input{tables/static.tex}
+\caption{The interpreter's per-site profiles (\secref{sec:static}) against the Pin tool's, for GAP's kernels built
+with \pass{} (Kronecker graphs, one trial), blocks of at least 64\,KB. Sites: in both profiles under the pass's
+identifiers, of those in Pin's. Largest site difference: the largest difference in a site's high water, as a share
+of its requested bytes. Profiling time on one core (the interpreter at scales 17 and 18 ran 8 at a time).}
+\label{tab:static}
+\end{table}
+
+We profiled GAP's pr, bfs, cc and sssp at scales 16, 17 and 18 with the interpreter and, for comparison, under Pin
+(\tabref{tab:static}). Each kernel was built with \pass{} in profile mode, and the interpreter's sites were keyed
+by that build's site map. Every site of 64\,KB or more in Pin's profile was found by the interpreter under the same
+identifier, and no other; the 10 to 13 sites per run are mostly \texttt{pvector} buffers, whose allocation is
+inlined into the kernels at different depths, and BFS's frontier queues. Requested bytes agree within 0.3\%, total
+high water within 0.5\%, and each site's high water within 0.1\% of its size, except BFS's three frontier queues
+(up to 77\% of a 64\,KB queue at scale 18), whose use depends on the traversal. For those, the interpreter's high
+water was the larger one in every case, because it follows both sides of data-dependent branches, which errs in the
+safe direction for a reservation.
+
+Only one site in these kernels requests much more than it uses: sssp's frontier, a \texttt{pvector} sized to the number of edges
+(\texttt{sssp.cc:92}), a block of 7.3 to 30.4\,MB per trial of which 11 to 32\,KB is
+touched. Fitted from three scales, the interpreter's profiles give it $0.000987\,n + 2.1$\,KB and Pin's
+$0.00103\,n + 1.1$\,KB, and both commit 12 to 32\,KB of each frontier with no block used beyond its commitment.
+Fitted from scale 16 alone, both routes give a constant that larger scales outgrow by 7 to 20\,KB per block. We ran all 12 kernel and scale pairs
+with the corpus's arguments (4 or 8 trials), without reservations and with the reservations of each route (3 runs
+each): every run produced the same output, peak RSS and commit were the same with either route's reservations,
+and time stayed within 0.99 to 1.04 of the build without reservations. The frontier is not live at the peak, which
+comes while the graph is built, so it lowers the commit while sssp runs but not its peak (except at scale 16, 32.5
+to 31.7\,MB).
+
+The interpreter took 1.2 to 17.5 times as long as the Pin profile (\tabref{tab:static}): 23\,s to 25\,min against
+18 to 90\,s, longest for pr. So it
+is not a cheaper way to profile a program that Pin can run. What it shows is that the per-site profile, and the
+reservations, can come from the source alone, with no instrumented run, and agree with the measured ones on the
+code it can execute. Its limit is the programs it can run: GAP's and the regular C/C++ codes of our earlier study~\cite{memprintstatic}, not miniVite
+(MPI), darknet or the LLM engines, which read their sizes from model files.
 
 \subsection{Robustness to wrong predictions}
 \label{sec:robust}
@@ -1062,15 +1229,18 @@ A limitation of the container capacities is that a capacity measured on one inpu
 far as the final sizes agree. The final size of miniVite's edge list depends on the graph, so a capacity from the
 8192- and 16384-vertex inputs reserves the 16384-vertex size, half of what the 32768-vertex input needs, and the
 vector still grows once more (\secref{sec:minivite}). Predicting the final size from the input would need a model
-of size against the input's parameters, or \memprint{}'s static route, which estimates footprints from source and
-does not yet produce per-site profiles. The growth points are specific to the containers of libstdc++ and
+of size against the input's parameters, as the \texttt{periodic} model does for KV caches, or a per-site profile
+from source (\secref{sec:static}), which the interpreter cannot produce for miniVite, an MPI program. The growth points are specific to the containers of libstdc++ and
 libc++ listed in \tabref{tab:rules}; \texttt{std::deque} grows in fixed 512-byte nodes and has no capacity to raise.
 
 A limitation of the shaped reservations is that a range is a fraction of the block, so it transfers between
-blocks of the same layout. llama2.c's held-out reservations, from models with 6 and 8 layers, cover a 12-layer
-model's KV caches only partly, and commit 46\,MB against 12\,MB with the model's own profile. A reservation that
-names the layout (the number of periods and the used prefix of each) would transfer between models; the profile
-would have to find the period.
+blocks of the same layout and use. llama2.c's held-out reservations, from models with 6 and 8 layers, cover a
+12-layer model's KV caches only partly, and commit 46\,MB against 12\,MB with the model's own profile. The
+\texttt{periodic} model names the layout and follows the run's length (\secref{sec:inputs}), but its number of
+periods and bytes per token are a model's, so it is fitted per model, and its parameter has to be supplied by
+whoever starts the job; without it, \libmpr{} assumes the largest value profiled. A parameter is only as good as
+its relation to the use: llama2.c's steps bound its tokens from above, so a run that ends early is over-committed,
+and llama.cpp's compute buffer follows the prompt length, which the fit was not given.
 
 Calling contexts are taken with a backtrace for each large allocation at a site that has context lines. The
 frames are return addresses, so they are tied to a build, as image keys are, and a context deeper than two frames
@@ -1089,7 +1259,9 @@ llama.cpp, but a program that clears a buffer and then fills all of it densely w
 
 Profiling is expensive: the Pin tool's exact mode with \texttt{-sites} took 300 to 1{,}100\,s for llama.cpp runs of
 0.8 to 2\,s, and 617\,s for llama2.c 110M (18\,s natively), so profiles must be reused across runs, which the
-held-out results show is possible when the inputs exercise the same code paths. Whether a sampled or windowed
+held-out and unseen-input results show is possible when the inputs exercise the same code paths: one profile per
+model served 21 new inputs (\secref{sec:inputs}). The interpreter avoids the instrumented run but was slower than
+Pin on GAP (\secref{sec:staticeval}). Whether a sampled or windowed
 \texttt{-sites} profile would give reservations as good is open. We ran single short completions; an LLM server that
 runs many sequences fills its KV cache over time, and its savings would shrink as it does.
 
@@ -1105,7 +1277,11 @@ llama.cpp's resident memory. Per-call-site container capacities, with element si
 remove miniVite's vector growth without slowing it, once the runtime's lookup is fast enough for a million
 growths. The 23-program corpus, which already holds about what it touches, saw no regressions. The measurements
 also showed that a footprint curve is most useful to a scheduler on a wall-clock axis, and that what a profile
-counts as use, such as zeros written to fresh memory, decides what can be saved.
+counts as use, such as zeros written to fresh memory, decides what can be saved. A profile describes its input:
+on unseen LLM inputs the savings held, and a reservation that takes the KV cache's layout from the profile and its
+length from the run kept the commitment in step with the use. The per-site profile can also come from source:
+\memprint{}'s interpreter reproduces Pin's profiles of GAP site by site, so the static route can now feed the
+same reservations, for the programs it can run.
 
 \bibliographystyle{plain}
 \bibliography{references}

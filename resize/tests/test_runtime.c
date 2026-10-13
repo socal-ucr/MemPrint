@@ -125,6 +125,15 @@ int main(void)
     CHECK(shaped && same(shaped, 1 * MB, 5), "shaped block written in full and grown: data kept");
     free(shaped);
 
+    /* a periodic site ("periodic 4 1024 0 tokens 1", MPR_PARAMS=tokens=10): 4 periods of 256 KB, the
+       first 10 KB of each committed (3 pages, rounded up) */
+    committed0 = __mpr_committed();
+    unsigned char *kv = __mpr_alloc(1 * MB, 0x5, MPR_MALLOC, 0);
+    CHECK(__mpr_committed() - committed0 == 4 * 12 * KB, "periodic site: 4 periods x 12 KB committed (tokens=10)");
+    fill(kv, 1 * MB, 6);
+    CHECK(same(kv, 1 * MB, 6), "periodic block written in full: data kept");
+    free(kv);
+
     /* memset(0) over a runtime block writes only the pages the program has touched; the others are
        zero already and stay untouched (memset through a pointer: a real call, as from another
        library) */

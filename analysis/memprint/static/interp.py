@@ -459,6 +459,7 @@ class Frame:
     func: object  # function definition cursor (None for the globals)
     base: int  # byte offset of the frame in the stack object
     vars: dict = field(default_factory=dict)  # key -> [slot Loc, value]
+    call: object = None  # the call expression that entered the function (static.sites: calling contexts)
 
 
 def _key(decl):
@@ -563,7 +564,20 @@ class _TimedEvents(list):
         self.times.append(self.interp.total)
 
 
+def _source_loc(cursor):
+    """(file base name, line) of a cursor, at its macro expansion; None without a location."""
+    if cursor is None or cursor.location.file is None:
+        return None
+    return (str(cursor.location.file).rsplit("/", 1)[-1], cursor.location.line)
+
+
 class Interpreter:
+    def site_of(self, cursor, depth=3):
+        """An allocation's site for static.sites: its own location and the locations of the calls that
+        entered the functions above it, innermost first."""
+        context = [_source_loc(fr.call) for fr in reversed(self.frames) if getattr(fr, "call", None) is not None]
+        return {"loc": _source_loc(cursor), "context": [c for c in context if c][:depth]}
+
     REALS = False  # track floating-point scalars (Real)
     SYMBOLIC = True  # count affine innermost loops symbolically (Aff, Obj.add_range) instead of point by point
 
@@ -623,7 +637,8 @@ class Interpreter:
                 return new
             return slot
 
-        return [Frame(fr.func, fr.base, {k: [maps(s), mapv(v)] for k, (s, v) in fr.vars.items()})
+        return [Frame(fr.func, fr.base, {k: [maps(s), mapv(v)] for k, (s, v) in fr.vars.items()},
+                      getattr(fr, "call", None))
                 for fr in self.frames]
 
     def _merge(self, sub_frames, idx):
@@ -1293,10 +1308,11 @@ class Interpreter:
         name = c.spelling
         fdef = self.functions.get(name)
         if fdef is None or len(self.frames) > MAX_DEPTH:
+            self._site_cursor = c                                      # an allocation's site (static.sites)
             return self._library(name, args_c)
         args = [self.eval(a) for a in args_c]
         caller_base = self.frames[-1].base
-        frame = Frame(fdef, len(self.frames) * FRAME_BYTES)
+        frame = Frame(fdef, len(self.frames) * FRAME_BYTES, call=c)
         ret_slot = Loc(self.stack, frame.base, 8)
         rbp_slot = Loc(self.stack, frame.base + 8, 8)
         self.access(ret_slot, write=True)
@@ -1357,6 +1373,8 @@ class Interpreter:
                 size = UNK if (v is UNK or size is UNK) else size * v
             nbytes = int(np.max(size)) if size is not UNK else 0
             obj = Obj(f"{name}#{len(self.objects)}", "heap", nbytes, zeroed=name == "calloc")
+            obj.site = self.site_of(getattr(self, "_site_cursor", None))
+            obj.alloc_kind = name
             self.objects.append(obj)
             self.heap_events.append(("new", obj))
             return Ptr(obj, 0)
@@ -1711,7 +1729,8 @@ def _map_frames_with(frames, f):
             return new
         return slot
 
-    return [Frame(fr.func, fr.base, {k: [maps(s), mapv(v)] for k, (s, v) in fr.vars.items()}) for fr in frames]
+    return [Frame(fr.func, fr.base, {k: [maps(s), mapv(v)] for k, (s, v) in fr.vars.items()}, getattr(fr, "call", None))
+            for fr in frames]
 
 
 # ---------------------------------------------------------------- loop analysis
@@ -2069,4 +2088,5 @@ def run(tu, entry="main", argc=1, footprint="starts", seed=0, heap_top=0, make=N
                     np.concatenate(sizes) if sizes else np.zeros(0), objects, interp.total, interp.unresolved,
                     interp.uncertain, interp.data_loops, interp.data_branches)
     result.timeline = timeline_curve(interp) if timeline else None
+    result.interp = interp                                             # (static sites: its blocks and sites)
     return result
