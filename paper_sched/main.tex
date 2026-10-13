@@ -28,17 +28,22 @@ Measured Footprints and Job Scheduling on Disaggregated Memory}
 
 \begin{abstract}
 A scheduler for a cluster with disaggregated memory can pack jobs only as tightly as its knowledge of each
-job's memory footprint allows. We measure that knowledge for 23 programs at three inputs each, with the full Pin
+job's memory footprint allows. We measure that knowledge for 25 programs at three inputs each, two LLM inference
+engines among them, with the full Pin
 trace as the truth, \memprint{}'s windowed and source-only estimates, Massif, DHAT, heaptrack, the gperftools heap
 profiler and sampled RSS, and we replay the measured footprints through DMSched-Sim, a simulator of 32 nodes with
 local DRAM and a shared 1\,TB pool, in which only the footprint oracle changes. Knowing a job's footprint curve
 rather than its peak is where most of the gain lies: at 80\% offered load the exact curve gives a mean response
-time 24.6$\times$ shorter than the user's request and 5.1$\times$ shorter than the exact peak, and it needs 5.0\,TB
+time 26.4$\times$ shorter than the user's request and 5.3$\times$ shorter than the exact peak, and it needs 5.0\,TB
 of memory for a service level that the exact peak meets with 6.0\,TB and the request with 11.0\,TB. Among measured
-estimators, \memprint{}'s windowed curves are the only ones that beat the exact peak (358 to 391 against 460
-minutes), at 6 to 11 times the native run time against 227 times for the full trace. The heap profilers report
-the right peak for most programs but read GCC's cc1 at 0.14 to 0.16 times its peak and darknet at 1.97 times, so
-no margin makes them safe without over-reserving every other job. Curves built from DHAT's three recorded points
+estimators, \memprint{} windowed at 5\% is the only one that beats the exact peak (389 against 448 minutes), at
+11 times the native run time against 227 times for the full trace. The heap profilers report the right peak for
+most programs but read GCC's cc1 at 0.14 to 0.16 times its peak, llama2.c, whose weights are mapped from a file,
+at 0.17 times and darknet at 1.97 times, so no margin makes them safe without over-reserving every other job; with
+the LLM engines in the corpus, the calibrated margins of heaptrack and gperftools exceed twice their estimates. On a
+stream of LLM jobs alone, only an earlier run's RSS peak, reactive resizing and exact knowledge avoid repeated OOM
+kills, because the weights are touched within the first percent of a run, before \memprint{}'s first window and
+outside every heap profiler's view. Curves built from DHAT's three recorded points
 do worse than DHAT's peak under every margin. When the truth is the resident set on wall-clock time, every
 measured curve, \memprint{}'s included, needs about 60\% headroom because its clock is not wall-clock time, and
 peaks do better than curves, which shows that a footprint curve is useful to a scheduler only with a faithful
@@ -76,11 +81,12 @@ curve known before the job starts. It is therefore unclear how much better a sch
 footprint than with the tools that exist, and which property of the footprint (its peak, its shape over
 time, or how safely it bounds the truth) the gain comes from.
 
-In this work, we measure every source of footprint knowledge listed above on the same 23 programs and
+In this work, we measure every source of footprint knowledge listed above on the same 25 programs and
 replay the results through one scheduler, with everything but the footprint oracle held fixed. We make the
 following contributions:
 \begin{itemize}
-  \item We build a corpus of footprint curves for 23 programs at three inputs each, from the full Pin trace
+  \item We build a corpus of footprint curves for 25 programs at three inputs each, HPC kernels, interpreters, a
+    compiler and two LLM inference engines among them, from the full Pin trace
     (the truth), \memprint{}'s windowed and static estimates, Massif, DHAT, heaptrack, gperftools and sampled
     RSS, together with what each method costs (\secref{sec:corpus}).
   \item We build DMSched-Sim, a cluster simulator with local memory and a shared pool, an EASY-backfilling
@@ -91,6 +97,8 @@ following contributions:
     each estimator's cost buys (\secref{sec:results}).
   \item We evaluate curves derived from DHAT, which records no time series, and show why its three recorded
     points do not substitute for a measured curve (\secref{sec:dhat}).
+  \item We schedule a stream of LLM inference jobs alone, whose memory is mostly model weights mapped from a file,
+    and show which estimators survive it (\secref{sec:llm}).
 \end{itemize}
 
 \section{Background and related work}
@@ -269,13 +277,18 @@ profile to calibrate, and they keep a 10\% margin.
 \section{Footprint corpus}
 \label{sec:corpus}
 
-We ran 23 programs at three inputs each, from the smallest to the largest, on a 32-core node with 62\,GB of
+We ran 25 programs at three inputs each, from the smallest to the largest, on a 32-core node with 62\,GB of
 memory (\tabref{tab:corpus}): four PolyBench kernels~\cite{polybench} (2mm, gemm, jacobi-2d, atax, unoptimised
 builds at SMALL, MEDIUM and LARGE), miniVite~\cite{minivite} with four threads, the GAP benchmarks bfs, pr, cc
 and sssp on Kronecker graphs of $2^{16}$ to $2^{18}$ vertices, Lua, Python, Perl and SQLite workloads at three
 sizes, GCC's cc1 compiling three source files at \texttt{-O0}, HPCCG, LULESH, NPB IS, CG and MG (classes S, W
-and A), MiniFE, Quicksilver, Kripke, and darknet classifying images with AlexNet (one input). The native runs
-take 0.12 to 12.8\,s, and the true peaks at the largest inputs are 15 to 275\,MB.
+and A), MiniFE, Quicksilver, Kripke, darknet classifying images with AlexNet (one input), and two LLM inference
+engines: llama2.c~\cite{llama2c} generating 128 tokens from "Once upon a time" with the stories15M, 42M and 110M
+models, and llama.cpp~\cite{llamacpp} (b11500, CPU, four threads) completing the same prompt with SmolLM2-135M
+(32 and 128 tokens) and SmolLM2-360M (64 tokens), quantised to 8 bits, at the model's default 8192-token
+context. Both engines map their weights from the model file rather than allocating them, and llama.cpp sizes its
+KV cache for the whole context and clears it with \texttt{memset}. The native runs take 0.12 to 14.9\,s, and the
+true peaks at the largest inputs are 15 to 450\,MB.
 
 Every (program, input) ran under ten methods: the program alone, with its RSS sampled every 5\,ms; the full Pin
 trace (\memprint{}'s splitter with frees tracked), which gives the bytes touched over time and is the truth;
@@ -285,9 +298,11 @@ snapshots), each run twice, with Massif's default clock of instructions executed
 Valgrind; DHAT; heaptrack 1.3.0; and the gperftools 2.18 heap profiler with a
 dump every 1/50 of the native peak RSS. The \memprint{} static predictions come from the C interpreter for
 PolyBench (a curve over time) and from the C++ interpreter for HPCCG, LULESH and NPB (a whole-run footprint).
-The NPB predictions are those of the second blind test, made before any trace of NPB existed. Of the 802 runs,
-one failed: the full trace of NPB MG class A ran out of memory, as in the earlier blind test, so MG is used up
-to class W. The runs shared the node with up to 15 others, so the costs below are slowdowns under load.
+The NPB predictions are those of the second blind test, made before any trace of NPB existed; the static route
+does not cover the LLM engines. Of the 874 runs, two failed: the full traces of NPB MG class A and of llama.cpp with
+the 360M model ran out of memory (the latter at 20.7\,GB, in Pin's allocator), so MG is used up to class W and
+llama.cpp up to the 135M model with 128 tokens. The runs shared the node with up to 15 others (the LLM runs with
+up to 7), so the costs below are slowdowns under load.
 
 \begin{table}[t]
 \centering
@@ -309,13 +324,17 @@ the black bar is the median). Left: against bytes touched. Right: against the RS
 \end{figure}
 
 Most heap profilers report the right peak for most of these programs, and fail badly on the rest
-(\figref{fig:peak}). Specifically, Massif's peak is within 5\% of the true peak on 19 of the 23 programs, DHAT
-and gperftools on 19 and heaptrack on 18, because these programs touch nearly all the heap they allocate.
+(\figref{fig:peak}). Specifically, Massif's peak is within 5\% of the true peak on 20 of the 25 programs, DHAT
+and gperftools on 20 and heaptrack on 19, because these programs touch nearly all the heap they allocate.
 However, the heap profilers read 0.14 to 0.16 times the peak of GCC's cc1, whose garbage collector maps its own
-pages, 1.97 times the peak of darknet and 1.53 to 1.55 times that of miniVite, which allocate memory they never
-touch. \memprint{} windowed at 5\% is within 5\% on 21 of the 23 programs (0.94 to 1.06 times the truth), and
-pages only on 21 (0.92 to 1.05). Massif with \texttt{--pages-as-heap} overestimates every program (1.07 to 29.9
-times), and the RSS is 0.95 to 1.99 times the bytes touched (median 1.05).
+pages, and 0.17 times that of llama2.c, whose 110M model's weights are mapped from the file and never pass
+through the heap; they read 1.97 times the peak of darknet and 1.42 to 1.55 times that of miniVite, which allocate
+memory they never touch. On llama.cpp they are within 5\% (1.04 to 1.05), because its weights' file mapping is
+offset by a KV cache that it allocates on the heap and clears in full. \memprint{} windowed at 5\% is within 5\%
+on 23 of the 25 programs (0.94 to 1.06 times the truth). Pages only is within 5\% on 21; it estimates the
+resident pages of heap blocks and writable sections, so it misses the read-only weight mappings and reads
+llama2.c at 0.02 and llama.cpp at 0.60. Massif with \texttt{--pages-as-heap} overestimates every program (1.07 to
+29.9 times), and the RSS is 0.95 to 1.99 times the bytes touched (median 1.05).
 
 \subsection{Shape over time}
 
@@ -328,7 +347,7 @@ estimators report. Each curve is on its own method's clock, rescaled to progress
 \end{figure}
 
 The footprint of half of the programs varies over the run. The mean over the run is below 70\% of the peak for
-11 of the 23 programs (GCC's cc1, the four GAP kernels, Lua, LULESH, miniVite, Perl, Python and SQLite), and it
+11 of the 25 programs (GCC's cc1, the four GAP kernels, Lua, LULESH, miniVite, Perl, Python and SQLite), and it
 is 0.36 to 0.40 times the peak for the four GAP kernels. A scheduler that holds the peak for such a job reserves memory that
 the job leaves unused for most of its run. \figref{fig:motivation} shows Python's footprint, which rises and
 falls seven times. \memprint{} windowed at 5\% follows it within a few percent. Massif's curve, on its clock of
@@ -336,6 +355,24 @@ instructions, follows its phases but sits above it, because Massif counts reques
 allocates memory it never touches (1.29 times the true peak).
 DHAT records only the peak, its time and the heap at exit, so a curve built from those points misses every phase
 but one.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/llm_curves.pdf}
+\caption{The two LLM engines at their largest inputs: the true footprint over the run, the RSS, and the curves
+and peaks the estimators report, each on its own clock rescaled to progress.}
+\label{fig:llmcurves}
+\end{figure}
+
+The LLM engines differ from the rest of the corpus in where their memory is (\figref{fig:llmcurves}). Both map
+the model's weights from the file, and both read all of them for the first token, so the true footprint reaches 90\%
+of its peak within the first 1 to 2\% of a llama2.c run and stays there (mean 0.96 to 0.98 of the peak). llama.cpp
+reaches it at 12\% of a 128-token run, and its mean is 0.89 of the peak.
+The heap profilers see only the heap: 0.08 to 0.21 of llama2.c's peak, and the KV cache and compute buffers of
+llama.cpp. \memprint{} windowed at 5\% reaches about the right peak (0.86 to 1.00 over the five configurations), but late: its curve reaches 90\% of
+the peak at 19 to 20\% of a llama2.c run and at 56\% of the llama.cpp run, because between its windows it tracks
+heap blocks and writable pages, not a read-only file mapping, so it learns of the weights only when a window
+watches the program reading them. Pages only, which never watches, reads llama2.c at 0.02 to 0.05 of its peak.
 
 \subsection{Cost}
 
@@ -350,8 +387,13 @@ prediction). The black bar is the median.}
 \memprint{}'s windowed estimates are not cheaper than the heap profilers on these short runs
 (\figref{fig:cost}). At the largest inputs, the median slowdown is 1.4$\times$ for heaptrack, 1.2$\times$ for
 gperftools, 5.7$\times$ for Massif (6.4$\times$ with its clock in milliseconds) and 23.8$\times$ for DHAT, against 6.3$\times$ for \memprint{} pages only,
-8.9$\times$ at 1\% watched and 11.4$\times$ at 5\% watched. The full Pin trace costs 226.8$\times$ (56.1 to
-772.5$\times$). Pin's fixed start-up cost weighs heavily on runs of a few seconds, and the windowed mode is
+8.9$\times$ at 1\% watched and 11.4$\times$ at 5\% watched. The full Pin trace costs 226.8$\times$ (41.2 to
+772.5$\times$). The two LLM engines sit at the ends of that range. llama2.c, a single-threaded run of 2 to
+15\,s, costs 41 to 49$\times$ under the full trace, 3.5 to
+6.6$\times$ under \memprint{} at 5\% and 19 to 21$\times$ under DHAT. llama.cpp, a sub-second run with four
+threads, costs 469 to 604$\times$ under the full trace, 47 to 91$\times$ under \memprint{} at 5\%, 82 to
+137$\times$ under Massif and 182 to 280$\times$ under DHAT, while heaptrack and gperftools stay at 2.4 to
+5.8$\times$. Pin's fixed start-up cost weighs heavily on runs of a few seconds, and the windowed mode is
 slowest on programs with much code to re-translate (GCC's cc1, 93.6$\times$ at 1\%). The static route needs no
 run of the program, but its interpreter takes 7 to 59{,}000 times the native run. It predicts atax MEDIUM in
 0.8\,s, the other PolyBench kernels at MEDIUM in 13 to 24\,s and HPCCG in 255 to 989\,s, but NPB IS and CG at
@@ -394,49 +436,58 @@ seeds, log scale). Left: the truth is bytes touched. Right: the truth is the RSS
 \subsection{An exact footprint curve}
 
 Knowing a job's footprint curve, rather than its peak, is where most of the gain lies. At load 0.8 the exact
-curve gives a mean response time of 90 minutes, against 460 minutes for the exact peak and 2{,}215 minutes for
-the user's request, under the bytes-touched truth, which makes the curve 24.6$\times$ better than the request and
-the peak 4.8$\times$ better. The RSS truth gives the same picture (91, 436 and 2{,}197 minutes). The curve lets
-the scheduler keep 79\% of all memory resident with jobs, against 58\% for the exact peak and 27\% for the request,
-because jobs whose peaks fall at different times share the memory that a peak would hold idle. Coarsening the
-exact curve to the 20 widened windows used for every measured curve raises the response to 158 minutes, so
-about four fifths of the curve's advantage over the peak survives the resolution and the timing slack a measured
-curve needs.
+curve gives a mean response time of 84 minutes, against 448 minutes for the exact peak and 2{,}208 minutes for
+the user's request, under the bytes-touched truth, which makes the curve 26.4$\times$ better than the request and
+5.3$\times$ better than the peak, and the peak 4.9$\times$ better than the request. The RSS truth gives the same
+picture (99, 423 and 2{,}183 minutes). The curve lets the scheduler keep 81\% of all memory resident with jobs,
+against 58\% for the exact peak and 27\% for the request, because jobs whose peaks fall at different times share
+the memory that a peak would hold idle. Coarsening the exact curve to the 20 widened windows used for every
+measured curve raises the response to 173 minutes, so about three quarters of the curve's advantage over the peak
+survives the resolution and the timing slack a measured curve needs.
 The gap widens with load (\figref{fig:load}). At load 0.4 every oracle that does not over-reserve keeps
 up with arrivals, and from load 0.6 the peak and the request saturate memory while the curve does not.
 
 \subsection{Measured estimators}
 
-\memprint{}'s windowed curves are the only measured estimates that beat the exact peak, and only under the
-bytes-touched truth. With calibrated 90\% margins, \memprint{} windowed at 1\% gives 358 minutes, at 5\% 391 minutes
-and pages only 381 minutes, against 460 minutes for the exact peak, 589 minutes for reactive resizing, 930 to
-979 minutes for the RSS, gperftools and DHAT peaks, and 1{,}077 minutes for heaptrack's curve. However, the
-\memprint{} curves still lose to the exact curve by a factor of four, for two reasons. First, the 20-window
-coarsening alone costs a factor of 1.8 (from 90 to 158 minutes). Second, a calibrated 90\% margin leaves the
-programs that need more than the 90th-percentile margin under-reserved, which causes 375 to 391 OOM kills per
-stream. With a fixed 10\% margin, \memprint{} pages only has no kills and gives 370 minutes.
+\memprint{} windowed at 5\% is the only measured estimate that beats the exact peak, and only under the
+bytes-touched truth. With calibrated 90\% margins it gives 389 minutes, against 448 minutes for the exact peak,
+469 for \memprint{} pages only, 580 for reactive resizing, 765 for \memprint{} windowed at 1\%, and 985 and 1{,}011
+minutes for the RSS and DHAT peaks. The LLM engines cost the other two \memprint{} curves their place: without
+them, pages only and windowed at 1\% gave 381 and 358 minutes, but their curves lag the weights the engines read
+at the start (\secref{sec:corpus}), and the margin that covers 90\% of the programs rises from 4 to 8\% for pages
+only and from 5 to 14\% for windowed at 1\% (\tabref{tab:margins}), with 1{,}117 to 1{,}901 OOM kills per stream.
+The \memprint{} 5\% curve still loses to the exact curve by a factor of 4.6, for two reasons. First, the 20-window
+coarsening alone costs a factor of 2.1 (from 84 to 173 minutes). Second, a calibrated 90\% margin leaves the
+programs that need more than the 90th-percentile margin under-reserved, which causes 461 OOM kills per stream.
+With a fixed 10\% margin it gives 470 minutes and 216 kills.
 
 Massif reports the heap over the whole run, not only its peak, and its curve follows a program's phases on its
-default clock of instructions executed. With calibrated 90\% margins it gives 2{,}175 minutes, close to the
-user's request, because the headroom that covers 90\% of the programs is 48\% of its peak (\tabref{tab:margins}).
-Two kinds of program set that headroom. Massif reads GCC's cc1 at 0.16 times its peak, because the compiler's
-garbage collector maps its own pages, and on the four GAP kernels its clock of instructions drifts from the
-truth's clock of memory references enough to need 12 to 53\% headroom. With a fixed 10\% margin, which leaves
-those jobs to be killed (1{,}242 kills per stream), Massif gives 875 minutes, between heaptrack and DHAT. The clock
-matters. With Massif's clock in milliseconds under Valgrind, which includes Valgrind's start-up and runs at a
-different pace from the native program, the headroom rises to 84\% and the response time to 3{,}973 minutes. On
-atax, for example, the heap reaches a tenth of its peak at 48\% of Massif's millisecond clock but at the start of
-the native run. Massif with \texttt{--pages-as-heap} counts mapped pages, 1.32 times the true peak at the median,
-and gives 4{,}594 minutes. The heap profilers' peaks (DHAT,
-gperftools) are within 5\% of the true peak for 19 of the 23 programs, so they come close to the exact peak for
-most jobs, but they read GCC's cc1 at 0.14 to 0.16 times its true peak, and its jobs are killed and restarted repeatedly
-(912 to 1{,}308 kills per stream). The ML peak (2{,}006 minutes) improves little on the request it scales, because
-its 0.95-quantile prediction of $u$ covers only 76\% of jobs from unseen users. Reactive resizing (589 minutes)
-is the best oracle that needs no profile, although it is shown its future resizes when the job is admitted.
+default clock of instructions executed. With calibrated 90\% margins it gives 2{,}399 minutes, worse than the
+user's request, because the headroom that covers 90\% of the programs is 52\% of its peak (\tabref{tab:margins}).
+Three kinds of program set that headroom. Massif reads GCC's cc1 at 0.16 times its peak, because the compiler's
+garbage collector maps its own pages, and llama2.c at 0.17, because its weights are a file mapping, and on the four
+GAP kernels its clock of instructions drifts from the truth's clock of memory references enough to need 12 to 53\%
+headroom. With a fixed 10\% margin, which leaves those jobs to be killed (1{,}714 kills per stream), Massif gives
+991 minutes, close to DHAT. The clock matters. With Massif's clock in milliseconds under Valgrind, which includes
+Valgrind's start-up and runs at a different pace from the native program, the headroom rises to 100\% and the
+response time to 4{,}268 minutes. On atax, for example, the heap reaches a tenth of its peak at 48\% of Massif's
+millisecond clock but at the start of the native run. Massif with \texttt{--pages-as-heap} counts mapped pages,
+1.32 times the true peak at the median, and gives 4{,}670 minutes. The heap profilers' peaks (DHAT, gperftools) are
+within 5\% of the true peak for 20 of the 25 programs, so they come close to the exact peak for most jobs, but
+they read GCC's cc1 at 0.14 to 0.16 times its true peak and llama2.c at 0.17, and those jobs are killed and
+restarted repeatedly. For DHAT, these two programs fall above the 90th percentile of the margins, so its calibrated
+margin stays at 6\% and it gives 1{,}011 minutes with 1{,}323 kills per stream. For gperftools and heaptrack a third
+program falls there as well, Python, whose heap they read at 0.21 and 0.14 times its peak, so the margin that
+covers 90\% of the programs becomes 233\% and 326\% of the estimate, every job reserves three to four times its
+estimate, and the response time rises to 10{,}476 and 11{,}778 minutes, about five times the request's. With a fixed 10\%
+margin, which accepts those kills, they give 1{,}158 and 1{,}154 minutes. The ML peak (1{,}991 minutes) improves
+little on the request it scales, because its 0.95-quantile prediction of $u$ covers only 76\% of jobs from unseen
+users. Reactive resizing (580 minutes) is the best oracle that needs no profile, although it is shown its future
+resizes when the job is admitted.
 
 \begin{table}[t]
 \centering
-\caption{The margin each oracle needs to stay above the truth, as a share of its own peak (\%), over the 23
+\caption{The margin each oracle needs to stay above the truth, as a share of its own peak (\%), over the 25
 programs at their largest inputs.}
 \label{tab:margins}
 \input{tables/margins.tex}
@@ -444,13 +495,13 @@ programs at their largest inputs.}
 
 \subsection{The RSS truth and the time axis}
 
-Under the RSS truth, the measured curves lose their advantage. \memprint{}'s windowed curves give 1{,}807 to
-1{,}814 minutes, worse than the DHAT peak (1{,}277 minutes) and the \memprint{} 5\% peak (1{,}038 minutes). The
+Under the RSS truth, the measured curves lose their advantage. \memprint{}'s windowed and pages-only curves give
+1{,}869 to 2{,}516 minutes, worse than the DHAT peak (1{,}302 minutes) and the \memprint{} 5\% peak (959 minutes). The
 reason is the margin, not the shape. \memprint{}'s curve is on a clock of memory references, while the RSS truth
 is on wall-clock seconds, so a phase falls at a slightly different point of progress on the two curves, and
 \memprint{} counts bytes rather than pages, which is half of miniVite's RSS. The margin that covers 90\% of the
-programs is therefore 58\% of the peak, against 2\% under the bytes-touched truth (\tabref{tab:margins}), and a
-curve with 58\% headroom on its peak reserves more than a peak. A curve oracle is thus only as useful as its time
+programs is therefore 57\% of the peak for \memprint{} at 5\%, against 6\% under the bytes-touched truth
+(\tabref{tab:margins}), and a curve with 57\% headroom on its peak reserves more than a peak. A curve oracle is thus only as useful as its time
 axis is faithful to wall-clock time. Under the bytes-touched truth the \memprint{} curves share the truth's clock
 of memory references, which favours them, and the RSS truth is the closer model of a real deployment. \memprint{} does not record
 the native time of each snapshot today, and whether doing so closes the gap is left for future work.
@@ -469,11 +520,13 @@ the native time of each snapshot today, and whether doing so closes the gap is l
 No margin policy rescues an estimator that is badly wrong for some programs (\figref{fig:margins}). A small
 margin lets those programs' jobs be killed, and a margin large enough to cover them over-reserves every other
 job. With calibrated 100\% margins, every heap profiler must cover GCC's cc1, whose peak it reads at 0.14 to 0.16, so each
-job reserves about 6.5 times its estimate and the response time rises to about 16{,}000 minutes. The \memprint{}
-curves need at most 7 to 19\% under the bytes-touched truth, and their response time with calibrated 100\% margins
-is 362 to 563 minutes. Taking each oracle at its best margin policy changes the order little
-(\figref{fig:loadbest} in the appendix): under the bytes-touched truth, \memprint{} windowed at 5\% gives 362
-minutes, heaptrack 766, Massif 875 (1{,}897 with its millisecond clock) and DHAT 979.
+job reserves about 6.5 times its estimate and the response time rises to 15{,}000 to 17{,}000 minutes. Before the
+LLM engines joined the corpus, the \memprint{} curves needed at most 7 to 19\% under the bytes-touched truth; their
+late view of the mapped weights raises that to 40\% at 5\% watched, 136\% at 1\% and 41 times the estimate for
+pages only (llama2.c), so with calibrated 100\% margins they give 1{,}299, 4{,}984 and 9{,}440 minutes. Taking each
+oracle at its best margin policy changes the order little (\figref{fig:loadbest} in the appendix): under the
+bytes-touched truth, \memprint{} windowed at 5\% gives 389 minutes, \memprint{} pages only 469, Massif 991 (1{,}644
+with its millisecond clock), DHAT 1{,}011 and heaptrack and gperftools 1{,}154 and 1{,}158.
 
 \subsection{Footprints predicted from source}
 
@@ -496,6 +549,57 @@ and the margin calibrated on the other eight programs is 0\%, which does not cov
 times, which wastes memory rather than causing kills. Under the RSS truth the static curve, like the windowed one,
 needs more headroom, and it gives 1{,}709 minutes against 1{,}399 for the DHAT peak.
 
+\subsection{LLM inference jobs}
+\label{sec:llm}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/llm_response_vs_load.pdf}
+\caption{A stream of LLM inference jobs alone (llama2.c with three models, llama.cpp with two lengths): mean
+response time against offered load, calibrated 90\% margins, each configuration's margin calibrated on the other
+four.}
+\label{fig:llm}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{The LLM stream at offered load 0.8, calibrated 90\% margins (10\% for the request, ML and reactive
+oracles), mean of three seeds; columns as in \tabref{tab:load08}.}
+\label{tab:llm}
+\resizebox{\textwidth}{!}{\input{tables/grid_llm_08.tex}}
+\end{table}
+
+To see how the estimators fare on a kind of job whose memory is mostly read-only model weights, we replay a
+stream made of the LLM engines alone (\figref{fig:llm}, \tabref{tab:llm}). Each job takes the footprint and the
+estimates of one of the five traced configurations (llama2.c with the 15M, 42M and 110M models, and llama.cpp
+with 32 and 128 tokens), and each configuration's calibrated margin comes from the other four, as a site that has
+run other models or lengths of the same engines would set it.
+
+These footprints are flat, so the curve gains less over the peak than in the full corpus: at load 0.8 the exact
+curve gives 180 minutes, the exact peak 307 and the request 2{,}067 under the bytes-touched truth, a 1.7$\times$
+gain of the curve over the peak against 5.3$\times$ for the full corpus. The best measured estimate is the RSS
+peak of an earlier run, 598 minutes with no kills under the bytes-touched truth and equal to the exact peak under
+the RSS truth, because the weights the RSS counts are the footprint. Reactive resizing gives 753 minutes and
+\memprint{}'s 5\% peak 785 minutes, 602 kills per stream.
+
+Every heap profiler fails. They read llama2.c at 0.08 to 0.21 of its peak and llama.cpp at about 1.05, so the
+margin calibrated on the other configurations cannot cover llama2.c's jobs, which would need headroom of 3.8 to
+10.6 times the estimate: with calibrated margins Massif, DHAT, heaptrack and gperftools give 8{,}747 to 9{,}344 minutes and 1{,}195
+kills per stream, four times the request. With a fixed 10\% margin, llama2.c's jobs are killed until the requeue
+factor has raised their reservation enough, 9{,}050 to 9{,}647 times per stream for DHAT, Massif and gperftools
+(15{,}661 for heaptrack), and their response of 613 to 823 minutes hides that waste. Massif with \texttt{--pages-as-heap} counts the file mapping and never under-reads, so it is never
+killed, but it over-reserves (2{,}650 minutes).
+
+\memprint{}'s curves fail for a different reason. Its peaks are about right (0.86 to 1.00 of the true peak at 5\%
+watched), but its curves reach the peak late (\secref{sec:corpus}), while every job's footprint jumps to the
+weights in the first percent of its run. A curve reservation is therefore too small at the start of every job,
+and the configurations need 17 to 96\% headroom at 5\% watched; the calibrated margin covers some and not others,
+and the curves give 3{,}120 to 6{,}685 minutes with 610 to 1{,}049 kills per stream. Pages only, which never watches,
+needs headroom of 20 to 41 times its estimate for llama2.c. This is the same finding as under the RSS truth, from another
+cause: a curve is worth only as much as its timing, and \memprint{}'s windowed timing misses memory that a
+program maps and reads before the first window. Tracking the residency of file mappings between windows, as the
+windowed mode already does for heap blocks, might address it; we have not tested it.
+
 \subsection{Memory needed for the same service}
 
 \begin{figure}[t]
@@ -509,13 +613,15 @@ on the 128\,GB cluster). Local memory per node was swept over 64, 96, 128, 160, 
 
 The response-time gains translate into memory a site would have to buy (\figref{fig:capacity}). At a fixed
 arrival rate, the exact curve meets the target with 128\,GB per node (5.0\,TB in all). Under the bytes-touched
-truth, \memprint{}'s windowed and pages-only curves and the exact peak need 160\,GB per node (6.0\,TB, 20\% more),
-reactive resizing and an earlier run's RSS 192\,GB (7.0\,TB, 40\% more), DHAT, gperftools and heaptrack 256\,GB
-(9.0\,TB, 80\% more), and Massif's curve, the request and the ML peak 320\,GB (11.0\,TB, 120\% more). Massif's
-curve on its millisecond clock and the DHAT curve do not meet the target even at 320\,GB per node. Under the RSS truth, the exact peak and the RSS of an
-earlier run need 6.0\,TB, reactive resizing 7.0\,TB, and \memprint{}'s curves, the heap profilers' peaks, the ML
-peak and the request 9.0\,TB, which repeats the finding that a curve on a reference clock loses its advantage
-against a wall-clock truth.
+truth, the exact peak needs 160\,GB per node (6.0\,TB, 20\% more), \memprint{}'s windowed and pages-only curves
+and reactive resizing 192\,GB (7.0\,TB, 40\% more), DHAT, an earlier run's RSS and the ML peak 256\,GB (9.0\,TB,
+80\% more), and Massif's curve and the request 320\,GB (11.0\,TB, 120\% more). gperftools, heaptrack, Massif's
+curve on its millisecond clock and the DHAT curve do not meet the target even at 320\,GB per node. With the LLM
+engines in the corpus, \memprint{}'s curves need one step more than before (192 instead of 160\,GB per node), and
+gperftools and heaptrack fall from 256\,GB to never, through their calibrated margins. Under the RSS truth, the
+exact peak and the RSS of an earlier run need 6.0\,TB, reactive resizing 7.0\,TB, \memprint{} windowed at 5\%,
+DHAT, Massif, the ML peak and the request 9.0\,TB, and \memprint{} pages only 11.0\,TB, which repeats the finding
+that a curve on a reference clock loses its advantage against a wall-clock truth.
 
 \subsection{What each estimator's cost buys}
 
@@ -529,14 +635,14 @@ curve's cost is the full Pin trace under the bytes-touched truth and an RSS samp
 \end{figure}
 
 \figref{fig:roi} sets each estimator's cost against what it buys. Under the bytes-touched truth, the full Pin
-trace costs 227 times the native run and gives a 24.6$\times$ gain over the request as a curve, or 4.8$\times$ as a
-peak. \memprint{}'s windowed and pages-only curves cost 6 to 11 times the native run and give about 6$\times$, which
-is a quarter of the exact curve's gain at a twentieth of its cost or less. heaptrack and gperftools cost under
-1.5$\times$ and give 2 to 3$\times$, DHAT costs 24$\times$ and gives 2.3$\times$, and Massif's curve costs
-5.7$\times$ and gives 2.5$\times$ (1.2$\times$ with its millisecond clock). An earlier run's RSS costs nothing extra and gives 2.4$\times$ under the
-bytes-touched truth, and under the RSS truth it is the truth's peak. Under the RSS truth the measured curves give
-about 2$\times$, the same as the heap profilers' peaks, so the profiling cost buys little until the curve's time
-axis is fixed.
+trace costs 227 times the native run and gives a 26.4$\times$ gain over the request as a curve, or 4.9$\times$ as a
+peak. \memprint{} windowed at 5\% costs 11 times the native run and gives 5.7$\times$, about a fifth of the exact
+curve's gain at a twentieth of its cost; pages only and windowed at 1\% cost 6 and 9 times and give 4.7$\times$ and
+4.3$\times$. heaptrack and gperftools cost under 1.5$\times$ and give 1.9$\times$, DHAT costs 24$\times$ and gives
+2.2$\times$, and Massif's curve costs 5.7$\times$ and gives 2.2$\times$ (1.3$\times$ with its millisecond clock). An
+earlier run's RSS costs nothing extra and gives 2.2$\times$ under the bytes-touched truth, and under the RSS truth it
+is the truth's peak. Under the RSS truth the measured curves give 1.6 to 1.7$\times$ and the heap profilers' peaks
+1.8 to 2.1$\times$, so the profiling cost buys little until the curve's time axis is fixed.
 
 
 \section{DHAT curves}
@@ -557,14 +663,16 @@ the DHAT peak oracle.
 \label{fig:dhat}
 \end{figure}
 
-Both DHAT curves do worse than the DHAT peak under every margin policy and both truths (\figref{fig:dhat}). At
-load 0.8 with calibrated 90\% margins, the DHAT curve gives 3{,}443 minutes and the hold-then-decay curve 4{,}342
-minutes, against 979 minutes for the DHAT peak, under the bytes-touched truth, and 3{,}074, 3{,}983 and 1{,}277
-minutes under the RSS truth. With fixed margins the curves are worse still (7{,}460 and 9{,}417 minutes at 10\%),
-because they fall below the truth wherever a program has more than one phase, and their jobs are killed 5{,}100
-to 5{,}836 times per stream. The median program needs 36\% headroom on the DHAT curve (21\% on hold-then-decay)
-and the 90th percentile needs 90\% (\tabref{tab:margins}). The average of the DHAT curve over the run is 0.87 times
-the true mean footprint at the median, so it under-reserves on average as well as in places. DHAT's three
+Both DHAT curves do worse than the DHAT peak under every margin policy and both truths, except with calibrated
+100\% margins, where all three reserve for GCC's cc1 and give about the same (15{,}000 to 17{,}000 minutes;
+\figref{fig:dhat}). At load 0.8 with calibrated 90\% margins, the DHAT curve gives 3{,}512 minutes and the
+hold-then-decay curve 4{,}161 minutes, against 1{,}011 minutes for the DHAT peak, under the bytes-touched truth, and
+3{,}008, 3{,}943 and 1{,}302 minutes under the RSS truth. With fixed margins the curves are worse still (8{,}263 and
+10{,}648 minutes at 10\%), because they fall below the truth wherever a program has more than one phase, and their
+jobs are killed 5{,}751 to 7{,}642 times per stream. The median program needs 36\% headroom on the DHAT curve (21\%
+on hold-then-decay) and the 90th percentile needs 90\% (\tabref{tab:margins}). The average of the DHAT curve over
+the run is 0.81 times the true mean footprint at the median over the 71 (program, input) pairs, so it
+under-reserves on average as well as in places. DHAT's three
 points therefore do not substitute for a measured curve. The information that makes a curve useful to a
 scheduler is the timing of every phase, and DHAT records the timing of one.
 
@@ -574,7 +682,7 @@ scheduler is the timing of every phase, and DHAT records the timing of one.
 
 The results rest on a model of a cluster and of its jobs, and each simplification limits what they show.
 
-\paragraph{Scaled footprints.} The corpus programs peak at 15 to 275\,MB, and the simulated jobs at tens to
+\paragraph{Scaled footprints.} The corpus programs peak at 15 to 450\,MB, and the simulated jobs at tens to
 hundreds of GB. Scaling a measured curve to a job's size keeps its shape and every estimator's ratio to the
 truth, but it assumes the ratio does not change with the input. The corpus shows that it often does at small
 inputs: \memprint{} windowed at 5\% reads 0.61 to 0.92 times the peak of the PolyBench kernels at SMALL, and 1.00
@@ -597,7 +705,12 @@ that killed a job only once, or that swapped instead of killing, would change th
 \paragraph{Costs.} The costs were measured with up to 15 runs sharing the node, so they are slowdowns under
 load, and Pin's fixed start-up cost weighs heavily on runs of a few seconds. Longer jobs would amortise it.
 
-\paragraph{The static route.} The static predictions cover 9 of the 23 programs. They predict a whole-run
+\paragraph{LLM inference.} The LLM jobs are single completions of 32 to 128 tokens on the CPU, scaled like every
+other program. A serving engine that runs for hours fills its KV cache over many requests, and a GPU engine keeps
+its weights in device memory, so neither shape is covered here. llama.cpp's 360M model could not be traced, so the
+corpus has llama.cpp at two inputs of one model.
+
+\paragraph{The static route.} The static predictions cover 9 of the 25 programs. They predict a whole-run
 footprint for C++ programs, so a program that frees and reallocates its data, such as LULESH, is over-predicted,
 and the interpreter takes up to 5.5 hours for one input of NPB CG.
 
@@ -607,12 +720,15 @@ and the interpreter takes up to 5.5 hours for one input of NPB CG.
 
 An exact footprint is worth most to a scheduler on disaggregated memory as a curve over the job's run, and
 the gain comes from letting jobs with peaks at different times share memory. On our corpus and streams, the
-exact curve gives a 24.6$\times$ shorter mean response time than the user's request and needs 5.0\,TB where the
+exact curve gives a 26.4$\times$ shorter mean response time than the user's request and needs 5.0\,TB where the
 request needs 11.0\,TB. Heap profilers get most peaks right, but their large errors on a few programs, which
 come from memory that is mapped outside the heap or allocated and never touched, cannot be covered by any margin
-without over-reserving every other job. Among measured estimators, \memprint{}'s windowed curves come closest to
-the exact curve, with the smallest margins (2 to 5\% for 90\% of programs) and 20\% more memory than the exact
-curve for the same service, at 6 to 11 times the native run time. DHAT's three recorded points do not make a
+without over-reserving every other job; LLM engines, whose weights are a file mapping, add a third such program,
+which pushes the calibrated margins of heaptrack and gperftools past twice their estimates. Among measured
+estimators, \memprint{} windowed at 5\% comes closest to the exact curve, with the smallest margin (6\% for 90\% of
+programs) and 40\% more memory than the exact curve for the same service, at 11 times the native run time. On LLM
+jobs alone it fails, because its curve learns of the weights only in its windows, while the footprint reaches its
+peak in the first percent of the run; there an earlier run's RSS peak is the best measured estimate. DHAT's three recorded points do not make a
 usable curve. Two results set the direction of further work. First, under the RSS truth every measured curve
 loses its advantage because its clock is not wall-clock time, so \memprint{} should record the native time of
 each snapshot and estimate resident pages as well as bytes touched. Second, the static route predicts footprints

@@ -5,7 +5,7 @@
 #
 # Writes $CORPUS/<prog>/<input>/<method>/ (the method's raw output) and appends
 # "<prog> <input> <method> <exit> <wall s> <max RSS KB>" to $CORPUS/done.txt (the cost of the method).
-# EMPTY in the command stands for an empty argument. Methods:
+# EMPTY in the command stands for an empty argument, and _SP_ for a space inside one (a prompt). Methods:
 #   native       the program alone, its RSS every 5 ms (rss.csv) and instruction count (perf.txt)
 #   truth        MemPrint splitter, live bytes touched over time (-track_frees), the full Pin estimate
 #   W1 | W5      MemPrint windowed, 1% / 5% of the run watched
@@ -35,7 +35,7 @@ export OMP_NUM_THREADS=$threads OMP_WAIT_POLICY=passive
 out=$CORPUS/$prog/$input/$method
 rm -rf "$out"; mkdir -p "$out"
 read -r -a args <<< "$cmd"
-for k in "${!args[@]}"; do [[ ${args[k]} == EMPTY ]] && args[k]=""; done
+for k in "${!args[@]}"; do [[ ${args[k]} == EMPTY ]] && args[k]=""; args[k]=${args[k]//_SP_/ }; done
 stdin=/dev/null
 [[ $prog == darknet ]] && stdin=$HOME/memprint-data/2026-10-0x-memory_estimator/win/cand/images.txt
 

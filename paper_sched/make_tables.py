@@ -1,6 +1,6 @@
 """Tables for paper_sched/main.tex (LaTeX fragments in paper_sched/tables/).
 
-    python paper_sched/make_tables.py --data ~/memprint-data/2026-10-11-sched
+    python paper_sched/make_tables.py --data ~/memprint-data/2026-10-13-sched-llm
 """
 import argparse
 import glob
@@ -19,7 +19,8 @@ NAMES = {"2mm": "2mm", "atax": "atax", "gemm": "gemm", "jacobi-2d": "jacobi-2d",
          "darknet": "darknet", "gap-bfs": "GAP bfs", "gap-cc": "GAP cc", "gap-pr": "GAP pr",
          "gap-sssp": "GAP sssp", "hpccg": "HPCCG", "kripke": "Kripke", "lua": "Lua", "lulesh": "LULESH",
          "miniVite": "miniVite", "minife": "MiniFE", "npb-cg": "NPB CG", "npb-is": "NPB IS", "npb-mg": "NPB MG",
-         "perl": "Perl", "python": "Python", "quicksilver": "Quicksilver", "sqlite": "SQLite"}
+         "perl": "Perl", "python": "Python", "quicksilver": "Quicksilver", "sqlite": "SQLite",
+         "llama2c": "llama2.c", "llamacpp": "llama.cpp"}
 
 
 def fmt(x, d=2):
@@ -73,8 +74,8 @@ def run_label(o):
     return STYLE[o][0].replace("%", r"\%")
 
 
-def grid_table(data, out, load=0.8):
-    files = sorted(glob.glob(f"{data}/results/grid_all*.csv"))
+def grid_table(data, out, load=0.8, pattern="grid_all*.csv", name=None):
+    files = sorted(glob.glob(f"{data}/results/{pattern}"))
     if not files:
         return
     g = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
@@ -98,13 +99,13 @@ def grid_table(data, out, load=0.8):
             r"\cmidrule(lr){2-6} \cmidrule(lr){7-11}" "\n"
             r"Oracle & Resp. (min) & BSLD & Kills & Res. \% & Used \% & Resp. (min) & BSLD & Kills & Res. \% & Used \% \\"
             "\n" r"\midrule")
-    open(f"{out}/grid_{str(load).replace('.', '')}.tex", "w").write(
+    open(f"{out}/{name or 'grid_' + str(load).replace('.', '')}.tex", "w").write(
         head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-11-sched"))
+    ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-13-sched-llm"))
     ap.add_argument("--out", default=os.path.join(HERE, "tables"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -112,6 +113,7 @@ def main():
     corpus_table(a.data, a.out)
     margins_table(a.data, a.out)
     grid_table(a.data, a.out)
+    grid_table(a.data, a.out, pattern="grid_llm*.csv", name="grid_llm_08")
     print("tables written to", a.out)
 
 

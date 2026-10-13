@@ -2,7 +2,7 @@
 
     python paper_sched/make_figures.py --data DIR [--out paper_sched/figures]
 
-DIR is the study's data directory (not in the repository), ~/memprint-data/2026-10-11-sched:
+DIR is the study's data directory (not in the repository), ~/memprint-data/2026-10-13-sched-llm:
 
     corpus/curves.csv, corpus/costs.csv     every method's footprint curve and cost (analysis/memprint/sched/corpus.py)
     corpus/static_summary.csv               static predictions and their time
@@ -90,6 +90,30 @@ def load_corpus(data):
     cv = pd.read_csv(f"{data}/corpus/curves.csv", dtype={"input": str})
     costs = pd.read_csv(f"{data}/corpus/costs.csv", dtype={"input": str})
     return cv, costs
+
+
+def fig_llm_curves(cv, out, cases=(("llama2c", "110M", "llama2.c, stories110M, 128 tokens"),
+                                    ("llamacpp", "135m-n128", "llama.cpp, SmolLM2-135M, 128 tokens"))):
+    """The LLM engines: the true footprint against RSS, MemPrint and the heap profilers over the run."""
+    fig, axes = plt.subplots(1, len(cases), figsize=(6.8, 2.3))
+    for ax, (prog, inp, title) in zip(axes, cases):
+        g = cv[(cv.prog == prog) & (cv.input == inp)]
+        c = {m: h.sort_values("k").bytes.to_numpy() / 1e6 for m, h in g.groupby("method")}
+        p = (np.arange(len(c["truth"])) + 0.5) / len(c["truth"])
+        ax.fill_between(p, 0, c["truth"], color=INK, alpha=0.12, linewidth=0, label="True footprint (bytes touched)")
+        ax.plot(p, c["truth"], color=INK, linewidth=1.0)
+        ax.plot(p, c["rss"], color=PAL[5], linewidth=1.0, linestyle=(0, (1, 1.5)), label="Resident set (RSS)")
+        for m, o in [("W5", "memprint-W5"), ("P", "memprint-P"), ("massifi", "massif-i"), ("heaptrack", "heaptrack")]:
+            lab, col, _, dash = style(o)
+            ax.plot(p, c[m], color=col, linestyle=dash, label=lab)
+        ax.axhline(c["dhat"].max(), color=PAL[2], linewidth=0.9, linestyle=(0, (6, 2, 1, 2)), label="DHAT peak")
+        ax.set_title(title)
+        ax.set_xlabel("Progress through the run")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, None)
+    axes[0].set_ylabel("Memory (MB)")
+    axes[0].legend(loc="upper center", bbox_to_anchor=(1.1, -0.3), ncol=4)
+    save(fig, out, "llm_curves")
 
 
 def fig_motivation(cv, out, prog="python", inp="1"):
@@ -373,7 +397,7 @@ def fig_dhat(g, out, load=0.8):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-11-sched"))
+    ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-13-sched-llm"))
     ap.add_argument("--out", default=os.path.join(HERE, "figures"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -398,6 +422,12 @@ def main():
         fig_response_vs_load(gs, a.out, "static_response_vs_load",
                              ["exact", "exact-peak", "memprint-static", "memprint-W5", "massif-i", "massif", "dhat",
                               "dhat-curve", "heaptrack", "request", "reactive"])
+    fig_llm_curves(cv, a.out)
+    gl = load_grid(a.data, "grid_llm*.csv")
+    if gl is not None:
+        fig_response_vs_load(gl, a.out, "llm_response_vs_load",
+                             ["exact", "exact-coarse", "exact-peak", "memprint-W5", "memprint-P", "massif-i", "dhat",
+                              "heaptrack", "gperf", "rss-peak", "request", "reactive"])
     cap = load_grid(a.data, "capacity_*.csv")
     if cap is not None:
         need = fig_capacity(cap, a.out)

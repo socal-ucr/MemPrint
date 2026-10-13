@@ -237,14 +237,23 @@ Summary: on a simulated cluster with local DRAM and a shared memory pool, knowin
 - **Massif's clock.** Massif reports the heap over the whole run; with its default instruction clock (`--time-unit=i`) the headroom covering 90% of programs is 48%, against 84% with `--time-unit=ms`, whose Valgrind start-up misaligns short runs.
 - **Cost** (median time over native, largest inputs): heaptrack 1.4×, gperftools 1.2×, Massif 5.7×, DHAT 23.8×, MemPrint pages only 6.3×, W1 8.9×, W5 11.4×, full trace 227×; the static interpreter 7× to 59,000×.
 
+### With the LLM engines (2026-10-13): 25 programs
+
+The bullets above are the 23-program study. llama2.c (stories15M/42M/110M, 128 tokens) and llama.cpp b11500 (SmolLM2-135M at 32 and 128 tokens, 360M at 64; 4 threads) were added to the corpus under the same 12 methods and Pin tool (`corpus/list_llm.txt`, `run_batch.sh`; `_SP_` in a corpus line is a space inside an argument). 874 runs; the llama.cpp 360M truth failed like NPB MG A (Pin: "Freepages: Out of memory" at 20.7 GB, alone too; the tool from the resize study and `-intervals 1` did not help), so llama.cpp is used up to 135M at 128 tokens. All grids rerun on 25 programs into `~/memprint-data/2026-10-13-sched-llm/results` (corpus and traces linked; the static panel's grids reused). The 23-program results stay in `2026-10-11-sched/results` (`curves_23.csv`, `costs_23.csv`); the 23 programs' curves are unchanged.
+
+- **The engines map their weights from the file.** Heap profilers read llama2.c at 0.08-0.21x its peak (llama.cpp ~1.05x: its KV cache is a heap block it clears); MemPrint W5 0.86-1.00x but late: the footprint reaches 90% of its peak in the first 1-2% of a llama2.c run, W5's curve at 19-20% (it learns of a read-only file mapping only inside a window); pages only reads llama2.c at 0.02-0.05x.
+- **Main stream, load 0.8, bytes truth, calibrated 90%:** exact curve 84 min, MemPrint W5 389, exact peak 448, MemPrint pages only 469 (was 381), reactive 580, W1 765 (was 358), RSS peak 985, DHAT 1,011, ML 1,991, request 2,208, Massif 2,399, gperftools 10,476 (was 955), heaptrack 11,778 (was 1,077). gperftools and heaptrack collapse because llama2.c is a third program they badly under-read (with cc1 and Python), so the 90th-percentile margin becomes 233% and 326%. Curve over request 26.4x, over peak 5.3x. Memory for the same service: exact curve 5.0 TB, exact peak 6.0, MemPrint curves 7.0 (was 6.0), gperftools and heaptrack never.
+- **LLM-only stream** (`programs="llm"` in `run.Setup`: the five configurations, each calibrated on the other four; `results/grid_llm.csv`): exact curve 180, exact peak 307, RSS peak 598 (no kills; under the RSS truth it is the exact peak), reactive 753, MemPrint 5% peak 785, request 2,067; heap profilers 8,747-9,344 with 1,195 kills (llama2.c needs 3.8-10.6x headroom), MemPrint curves 3,120-6,685 (needing 17-96% headroom at 5%: the late view of the weights). Flat footprints: the curve gains only 1.7x over the peak.
+- Paper: `paper_sched/` (new figures `llm_curves`, `llm_response_vs_load`; table `grid_llm_08`; every number updated to 25 programs).
+
 ### Reproduce
 
     scripts/footprint_corpus.sh native "<prog> <input> <threads> <cwd> <cmd>"   # first, for each corpus line
     scripts/footprint_corpus.sh <method> "<same line>"                          # truth, W1, W5, P, massifi, dhat, ...
     python -c "from memprint.sched import corpus; corpus.build('<data>/corpus')"   # from analysis/: curves.csv, costs.csv
     python -c "from memprint.sched import run; run.run('<data>/corpus', '<data>/traces', 'grid.csv')"   # one grid
-    python paper_sched/make_figures.py --data ~/memprint-data/2026-10-11-sched
-    python paper_sched/make_tables.py --data ~/memprint-data/2026-10-11-sched
+    python paper_sched/make_figures.py --data ~/memprint-data/2026-10-13-sched-llm   # 25 programs (2026-10-11-sched: 23)
+    python paper_sched/make_tables.py --data ~/memprint-data/2026-10-13-sched-llm
 
 Data (not in the repository): `~/memprint-data/2026-10-11-sched/` (`corpus/`, `results/`, `traces/` with the Parallel Workloads Archive logs, `verify/`, `static/`).
 

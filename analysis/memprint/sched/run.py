@@ -18,8 +18,11 @@ from .model import Cluster, Job, at_slots
 from .sim import Sim
 from copy import copy
 
-ORDER = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2, "S": 0, "W": 1, "A": 2, "small": 0, "medium": 1, "large": 2}
-EXCLUDE = {("npb-mg", "A")}   # the splitter ran out of memory: no truth
+ORDER = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2, "S": 0, "W": 1, "A": 2, "small": 0, "medium": 1, "large": 2,
+         "15M": 0, "42M": 1, "110M": 2,                                  # llama2.c models
+         "135m-n32": 0, "135m-n128": 1, "360m-n64": 2}                   # llama.cpp model and tokens
+LLM = ("llama2c", "llamacpp")
+EXCLUDE = {("npb-mg", "A"), ("llamacpp", "360m-n64")}   # the splitter ran out of memory: no truth
 EXACT = {"exact", "exact-coarse", "exact-peak"}
 CALIBRATED = {"memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "memprint-static", "massif",
               "massif-pages", "massif-i", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak",
@@ -51,11 +54,18 @@ class Setup:
 
     def __init__(self, corpus, traces, n, cluster, kind="synthetic", programs=None):
         self.cluster = cluster
-        # programs: None (every program, largest input) or "static" (the programs the static route predicts, at
-        # their largest input with a prediction)
+        # programs: None (every program, largest input), "static" (the programs the static route predicts, at
+        # their largest input with a prediction) or "llm" (the LLM engines at every input, each (engine, input) a
+        # program of its own, so that a margin is calibrated on the other models and lengths)
         self.panel = programs or "all"
-        self.curves = largest(pd.read_csv(f"{corpus}/curves.csv", dtype={"input": str}),
-                              require="static" if programs == "static" else None)
+        all_curves = pd.read_csv(f"{corpus}/curves.csv", dtype={"input": str})
+        if programs == "llm":
+            keep = np.array([(p, i) not in EXCLUDE for p, i in zip(all_curves.prog, all_curves.input)], bool)
+            c = all_curves[all_curves.prog.isin(LLM).to_numpy() & keep].copy()
+            c["prog"] = c.prog + "-" + c.input
+            self.curves = c
+        else:
+            self.curves = largest(all_curves, require="static" if programs == "static" else None)
         cm5 = real.cm5_ratios(f"{traces}/LANL-CM5-1994-4.1-cln.swf.gz")
         self.cm5_train, self.cm5_test = ml.split_users(cm5)
         self.model = ml.PeakModel(self.cm5_train)
