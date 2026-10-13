@@ -41,9 +41,10 @@ estimators, \memprint{} windowed at 5\% is the only one that beats the exact pea
 most programs but read GCC's cc1 at 0.14 to 0.16 times its peak, llama2.c, whose weights are mapped from a file,
 at 0.17 times and darknet at 1.97 times, so no margin makes them safe without over-reserving every other job; with
 the LLM engines in the corpus, the calibrated margins of heaptrack and gperftools exceed twice their estimates. On a
-stream of LLM jobs alone, only an earlier run's RSS peak, reactive resizing and exact knowledge avoid repeated OOM
-kills, because the weights are touched within the first percent of a run, before \memprint{}'s first window and
-outside every heap profiler's view. Curves built from DHAT's three recorded points
+stream of LLM jobs alone, the heap profilers fail because the weights are outside the heap, and \memprint{}'s
+curves failed because they saw the weights only in their windows; tracking the program's file mappings between
+windows fixes the latter (386 instead of 4{,}134 minutes on the LLM stream, and 327 instead of 389 on the full
+corpus, where every \memprint{} curve then beats the exact peak). Curves built from DHAT's three recorded points
 do worse than DHAT's peak under every margin. When the truth is the resident set on wall-clock time, every
 measured curve, \memprint{}'s included, needs about 60\% headroom because its clock is not wall-clock time, and
 peaks do better than curves, which shows that a footprint curve is useful to a scheduler only with a faithful
@@ -98,7 +99,8 @@ following contributions:
   \item We evaluate curves derived from DHAT, which records no time series, and show why its three recorded
     points do not substitute for a measured curve (\secref{sec:dhat}).
   \item We schedule a stream of LLM inference jobs alone, whose memory is mostly model weights mapped from a file,
-    and show which estimators survive it (\secref{sec:llm}).
+    show which estimators survive it (\secref{sec:llm}), and extend \memprint{}'s windowed mode to track file
+    mappings between windows, which removes its failure there (\secref{sec:filemaps}).
 \end{itemize}
 
 \section{Background and related work}
@@ -597,8 +599,46 @@ and the configurations need 17 to 96\% headroom at 5\% watched; the calibrated m
 and the curves give 3{,}120 to 6{,}685 minutes with 610 to 1{,}049 kills per stream. Pages only, which never watches,
 needs headroom of 20 to 41 times its estimate for llama2.c. This is the same finding as under the RSS truth, from another
 cause: a curve is worth only as much as its timing, and \memprint{}'s windowed timing misses memory that a
-program maps and reads before the first window. Tracking the residency of file mappings between windows, as the
-windowed mode already does for heap blocks, might address it; we have not tested it.
+program maps and reads before the first window. \secref{sec:filemaps} adds file mappings to what the windowed
+mode tracks between windows.
+
+\subsection{Tracking file mappings between windows}
+\label{sec:filemaps}
+
+\begin{table}[t]
+\centering
+\caption{\memprint{}'s oracles before and after tracking file mappings between windows (\texttt{-file\_maps}):
+mean response time (minutes) at load 0.8, calibrated 90\% margins, mean of three seeds. Only \memprint{}'s
+windowed runs were repeated; every other oracle is unchanged.}
+\label{tab:filemaps}
+\input{tables/file_maps.tex}
+\end{table}
+
+Between windows, \memprint{}'s windowed mode tracks the program's heap blocks and anonymous mappings and reads
+their resident pages from \texttt{/proc/self/pagemap} at every snapshot, but a file mapping was not a block, so
+its pages were seen only through the samples a window took. We added the program's file mappings to the tracked
+memory (\texttt{-file\_maps}, now the default). The tool catches every \texttt{mmap} of a file without
+\texttt{PROT\_EXEC} at the system call, trims the mapping on \texttt{munmap} or when a later mapping replaces part
+of it, and leaves out mappings inside a loaded image's address range, which are the loader's mappings of a library
+whose writable sections are already counted. At every snapshot the resident bytes of the remaining file mappings
+are added to the estimate, as those of a fresh heap block are, and the windows' samples that fall in them are not
+counted a second time. A test program that maps a 4\,MB file and reads it before its first window is estimated at
+4.1\,MB at its peak with the option and at 0.14\,MB without it.
+
+We repeated \memprint{}'s windowed and pages-only runs at every program's largest input and at every LLM input with
+the new tool, and replayed both streams (\tabref{tab:filemaps}). Only the LLM engines change materially: their
+peaks become 1.00 for every mode (llama2.c pages only: from 0.02), and the curves reach 90\% of the peak at the same
+point of the run as the truth. Perl and SQLite, the only other programs whose peak moves, change by 1\%. The
+margin that covers 90\% of the programs falls to 1\% at 5\% watched, 4\% at 1\% and 4\% for pages only (from 6, 14
+and 8\%), and in the LLM stream to 1\% for every mode (from 92\%, 137\% and 37 times the estimate). On the main
+stream under the bytes-touched truth, all three \memprint{} curves now beat the exact peak (448 minutes):
+windowed at 5\% gives 327 minutes (389 before), at 1\% 405 (765) and pages only 411 (469), and windowed at 5\% needs
+160\,GB per node for the target service level, as the exact peak does, instead of 192\,GB. On the LLM stream the
+curves give 365 to 386 minutes instead of 3{,}120 to 6{,}685, better than the earlier run's RSS peak (598) and close
+to the exact peak (307); the remaining 597 kills per stream come from llama2.c with the 15M model, which needs 1.2 to
+1.4\% of headroom, more than the margin calibrated on the other four configurations (under 0.5\%). The option does not change the time axis, so under the RSS
+truth the curves still need their wall-clock headroom: 1{,}843 to 1{,}873 minutes on the main stream and 930 to 948
+on the LLM stream, against 423 and 361 for the RSS peak.
 
 \subsection{Memory needed for the same service}
 
@@ -727,8 +767,9 @@ without over-reserving every other job; LLM engines, whose weights are a file ma
 which pushes the calibrated margins of heaptrack and gperftools past twice their estimates. Among measured
 estimators, \memprint{} windowed at 5\% comes closest to the exact curve, with the smallest margin (6\% for 90\% of
 programs) and 40\% more memory than the exact curve for the same service, at 11 times the native run time. On LLM
-jobs alone it fails, because its curve learns of the weights only in its windows, while the footprint reaches its
-peak in the first percent of the run; there an earlier run's RSS peak is the best measured estimate. DHAT's three recorded points do not make a
+jobs alone it failed, because its curve learned of the weights only in its windows, while the footprint reaches
+its peak in the first percent of the run; tracking the program's file mappings between windows, as its heap blocks
+are tracked, removed that failure and made every \memprint{} curve beat the exact peak on the full corpus. DHAT's three recorded points do not make a
 usable curve. Two results set the direction of further work. First, under the RSS truth every measured curve
 loses its advantage because its clock is not wall-clock time, so \memprint{} should record the native time of
 each snapshot and estimate resident pages as well as bytes touched. Second, the static route predicts footprints

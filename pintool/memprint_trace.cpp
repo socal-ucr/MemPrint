@@ -89,7 +89,12 @@
  * footprint and the bytes covered in the selected chunks; the ratio does not
  * depend on how much of the run the windows covered. With bytes, they select
  * 8-byte words, like spatial sampling. Memory outside blocks
- * (stack, globals) is only seen in windows.
+ * (stack, globals) is only seen in windows. With -file_maps (the default), the
+ * program's file mappings (mmap of a file, not executable, outside the loaded
+ * images: an LLM engine's weights) are tracked like fresh blocks: their resident
+ * pages are added at every snapshot (columns FileMapped, FileResident), and the
+ * windows' samples in them are not counted again. Without it, a file the program
+ * maps and reads between windows is seen only in windows.
  *
  * Each snapshot is a row of <prefix>_windowed.csv: Time, Watching (in a
  * window), Windows (completed), AllocatedBytes and Blocks (live), FreshBytes,
@@ -193,6 +198,10 @@ KNOB< UINT64 > KnobVersionTraces(KNOB_MODE_WRITEONCE, "pintool", "version_traces
 KNOB< BOOL > KnobEdgeCorrection(KNOB_MODE_WRITEONCE, "pintool", "edge_correction", "1",
                                  "windowed: count half a page less for every touched page inside a block that borders an "
                                  "untouched one (it is probably partly used)");
+KNOB< BOOL > KnobFileMaps(KNOB_MODE_WRITEONCE, "pintool", "file_maps", "1",
+                          "windowed: track the program's file mappings (mmap of a file, not executable, outside the "
+                          "loaded images) and count their resident pages at every snapshot, as for fresh blocks; window "
+                          "samples in them are not counted again");
 KNOB< BOOL > KnobBlockSlack(KNOB_MODE_WRITEONCE, "pintool", "block_slack", "0",
                             "windowed: measure heap blocks over their whole glibc chunk (requested size plus slack)");
 KNOB< BOOL > KnobPagesOnly(KNOB_MODE_WRITEONCE, "pintool", "pages_only", "0",
@@ -544,6 +553,8 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     BOOL allocFresh = FALSE; // windowed: the allocator mapped new pages (mmap/mremap) for this call
     ADDRINT munmapLo = 0, munmapHi = 0;
     ADDRINT mmapLen = 0; // windowed: anonymous mmap in progress
+    ADDRINT mapLen = 0;  // windowed, -file_maps: any mmap in progress (it replaces file mappings it overlaps)
+    BOOL fileMap = FALSE; // ... and it maps a file (not executable)
     BOOL clearDirty = FALSE; // windowed: clear soft-dirty bits when this system call returns
 };
 ThreadData threads[MAX_THREADS];
@@ -649,6 +660,12 @@ BOOL windowed = FALSE;
 BOOL pagesOnly = FALSE; // -pages_only: windowed bookkeeping, but never a window
 // The program's writable image sections (.data, .bss) of every loaded image, for -pages_only.
 vector< std::pair< ADDRINT, ADDRINT > > dataRegions;
+// -file_maps: the program's live file mappings, start -> end (stateLock). Between windows, a file the
+// program maps and reads (an LLM's weights) would otherwise be seen only in windows, as memory outside
+// blocks. Mappings inside a loaded image's range (the loader's mappings of a library) are left out.
+BOOL fileMapsOn = FALSE;
+std::map< ADDRINT, ADDRINT > fileMaps;
+vector< std::pair< ADDRINT, ADDRINT > > imageSpans; // windowed: the loaded images' address ranges
 volatile BOOL watching = TRUE; // inside a window (read at instrumentation time)
 BOOL flushPending = FALSE;     // instrumentation must be redone for a window change
 // -window_switch version: every trace exists in a watching and a not-watching version. CheckTime,
@@ -1052,6 +1069,42 @@ static VOID UnmapBlocks(ADDRINT lo, ADDRINT hi)
     }
 }
 
+// -file_maps: drop file mappings in [lo, hi) (munmap, or a new mapping over them), keeping the rest
+static VOID UnmapFileMaps(ADDRINT lo, ADDRINT hi)
+{
+    auto it = fileMaps.upper_bound(lo);
+    if (it != fileMaps.begin()) --it;
+    while (it != fileMaps.end() && it->first < hi)
+    {
+        auto next     = std::next(it);
+        ADDRINT start = it->first, end = it->second;
+        if (end > lo)
+        {
+            fileMaps.erase(it);
+            if (start < lo) fileMaps[start] = lo;
+            if (end > hi) fileMaps[hi] = end;
+        }
+        it = next;
+    }
+}
+
+static BOOL InImage(ADDRINT lo, ADDRINT hi)
+{
+    for (const auto& r : imageSpans)
+        if (lo < r.second && r.first < hi) return TRUE;
+    return FALSE;
+}
+
+// -file_maps: the counted file mapping holding `address`, if any
+static BOOL InFileMap(ADDRINT address)
+{
+    if (fileMaps.empty()) return FALSE;
+    auto it = fileMaps.upper_bound(address);
+    if (it == fileMaps.begin()) return FALSE;
+    --it;
+    return address < it->second && !InImage(it->first, it->second);
+}
+
 // Split the selected footprint (accesses in windows so far) between reused
 // blocks, fresh blocks and the rest, with the bytes covered in the blocks.
 static VOID Attribute()
@@ -1071,6 +1124,8 @@ static VOID Attribute()
         auto it = blocks.upper_bound(address);
         if (it != blocks.begin() && address < std::prev(it)->first + std::prev(it)->second.Extent())
             inBlocks.push_back({address, size, &std::prev(it)->second});
+        else if (InFileMap(address))
+            return;                                                    // counted by residency (-file_maps)
         else if (countBytes)
             outside.push_back({address, size, NULL});
         else
@@ -2108,6 +2163,12 @@ VOID ImageLoad(IMG img, VOID* v)
         PIN_ReleaseLock(&stateLock);
     }
     if (windowed)
+    {
+        PIN_GetLock(&stateLock, 1);
+        imageSpans.push_back({IMG_LowAddress(img), IMG_HighAddress(img) + 1});
+        PIN_ReleaseLock(&stateLock);
+    }
+    if (windowed)
         for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
             if (SEC_Mapped(sec) && SEC_IsWriteable(sec) && SEC_Size(sec) > 0)
             {
@@ -2217,7 +2278,16 @@ VOID SyscallEntry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
     ThreadData& t = threads[tid];
     t.munmapLo = t.munmapHi = 0;
     t.mmapLen               = 0;
+    t.mapLen                = 0;
+    t.fileMap               = FALSE;
     ADDRINT number          = PIN_GetSyscallNumber(ctxt, std);
+    if (fileMapsOn && number == SYS_mmap)
+    {
+        ADDRINT flags = PIN_GetSyscallArgument(ctxt, std, 3), prot = PIN_GetSyscallArgument(ctxt, std, 2);
+        INT64 fd      = (INT64)(INT32)PIN_GetSyscallArgument(ctxt, std, 4);
+        t.mapLen      = (PIN_GetSyscallArgument(ctxt, std, 1) + 4095) & ~(ADDRINT)4095;
+        t.fileMap     = !(flags & MAP_ANONYMOUS) && fd >= 0 && !(prot & PROT_EXEC);
+    }
     BOOL anonymous = number == SYS_mmap && (PIN_GetSyscallArgument(ctxt, std, 3) & MAP_ANONYMOUS);
     if (windowed && anonymous && t.allocDepth == 0) t.mmapLen = (PIN_GetSyscallArgument(ctxt, std, 1) + 4095) & ~(ADDRINT)4095;
     if (windowed && (anonymous || number == SYS_mremap) && t.allocDepth > 0) t.allocFresh = TRUE;
@@ -2255,8 +2325,19 @@ VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
         {
             PIN_GetLock(&stateLock, tid + 1);
             if (!finished) UnmapBlocks(t.munmapLo, t.munmapHi);
+            if (!finished && fileMapsOn) UnmapFileMaps(t.munmapLo, t.munmapHi);
             PIN_ReleaseLock(&stateLock);
         }
+    }
+    if (t.mapLen && ret != (ADDRINT)MAP_FAILED && ret < (ADDRINT)-4096)
+    {
+        PIN_GetLock(&stateLock, tid + 1);
+        if (!finished)
+        {
+            UnmapFileMaps(ret, ret + t.mapLen); // (MAP_FIXED over an earlier mapping replaces it)
+            if (t.fileMap) fileMaps[ret] = ret + t.mapLen;
+        }
+        PIN_ReleaseLock(&stateLock);
     }
     if (t.mmapLen && ret != (ADDRINT)MAP_FAILED)
     {
@@ -2265,7 +2346,7 @@ VOID SyscallExit(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v)
         PIN_ReleaseLock(&stateLock);
         ApplyWindowChange();
     }
-    t.munmapLo = t.munmapHi = t.mmapLen = 0;
+    t.munmapLo = t.munmapHi = t.mmapLen = t.mapLen = 0;
 }
 
 /* ===================================================================== */
@@ -2424,7 +2505,20 @@ static VOID WriteSnapshot()
 
 static const char* WINDOWED_HEADER = "Time,Watching,Windows,AllocatedBytes,Blocks,FreshBytes,FreshResident,ReusedBytes,"
                                      "ReusedResident,FreshEst,ReusedEst,OtherEst,FreshCovered,ReusedCovered,Density,Estimate,"
-                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges,Seconds";
+                                     "Window,Period,ReusedWritten,TriggeredWindows,WatchedRefs,RegionsResident,PartialEdges,FileMapped,FileResident,"
+                                     "Seconds";
+
+// -file_maps: resident bytes of the counted file mappings
+static UINT64 FileMapsResident(UINT64* mapped)
+{
+    UINT64 total = 0;
+    *mapped = 0;
+    ForgetResidency();
+    for (const auto& kv : fileMaps)
+        if (!InImage(kv.first, kv.second)) total += Resident(kv.first, kv.second), *mapped += kv.second - kv.first;
+    ForgetResidency();
+    return total;
+}
 
 // Resident bytes of the program's writable image sections and of its main thread's stack (other
 // threads' stacks are anonymous mmaps, tracked as blocks). The stack is the 8 MB (the usual limit)
@@ -2525,19 +2619,20 @@ static VOID WriteWindowed()
     // soft-dirty tracking (-dirty_every 0: 103 s); the cause is unknown.
     static BOOL flushedOnce = FALSE;
     if (pagesOnly && !flushedOnce) flushedOnce = TRUE, flushPending = TRUE, epoch++;
-    double estimate = blocksEstimate + (pagesOnly ? (double)regions : (double)R * otherSampled);
+    UINT64 fileMapped = 0, fileResident = fileMapsOn ? FileMapsResident(&fileMapped) : 0;
+    double estimate = blocksEstimate + (pagesOnly ? (double)regions : (double)R * otherSampled) + (double)fileResident;
     // a touched page next to an untouched one inside a block is, on average, half used
     if (KnobEdgeCorrection.Value()) estimate = std::max(0.0, estimate - (double)edges * (1 << (PAGE_BITS - 1)));
     // -footprint pages: the resident pages of live blocks (each page once, whoever touched it) and of
     // the program's segments and stack; no densities, no partial pages
-    if (countPages) estimate = (double)(BlockPagesResident() + regions);
+    if (countPages) estimate = (double)(BlockPagesResident() + regions + fileResident);
     windowedFile << timeNow << "," << (watching ? 1 : 0) << "," << windowsDone << "," << bytes[0] + bytes[1] << ","
                  << blocks.size() << "," << bytes[1] << "," << resident[1] << "," << bytes[0] << "," << resident[0] << ","
                  << R * kindSampled[1] << "," << R * kindSampled[0] << "," << R * otherSampled << "," << R * kindCovered[1]
                  << "," << R * kindCovered[0] << "," << density << "," << (UINT64)estimate << "," << KnobWindow.Value() << ","
                  << KnobPeriod.Value() << "," << reusedWritten << "," << triggeredWindows << ","
                  << watchedRefs + (watching ? timeNow - windowStart : 0) << "," << regions << "," << edges << ","
-                 << SecondsText(snapshotMicros) << "\n";
+                 << fileMapped << "," << fileResident << "," << SecondsText(snapshotMicros) << "\n";
 }
 
 // windowed: windows are periodic (one of -window references at every multiple of -period)
@@ -2959,6 +3054,7 @@ int main(int argc, char* argv[])
             if (!pagesOnly && KnobPeriod.Value() <= KnobWindow.Value()) return Usage("-period must be larger than -window");
             if (!KnobSnapshot.Value()) return Usage("-window and -pages_only need -snapshot");
             windowed   = TRUE;
+            fileMapsOn = KnobFileMaps.Value();
             // residency of fresh blocks is their touched pages, at 4 KB granularity only without huge pages
             syscall(SYS_prctl, PR_SET_THP_DISABLE, 1, 0, 0, 0); // Pin's CRT has no prctl()
             pagemapFd = open("/proc/self/pagemap", O_RDONLY);

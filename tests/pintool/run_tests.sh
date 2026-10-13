@@ -21,6 +21,7 @@ cc -O1 -pthread -o "$WORK/parallel" "$HERE/parallel.c"
 cc -O1 -o "$WORK/churn" "$HERE/churn.c"
 cc -O1 -o "$WORK/first_calloc" "$HERE/first_calloc.c"
 cc -O1 -o "$WORK/sparse" "$HERE/sparse.c"
+cc -O1 -o "$WORK/filemap" "$HERE/filemap.c"
 
 failed=0
 # run <test name> <program> <pin knobs> -- <check.py arguments>
@@ -103,6 +104,23 @@ echo "  pages"
 "$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 20000 -window 20000 -period 200000 -footprint pages \
     -outdir "$WORK/out/windowed-pages" -name windowed-pages -- "$WORK/sparse" > /dev/null 2>&1 || failed=1
 python3 "$HERE/check.py" "$WORK/out/windowed-pages"/*_windowed.csv --windowed --peak 2 --slack 0.6 --final-max 0.6 || failed=1
+
+# windowed, -file_maps (default on): a 4 MB file mapped and read in full between windows is counted from its
+# resident pages (peak 4 MB); without it, only the windows' samples see it
+echo "  file mappings"
+"$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 100000 -window 20000 -period 2000000 \
+    -outdir "$WORK/out/windowed-filemap" -name windowed-filemap -- "$WORK/filemap" "$WORK/filemap.bin" > /dev/null 2>&1 || failed=1
+python3 "$HERE/check.py" "$WORK/out/windowed-filemap"/*_windowed.csv --windowed --peak 4 --tolerance 0.1 --slack 0.6 \
+    --final-max 0.6 || failed=1
+"$PIN_ROOT/pin" -t "$MEMPRINT_TOOL" -mode spatial -i 100 -s 20 -snapshot 100000 -window 20000 -period 2000000 -file_maps 0 \
+    -outdir "$WORK/out/windowed-filemap0" -name windowed-filemap0 -- "$WORK/filemap" "$WORK/filemap0.bin" > /dev/null 2>&1 || failed=1
+peak0=$(awk -F, 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "Estimate") e = i } NR > 1 && $e > m { m = $e } END { print m + 0 }' \
+    "$WORK"/out/windowed-filemap0/*_windowed.csv)
+if [[ $peak0 -lt 1048576 ]]; then
+    echo "    ok   -file_maps 0: peak $peak0 bytes < 1 MB (the file seen only in windows)"
+else
+    echo "    FAIL -file_maps 0: peak $peak0 bytes"; failed=1
+fi
 
 # -stop: outputs are written after 200000 references and the program finishes natively.
 echo "stop"

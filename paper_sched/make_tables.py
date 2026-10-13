@@ -103,6 +103,34 @@ def grid_table(data, out, load=0.8, pattern="grid_all*.csv", name=None):
         head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
+def file_maps_table(data, fm, out, load=0.8):
+    """MemPrint's oracles before and after -file_maps (fm: the data root of the reruns), calibrated 90% margins."""
+    from make_figures import select
+    mp = ["memprint-W5", "memprint-W1", "memprint-P", "memprint-W5-peak"]
+
+    def get(root, pattern):
+        files = sorted(glob.glob(f"{root}/results/{pattern}"))
+        g = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+        g["margin"] = g.margin.astype(str)
+        g = select(g, "cal")
+        return g[(g.load == load) & g.oracle.isin(mp)].groupby(["oracle", "scenario"]).agg(
+            r=("steady_response", "mean"), k=("kills", "mean"))
+    cols = [(get(data, "grid_all.csv"), get(fm, "grid_all_fm.csv")), (get(data, "grid_llm.csv"), get(fm, "grid_llm_fm.csv"))]
+    rows = []
+    for o in mp:
+        cells = [run_label(o)]
+        for before, after in cols:
+            for sc in ("bytes", "rss"):
+                cells += [fmt(before.loc[(o, sc), "r"], 0), fmt(after.loc[(o, sc), "r"], 0)]
+        rows.append(" & ".join(cells) + r" \\")
+    head = (r"\begin{tabular}{lrrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & \multicolumn{4}{c}{Main stream (25 programs)} & \multicolumn{4}{c}{LLM stream} \\" "\n"
+            r"\cmidrule(lr){2-5} \cmidrule(lr){6-9}" "\n"
+            r" & \multicolumn{2}{c}{Bytes touched} & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Bytes touched} & \multicolumn{2}{c}{RSS} \\" "\n"
+            r"Oracle & before & after & before & after & before & after & before & after \\" "\n" r"\midrule")
+    open(f"{out}/file_maps.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-13-sched-llm"))
@@ -114,6 +142,9 @@ def main():
     margins_table(a.data, a.out)
     grid_table(a.data, a.out)
     grid_table(a.data, a.out, pattern="grid_llm*.csv", name="grid_llm_08")
+    fm = os.path.expanduser("~/memprint-data/2026-10-13-sched-fm")
+    if os.path.exists(f"{fm}/results/grid_all_fm.csv"):
+        file_maps_table(a.data, fm, a.out)
     print("tables written to", a.out)
 
 
