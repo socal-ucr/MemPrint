@@ -246,6 +246,83 @@ class Obj:
                 v = _wrap64(v)
             vals[units] = np.broadcast_to(np.asarray(v, dtype=np.int64), units.shape)
 
+    def copy_from(self, src, soff, doff, n):
+        """memcpy: the contents of n bytes at src + soff become those at self + doff (integer values,
+        per-byte values, floating-point values and pointers, Obj.ptrs). Whole 4-byte units move when both
+        offsets are 4-aligned; otherwise the destination bytes become unknown."""
+        soff, doff, n = int(soff), int(doff), int(n)
+        if n <= 0 or soff < 0 or doff < 0:
+            return
+        du0, du1 = doff // 4, (doff + n + 3) // 4
+        if soff % 4 or doff % 4:
+            self.forget(doff, n)
+            return
+        nu, su0 = n // 4, soff // 4
+        dvals = self._value_units(du0 + nu)
+        dvals[du0: du0 + nu] = src._value_units(su0 + nu)[su0: su0 + nu]
+        if n % 4:                                                      # a partial last unit
+            self._value_units(du1)[du0 + nu] = SENTINEL
+        self._forget_points(np.arange(du0, du1))
+        if getattr(src, "bytevals", None) is not None or getattr(self, "bytevals", None) is not None:
+            sb = src._byte_values(soff + n)[soff: soff + n] if getattr(src, "bytevals", None) is not None else \
+                np.full(n, 0 if src.zeroed else SENTINEL, dtype=np.int64)
+            self._byte_values(doff + n)[doff: doff + n] = sb
+        sf, df = getattr(src, "fvals", None), getattr(self, "fvals", None)
+        if sf is not None:
+            self._float_units(du0 + nu)[du0: du0 + nu] = src._float_units(su0 + nu)[su0: su0 + nu]
+        elif df is not None:
+            df[du0: min(du0 + nu, len(df))] = np.nan
+        sp, dp = getattr(src, "ptrs", None), getattr(self, "ptrs", None)
+        if sp is not None or dp is not None:
+            if dp is None or len(dp) < len(dvals):
+                new = np.full(len(dvals), -1, dtype=np.int64)
+                if dp is not None:
+                    new[: len(dp)] = dp
+                self.ptrs = dp = new
+            part = np.full(nu, -1, dtype=np.int64)
+            if sp is not None:
+                k = max(0, min(nu, len(sp) - su0))
+                part[:k] = sp[su0: su0 + k]
+            dp[du0: du0 + nu] = part
+
+    def forget(self, off, n):
+        """The contents of n bytes at off become unknown."""
+        off, n = int(off), int(n)
+        if n <= 0 or off < 0:
+            return
+        u0, u1 = off // 4, (off + n + 3) // 4
+        self._value_units(u1)[u0:u1] = SENTINEL
+        self._forget_points(np.arange(u0, u1))
+        for name, fill in (("bytevals", SENTINEL), ("fvals", np.nan), ("ptrs", -1)):
+            arr = getattr(self, name, None)
+            if arr is not None:
+                lo, hi = (off, off + n) if name == "bytevals" else (u0, u1)
+                arr[lo: min(hi, len(arr))] = fill
+
+    def fill(self, off, n, byte):
+        """memset: n bytes at off all hold `byte` (0 makes integers, floats and bytes known zeros)."""
+        off, n, byte = int(off), int(n), int(byte) & 0xFF
+        if n <= 0 or off < 0:
+            return
+        u0, u1 = (off + 3) // 4, (off + n) // 4                        # whole units inside the range
+        word = int.from_bytes(bytes([byte]) * 4, "little", signed=True)
+        vals = self._value_units(max(u1, 1))
+        if off % 4:
+            vals[off // 4] = SENTINEL
+        if (off + n) % 4:
+            self._value_units((off + n) // 4 + 1)[(off + n) // 4] = SENTINEL
+        vals = self.values
+        vals[u0:u1] = word
+        self._forget_points(np.arange(off // 4, (off + n + 3) // 4))
+        if getattr(self, "bytevals", None) is not None or byte:
+            self._byte_values(off + n)[off: off + n] = byte
+        fv = getattr(self, "fvals", None)
+        if fv is not None:
+            fv[off // 4: min((off + n + 3) // 4, len(fv))] = np.nan     # zeros read back as 0.0 (fload)
+        dp = getattr(self, "ptrs", None)
+        if dp is not None:
+            dp[off // 4: min((off + n + 3) // 4, len(dp))] = -1
+
     def _grow(self, size, length):
         arr = self.by_size.get(size)
         if arr is None or len(arr) < length:
@@ -579,6 +656,7 @@ class Interpreter:
         return {"loc": _source_loc(cursor), "context": [c for c in context if c][:depth]}
 
     REALS = False  # track floating-point scalars (Real)
+    COPY_VALUES = False  # memcpy / memset carry the contents they copy or set (Obj.copy_from, Obj.fill)
     SYMBOLIC = True  # count affine innermost loops symbolically (Aff, Obj.add_range) instead of point by point
 
     def __init__(self, tu, seed=0):
@@ -1387,6 +1465,8 @@ class Interpreter:
             return int(draws[0]) if self.L == 1 else draws
         if name in ("memset", "memcpy", "memmove") and len(args) == 3:
             n = _as_int(args[2])
+            if self.COPY_VALUES:
+                self._move_values(name, args, n)
             for i, write in ((0, True), (1, False)) if name != "memset" else ((0, True),):
                 p = args[i]
                 if isinstance(p, Ptr) and isinstance(p.obj, Obj) and np.ndim(p.off) == 0 and p.off is not UNK \
@@ -1397,6 +1477,25 @@ class Interpreter:
                     self.access(Loc(p.obj if isinstance(p, Ptr) else UNK, UNK, 8), write=write)
             return args[0]
         return UNK
+
+    def _move_values(self, name, args, n):
+        """memcpy / memmove / memset of known extent: the destination's contents follow (COPY_VALUES)."""
+        d = args[0]
+        if not self.charging or n is UNK or np.ndim(n) or not isinstance(d, Ptr) or not isinstance(d.obj, Obj) \
+                or d.off is UNK or np.ndim(d.off):
+            return
+        if name == "memset":
+            v = _as_int(args[1])
+            if v is UNK or np.ndim(v):
+                d.obj.forget(int(d.off), int(n))
+            else:
+                d.obj.fill(int(d.off), int(n), int(v))
+            return
+        s = args[1]
+        if isinstance(s, Ptr) and isinstance(s.obj, Obj) and s.off is not UNK and np.ndim(s.off) == 0:
+            d.obj.copy_from(s.obj, int(s.off), int(d.off), int(n))
+        else:
+            d.obj.forget(int(d.off), int(n))
 
     def _libc_random(self):
         """Charge the references a rand() call makes inside the C library (once per batch point)."""

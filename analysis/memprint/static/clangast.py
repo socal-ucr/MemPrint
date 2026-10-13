@@ -7,6 +7,7 @@ evaluation, so they are called through the C API.
 import ctypes
 import subprocess
 from functools import lru_cache
+from pathlib import Path
 
 import clang.cindex as ci
 
@@ -129,12 +130,20 @@ def _gcc_include():
         return None
 
 
-def parse(path, defines=(), includes=(), extra=(), cplusplus=False):
-    """Parse a source file. Errors are kept in tu.diagnostics; the AST is used as far as it goes."""
+CUDA_INCLUDE = Path(__file__).resolve().with_name("cuda")  # cuda_stub.h and the runtime headers it stands for
+
+
+def parse(path, defines=(), includes=(), extra=(), cplusplus=False, cuda=False):
+    """Parse a source file. Errors are kept in tu.diagnostics; the AST is used as far as it goes.
+    cuda: CUDA source, host side (kernel bodies are kept), with no CUDA installation: the runtime is
+    declared by cuda/cuda_stub.h, force-included."""
     args = [f"-D{d}" for d in defines] + [f"-I{i}" for i in includes] + list(extra)
     if _gcc_include():
         args.append(f"-I{_gcc_include()}")
-    if cplusplus:
+    if cuda:
+        args = ["-x", "cuda", "--cuda-host-only", "-nocudainc", "-nocudalib", "-std=c++17",
+                f"-I{CUDA_INCLUDE}", "-include", str(CUDA_INCLUDE / "cuda_stub.h")] + args
+    elif cplusplus:
         args = ["-x", "c++", "-std=c++17"] + args
     return ci.Index.create().parse(str(path), args=args)
 
