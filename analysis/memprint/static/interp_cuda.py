@@ -1,0 +1,1258 @@
+"""The C++ interpreter for CUDA programs: which bytes each kernel launch reads and writes.
+
+A CUDA source is parsed host side by libclang (clangast.parse(cuda=True), with cuda/cuda_stub.h in place of
+CUDA's headers) and run from main() like any C++ program. A kernel launch k<<<grid, block>>>(args) runs
+the kernel body once for all its threads together: the threads are the batch points that a vectorised
+loop's iterations are in the C++ interpreter, and threadIdx, blockIdx, blockDim and gridDim are integer
+values per point. Statements execute in lockstep, which is one legal schedule of a race-free kernel
+(__syncthreads is a no-op), and atomics take effect in thread order. Blocks run in groups of at most
+THREADS_PER_BATCH threads; __shared__ arrays have one copy per block.
+
+Memory. cudaMalloc and friends make objects of kind device / managed / pinned; __device__ and
+__constant__ variables are objects of their own (device-global) whose scalars always live in memory.
+cudaMemcpy, cudaMemset, cudaMemcpyToSymbol (and memcpy / memset on the host) carry the contents they copy,
+so an index array built on the host and copied to the device keeps its values there, and A[B[i]] in a
+kernel resolves to addresses (Obj.copy_from).
+
+Events. Every kernel launch, device copy and memset is an Event, and so is the host code between two of
+them (a host segment). An event records, per object and byte, what it did: read or wrote (R, W), whether
+only perhaps (RM, WM: under control that depends on data the interpreter does not know, or at an address
+it could not resolve, which then covers the whole object), and whether the reference depends on memory
+contents (RD, WD: its address or the conditions it runs under read memory, DataFacts). kdeps turns the
+events into dependences between them.
+"""
+
+import os
+import re
+
+import numpy as np
+
+from . import clangast as ca
+from .clangast import K
+from .interp import (Loc, Obj, Ptr, Real, SENTINEL, UNK, _SCALAR, _as_int, _is_unk, _key, _map_frames_with, _real)
+from .interp_cpp import REGISTER_BYTES, CppInterpreter, InMemory, _body, _breaks, _system
+
+THREADS_PER_BATCH = 1 << 18  # threads (whole blocks) run together
+BUILTINS = ("threadIdx", "blockIdx", "blockDim", "gridDim")
+LAUNCH_CONFIG = ("cudaConfigureCall", "__cudaPushCallConfiguration")
+ALLOCS = {"cudaMalloc": "device", "cudaMallocManaged": "managed", "cudaMallocHost": "pinned",
+          "cudaHostAlloc": "pinned"}
+FREES = {"cudaFree", "cudaFreeHost"}
+COPIES = {"cudaMemcpy", "cudaMemcpyAsync"}
+SETS = {"cudaMemset", "cudaMemsetAsync"}
+SYMBOL_COPIES = {"cudaMemcpyToSymbol", "cudaMemcpyFromSymbol"}
+HOST_COPIES = {"memcpy", "memmove"}
+ATOMICS = {"atomicAdd", "atomicSub", "atomicExch", "atomicMin", "atomicMax", "atomicCAS", "atomicAnd", "atomicOr",
+           "atomicXor", "atomicInc", "atomicDec"}
+WARP = {"__shfl_sync", "__shfl_down_sync", "__shfl_up_sync", "__shfl_xor_sync", "__ballot_sync", "__any_sync",
+        "__all_sync", "__syncthreads_or", "__syncthreads_and", "__syncthreads_count"}
+# allocation results are addresses, not data, whatever their sizes depend on
+NOT_DERIVED = set(ALLOCS) | {"malloc", "calloc", "realloc", "aligned_alloc", "fopen", "fopen64"}
+FILE_IO = {"fopen", "fopen64", "fclose", "fread", "fscanf", "fgets", "feof", "fseek", "ftell", "rewind", "fgetc",
+           "getc"}
+COPY_KINDS = {0: "H2H", 1: "H2D", 2: "D2H", 3: "D2D", 4: "default"}
+# objects whose bytes events record: device memory, host heap and globals, large host arrays (not the stack
+# frames, registers or a kernel thread's own arrays)
+TRACKED = {"device", "managed", "pinned", "device-global", "heap", "global", "stack-array"}
+DEVICE_KINDS = {"device", "managed", "device-global"}
+
+R, W, RM, WM, RD, WD = 1, 2, 4, 8, 16, 32
+RET_KEY = ("__cuda", "returned")  # per point: has the thread returned from the current function
+BLOCK_KEY = ("__cuda", "block")  # per point: its block's index within the threads being run
+
+
+class Event:
+    """A kernel launch, device copy or memset, or a host segment, with the bytes it read and wrote."""
+
+    def __init__(self, index, kind, name, site):
+        self.index, self.kind, self.name, self.site = index, kind, name, site
+        self.grid = self.block = None
+        self.threads = 0
+        self.bits = {}  # Obj -> uint8 per byte (R, W, RM, WM, RD, WD)
+        self.all = {}  # Obj -> bits for every byte (a reference whose address is unknown)
+        self.unknown = 0  # bits of references to an unknown object
+        self.data_control = False  # issued under host control that depends on memory contents
+        self.note = ""
+
+    def _arr(self, obj, hi):
+        arr = self.bits.get(obj)
+        if arr is None or len(arr) < hi:
+            new = np.zeros(max(hi, obj.nbytes, 1), dtype=np.uint8)
+            if arr is not None:
+                new[: len(arr)] = arr
+            self.bits[obj] = arr = new
+        return arr
+
+    def mark(self, obj, offs, size, bits):
+        offs = np.asarray(offs, dtype=np.int64).ravel()
+        offs = offs[offs >= 0]
+        if offs.size == 0:
+            return
+        if offs.size > 1:
+            offs = np.unique(offs)
+        b = (offs[:, None] + np.arange(max(size, 1))).ravel() if size > 1 else offs
+        self._arr(obj, int(b[-1]) + 1)[b] |= bits
+
+    def mark_range(self, obj, lo, n, bits):
+        if n > 0 and lo >= 0:
+            self._arr(obj, lo + n)[lo: lo + n] |= bits
+
+    def mark_all(self, obj, bits):
+        self.all[obj] = self.all.get(obj, 0) | bits
+
+
+def _scalarize(v):
+    """A host value of one batch point as a scalar (a launch's arguments are the same for every thread)."""
+    if isinstance(v, np.ndarray) and v.size == 1:
+        return int(v.ravel()[0])
+    if isinstance(v, Ptr) and isinstance(v.off, np.ndarray) and v.off.size == 1:
+        return Ptr(v.obj, int(v.off.ravel()[0]), v.src)
+    if isinstance(v, Real) and isinstance(v.v, np.ndarray) and v.v.size == 1:
+        return Real(float(v.v.ravel()[0]))
+    return v
+
+
+def _launch_config(c):
+    """The configuration call (grid, block, shared bytes, stream) of a kernel launch, or None."""
+    for k in ca.children(c):
+        if k.kind == K.CALL_EXPR and k.spelling in LAUNCH_CONFIG:
+            return k
+    return None
+
+
+def _attrs(decl):
+    return {k.kind for k in decl.get_children() if k.kind.is_attribute()}
+
+
+def _returns(body):
+    """Does a statement contain a return (not one inside a lambda)?"""
+    stack = [body]
+    while stack:
+        n = stack.pop()
+        if n.kind == K.RETURN_STMT:
+            return True
+        if n.kind != K.LAMBDA_EXPR:
+            stack.extend(n.get_children())
+    return False
+
+
+def _argv(c):
+    """Is c main's argv (or argv + i)?"""
+    c = ca.strip(c)
+    while c.kind == K.BINARY_OPERATOR and ca.children(c):
+        c = ca.strip(ca.children(c)[0])
+    return c.kind == K.DECL_REF_EXPR and c.referenced is not None and c.referenced.kind == K.PARM_DECL and \
+        c.spelling == "argv"
+
+
+def _site_key(c):
+    k = c.__dict__.get("_mp_site")
+    if k is None:
+        e = c.extent
+        k = c._mp_site = (str(e.start.file), e.start.offset, e.end.offset, c.kind.value)
+    return k
+
+
+def _var_name(c):
+    """The first variable or member named in an expression (a cudaMalloc destination: &d_a, &s.buf)."""
+    stack = [c]
+    while stack:
+        n = stack.pop(0)
+        if n.kind in (K.DECL_REF_EXPR, K.MEMBER_REF_EXPR) and n.spelling:
+            return n.spelling
+        stack.extend(n.get_children())
+    return "?"
+
+
+def _loc_text(c):
+    if c is None or c.location.file is None:
+        return ""
+    return f"{str(c.location.file).rsplit('/', 1)[-1]}:{c.location.line}"
+
+
+class DataFacts:
+    """Which references depend on memory contents, from the source alone (flow-insensitive).
+
+    A value is data-derived if it was loaded from memory (an array element, *p, p->f, a __device__ or
+    __shared__ scalar, an atomic's result) or computed from such a value, or assigned under control that
+    is; variables are data-derived if any assignment to them is (a fixpoint over all functions, through
+    parameters and return values). The thread indices, a kernel's scalar arguments computed on the host
+    from sizes, and loop counters are not. A reference is indirect if its address is data-derived, and
+    guarded if a condition it runs under (if, loop, ?:, &&, ||, or any call site of its function) is.
+    A launch is under data control if the host code issuing it is (a loop until a device flag clears)."""
+
+    MAKES_DERIVED = {"cudaMemcpy", "cudaMemcpyAsync", "cudaMemcpyFromSymbol", "memcpy", "memmove", "fread",
+                     "read"}  # &x passed as their destination makes x data-derived
+
+    def __init__(self, functions):
+        self.functions = {n: f for n, f in functions.items() if not _system(f)}
+        self.derived, self.ret, self.guarded_fn = set(), set(), set()
+        self.sites, self.calls = {}, {}
+        self._fn = None
+        for _ in range(16):
+            before = (len(self.derived), len(self.ret), len(self.guarded_fn))
+            for name, f in self.functions.items():
+                body = _body(f)
+                if body is not None:
+                    self._fn = name
+                    self._walk(body, name in self.guarded_fn)
+            if (len(self.derived), len(self.ret), len(self.guarded_fn)) == before:
+                break
+
+    def site(self, cursor):
+        """(indirect, guarded) of a reference's expression."""
+        return self.sites.get(_site_key(cursor), (False, False))
+
+    def under_data_control(self, call):
+        return self.calls.get(_site_key(call), False)
+
+    # ------------------------------------------------------------ the walk
+
+    def _set(self, decl):
+        if decl is not None and decl.kind in (K.VAR_DECL, K.PARM_DECL):
+            self.derived.add(_key(decl))
+
+    def _assign(self, lhs, flag):
+        t = ca.strip(lhs)
+        if flag and t.kind == K.DECL_REF_EXPR:
+            self._set(t.referenced)
+
+    def _walk(self, n, g):
+        k = n.kind
+        kids = ca.children(n)
+        if k == K.IF_STMT:
+            gg = g or self.value(kids[0])
+            self._walk(kids[0], g)
+            for kid in kids[1:]:
+                self._walk(kid, gg)
+            return
+        if k in (K.WHILE_STMT, K.DO_STMT):
+            cond = kids[0] if k == K.WHILE_STMT else kids[-1]
+            gg = g or self.value(cond)
+            for kid in kids:
+                self._walk(kid, gg)
+            return
+        if k == K.FOR_STMT:
+            init, cond, inc, body = ca.for_parts(n)
+            if init is not None:
+                self._walk(init, g)
+            gg = g or (cond is not None and self.value(cond))
+            for part in (cond, inc, body):
+                if part is not None:
+                    self._walk(part, gg)
+            return
+        if k == K.CONDITIONAL_OPERATOR and len(kids) == 3:
+            gg = g or self.value(kids[0])
+            self._walk(kids[0], g)
+            self._walk(kids[1], gg)
+            self._walk(kids[2], gg)
+            return
+        if k == K.BINARY_OPERATOR:
+            op = ca.binary_op(n)
+            if op in ("&&", "||"):
+                self._walk(kids[0], g)
+                self._walk(kids[1], g or self.value(kids[0]))
+                return
+            if op == "=":
+                self._assign(kids[0], g or self.value(kids[1]))
+        if k == K.COMPOUND_ASSIGNMENT_OPERATOR:
+            self._assign(kids[0], g or self.value(kids[1]))
+        if k == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "post--", "pre++", "pre--") and g:
+            self._assign(kids[0], True)
+        if k == K.VAR_DECL:
+            init = [x for x in kids if x.kind.is_expression()]
+            if init and (g or self.value(init[-1])):
+                self._set(n)
+        if k == K.RETURN_STMT and self._fn is not None and (g or (kids and self.value(kids[0]))):
+            self.ret.add(self._fn)
+        if k == K.CALL_EXPR:
+            self._call(n, g)
+        if k in (K.ARRAY_SUBSCRIPT_EXPR, K.MEMBER_REF_EXPR) or (k == K.UNARY_OPERATOR and ca.unary_op(n) == "*"):
+            self.sites[_site_key(n)] = (self.address(n), g)
+        for kid in kids:
+            self._walk(kid, g)
+
+    def _call(self, n, g):
+        ref = n.referenced
+        name = ref.spelling if ref is not None else n.spelling
+        args = list(n.get_arguments())
+        if _launch_config(n) is not None or name in COPIES or name in SETS or name in SYMBOL_COPIES:
+            self.calls[_site_key(n)] = g
+        if name in self.MAKES_DERIVED and args:
+            t = ca.strip(args[0])
+            while t.kind in (K.CSTYLE_CAST_EXPR, K.CXX_STATIC_CAST_EXPR, K.CXX_REINTERPRET_CAST_EXPR) and ca.children(t):
+                t = ca.strip(ca.children(t)[-1])
+            if t.kind == K.UNARY_OPERATOR and ca.unary_op(t) == "&":
+                self._assign(ca.children(t)[0], True)
+        if name in ATOMICS and args:
+            self.sites[_site_key(n)] = (self.value(args[0]), g)
+        f = self.functions.get(name)
+        if f is not None and ref is not None and ref.get_definition() is not None:
+            params = [p for p in f.get_children() if p.kind == K.PARM_DECL]
+            for p, a in zip(params, args):
+                if self.value(a):
+                    self._set(p)
+            if g:
+                self.guarded_fn.add(name)
+
+    # ------------------------------------------------------------ expressions
+
+    def address(self, n):
+        """Is the address of an lvalue expression data-derived?"""
+        n = ca.strip(n)
+        k = n.kind
+        kids = ca.children(n)
+        if k == K.ARRAY_SUBSCRIPT_EXPR and len(kids) == 2:
+            base, idx = kids
+            if ca.is_pointer(idx.type):
+                base, idx = idx, base
+            return self.value(idx) or (self.address(base) if ca.is_array(base.type) else self.value(base))
+        if k == K.UNARY_OPERATOR and ca.unary_op(n) == "*":
+            return self.value(kids[0])
+        if k == K.MEMBER_REF_EXPR:
+            if not kids:
+                return False
+            return self.value(kids[0]) if ca.is_pointer(kids[0].type) else self.address(kids[0])
+        if k == K.DECL_REF_EXPR:
+            return False
+        return self.value(n)
+
+    def value(self, n):
+        """Is the value of an expression data-derived?"""
+        n = ca.strip(n)
+        k = n.kind
+        kids = ca.children(n)
+        if k in (K.INTEGER_LITERAL, K.FLOATING_LITERAL, K.CHARACTER_LITERAL, K.STRING_LITERAL,
+                 K.CXX_BOOL_LITERAL_EXPR, K.CXX_NULL_PTR_LITERAL_EXPR, K.CXX_UNARY_EXPR, K.CXX_NEW_EXPR):
+            return False
+        if k == K.DECL_REF_EXPR:
+            d = n.referenced
+            if d is None or d.kind not in (K.VAR_DECL, K.PARM_DECL):
+                return False
+            if _key(d) in self.derived:
+                return True
+            if d.kind == K.VAR_DECL and not ca.is_array(d.type):
+                a = _attrs(d)
+                return bool(a & {K.CUDADEVICE_ATTR, K.CUDACONSTANT_ATTR, K.CUDASHARED_ATTR}) and \
+                    d.spelling not in BUILTINS
+            return False
+        if k == K.ARRAY_SUBSCRIPT_EXPR:
+            if _argv(kids[0]):
+                return False                                           # the command line: run parameters
+            return self.address(n) if ca.is_array(n.type) else True
+        if k == K.UNARY_OPERATOR:
+            op = ca.unary_op(n)
+            if op == "*":
+                return not ca.is_array(n.type) and not _argv(kids[0])
+            if op == "&":
+                return self.address(kids[0])
+            return self.value(kids[0])
+        if k == K.MEMBER_REF_EXPR:
+            if not kids:
+                return True
+            base = ca.strip(kids[0])
+            if base.kind == K.DECL_REF_EXPR and base.spelling in BUILTINS:
+                return False
+            return True if ca.is_pointer(kids[0].type) else self.value(kids[0])
+        if k == K.CALL_EXPR:
+            ref = n.referenced
+            name = ref.spelling if ref is not None else n.spelling
+            if name in ATOMICS or name in WARP or name == "__ldg":
+                return True
+            if name in NOT_DERIVED:
+                return False
+            args = list(n.get_arguments())
+            if name in self.functions and name in self.ret:
+                return True
+            return any(self.value(a) for a in args)
+        return any(self.value(x) for x in kids if x.kind.is_expression())
+
+
+class CudaInterpreter(CppInterpreter):
+    COPY_VALUES = True
+
+    def __init__(self, tu, seed=0, stubs=None, opt=3, host_events=True):
+        self.kernel = None  # the Event of the launch being run
+        self.shared = {}  # __shared__ variable key -> (Obj, bytes per block), for the blocks being run
+        self.dyn_shared = 0
+        super().__init__(tu, seed, stubs, opt)
+        self.host_events = host_events
+        self.events = []
+        self.host_event = None
+        self.tracker = None  # kdeps.Tracker: events are folded into dependences as they close
+        self._gpu_work_memo = {}
+        self.facts = DataFacts(self.functions)
+
+    # ------------------------------------------------------------ events
+
+    def _new_event(self, kind, name, cursor):
+        self._close_event()
+        ev = Event(len(self.events), kind, name, _loc_text(cursor))
+        self.events.append(ev)
+        return ev
+
+    def _close_event(self):
+        """Fold the last event into the dependences (kdeps.Tracker) and free its byte maps."""
+        if self.events and getattr(self.events[-1], "open", True):
+            ev = self.events[-1]
+            ev.open = False
+            if self.tracker is not None:
+                self.tracker.add(ev)
+            ev.summary = {obj.name: int(np.count_nonzero(b)) for obj, b in ev.bits.items()}
+            ev.bits = {}
+        self.host_event = None
+
+    def _current_event(self):
+        if self.kernel is not None:
+            return self.kernel
+        if not self.host_events:
+            return None
+        if self.host_event is None:
+            self.host_event = self._new_event("host", f"host#{sum(e.kind == 'host' for e in self.events)}", None)
+        return self.host_event
+
+    def finish(self):
+        self._close_event()
+
+    # ------------------------------------------------------------ references
+
+    def access(self, loc, write=False):
+        if self.charging and not loc.array:
+            self._note(loc, write)
+        return super().access(loc, write)
+
+    def _note(self, loc, write):
+        """Record a reference in the current event."""
+        obj = loc.obj
+        if isinstance(obj, Obj) and obj.kind not in TRACKED and obj.kind != "device-global":
+            return
+        if isinstance(obj, Obj) and self.kernel is not None and obj.kind == "stack-array":
+            return                                                     # an object a thread keeps for itself
+        ev = self._current_event()
+        if ev is None:
+            return
+        bits = W if write else R
+        if self.uncertain_depth:
+            bits <<= 2
+        cur = getattr(loc, "cursor", None)
+        if cur is not None:
+            indirect, guarded = self.facts.site(cur)
+            if indirect or guarded or getattr(self, "_guarded_depth", 0):
+                bits |= WD if write else RD
+        elif getattr(self, "_guarded_depth", 0):
+            bits |= WD if write else RD
+        if not isinstance(obj, Obj):
+            ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
+            return
+        off = loc.off
+        if off is UNK or not isinstance(off, (int, np.integer, np.ndarray)):
+            may = (bits & (RD | WD)) | (WM if write else RM)
+            ev.mark_all(obj, may)
+            return
+        ev.mark(obj, off, loc.size or 8, bits)
+
+    def lvalue(self, c):
+        s = ca.strip(c)
+        if s.kind == K.DECL_REF_EXPR and s.referenced is not None and _key(s.referenced) in self.shared:
+            entry = self._lookup(s.referenced)
+            loc = entry[1].loc if isinstance(entry[1], InMemory) else entry[0]
+            return loc
+        loc = super().lvalue(c)
+        if s.kind in (K.ARRAY_SUBSCRIPT_EXPR, K.MEMBER_REF_EXPR) or \
+                (s.kind == K.UNARY_OPERATOR and ca.unary_op(s) == "*"):
+            if isinstance(loc, Loc) and isinstance(loc.obj, Obj) and loc.obj.kind != "register":
+                loc.cursor = s                                         # a fresh Loc: tag it with its expression
+        return loc
+
+    def _load_lvalue(self, c):
+        decl, entry = self._scalar_entry(c)
+        if entry is not None and isinstance(entry[1], InMemory) and entry[1].loc.obj.kind in ("device-global", "shared"):
+            loc = entry[1].loc
+            self.access(loc)
+            return self._mem_load(loc, c.type)
+        return super()._load_lvalue(c)
+
+    def _store(self, c, value):
+        decl, entry = self._scalar_entry(c)
+        if entry is not None and isinstance(entry[1], InMemory) and entry[1].loc.obj.kind in ("device-global", "shared"):
+            loc = entry[1].loc
+            self.access(loc, write=True)
+            self._mem_store(loc, c.type, value)
+            return loc
+        return super()._store(c, value)
+
+    # ------------------------------------------------------------ variables
+
+    def _declare_global(self, c):
+        a = _attrs(c)
+        if c.spelling in BUILTINS or c.spelling == "warpSize":
+            self.frames[0].vars[_key(c)] = [Loc(UNK, UNK, 4), UNK]
+            return
+        managed = K.UNEXPOSED_ATTR in a and any(t.spelling == "__managed__" for t in c.get_tokens())
+        if not (a & {K.CUDADEVICE_ATTR, K.CUDACONSTANT_ATTR}) and not managed:
+            return super()._declare_global(c)
+        size = ca.type_size(c.type) or 8
+        obj = Obj(c.spelling, "device-global", size, zeroed=True)
+        obj.site = {"loc": (str(c.location.file).rsplit("/", 1)[-1], c.location.line), "context": []}
+        self.objects.append(obj)
+        if ca.is_array(c.type):
+            self.frames[0].vars[_key(c)] = [Loc(obj, 0, size, True), Ptr(obj, 0)]
+            return
+        slot = Loc(obj, 0, size)
+        init = self._initializer(c)
+        if init is not None:
+            v = ca.evaluate(init)
+            if isinstance(v, int):
+                obj.store(0, v, size)
+            elif isinstance(v, float):
+                obj.fstore(0, v, size)
+        self.frames[0].vars[_key(c)] = [slot, InMemory(slot)]
+
+    def _lookup(self, decl):
+        k = _key(decl)
+        if k in self.shared:                                           # one copy per block
+            obj, size, array = self.shared[k]
+            blk = self.frames[0].vars[BLOCK_KEY][1]
+            off = _SCALAR(np.asarray(blk) * size) if np.ndim(blk) else int(blk) * size
+            loc = Loc(obj, off, size, array)
+            return [loc, Ptr(obj, off)] if array else [loc, InMemory(loc)]
+        return super()._lookup(decl)
+
+    def _exec_decl(self, decl):
+        if self.kernel is not None:
+            a = _attrs(decl)
+            if K.CUDASHARED_ATTR in a:
+                k = _key(decl)
+                if k not in self.shared:
+                    size = ca.type_size(decl.type) if decl.type.get_canonical().kind != ca.ci.TypeKind.INCOMPLETEARRAY \
+                        else None
+                    size = size or max(int(self.dyn_shared), 0)        # extern __shared__ T s[]: the launch's bytes
+                    nblocks = int(np.max(self.frames[0].vars[BLOCK_KEY][1])) + 1
+                    obj = Obj(f"{self.kernel.name}.{decl.spelling}", "shared", size * nblocks)
+                    self.shared[k] = (obj, size, ca.is_array(decl.type))
+                return
+            t = decl.type
+            size = ca.type_size(t.get_canonical()) or 0
+            if ca.is_array(t) and size > REGISTER_BYTES and decl.storage_class.name != "STATIC":
+                # a thread's own array: one copy per thread
+                obj = Obj(f"{self.kernel.name}.{decl.spelling}", "stack-array", size * self.L)
+                off = size * np.arange(self.L) if self.L > 1 else 0
+                self.frames[-1].vars[_key(decl)] = [Loc(obj, off, size, True), Ptr(obj, off)]
+                return
+        return super()._exec_decl(decl)
+
+    def eval(self, c):
+        if c.kind == K.MEMBER_REF_EXPR:
+            kids = ca.children(c)
+            if kids:
+                base = ca.strip(kids[0])
+                if base.kind == K.DECL_REF_EXPR and base.spelling in BUILTINS and base.referenced is not None \
+                        and _system_stub(base.referenced):
+                    entry = self.frames[0].vars.get(("__cuda", base.spelling, c.spelling))
+                    return entry[1] if entry is not None and self.kernel is not None else UNK
+        elif c.kind == K.DECL_REF_EXPR and c.spelling == "warpSize" and c.referenced is not None \
+                and _system_stub(c.referenced):
+            return 32
+        return super().eval(c)
+
+    # ------------------------------------------------------------ control in kernels
+
+    def _enter(self, fdef, bound, this, this_type, sret, parent=None):
+        frame = super()._enter(fdef, bound, this, this_type, sret, parent)
+        if self.kernel is not None:
+            frame.vars[RET_KEY] = [None, 0]
+        return frame
+
+    def _active_points(self):
+        act = super()._active_points()
+        if self.kernel is None:
+            return act
+        e = self.frames[-1].vars.get(RET_KEY)
+        if e is None or (np.ndim(e[1]) == 0 and not e[1]):
+            return act
+        stop = np.broadcast_to(np.asarray(e[1]) != 0, (self.L,))
+        if act is not None:
+            keep = np.zeros(self.L, dtype=bool)
+            keep[act] = True
+            stop = stop | ~keep
+        return np.nonzero(~stop)[0]
+
+    def exec(self, c):
+        kind = c.kind
+        if self.kernel is not None and kind == K.RETURN_STMT:
+            frame = self.frames[-1]
+            if getattr(frame, "returned", False):
+                return
+            super().exec(c)
+            done = np.ones(self.L, dtype=np.int64) if self.L > 1 else 1
+            frame.vars[RET_KEY] = [None, done]
+            if self.loop_flags and self.loop_flags[-1][0] in frame.vars:
+                frame.vars[self.loop_flags[-1][0]] = [None, done]     # leave the loop being run too
+            return
+        if kind in (K.WHILE_STMT, K.DO_STMT):
+            kids = ca.children(c)
+            cond, body = (kids[0], kids[-1]) if kind == K.WHILE_STMT else (kids[-1], kids[0])
+            if self._one_at_a_time(body):
+                if kind == K.DO_STMT:
+                    self.exec(body)
+                return self._loop_with_break(cond, None, body)
+        return super().exec(c)
+
+    def _for(self, c):
+        init, cond, inc, body = ca.for_parts(c)
+        if self._one_at_a_time(body):
+            if init is not None:
+                self.exec(init) if init.kind == K.DECL_STMT else self.eval(init)
+            return self._loop_with_break(cond, inc, body)
+        return super()._for(c)
+
+    def _one_at_a_time(self, body):
+        """Loops that run one iteration at a time: in a kernel, those a thread may return from; on the
+        host, those that launch kernels or copy device memory (in program order)."""
+        if self.kernel is not None:
+            return _returns(body) and not _breaks(body)
+        return self._gpu_work(body)
+
+    def _gpu_work(self, node, depth=0):
+        key = _site_key(node)
+        hit = self._gpu_work_memo.get(key)
+        if hit is not None:
+            return hit
+        self._gpu_work_memo[key] = False                               # recursion
+        found = False
+        for n in _walk_nodes(node):
+            if n.kind != K.CALL_EXPR:
+                continue
+            name = n.spelling
+            if _launch_config(n) is not None or name in COPIES or name in SETS or name in SYMBOL_COPIES:
+                found = True
+                break
+            f = self.functions.get(name)
+            if f is not None and depth < 8 and not _system(f):
+                body = _body(f)
+                if body is not None and self._gpu_work(body, depth + 1):
+                    found = True
+                    break
+        self._gpu_work_memo[key] = found
+        return found
+
+    # ------------------------------------------------------------ calls
+
+    def _call(self, c, sret=None):
+        ref = c.referenced
+        name = ref.spelling if ref is not None else c.spelling
+        if _launch_config(c) is not None:
+            return self._launch(c)
+        if name in ATOMICS and self.kernel is not None:
+            return self._atomic_cuda(name, c)
+        if name in WARP:
+            for a in c.get_arguments():
+                self.eval(a)
+            return UNK
+        if name in ("__syncthreads", "__syncwarp", "__threadfence", "__threadfence_block"):
+            return UNK
+        if name == "__ldg":
+            args = list(c.get_arguments())
+            p = self.eval(args[0]) if args else UNK
+            if not isinstance(p, Ptr):
+                return UNK
+            t = args[0].type.get_canonical().get_pointee()
+            loc = Loc(p.obj, p.off, ca.type_size(t) or 4)
+            loc.cursor = c
+            self.access(loc)
+            return self._mem_load(loc, t)
+        if name in FILE_IO and (ref is None or _system(ref)):
+            return self._file_io(name, c)
+        if ref is not None and (name in ALLOCS or name in FREES or name in COPIES or name in SETS or
+                                name in SYMBOL_COPIES or name in HOST_COPIES or name == "memset" or
+                                (name.startswith("cuda") and _system_stub(ref))):
+            return self._runtime(name, c)
+        return super()._call(c, sret)
+
+    def _runtime(self, name, c):
+        args_c = list(c.get_arguments())
+        if name in ALLOCS:
+            p = self.eval(args_c[0])
+            n = _as_int(self.eval(args_c[1])) if len(args_c) > 1 else UNK
+            for a in args_c[2:]:
+                self.eval(a)
+            nbytes = int(np.max(n)) if n is not UNK else 0
+            obj = Obj(f"{_var_name(args_c[0])}@{c.location.line}", ALLOCS[name], nbytes)
+            obj.site = self.site_of(c)
+            obj.alloc_kind = name
+            self.objects.append(obj)
+            if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK:
+                self._ptr_store(Loc(p.obj, p.off, 8), Ptr(obj, 0))
+            return 0
+        if name in FREES:
+            for a in args_c:
+                self.eval(a)
+            return 0
+        if name in COPIES or name in HOST_COPIES:
+            args = [self.eval(a) for a in args_c]
+            n = _as_int(args[2]) if len(args) > 2 else UNK
+            if name in COPIES:
+                kind = _as_int(args[3]) if len(args) > 3 else UNK
+                ev = self._new_event("copy", f"{name} {COPY_KINDS.get(kind, '?') if kind is not UNK else '?'}", c)
+                ev.data_control = self.facts.under_data_control(c) or bool(self.uncertain_depth)
+            else:
+                ev = self._current_event()
+            self._copy(ev, args[0], args[1], n)
+            if name in COPIES:
+                self._close_event()
+                return 0
+            return args[0]
+        if name in SETS or name == "memset":
+            args = [self.eval(a) for a in args_c]
+            n = _as_int(args[2]) if len(args) > 2 else UNK
+            if name in SETS:
+                ev = self._new_event("set", name, c)
+                ev.data_control = self.facts.under_data_control(c) or bool(self.uncertain_depth)
+            else:
+                ev = self._current_event()
+            self._fill(ev, args[0], _as_int(args[1]) if len(args) > 1 else UNK, n)
+            if name in SETS:
+                self._close_event()
+                return 0
+            return args[0]
+        if name in SYMBOL_COPIES:
+            to = name == "cudaMemcpyToSymbol"
+            sym_c, other_c = (args_c[0], args_c[1]) if to else (args_c[1], args_c[0])
+            sym = self.lvalue(sym_c)
+            other = self.eval(other_c)
+            n = _as_int(self.eval(args_c[2])) if len(args_c) > 2 else UNK
+            off = _as_int(self.eval(args_c[3])) if len(args_c) > 3 and ca.children(args_c[3]) else 0
+            off = 0 if off is UNK else off
+            symp = Ptr(sym.obj, sym.off + off) if isinstance(sym.obj, Obj) and sym.off is not UNK else Ptr(UNK, UNK)
+            ev = self._new_event("copy", f"{name} {sym_c.spelling or _var_name(sym_c)}", c)
+            ev.data_control = self.facts.under_data_control(c) or bool(self.uncertain_depth)
+            self._copy(ev, symp if to else other, other if to else symp, n)
+            self._close_event()
+            return 0
+        if name == "cudaGetDeviceCount" and args_c:
+            p = self.eval(args_c[0])
+            if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK:
+                p.obj.store(p.off, 1, 4)
+            return 0
+        for a in args_c:                                               # synchronisation, events, streams, errors
+            if a.kind.is_expression():
+                self.eval(a)
+        return 0
+
+    # ------------------------------------------------------------ input files
+
+    def _file_io(self, name, c):
+        """The C library's stdio on real files: a program's input (a graph, a matrix) is read from the file its
+        command line names, so the values it loads are known (index arrays resolve)."""
+        args_c = list(c.get_arguments())
+        if name in ("fopen", "fopen64"):
+            path = self._text(self.eval(args_c[0])) if args_c else None
+            mode = self._text(self.eval(args_c[1])) if len(args_c) > 1 else "r"
+            if path is None or "r" not in (mode or "r") or not os.path.isfile(path):
+                return Ptr(self.null, 0)
+            with open(path, "rb") as f:
+                data = f.read()
+            obj = Obj(f"FILE {os.path.basename(path)}", "file", 0)
+            obj.data, obj.pos = data, 0
+            return Ptr(obj, 0)
+        args = [self.eval(a) for a in args_c]
+        fp = args[{"fread": 3, "fgets": 2}.get(name, 0)] if args else None
+        f = fp.obj if isinstance(fp, Ptr) and isinstance(fp.obj, Obj) and hasattr(fp.obj, "data") else None
+        if name == "fclose":
+            return 0
+        if f is None:
+            return UNK
+        if name == "feof":
+            return int(f.pos >= len(f.data))
+        if name == "ftell":
+            return f.pos
+        if name == "rewind":
+            f.pos = 0
+            return UNK
+        if name == "fseek":
+            off, whence = _as_int(args[1]), _as_int(args[2])
+            if _is_unk(off, whence) or np.ndim(off):
+                return UNK
+            f.pos = max(0, min(len(f.data), int(off) + {0: 0, 1: f.pos, 2: len(f.data)}.get(int(whence), 0)))
+            return 0
+        if name in ("fgetc", "getc"):
+            if f.pos >= len(f.data):
+                return -1
+            f.pos += 1
+            return f.data[f.pos - 1]
+        if name == "fread":
+            return self._fread(f, args_c, args)
+        if name == "fgets":
+            return self._fgets(f, args)
+        return self._fscanf(f, args_c, args)
+
+    def _fread(self, f, args_c, args):
+        size, count = _as_int(args[1]), _as_int(args[2])
+        buf = args[0]
+        if _is_unk(size, count) or np.ndim(size) or np.ndim(count) or not isinstance(buf, Ptr) or \
+                not isinstance(buf.obj, Obj) or buf.off is UNK or np.ndim(buf.off):
+            return UNK
+        n = min(int(size) * int(count), len(f.data) - f.pos)
+        raw = f.data[f.pos: f.pos + n]
+        f.pos += n
+        self._charge(self._current_event(), buf.obj, int(buf.off), n, True)
+        t = _pointee(args_c[0])
+        self._store_raw(buf.obj, int(buf.off), raw, t)
+        return n // int(size) if int(size) else 0
+
+    def _store_raw(self, obj, off, raw, t):
+        """Bytes read from a file into memory, kept as values of the buffer's element type."""
+        size = ca.type_size(t.get_canonical()) if t is not None else None
+        if not self.charging or not raw:
+            return
+        if t is not None and ca.is_float(t) and size in (4, 8):
+            vals = np.frombuffer(raw[: len(raw) // size * size], dtype=np.float32 if size == 4 else np.float64)
+            obj.fstore(off + size * np.arange(len(vals)), vals.astype(float), size)
+            return
+        if size in (1, 2):
+            obj.store(off + np.arange(len(raw)), np.frombuffer(raw, dtype=np.uint8).astype(np.int64), 1)
+            if size == 1:
+                return
+        width = 8 if size == 8 else 4
+        vals = np.frombuffer(raw[: len(raw) // width * width], dtype=np.int64 if width == 8 else np.int32)
+        obj.store(off + width * np.arange(len(vals)), vals.astype(np.int64), 4)
+
+    def _fgets(self, f, args):
+        buf, n = args[0], _as_int(args[1])
+        if f.pos >= len(f.data):
+            return Ptr(self.null, 0)
+        if not isinstance(buf, Ptr) or not isinstance(buf.obj, Obj) or buf.off is UNK or n is UNK or np.ndim(n) \
+                or np.ndim(buf.off):
+            return UNK
+        end = f.data.find(b"\n", f.pos)
+        end = len(f.data) if end < 0 else end + 1
+        line = f.data[f.pos: min(end, f.pos + int(n) - 1)]
+        f.pos += len(line)
+        self._charge(self._current_event(), buf.obj, int(buf.off), len(line) + 1, True)
+        if self.charging:
+            buf.obj.store(int(buf.off) + np.arange(len(line) + 1),
+                          np.frombuffer(line + b"\0", dtype=np.uint8).astype(np.int64), 1)
+        buf.obj.text = line.decode(errors="replace")
+        return buf
+
+    def _fscanf(self, f, args_c, args):
+        """fscanf with %d %i %u %ld %lld %x %f %lf %e %g %s %c: one point at a time, in order."""
+        fmt = self._text(args[1]) if len(args) > 1 else None
+        if fmt is None:
+            return UNK
+        specs = re.findall(r"%[*]?\d*(?:hh|h|ll|l|L|z)?[diuxXfeEgGsc]", fmt)
+        slots, k = [], 2
+        for spec in specs:                                             # %*d is read and dropped
+            slots.append(None if "*" in spec else k)
+            k += "*" not in spec
+        targets = [(spec, args[k], args_c[k]) for spec, k in zip(specs, slots) if k is not None and k < len(args)]
+        L = self.L
+        values = [[] for _ in specs]
+        counts = []
+        for _ in range(L):
+            got = 0
+            for i, spec in enumerate(specs):
+                text = f.data
+                while f.pos < len(text) and text[f.pos: f.pos + 1].isspace() and spec[-1] != "c":
+                    f.pos += 1
+                if f.pos >= len(text):
+                    values[i].append(None)
+                    continue
+                m = _TOKEN.get(spec[-1], _TOKEN["s"]).match(text, f.pos)
+                if m is None or not m.group(0):
+                    values[i].append(None)
+                    continue
+                f.pos = m.end()
+                tok = m.group(0).decode(errors="replace")
+                try:
+                    base = 16 if spec[-1] in "xX" else 0 if spec[-1] == "i" else 10
+                    v = float(tok) if spec[-1] in "feEgG" else int(tok, base)
+                except ValueError:
+                    v = tok
+                values[i].append(v)
+                got += slots[i] is not None
+            counts.append(got if got or f.pos < len(f.data) else -1)
+        kept = [v for v, k in zip(values, slots) if k is not None and k < len(args)]
+        for (spec, p, a), vals in zip(targets, kept):
+            if not isinstance(p, Ptr) or not isinstance(p.obj, Obj) or p.off is UNK:
+                continue
+            t = _pointee(a)
+            size = (ca.type_size(t.get_canonical()) if t is not None else None) or 4
+            loc = Loc(p.obj, p.off, size)
+            self.access(loc, write=True)
+            if spec[-1] in "sc":
+                continue
+            if any(v is None or isinstance(v, str) for v in vals):
+                self._mem_store(loc, t, UNK) if t is not None else None
+                continue
+            v = vals[0] if L == 1 else np.asarray(vals)
+            if spec[-1] in "feEgG":
+                self._mem_store(loc, t, Real(v if L == 1 else v.astype(float)))
+            else:
+                self._mem_store(loc, t, int(v) if L == 1 else v.astype(np.int64))
+        return counts[0] if L == 1 else np.asarray(counts, dtype=np.int64)
+
+    def _charge(self, ev, obj, off, n, write):
+        """A bulk copy's references: 8 bytes at a time, and the bytes in the event."""
+        if not self.charging or n <= 0:
+            return
+        w0 = float(np.ravel(self.w)[0])
+        offs = np.arange(off, off + n, 8, dtype=np.int64)
+        obj.add(offs, 8, np.full(len(offs), w0))
+        self.total += w0 * len(offs)
+        if self.uncertain_depth:
+            self.uncertain += w0 * len(offs)
+        if ev is not None and (obj.kind in TRACKED or obj.kind == "device-global"):
+            bits = (W if write else R) << (2 if self.uncertain_depth else 0)
+            ev.mark_range(obj, off, n, bits)
+
+    def _copy(self, ev, d, s, n):
+        def known(p):
+            return isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK and np.ndim(p.off) == 0
+
+        if n is UNK or np.ndim(n):
+            for p, bits in ((s, RM), (d, WM)):
+                if isinstance(p, Ptr) and isinstance(p.obj, Obj):
+                    if ev is not None:
+                        ev.mark_all(p.obj, bits)
+                    if bits == WM:
+                        p.obj.forget(0, max(p.obj.nbytes, 0))
+                elif ev is not None:
+                    ev.unknown |= bits
+            return
+        n = int(n)
+        if known(s):
+            self._charge(ev, s.obj, int(s.off), n, False)
+        elif ev is not None:
+            if isinstance(s, Ptr) and isinstance(s.obj, Obj):
+                ev.mark_all(s.obj, RM)
+            else:
+                ev.unknown |= RM
+        if known(d):
+            self._charge(ev, d.obj, int(d.off), n, True)
+            if self.charging:
+                if known(s):
+                    d.obj.copy_from(s.obj, int(s.off), int(d.off), n)
+                else:
+                    d.obj.forget(int(d.off), n)
+        elif ev is not None:
+            if isinstance(d, Ptr) and isinstance(d.obj, Obj):
+                ev.mark_all(d.obj, WM)
+            else:
+                ev.unknown |= WM
+
+    def _fill(self, ev, d, v, n):
+        if not (isinstance(d, Ptr) and isinstance(d.obj, Obj) and d.off is not UNK and np.ndim(d.off) == 0) \
+                or n is UNK or np.ndim(n):
+            if ev is not None:
+                if isinstance(d, Ptr) and isinstance(d.obj, Obj):
+                    ev.mark_all(d.obj, WM)
+                else:
+                    ev.unknown |= WM
+            return
+        self._charge(ev, d.obj, int(d.off), int(n), True)
+        if self.charging:
+            if v is UNK or np.ndim(v):
+                d.obj.forget(int(d.off), int(n))
+            else:
+                d.obj.fill(int(d.off), int(n), int(v))
+
+    # ------------------------------------------------------------ launches
+
+    def _dim3(self, expr):
+        """(x, y, z) of a launch's grid or block argument, or UNK."""
+        t = expr.type
+        if not ca.is_float(t) and t.get_canonical().kind != ca.ci.TypeKind.RECORD:
+            v = _as_int(self.eval(expr))
+            return UNK if v is UNK or np.ndim(v) else (int(v), 1, 1)
+        dest = self._new_storage(t)
+        self._construct_into(expr, dest, t)
+        if not isinstance(dest, Ptr) or not isinstance(dest.obj, Obj):
+            return UNK
+        vals = [dest.obj.load(np.asarray(dest.off) + 4 * i, 4) for i in range(3)]
+        out = []
+        for v in vals:
+            v = np.ravel(v)
+            if v.size == 0 or np.any(v == SENTINEL) or np.any(v != v[0]):
+                return UNK
+            out.append(int(v[0]))
+        return tuple(out)
+
+    def _launch(self, c):
+        if self.L > 1:                                                 # launches in a batched host region:
+            for p in range(self.L):                                    # one point at a time
+                self.run_subset(np.array([p]), lambda: self._launch(c))
+            return UNK
+        ref = c.referenced
+        fdef = ref.get_definition() if ref is not None else None
+        cfg = _launch_config(c)
+        cargs = [a for a in cfg.get_arguments()]
+        grid = self._dim3(cargs[0]) if cargs else UNK
+        block = self._dim3(cargs[1]) if len(cargs) > 1 else UNK
+        shmem = 0
+        if len(cargs) > 2 and ca.children(cargs[2]):
+            v = _as_int(self.eval(cargs[2]))
+            shmem = int(v) if v is not UNK and np.ndim(v) == 0 else 0
+        if len(cargs) > 3 and ca.children(cargs[3]):
+            self.eval(cargs[3])
+        name = ref.spelling if ref is not None else c.spelling
+        ev = self._new_event("kernel", name, c)
+        ev.data_control = self.facts.under_data_control(c) or bool(self.uncertain_depth)
+        params = [p for p in fdef.get_children() if p.kind == K.PARM_DECL] if fdef is not None else []
+        stack = self.__dict__.setdefault("call_stack", [])
+        stack.append(c)
+        try:
+            bound = [(how, p, _scalarize(v)) for how, p, v in self._bind_args(params, list(c.get_arguments()), None)]
+            if fdef is None or _body(fdef) is None or grid is UNK or block is UNK:
+                # not run: it may read and write whatever its arguments point to
+                ev.note = "not run: " + ("no definition" if fdef is None or _body(fdef) is None else "unknown grid")
+                for _, _, v in bound:
+                    if isinstance(v, Ptr) and isinstance(v.obj, Obj):
+                        ev.mark_all(v.obj, RM | WM)
+                ev.unknown |= RM | WM
+                return UNK
+            ev.grid, ev.block = grid, block
+            self._run_kernel(ev, fdef, bound, grid, block, shmem)
+        finally:
+            stack.pop()
+            self._close_event()
+        return UNK
+
+    def _run_kernel(self, ev, fdef, bound, grid, block, shmem):
+        bx, by, bz = block
+        gx, gy, gz = grid
+        bsz, nblocks = bx * by * bz, gx * gy * gz
+        ev.threads = bsz * nblocks
+        if bsz <= 0 or nblocks <= 0:
+            return
+        per = max(1, THREADS_PER_BATCH // bsz)
+        saved = (self.frames, self.w, self.loop_flags, self.kernel, self.shared, self.dyn_shared)
+        w0 = float(np.ravel(self.w)[0])
+        globals_frame = self.frames[0]
+
+        def split(v, nx, ny):
+            x = v % nx if nx > 1 else 0
+            y = (v // nx) % ny if ny > 1 else 0
+            z = v // (nx * ny) if np.size(v) and int(np.max(v)) >= nx * ny else 0
+            return tuple(_SCALAR(a) if np.ndim(a) else int(a) for a in (x, y, z))
+
+        try:
+            for b0 in range(0, nblocks, per):
+                nb = min(per, nblocks - b0)
+                L = nb * bsz
+                tid = np.arange(L, dtype=np.int64)
+                local_block = tid // bsz
+                g0 = _map_frames_with([globals_frame], lambda a: a[np.zeros(L, dtype=np.int64)])[0]
+                before = {k: e[1] for k, e in g0.vars.items()}
+                g0.vars[BLOCK_KEY] = [None, local_block if nb > 1 else 0]
+                for bname, vals in (("threadIdx", split(tid % bsz, bx, by)),
+                                    ("blockIdx", split(b0 + local_block, gx, gy)),
+                                    ("blockDim", (bx, by, bz)), ("gridDim", (gx, gy, gz))):
+                    for f, v in zip("xyz", vals):
+                        g0.vars[("__cuda", bname, f)] = [None, v]
+                self.frames = [g0]
+                self.w = np.full(L, w0)
+                self.loop_flags = []
+                self.kernel, self.shared, self.dyn_shared = ev, {}, shmem
+                self._enter(fdef, bound, None, None, None)
+                try:
+                    self.exec(_body(fdef))
+                finally:
+                    self.frames.pop()
+                    self.this_types.pop()
+                for k, v in before.items():                           # host scalars a kernel assigned
+                    if g0.vars[k][1] is not v and k in globals_frame.vars:
+                        globals_frame.vars[k][1] = UNK
+        finally:
+            self.frames, self.w, self.loop_flags, self.kernel, self.shared, self.dyn_shared = saved
+
+    # ------------------------------------------------------------ atomics
+
+    def _atomic_cuda(self, name, c):
+        args_c = list(c.get_arguments())
+        p = self.eval(args_c[0])
+        vals = [self.eval(a) for a in args_c[1:]]
+        t = args_c[0].type.get_canonical().get_pointee()
+        size = ca.type_size(t) or 4
+        if not isinstance(p, Ptr):
+            return UNK
+        loc = Loc(p.obj, p.off, size)
+        loc.cursor = c
+        self.access(loc)
+        self.access(loc, write=True)
+        if not isinstance(p.obj, Obj) or p.off is UNK or not self.charging or isinstance(p.off, np.ndarray) and \
+                p.off.size not in (1, self.L):
+            if isinstance(p.obj, Obj) and p.off is not UNK and self.charging:
+                p.obj.store(p.off, UNK, size)
+            return UNK
+        if ca.is_float(t):
+            return self._atomic_float(name, loc, size, vals)
+        if name in ("atomicAdd", "atomicSub"):
+            d = _as_int(vals[0]) if vals else UNK
+            if d is not UNK and name == "atomicSub":
+                d = _SCALAR(-np.asarray(d)) if np.ndim(d) else -d
+            old, _ = self._rmw_add(loc, t, d)
+            return old
+        return self._atomic_serial(name, loc, size, [_as_int(v) for v in vals])
+
+    def _groups(self, off):
+        """Thread order within each address: (order, starts, group, rank, unique offsets)."""
+        offs = np.broadcast_to(np.asarray(off, dtype=np.int64), (self.L,))
+        order = np.argsort(offs, kind="stable")
+        so = offs[order]
+        first = np.concatenate([[True], so[1:] != so[:-1]])
+        starts = np.nonzero(first)[0]
+        group = np.cumsum(first) - 1
+        rank = np.arange(self.L) - starts[group]
+        return order, starts, group, rank, so[starts]
+
+    def _atomic_serial(self, name, loc, size, vals):
+        if any(v is UNK for v in vals) or not vals:
+            loc.obj.store(loc.off, UNK, size)
+            return UNK
+        L = self.L
+        order, starts, group, rank, uniq = self._groups(loc.off)
+        cur = np.asarray(loc.obj.load(uniq, size), dtype=np.int64).copy()
+        if np.any(cur == SENTINEL):
+            loc.obj.store(uniq, UNK, size)
+            return UNK
+        a = np.broadcast_to(np.asarray(vals[0], dtype=np.int64), (L,))[order]
+        b = np.broadcast_to(np.asarray(vals[1], dtype=np.int64), (L,))[order] if len(vals) > 1 else None
+        old_sorted = np.empty(L, dtype=np.int64)
+        if name == "atomicExch":
+            old_sorted[1:] = a[:-1]
+            old_sorted[starts] = cur
+            last = np.concatenate([starts[1:] - 1, [L - 1]])
+            cur = a[last]
+        elif name in ("atomicMin", "atomicMax"):
+            incl = _seg_accumulate(name == "atomicMax", group, a)
+            op = np.maximum if name == "atomicMax" else np.minimum
+            prev = np.concatenate([[0], incl[:-1]])
+            old_sorted = np.where(rank == 0, cur[group], op(cur[group], prev))
+            last = np.concatenate([starts[1:] - 1, [L - 1]])
+            cur = op(cur, incl[last])
+        else:
+            ops = {"atomicCAS": lambda o, x, y: np.where(o == x, y, o), "atomicAnd": lambda o, x, y: o & x,
+                   "atomicOr": lambda o, x, y: o | x, "atomicXor": lambda o, x, y: o ^ x,
+                   "atomicInc": lambda o, x, y: np.where(o >= x, 0, o + 1),
+                   "atomicDec": lambda o, x, y: np.where((o == 0) | (o > x), x, o - 1)}
+            op = ops[name]
+            by_rank = np.argsort(rank, kind="stable")
+            pos = 0
+            for cnt in np.bincount(rank):
+                sel = by_rank[pos: pos + cnt]
+                pos += cnt
+                g = group[sel]
+                o = cur[g]
+                old_sorted[sel] = o
+                cur[g] = op(o, a[sel], b[sel] if b is not None else None)
+        loc.obj.store(uniq, cur, size)
+        old = np.empty(L, dtype=np.int64)
+        old[order] = old_sorted
+        return int(old[0]) if L == 1 else old
+
+    def _atomic_float(self, name, loc, size, vals):
+        r = _real(vals[0]) if vals and vals[0] is not UNK else UNK
+        order, starts, group, rank, uniq = self._groups(loc.off)
+        if r is UNK or name not in ("atomicAdd", "atomicExch"):
+            loc.obj.fstore(uniq, np.nan, size)
+            return UNK
+        L = self.L
+        v = np.broadcast_to(np.asarray(r.v, dtype=float), (L,))[order]
+        base = loc.obj.fload(uniq, size)
+        if name == "atomicExch":
+            old_sorted = np.empty(L)
+            old_sorted[1:] = v[:-1]
+            old_sorted[starts] = base
+            last = np.concatenate([starts[1:] - 1, [L - 1]])
+            loc.obj.fstore(uniq, v[last], size)
+        else:
+            cs = np.cumsum(v)
+            excl = cs - v
+            excl = excl - excl[starts][group]
+            old_sorted = base[group] + excl
+            ends = np.concatenate([starts[1:], [L]])
+            loc.obj.fstore(uniq, base + (cs[ends - 1] - (cs[starts] - v[starts])), size)
+        if np.any(np.isnan(old_sorted)):
+            return UNK
+        old = np.empty(L)
+        old[order] = old_sorted
+        return Real(float(old[0]) if L == 1 else old)
+
+
+def _seg_accumulate(maximum, group, x):
+    """Inclusive running max (or min) of x within each group (x sorted by group)."""
+    u, inv = np.unique(x, return_inverse=True)
+    m = len(u)
+    r = inv if maximum else (m - 1 - inv)
+    key = group.astype(np.int64) * m + r
+    acc = np.maximum.accumulate(key) - group.astype(np.int64) * m
+    return u[acc] if maximum else u[m - 1 - acc]
+
+
+_TOKEN = {"d": re.compile(rb"[-+]?\d+"), "i": re.compile(rb"[-+]?(0[xX][0-9a-fA-F]+|\d+)"),
+          "u": re.compile(rb"[-+]?\d+"), "x": re.compile(rb"[-+]?(0[xX])?[0-9a-fA-F]+"),
+          "X": re.compile(rb"[-+]?(0[xX])?[0-9a-fA-F]+"), "s": re.compile(rb"\S+"), "c": re.compile(rb"."),
+          **{k: re.compile(rb"[-+]?(\d+\.?\d*([eE][-+]?\d+)?|\.\d+([eE][-+]?\d+)?|inf|nan)") for k in "feEgG"}}
+
+
+def _pointee(arg):
+    """The element type a pointer argument points to, before its conversion to void *."""
+    c = arg
+    while True:
+        t = c.type.get_canonical()
+        if t.kind == ca.ci.TypeKind.POINTER and t.get_pointee().get_canonical().kind != ca.ci.TypeKind.VOID:
+            return t.get_pointee()
+        kids = [k for k in ca.children(c) if k.kind.is_expression()]
+        if c.kind == K.UNARY_OPERATOR and ca.unary_op(c) == "&" and kids:
+            return kids[0].type
+        if not kids or c.kind not in (K.UNEXPOSED_EXPR, K.PAREN_EXPR, K.CSTYLE_CAST_EXPR, K.CXX_STATIC_CAST_EXPR,
+                                      K.CXX_REINTERPRET_CAST_EXPR):
+            return None
+        c = kids[-1]
+
+
+def _system_stub(decl):
+    """Declared by cuda_stub.h (the runtime), not by the program."""
+    f = decl.location.file
+    return f is not None and str(f).endswith("cuda_stub.h")
+
+
+def _walk_nodes(node):
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        yield n
+        stack.extend(n.get_children())
+
+
+def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True):
+    """Run a CUDA program from main; returns the interpreter, with its events (Event) and their dependences
+    (interp.tracker, a kdeps.Tracker at `unit` bytes)."""
+    from . import interp
+    from .kdeps import Tracker
+
+    made = []
+
+    def make(tu_, seed_):
+        it = CudaInterpreter(tu_, seed_, stubs, opt, host_events)
+        it.tracker = Tracker(unit)
+        made.append(it)
+        return it
+
+    result = interp.run(tu, footprint="starts", seed=seed, make=make, argv=argv)
+    it = made[0]
+    it.finish()
+    it.result = result
+    return it
+
+
+def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_events=True):
+    """Parse a CUDA source and run it: (interpreter, parse errors, seconds)."""
+    import time
+
+    start = time.time()
+    tu = ca.parse(source, defines, includes, cuda=True)
+    errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
+    it = run(tu, argv=argv, seed=seed, unit=unit, host_events=host_events)
+    return it, errors, time.time() - start
