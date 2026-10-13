@@ -26,8 +26,9 @@ int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site);
 /* A program built with the pass in apply mode carries its reservations in this string (the
    MPR_RESERVATIONS file format); MPR_RESERVATIONS overrides it. */
 extern const char __mpr_embedded_reservations[] __attribute__((weak));
-/* A container's new capacity (len elements of elem bytes, at growth point `site`): at least `len`,
-   MemPrint's predicted final size when the call site has one. */
+/* A container's new capacity (len elements of elem bytes, at growth point `site`; size: what grows,
+   1 vector, 2 string, 3 hash table buckets, for the profile): at least `len`, MemPrint's predicted
+   final size when the call site has one. */
 size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site);
 /* The program's call site growing a container on this thread (0: none), set by the pass around calls
    to container members. */

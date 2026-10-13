@@ -133,15 +133,16 @@ if [[ -n "${PIN_ROOT:-}" && -f "$HERE/../../pintool/obj-intel64/memprint_trace.s
     else
         echo "    FAIL shaped reservation (status $status):"; cat "$WORK/strided_res.txt" "$WORK/strided.csv"; failed=1
     fi
-    # capacities profiled per call site: the big vector, the string and the bucket array are
-    # allocated once; the 2000 small vectors at another call site keep their own growth
+    # capacities profiled per call site: the big vector and the string are allocated once; the 2000
+    # small vectors at another call site keep their own growth
     "$PIN_ROOT/pin" -t "$HERE/../../pintool/obj-intel64/memprint_trace.so" -mode splitter -track_frees 1 -sites 1 \
         -outdir "$WORK/pincap" -name cap -- "$WORK/cap" > /dev/null 2>&1
     (cd "$HERE/../../analysis" && "$PY" -m memprint.sites "$WORK/pincap" -o "$WORK/cap_res.txt" > /dev/null)
     out0=$(MPR_ALL=1 MPR_REPORT="$WORK/cap0.csv" "$WORK/cap"); out1=$(MPR_ALL=1 MPR_RESERVATIONS="$WORK/cap_res.txt" MPR_REPORT="$WORK/cap1.csv" "$WORK/cap")
     n0=$(awk -F, 'NR > 1 {n += $3} END {print n}' "$WORK/cap0.csv"); n1=$(awk -F, 'NR > 1 {n += $3} END {print n}' "$WORK/cap1.csv")
     caps=$(grep -c " cap " "$WORK/cap_res.txt")
-    if [[ "$out0" == "$out1" && $caps -eq 3 && $n1 -lt $n0 && $n1 -le 4 ]]; then
+    # (the hash table's bucket array is left out by default: --hash-capacities)
+    if [[ "$out0" == "$out1" && $caps -eq 2 && $n1 -lt $n0 ]]; then
         echo "    ok   container capacities: $caps call sites, $n0 -> $n1 large blocks, same output"
     else
         echo "    FAIL container capacities: $caps call sites, $n0 -> $n1 large blocks; output '$out0' / '$out1'"

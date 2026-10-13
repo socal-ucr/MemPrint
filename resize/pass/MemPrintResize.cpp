@@ -233,26 +233,31 @@ bool GrowingCall(Function* callee)
 // A growth point: a call whose result (or an argument) is a container's new capacity.
 // arg: -1 the result; else the index of the argument that is the capacity (byRef: a pointer to it,
 // read before the call and written back). fixedElem: the element size when it is not the class's
-// template parameter (a hash table's bucket: a pointer).
+// template parameter (a hash table's bucket: a pointer). kind: what grows, passed to __mpr_capacity
+// in its `size` argument so that the profile can tell (1 vector, 2 string, 3 hash table's buckets).
+enum GrowthKind { GROW_VECTOR = 1, GROW_STRING = 2, GROW_HASH = 3 };
 struct GrowthPoint
 {
     int arg;
     bool byRef;
     uint64_t fixedElem;
+    int kind;
 };
 
 bool FindGrowthPoint(Function* callee, GrowthPoint* g)
 {
     if (!callee) return false;
     StringRef n = callee->getName();
-    if (n.contains("12_M_check_lenEmPKc") || (n.contains("11__recommendEm") && callee->getReturnType()->isIntegerTy(64)))
-        return *g = {-1, false, 0}, true;   // libstdc++ vector, libc++ vector and string: the result
+    if (n.contains("12_M_check_lenEmPKc"))
+        return *g = {-1, false, 0, GROW_VECTOR}, true; // libstdc++ vector: the result
+    if (n.contains("11__recommendEm") && callee->getReturnType()->isIntegerTy(64))
+        return *g = {-1, false, 0, n.contains("basic_string") ? GROW_STRING : GROW_VECTOR}, true; // libc++: the result
     if (n.contains("9_M_createERmm"))
-        return *g = {1, true, 0}, true;     // libstdc++ string: _M_create(size_type& capacity, size_type old)
+        return *g = {1, true, 0, GROW_STRING}, true;   // libstdc++ string: _M_create(size_type& capacity, size_type old)
     if (n.starts_with("_ZNSt10_Hashtable") && n.contains("9_M_rehashEm"))
-        return *g = {1, false, 8}, true;    // libstdc++ hash table: _M_rehash(size_type buckets, state)
+        return *g = {1, false, 8, GROW_HASH}, true;    // libstdc++ hash table: _M_rehash(size_type buckets, state)
     if (n.contains("__hash_table") && (n.contains("8__rehashILb") || n.contains("8__rehashEm")))
-        return *g = {1, false, 8}, true;    // libc++ hash table: __rehash(size_type buckets)
+        return *g = {1, false, 8, GROW_HASH}, true;    // libc++ hash table: __rehash(size_type buckets)
     return false;
 }
 
@@ -310,12 +315,13 @@ struct MemPrintResize : PassInfoMixin< MemPrintResize >
                     uint64_t elem = g.fixedElem ? g.fixedElem : ElementSize(F);
                     Value* id     = ConstantInt::get(I64, site.first);
                     Value* elemV  = ConstantInt::get(SizeT, elem ? elem : 1);
+                    Value* kindV  = ConstantInt::get(SizeT, g.kind);
                     if (g.arg < 0)
                     {
                         // the new capacity is the result (elements; libmpr's models are in bytes)
                         if (!call->getType()->isIntegerTy(64) || isa< InvokeInst >(call)) continue;
                         IRBuilder<> B(call->getNextNode());
-                        Value* len = B.CreateCall(capacity, {call, ConstantInt::get(SizeT, 0), elemV, id});
+                        Value* len = B.CreateCall(capacity, {call, kindV, elemV, id});
                         call->replaceUsesWithIf(len, [&](Use& u) { return u.getUser() != len; });
                     }
                     else if (g.byRef)
@@ -323,17 +329,17 @@ struct MemPrintResize : PassInfoMixin< MemPrintResize >
                         IRBuilder<> B(call);
                         Value* ref = call->getArgOperand(g.arg);
                         Value* len = B.CreateLoad(I64, ref);
-                        B.CreateStore(B.CreateCall(capacity, {len, ConstantInt::get(SizeT, 0), elemV, id}), ref);
+                        B.CreateStore(B.CreateCall(capacity, {len, kindV, elemV, id}), ref);
                     }
                     else
                     {
                         IRBuilder<> B(call);
                         Value* len = B.CreateZExtOrTrunc(call->getArgOperand(g.arg), SizeT);
-                        Value* cap = B.CreateCall(capacity, {len, ConstantInt::get(SizeT, 0), elemV, id});
+                        Value* cap = B.CreateCall(capacity, {len, kindV, elemV, id});
                         call->setArgOperand(g.arg, B.CreateZExtOrTrunc(cap, call->getArgOperand(g.arg)->getType()));
                     }
                     grown++;
-                    note(site.first, ("capacity elem=" + Twine(elem)).str(), site.second);
+                    note(site.first, ("capacity elem=" + Twine(elem) + " kind=" + Twine(g.kind)).str(), site.second);
                 }
             }
         }

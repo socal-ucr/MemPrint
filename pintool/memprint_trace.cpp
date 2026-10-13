@@ -537,6 +537,7 @@ struct alignas(64) ThreadData // own cache lines: counters are written by their 
     // -sites, programs built with the pass: the call site growing a container (__mpr_growth) and the
     // capacity request (__mpr_capacity) the next allocation serves
     ADDRINT growthSite = 0, pendingCap = 0, allocCap = 0, pendingCapElem = 0, allocCapElem = 0;
+    ADDRINT pendingCapKind = 0, allocCapKind = 0; // 1 vector, 2 string, 3 hash table buckets
     BOOL pendingCapCtx = FALSE, pendingCapSet = FALSE, allocCapCtx = FALSE, allocCapSet = FALSE;
     BOOL zeroQueued = FALSE;          // the last range queued is not empty
     BOOL allocMallocLike = FALSE; // the outermost call returns its block (malloc, calloc, memalign, ...)
@@ -606,7 +607,7 @@ struct CapChain
 {
     ADDRINT key;
     BOOL ctx;
-    ADDRINT elem, lastPtr;
+    ADDRINT elem, kind, lastPtr;
     UINT64 blocks = 0, finalSize = 0, finalHighWater = 0;
 };
 vector< CapChain > capChains;                                    // blockSiteLock
@@ -1257,6 +1258,7 @@ static VOID SiteBorn(THREADID tid, ADDRINT ptr, ADDRINT size, ADDRINT grownFrom 
                 c = capChains.size();
                 capChains.push_back(CapChain());
                 capChains[c].key = t.allocCap, capChains[c].ctx = t.allocCapCtx, capChains[c].elem = t.allocCapElem;
+                capChains[c].kind = t.allocCapKind;
                 capLatest[key] = c;
             }
             CapChain& ch = capChains[c];
@@ -1398,24 +1400,24 @@ static VOID SitesFinish()
     {
         // per capacity key: its chains; the small ones (final buffer below -sites_block_min) only as a
         // count and the largest final buffer, the others one by one (final buffer's size and high water)
-        struct Agg { ADDRINT elem = 0; UINT64 chains = 0, small = 0, smallMax = 0; vector< std::pair< UINT64, UINT64 > > large; };
+        struct Agg { ADDRINT elem = 0, kind = 0; UINT64 chains = 0, small = 0, smallMax = 0; vector< std::pair< UINT64, UINT64 > > large; };
         std::map< std::pair< ADDRINT, BOOL >, Agg > agg;
         for (const CapChain& c : capChains)
         {
             Agg& a = agg[{c.key, c.ctx}];
-            a.elem = c.elem, a.chains++;
+            a.elem = c.elem, a.kind = c.kind, a.chains++;
             if (c.finalSize < KnobSitesBlockMin.Value())
                 a.small++, a.smallMax = std::max(a.smallMax, c.finalSize);
             else if (a.large.size() < 1000)
                 a.large.push_back({c.finalSize, c.finalHighWater});
         }
         ofstream cap(outputFileNamePrefix + "_capacity.csv");
-        cap << "key,elem,chains,small_chains,small_max_size,final_sizes,final_high_waters\n";
+        cap << "key,elem,kind,chains,small_chains,small_max_size,final_sizes,final_high_waters\n";
         for (const auto& e : agg)
         {
             ostringstream key;
             key << (e.first.second ? "cap:0x" : "id:0x") << std::hex << e.first.first;
-            cap << key.str() << ',' << e.second.elem << ',' << e.second.chains << ',' << e.second.small << ','
+            cap << key.str() << ',' << e.second.elem << ',' << e.second.kind << ',' << e.second.chains << ',' << e.second.small << ','
                 << e.second.smallMax << ',';
             for (size_t i = 0; i < e.second.large.size(); i++)
                 cap << (i ? ";" : "") << e.second.large[i].first;
@@ -1529,7 +1531,7 @@ static VOID AllocEnter(THREADID tid, ADDRINT sp, ADDRINT caller, BOOL mallocLike
         t.allocCtx[i] = t.pendingSiteSet ? t.pendingCtx[i] : t.scratchCtx[i];
     t.scratchFor = 0;
     t.allocCapSet = t.pendingCapSet, t.allocCap = t.pendingCap, t.allocCapCtx = t.pendingCapCtx;
-    t.allocCapElem  = t.pendingCapElem;
+    t.allocCapElem  = t.pendingCapElem, t.allocCapKind = t.pendingCapKind;
     t.pendingCapSet = FALSE;
     t.pendingSiteSet  = FALSE;
     t.allocKind       = mallocLike ? SITE_MALLOC : (out ? SITE_MEMALIGN : SITE_REALLOC);
@@ -1612,9 +1614,10 @@ static VOID Backtrace(const CONTEXT* ctxt, ADDRINT ret, ADDRINT* out, UINT32* n)
 static VOID GrowthEnter(THREADID tid, ADDRINT site) { threads[tid].growthSite = site; }
 
 // __mpr_capacity(len, size, elem, point): the next allocation is that container's new buffer
-static VOID CapacityEnter(THREADID tid, ADDRINT elem, ADDRINT point)
+static VOID CapacityEnter(THREADID tid, ADDRINT kind, ADDRINT elem, ADDRINT point)
 {
     ThreadData& t     = threads[tid];
+    t.pendingCapKind  = kind;
     t.pendingCapCtx   = t.growthSite != 0;
     t.pendingCap      = t.growthSite ? t.growthSite : point;
     t.pendingCapElem  = elem;
@@ -2141,7 +2144,7 @@ VOID ImageLoad(IMG img, VOID* v)
                                IARG_END);
             else
                 RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(CapacityEnter), IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE,
-                               2, IARG_FUNCARG_ENTRYPOINT_VALUE, 3, IARG_END);
+                               1, IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_FUNCARG_ENTRYPOINT_VALUE, 3, IARG_END);
             RTN_Close(rtn);
         }
         // name, site argument, size argument(s) (calloc: count x size)

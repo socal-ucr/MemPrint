@@ -33,7 +33,10 @@ Container capacities (programs built with the MemPrintResize pass): the Pin tool
 container's successive buffers into growth chains per call site (*_capacity.csv). For a call site
 whose containers grow past --min, the line "cap:0x<call site> cap A B" reserves A bytes, the
 --quantile of the final buffers' used bytes (high water), once a container asks for more than B
-bytes, the largest any of the call site's small containers grew to (0 when it has none).
+bytes, the largest any of the call site's small containers grew to (0 when it has none). Hash tables'
+bucket arrays are left out unless --hash-capacities: their growth copies only pointers, and a large
+bucket array makes every clear() and traversal of the table slower (miniVite: 7% of its run time, no
+memory saved).
 """
 
 import argparse
@@ -184,12 +187,15 @@ def images(dirs):
     return out
 
 
-def capacities(dirs, q, min_size):
+def capacities(dirs, q, min_size, hashes=False):
     """'key cap A B' rows from the Pin tool's *_capacity.csv files (one per profiling run)."""
     rows = {}
     for d in dirs:
         for f in glob.glob(os.path.join(d, "*_capacity.csv")):
             for r in pd.read_csv(f, dtype=str).fillna("").itertuples():
+                kind = int(getattr(r, "kind", 0) or 0)
+                if kind == 3 and not hashes:
+                    continue
                 a = rows.setdefault(r.key, dict(elem=int(r.elem), chains=0, small=0, small_max=0, finals=[]))
                 a["chains"] += int(r.chains)
                 a["small"] += int(r.small_chains)
@@ -253,11 +259,12 @@ def main(argv=None):
     ap.add_argument("--quantile", type=float, default=0.9)
     ap.add_argument("--min", type=int, default=65536)
     ap.add_argument("--keep", type=float, default=0.95)
+    ap.add_argument("--hash-capacities", action="store_true", help="also reserve hash tables' bucket counts")
     ap.add_argument("--split", type=float, default=0.05,
                     help="split a site by calling context when that commits less by this share of its requested bytes")
     a = ap.parse_args(argv)
     r = reservations(load(a.dirs, a.min), a.quantile, a.keep, a.split)
-    caps = capacities(a.dirs, a.quantile, a.min)
+    caps = capacities(a.dirs, a.quantile, a.min, a.hash_capacities)
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
         for x in r[r.keep.astype(bool)].itertuples():
