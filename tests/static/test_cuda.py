@@ -2,6 +2,7 @@
 tests/static/cuda/: values the programs compute (probe), launches, and the dependences each program's
 comment describes, with their units, certainty and input dependence. No GPU is needed:
 python tests/static/test_cuda.py"""
+import csv
 import struct
 import sys
 import tempfile
@@ -11,6 +12,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
 from memprint.static import interp_cuda as ic  # noqa: E402
+from memprint.static import kdeps, kdeps_score  # noqa: E402
 from memprint.static.kdeps import reduce_edges  # noqa: E402
 
 HERE = Path(__file__).with_name("cuda")
@@ -111,6 +113,27 @@ it, probes, rows = run("maybe.cu")
 t, c = index(it, "threshold"), index(it, "count")
 check("threshold -> count through flag (may)", edge(rows, t, c, "RAW", "flag"), (0, 512, 1, 1))
 check("threshold -> count through seen (must)", edge(rows, t, c, "RAW", "seen"), (512, 0, 0, 1))
+
+# the scoring pipeline (kdeps_score against gpu/nvbit_rw's truth format), on the interpreter's own access
+# sets written as a truth: every dependence must come back, with its units
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    kdeps.main([str(HERE / "bfs.cu"), str(out), "--argv", "bfs", "500", "--no-host", "--access"])
+    with open(out / "bfs_objects.csv") as f:
+        allocs = sorted((int(r["alloc"]), int(r["bytes"])) for r in csv.DictReader(f) if r["alloc"])
+    with open(out / "truth_allocs.csv", "w") as f:
+        f.write("index,base,bytes\n" + "".join(f"{i},0x{(i + 1) << 32:x},{b}\n" for i, b in allocs))
+    with open(out / "bfs_events.csv") as f, open(out / "truth_events.csv", "w") as g:
+        g.write("index,kind,name,grid,block\n")
+        for r in csv.DictReader(f):
+            g.write(f"{r['index']},{r['kind']},\"_Z{r['name']}\",{r['grid']},{r['block']}\n")
+    (out / "truth_access.csv").write_text((out / "bfs_access.csv").read_text())
+    ie, iedges = kdeps_score.interp_edges(out, "bfs")
+    te, tedges = kdeps_score.truth_edges(out, 4)
+    check("aligned", kdeps_score.aligned(ie, te), (True, ""))
+    sc = kdeps_score.score(iedges, tedges)
+    check("must precision, recall, units error", (sc["must_precision"], sc["recall"], sc["units_error"]),
+          (1.0, 1.0, 0.0))
 
 # the transitive reduction
 check("reduce_edges", sorted(reduce_edges({(0, 1), (1, 2), (0, 2), (2, 3), (0, 3), (1, 3)})), [(0, 1), (1, 2), (2, 3)])

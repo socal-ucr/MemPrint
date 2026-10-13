@@ -65,6 +65,12 @@ class Tracker:
         self.objects = {}  # Obj -> its row: name, kind, bytes, site
         self.events = []
         self.edges = {}  # (src, dst, kind, object name) -> [must units, may units, dd units]
+        self.access = None  # a list to keep each event's units of device allocations in (keep_access)
+
+    def keep_access(self):
+        """Also keep, per event and device allocation, the runs of units it read (1) and wrote (2), in
+        gpu/nvbit_rw's truth_access.csv format."""
+        self.access = []
 
     def _units(self, ev, obj):
         """uint8 bits per unit of an event's references to obj."""
@@ -104,7 +110,8 @@ class Tracker:
                 site = getattr(obj, "site", None) or {}
                 loc = site.get("loc")
                 self.objects[obj] = {"name": obj.name, "kind": obj.kind, "bytes": obj.nbytes,
-                                     "site": f"{loc[0]}:{loc[1]}" if loc else ""}
+                                     "site": f"{loc[0]}:{loc[1]}" if loc else "",
+                                     "alloc": getattr(obj, "alloc_index", "")}
             bits = self._units(ev, obj)
             st = self.states.get(obj)
             if st is None:
@@ -113,6 +120,12 @@ class Tracker:
             if len(bits) < len(st.last):
                 bits = np.concatenate([bits, np.zeros(len(st.last) - len(bits), dtype=np.uint8)])
             self._fold(ev, obj, st, bits)
+            if self.access is not None and getattr(obj, "alloc_index", None) is not None:
+                rw = ((bits & (R | RM)) != 0).astype(np.uint8) | (((bits & (W | WM)) != 0).astype(np.uint8) << 1)
+                cuts = np.flatnonzero(np.diff(rw)) + 1
+                for lo, hi in zip(np.r_[0, cuts], np.r_[cuts, len(rw)]):
+                    if rw[lo]:
+                        self.access.append((ev.index, obj.alloc_index, int(lo), int(hi), int(rw[lo])))
 
     def _fold(self, ev, obj, st, bits):
         i = ev.index
@@ -209,9 +222,14 @@ def write(out_dir, name, tracker):
         wr.writerows(rows)
     obj_path = os.path.join(out_dir, f"{name}_objects.csv")
     with open(obj_path, "w", newline="") as f:
-        wr = csv.DictWriter(f, ["name", "kind", "bytes", "site"])
+        wr = csv.DictWriter(f, ["name", "kind", "bytes", "site", "alloc"])
         wr.writeheader()
         wr.writerows(tracker.objects.values())
+    if tracker.access is not None:
+        with open(os.path.join(out_dir, f"{name}_access.csv"), "w", newline="") as f:
+            wr = csv.writer(f)
+            wr.writerow(["event", "alloc", "unit_lo", "unit_hi", "bits"])
+            wr.writerows(tracker.access)
     return ev_path, edge_path, rows
 
 
@@ -234,6 +252,8 @@ def main(argv=None):
     ap.add_argument("--unit", type=int, default=4, help="bytes per dependence unit")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-host", action="store_true", help="no host segments: only device operations")
+    ap.add_argument("--access", action="store_true",
+                    help="also write NAME_access.csv: each event's units of device allocations (truth format)")
     args = ap.parse_args(argv)
 
     from .interp_cuda import analyze
@@ -244,7 +264,7 @@ def main(argv=None):
     os.makedirs(args.out_dir, exist_ok=True)
     start = time.time()
     it, errors, _ = analyze(source, args.defines, args.includes, argv=args.argv, seed=args.seed, unit=args.unit,
-                            host_events=not args.no_host)
+                            host_events=not args.no_host, keep_access=args.access)
     for e in errors[:20]:
         print("parse error:", e, file=sys.stderr)
     ev_path, edge_path, rows = write(args.out_dir, name, it.tracker)

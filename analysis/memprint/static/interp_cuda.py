@@ -680,6 +680,9 @@ class CudaInterpreter(CppInterpreter):
             obj = Obj(f"{_var_name(args_c[0])}@{c.location.line}", ALLOCS[name], nbytes)
             obj.site = self.site_of(c)
             obj.alloc_kind = name
+            if ALLOCS[name] in ("device", "managed"):                  # the n-th device allocation (kdeps_score)
+                obj.alloc_index = self.__dict__.setdefault("device_allocs", 0)
+                self.device_allocs += 1
             self.objects.append(obj)
             if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK:
                 self._ptr_store(Loc(p.obj, p.off, 8), Ptr(obj, 0))
@@ -1226,7 +1229,7 @@ def _walk_nodes(node):
         stack.extend(n.get_children())
 
 
-def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True):
+def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep_access=False):
     """Run a CUDA program from main; returns the interpreter, with its events (Event) and their dependences
     (interp.tracker, a kdeps.Tracker at `unit` bytes)."""
     from . import interp
@@ -1237,6 +1240,8 @@ def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True):
     def make(tu_, seed_):
         it = CudaInterpreter(tu_, seed_, stubs, opt, host_events)
         it.tracker = Tracker(unit)
+        if keep_access:
+            it.tracker.keep_access()
         made.append(it)
         return it
 
@@ -1247,12 +1252,12 @@ def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True):
     return it
 
 
-def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_events=True):
+def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_events=True, keep_access=False):
     """Parse a CUDA source and run it: (interpreter, parse errors, seconds)."""
     import time
 
     start = time.time()
     tu = ca.parse(source, defines, includes, cuda=True)
     errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
-    it = run(tu, argv=argv, seed=seed, unit=unit, host_events=host_events)
+    it = run(tu, argv=argv, seed=seed, unit=unit, host_events=host_events, keep_access=keep_access)
     return it, errors, time.time() - start
