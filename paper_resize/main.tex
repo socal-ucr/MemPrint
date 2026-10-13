@@ -1084,15 +1084,17 @@ to every program until the table was marked \texttt{MADV\_NOHUGEPAGE}.
 \subsection{Profiles from source}
 \label{sec:staticeval}
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering\small
-\input{tables/static.tex}
-\caption{The interpreter's per-site profiles (\secref{sec:static}) against the Pin tool's, for GAP's kernels built
-with \pass{} (Kronecker graphs, one trial), blocks of at least 64\,KB. Sites: in both profiles under the pass's
-identifiers, of those in Pin's. Largest site difference: the largest difference in a site's high water, as a share
-of its requested bytes. Profiling time on one core (the interpreter at scales 17 and 18 ran 8 at a time).}
+\resizebox{\linewidth}{!}{\input{tables/static.tex}}
+\caption{The interpreter's per-site profiles (\secref{sec:static}) against the Pin tool's, and what each cost, for
+GAP's kernels built with \pass{} (Kronecker graphs, one trial), blocks of at least 64\,KB. Sites: in both
+profiles under the pass's identifiers, of those in Pin's. Largest site difference: the largest difference in a
+site's high water, as a share of its requested bytes. Times are wall times with one process on the otherwise idle
+machine (native: mean of 3 runs of the same build); slowdown is over native; peak RSS of the profiling process
+(Pin with the program, or the interpreter's Python process).}
 \label{tab:static}
-\end{table}
+\end{table*}
 
 We profiled GAP's pr, bfs, cc and sssp at scales 16, 17 and 18 with the interpreter and, for comparison, under Pin
 (\tabref{tab:static}). Each kernel was built with \pass{} in profile mode, and the interpreter's sites were keyed
@@ -1115,12 +1117,38 @@ and time stayed within 0.99 to 1.04 of the build without reservations. The front
 comes while the graph is built, so it lowers the commit while sssp runs but not its peak (except at scale 16, 32.5
 to 31.7\,MB).
 
-The interpreter took 1.2 to 17.5 times as long as the Pin profile (\tabref{tab:static}): 23\,s to 25\,min against
-18 to 90\,s, longest for pr. So it
+\textbf{Cost.} We timed both profilers again, one process at a time on the idle machine (\tabref{tab:static}). Pin's
+exact \texttt{-sites} profile ran 65 to 97 times slower than the program (15 to 82\,s) and held 0.46 to 1.5\,GB.
+The interpreter ran 86 to 1{,}344 times slower (19\,s to 20\,min) and held 1.4 to 11.4\,GB, so it took 1.3 to 14.8
+times as long as Pin and 3 to 7 times its memory; over all twelve profiles, 2{,}751\,s against 472\,s. The ratio
+depends on the kernel more than on the scale: cc 1.3 to 1.4, bfs 1.9 to 2.1, sssp 3.0 to 3.3 and pr 13 to 15. Both slowdowns fall slightly with scale, the
+interpreter's from 1{,}344 to 1{,}234 on pr and 286 to 223 on sssp, and its memory grows with the input, about in
+proportion to the program's (1.4\,GB at scale 16 to 5.1\,GB at 18 for pr, 3.2 to 11.4\,GB for sssp). So it
 is not a cheaper way to profile a program that Pin can run. What it shows is that the per-site profile, and the
 reservations, can come from the source alone, with no instrumented run, and agree with the measured ones on the
 code it can execute. Its limit is the programs it can run: GAP's and the regular C/C++ codes of our earlier study~\cite{memprintstatic}, not miniVite
 (MPI), darknet or the LLM engines, which read their sizes from model files.
+
+\subsection{What a profile costs}
+\label{sec:cost}
+
+\begin{table}[t]
+\centering\small
+\resizebox{\linewidth}{!}{\input{tables/pin_cost.tex}}
+\caption{The Pin tool's exact \texttt{-sites} profile on the workloads the interpreter cannot run or that we profiled
+only under Pin: the corpus's largest inputs and the LLM profiles, against the same input's native run under glibc.
+The corpus profiles ran several at a time, so their times are upper bounds.}
+\label{tab:pincost}
+\end{table}
+
+A reservation is only as cheap as the profile behind it. \tabref{tab:pincost} records what the Pin tool's exact
+\texttt{-sites} mode cost on every other workload: a median slowdown of 217 over 29 profiles, from 40 on llama2.c
+(single-threaded) to 452 to 596 on llama.cpp (four threads), and 0.3 to 4.2\,GB of memory. The full trace is what makes the profile exact; whether a sampled or
+windowed \texttt{-sites} profile would give the same reservations is open (\secref{sec:limits}). Against GAP's 65 to
+97 when each run was alone (\tabref{tab:static}), the corpus's 76 to 127 for GAP at scale 18 includes the
+contention of the profiles that ran beside it and four to eight trials. Because the savings held with one profile
+per model (\secref{sec:inputs}), the cost is paid once per program and model, not per run, and the interpreter can
+replace it only for the programs it can execute, at a further 1.3 to 15 times the time (\secref{sec:staticeval}).
 
 \subsection{Robustness to wrong predictions}
 \label{sec:robust}
@@ -1261,7 +1289,7 @@ Profiling is expensive: the Pin tool's exact mode with \texttt{-sites} took 300 
 0.8 to 2\,s, and 617\,s for llama2.c 110M (18\,s natively), so profiles must be reused across runs, which the
 held-out and unseen-input results show is possible when the inputs exercise the same code paths: one profile per
 model served 21 new inputs (\secref{sec:inputs}). The interpreter avoids the instrumented run but was slower than
-Pin on GAP (\secref{sec:staticeval}). Whether a sampled or windowed
+Pin on GAP, 1.3 to 14.8 times its time and 3 to 7 times its memory (\secref{sec:staticeval}, \secref{sec:cost}). Whether a sampled or windowed
 \texttt{-sites} profile would give reservations as good is open. We ran single short completions; an LLM server that
 runs many sequences fills its KV cache over time, and its savings would shrink as it does.
 

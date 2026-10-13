@@ -482,15 +482,46 @@ def table_inputs(data, out):
 
 
 def table_static(data, out):
-    f = pd.read_csv(f"{data}/static/fidelity.csv")
-    lines = [r"\begin{tabular}{llrrrrrrr}", r"\toprule",
-             r"Kernel & Scale & Sites & \multicolumn{2}{c}{Requested (MB)} & \multicolumn{2}{c}{High water (MB)} & Largest site & Profiling \\",
-             r" & & both / Pin & static & Pin & static & Pin & difference & static / Pin (s) \\", r"\midrule"]
+    """Agreement and cost of the two per-site profilers (static/overhead.csv: one process at a time)."""
+    f = pd.read_csv(f"{data}/static/overhead.csv")
+    lines = [r"\begin{tabular}{llrrrrrrrrrr}", r"\toprule",
+             r" & & & \multicolumn{2}{c}{High water (MB)} & Largest & Native & \multicolumn{2}{c}{Pin \texttt{-sites}} & "
+             r"\multicolumn{2}{c}{Interpreter} & Peak RSS (MB) \\",
+             r"\cmidrule(lr){4-5}\cmidrule(lr){8-9}\cmidrule(lr){10-11}",
+             r"Kernel & Scale & Sites & static & Pin & site diff. & (s) & (s) & slowdown & (s) & slowdown & Pin / interp. \\",
+             r"\midrule"]
     for x in f.itertuples():
-        lines.append(f"{x.kernel} & {x.scale} & {x.sites_both} / {x.sites_pin} & {x.req_st:.1f} & {x.req_pin:.1f} & "
-                     f"{x.hw_st:.1f} & {x.hw_pin:.1f} & {100 * x.max_site_hw_err:.1f}\\% & {x.secs_st:.0f} / {x.secs_pin:.0f} \\\\")
-    lines += [r"\bottomrule", r"\end{tabular}"]
+        lines.append(f"{x.kernel} & {x.scale} & {x.sites_both} / {x.sites_pin} & {x.hw_st:.1f} & {x.hw_pin:.1f} & "
+                     f"{100 * x.max_site_hw_err:.1f}\\% & {x.native_s:.2f} & {x.pin_s:.0f} & {x.pin_x:.0f}$\\times$ & "
+                     f"{x.st_s:.0f} & {x.st_x:,.0f}$\\times$ & {x.pin_rss_mb:,.0f} / {x.st_rss_mb:,.0f} \\\\".replace(",", "{,}"))
+    lines += [r"\midrule",
+              f"Total & & & & & & {f.native_s.sum():.1f} & {f.pin_s.sum():.0f} & & {f.st_s.sum():,.0f} & & \\\\".replace(",", "{,}"),
+              r"\bottomrule", r"\end{tabular}"]
     open(f"{out}/tables/static.tex", "w").write("\n".join(lines) + "\n")
+
+
+PIN_GROUPS = [("PolyBench (2mm, gemm, jacobi-2d, atax)", ["2mm", "gemm", "jacobi-2d", "atax"]),
+              ("GAP (bfs, pr, cc, sssp; scale 18)", ["gap-bfs", "gap-pr", "gap-cc", "gap-sssp"]),
+              ("HPC proxies (HPCCG, LULESH, miniFE, Kripke, Quicksilver)", ["hpccg", "lulesh", "minife", "kripke", "quicksilver"]),
+              ("NPB (IS, CG, MG)", ["npb-is", "npb-cg", "npb-mg"]),
+              ("Interpreters, database, compiler (Lua, Python, Perl, SQLite, cc1)", ["lua", "python", "perl", "sqlite", "cc1"]),
+              ("miniVite 32768", ["miniVite"]), ("darknet AlexNet", ["darknet"]),
+              ("llama2.c (15M, 42M, 110M; 128 steps)", ["llama2c-15M", "llama2c-42M", "llama2c-110M"]),
+              ("llama.cpp (135M 32/128 tokens, 360M 64)", ["llamacpp-135m-n32", "llamacpp-135m-n128", "llamacpp-360m-n64"])]
+
+
+def table_pin_cost(data, out):
+    t = pd.read_csv(f"{data}/results/pin_cost.csv").set_index("workload")
+    rng = lambda v, f: f"{f(v.min())}" if len(v) == 1 or f(v.min()) == f(v.max()) else f"{f(v.min())} to {f(v.max())}"
+    lines = [r"\begin{tabular}{lrrrr}", r"\toprule",
+             r"Workloads & Native (s) & Pin \texttt{-sites} (s) & Slowdown & Peak RSS under Pin (GB) \\", r"\midrule"]
+    for label, names in PIN_GROUPS:
+        g = t.loc[[n for n in names if n in t.index]]
+        nums = (f"{rng(g.native_s, lambda x: f'{x:.1f}')} & {rng(g.pin_s, lambda x: f'{x:,.0f}')} & "
+                f"{rng(g.slowdown, lambda x: f'{x:.0f}')} & {rng(g.pin_rss_mb / 1024, lambda x: f'{x:.1f}')}")
+        lines.append(f"{label} & {nums.replace(',', '{,}')} \\\\")
+    lines += [r"\midrule", f"All 29 & & & median {t.slowdown.median():.0f} & \\\\", r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/pin_cost.tex", "w").write("\n".join(lines) + "\n")
 
 
 def main():
@@ -516,7 +547,9 @@ def main():
     if os.path.exists(f"{a.data}/runs/inputs-v2/summary.csv"):
         fig_inputs(a.data, a.out)
         table_inputs(a.data, a.out)
-    if os.path.exists(f"{a.data}/static/fidelity.csv"):
+    if os.path.exists(f"{a.data}/results/pin_cost.csv"):
+        table_pin_cost(a.data, a.out)
+    if os.path.exists(f"{a.data}/static/overhead.csv"):
         table_static(a.data, a.out)
     for name, b, s, h in rows:
         print(f"{name:26s} glibc {b.rss:7.1f} {b.commit:7.1f}  own {s.rss:7.1f} {s.commit:7.1f}  held {h.rss:7.1f} {h.commit:7.1f}  "

@@ -178,7 +178,17 @@ Eight refinements, each tested (`tests/pintool`, `resize/tests`), and the effect
 - Every site of at least 64 KB in Pin's profile is found under the same id, and no other (10-13 per run). Requested bytes within 0.3%, total high water within 0.5%, each site's high water within 0.1% of its size, except BFS's three frontier queues (up to 77% of a 64 KB queue), where the interpreter's high water is always the larger (it follows both sides of data-dependent branches: the safe direction).
 - The one wasteful site, sssp's `frontier` pvector (sized to the edges, 7.3-30.4 MB per trial, 11-32 KB touched): static fit 0.000987 n + 2.1 KB, Pin 0.00103 n + 1.1 KB (three scales); both commit 12-32 KB per frontier with nothing beyond. From scale 16 alone both give a const that larger scales outgrow by 7-20 KB per block.
 - End to end (180 runs: none / static / Pin reservations, from scale 16 and from 16-18): identical outputs; same peak RSS and commit with either route; time 0.99-1.04. The frontier is not live at the peak (graph construction), so the peak commit falls only at scale 16 (32.5 -> 31.7 MB).
-- **Cost:** the interpreter took 23 s to 25 min (pr at 18: 1525 s) against Pin's 18-90 s, 1.2-17.5x. The value is that the per-site profile and the reservations can come from source with no instrumented run, not speed; and it only covers what the interpreter runs (not miniVite, darknet or the LLM engines).
+- **Cost, Pin vs the interpreter** (`static/overhead.sh` -> `static/overhead.csv`, `overhead.py`; one process at a time on the idle machine, `/usr/bin/time`; native = mean of 3 runs of the same pass build, `-n 1`):
+
+| Kernel | Native (s) 16 / 17 / 18 | Pin -sites (s) | Pin slowdown | Interpreter (s) | Interpreter slowdown | Interp / Pin | Peak RSS Pin / interp. (MB), scale 18 |
+|---|---|---|---|---|---|---|---|
+| pr | 0.19 / 0.43 / 0.99 | 19 / 40 / 82 | 83-97x | 260 / 527 / 1217 | 1234-1344x | 13.2-14.8 | 1254 / 5069 |
+| bfs | 0.18 / 0.38 / 0.84 | 15 / 27 / 55 | 65-81x | 31 / 52 / 113 | 134-171x | 1.9-2.1 | 1253 / 4850 |
+| cc | 0.17 / 0.38 / 0.83 | 15 / 27 / 54 | 65-85x | 19 / 37 / 72 | 86-108x | 1.3-1.4 | 1253 / 4851 |
+| sssp | 0.22 / 0.50 / 1.06 | 20 / 39 / 80 | 75-88x | 64 / 123 / 237 | 223-286x | 3.0-3.3 | 1542 / 11416 |
+
+  All twelve profiles: Pin 472 s, interpreter 2,751 s (5.8x); peak memory Pin 457-1542 MB, interpreter 1358-11416 MB (3.0-7.4x). The ratio depends on the kernel, not the scale; both slowdowns fall slightly with scale. The two profiles of these clean runs agree as above (same sites; high water within 0.5% in total). So the interpreter is not a cheaper profiler where Pin can run; its value is a profile from source with no instrumented run, and it only covers what it can execute (not miniVite, darknet or the LLM engines).
+- **Pin's cost on every other workload** (`pin_cost.py` -> `results/pin_cost.csv`; the corpus's largest inputs, which ran several at a time, so upper bounds, and the LLM profiles): median slowdown 217 over 29 profiles; PolyBench 121-346x, GAP 76-127x, HPC proxies 183-396x, NPB 92-273x, Lua/Python/Perl/SQLite/cc1 130-275x, miniVite 296x, darknet 325x, llama2.c 40-48x, llama.cpp 452-596x; 0.3-4.2 GB under Pin. Paid once per program and model (one profile per model served 21 unseen inputs).
 
 Paper: `paper_resize/main.pdf` (sections "Run parameters", "Per-site profiles from source", "Unseen inputs and run parameters", "Profiles from source").
 

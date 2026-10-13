@@ -1,0 +1,17 @@
+\begin{tabular}{lrrrr}
+\toprule
+Workloads & Native (s) & Pin \texttt{-sites} (s) & Slowdown & Peak RSS under Pin (GB) \\
+\midrule
+PolyBench (2mm, gemm, jacobi-2d, atax) & 0.1 to 12.4 & 16 to 3{,}332 & 121 to 346 & 0.3 to 0.5 \\
+GAP (bfs, pr, cc, sssp; scale 18) & 1.5 to 2.2 & 117 to 280 & 76 to 127 & 1.2 to 2.0 \\
+HPC proxies (HPCCG, LULESH, miniFE, Kripke, Quicksilver) & 1.7 to 7.0 & 523 to 2{,}195 & 183 to 396 & 0.9 to 3.3 \\
+NPB (IS, CG, MG) & 0.4 to 2.0 & 59 to 457 & 92 to 273 & 0.5 to 1.2 \\
+Interpreters, database, compiler (Lua, Python, Perl, SQLite, cc1) & 1.2 to 4.0 & 225 to 1{,}085 & 130 to 275 & 1.1 to 3.0 \\
+miniVite 32768 & 1.9 & 559 & 296 & 0.6 \\
+darknet AlexNet & 3.0 & 968 & 325 & 4.1 \\
+llama2.c (15M, 42M, 110M; 128 steps) & 2.1 to 15.3 & 94 to 617 & 40 to 48 & 0.5 to 2.6 \\
+llama.cpp (135M 32/128 tokens, 360M 64) & 0.7 to 1.9 & 332 to 1{,}062 & 452 to 596 & 2.5 to 3.9 \\
+\midrule
+All 29 & & & median 217 & \\
+\bottomrule
+\end{tabular}
