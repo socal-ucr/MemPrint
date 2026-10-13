@@ -41,25 +41,24 @@ Non-Binding Per-Site Reservations from Measured Memory Footprints}
 \begin{abstract}
 A program asks the allocator for the memory it might need, and the operating system and a cluster scheduler
 must honour every request, although the program often touches only part of it. We use \memprint{}, a Pin-based
-footprint profiler, to measure the bytes each allocation site requests and the bytes the program touches in
-each block, and we pass these measurements to the compiler and the runtime as \term{non-binding
-reservations}. The system has three parts. First, a per-site mode of the Pin tool records each large block's
-touched bytes, highest touched offset and touched pages when the block is freed. Second, \pass{}, an LLVM 21
-pass plugin, routes every allocation call through a runtime with a stable site identifier computed from the
-call's inlined debug location chain, passes \texttt{std::vector}'s growth capacity through the runtime, and can
-embed the reservations in the binary. Third, \libmpr{}, a runtime that is either linked or preloaded, commits only
-a block's predicted prefix and maps the rest \texttt{MAP\_NORESERVE}, so that an under-prediction costs commit
-accounting and never correctness. \libmpr{} also skips the zeroing of pages that a program has never touched and
-keeps those pages out of transparent huge pages. Every program we ran produced its original output under
-\libmpr{}. On darknet AlexNet inference, \libmpr{} reduces peak commit by 46.8\%. On miniVite, the pass's
-predicted vector capacity reduces peak RSS by 11.5\% and peak commit by 22.5\%. On llama.cpp, which zeroes a KV
-cache sized for an 8192-token context, \libmpr{} reduces peak RSS by 49.1\% and peak commit by 34.5\% with a
-135M-parameter model (43.3\% and 25.1\% with a 360M model), at no cost in run time, and reservations profiled on
-other inputs do as well. Across a 23-program HPC and interpreter corpus, where most programs already hold about
-what they touch, \libmpr{} changes no output, keeps run time within $-9\%$ to $+6\%$, and reduces total peak commit
-by 10.2\%. We also report what the measurements show about footprint estimation itself: a footprint curve
-drawn on wall-clock time needs 24\% less headroom to cover the resident set than one drawn on memory
-references, and bytes touched can exceed the resident set when a program writes zeros to fresh memory.
+footprint profiler, to measure what each allocation site requests and what the program touches in each block,
+and we pass these measurements to the compiler and the runtime as \term{non-binding reservations}. The system has
+three parts. First, a per-site mode of the Pin tool records each large block's touched bytes, highest touched
+offset and touched page ranges, the calling context that allocated it, and the growth of every container; zeros
+written over untouched memory do not count as use. Second, \pass{}, an LLVM 21 pass plugin, routes every allocation
+through a runtime with a site identifier that survives edits elsewhere in the program, raises the capacity of
+growing \texttt{std::vector}s, strings and hash tables per call site, with element sizes from the debug information,
+and can embed the reservations in the binary. Third, \libmpr{}, linked or preloaded, commits only the predicted
+prefix or ranges of a block and maps the rest \texttt{MAP\_NORESERVE}, so that an under-prediction costs commit
+accounting and never correctness; it also skips the zeroing of pages a program has never touched. Every program
+we ran produced its original output. On llama.cpp, which sizes and zeroes a KV cache for an 8192-token context,
+\libmpr{} reduces peak commit by 86\% and peak RSS by 54\% with a 135M-parameter model (90\% and 45\% with a 360M
+model), and profiles from other model sizes do as well. It reduces commit by 85\% on llama2.c, whose KV caches
+are used in one range per layer, by 47\% on darknet AlexNet inference, and by 22\% on miniVite with the pass's
+per-call-site container capacities. Across a 23-program HPC and interpreter corpus, where most programs already
+hold about what they touch, it changes no output and no total RSS, keeps run time within $-5\%$ to $+7\%$, and
+reduces total peak commit by 10.7\%. The pass adds 0 to 3\% to compile time, and 96.6\% of its site identifiers
+survive an edit that changed 19\% of the previous ones.
 \end{abstract}
 
 \section{Introduction}
@@ -98,15 +97,21 @@ In this work, we make the following contributions:
   \item We extend \memprint{}'s Pin tool to profile requested against touched bytes per allocation site, with
   each block's touched bytes, highest touched offset and touched pages measured exactly when the block is
   freed (\secref{sec:profile}).
-  \item We present \pass{}, an LLVM pass plugin that gives every allocation call a stable site identifier from
-  its inlined debug location chain, routes it through a runtime, passes \texttt{std::vector}'s new capacity
-  through the runtime, and embeds the reservations in the binary (\secref{sec:pass}).
-  \item We present \libmpr{}, a runtime that serves large blocks as a committed predicted prefix plus a
-  \texttt{MAP\_NORESERVE} remainder, grows blocks by moving page tables, and skips the zeroing of pages that
-  were never touched (\secref{sec:runtime}).
-  \item We evaluate the system on darknet, miniVite, two LLM inference engines and a 23-program corpus, and we
-  show that it halves llama.cpp's resident memory and nearly halves darknet's commit, with identical outputs
-  and no time cost (\secref{sec:eval}).
+  \item We extend the profile with calling contexts, so that a site reached through an allocation wrapper is
+  split by its callers, with touched page ranges for blocks used sparsely across their length, with container
+  growth chains, and with zeroing of untouched memory left out of use (\secref{sec:profile},
+  \secref{sec:fit}).
+  \item We present \pass{}, an LLVM pass plugin that gives every allocation call a site identifier that survives
+  edits elsewhere in the program, routes address-taken allocators through thunks and large zeroing through the
+  runtime, and raises the capacity of growing vectors, strings and hash tables per call site, with element sizes
+  from the debug information (\secref{sec:pass}).
+  \item We present \libmpr{}, a runtime that commits a block's predicted prefix or ranges and maps the rest
+  \texttt{MAP\_NORESERVE}, matches reservations by calling context, grows blocks by moving page tables, skips the
+  zeroing of pages that were never touched, and refuses address-keyed reservations profiled on another build
+  (\secref{sec:runtime}).
+  \item We evaluate the system on darknet, miniVite, two LLM inference engines and a 23-program corpus. It cuts
+  llama.cpp's commit by 86\% and its resident memory by 54\%, and llama2.c's commit by 85\%, with identical
+  outputs and no time cost, and we measure what each refinement adds (\secref{sec:eval}).
   \item We report what the measurements show about footprint estimation: where miniVite's extra memory comes
   from, why the bytes a program touches can exceed its resident set, and why the time axis of a footprint
   curve matters more than its unit (\secref{sec:discussion}).
@@ -168,7 +173,7 @@ Makor et al.~\cite{Makor2025Replacement} & data-structure use per allocation sit
 Odaira (IBM patent)~\cite{Odaira2015ArraySize} & highest index accessed per allocation context & JIT sets the initial array size & yes (Java JIT) & array grows by copying \\
 Xu et al., DHAT~\cite{Xu2010LowUtility,Xu2010Containers,ValgrindDHAT} & cost and benefit, or bytes accessed, per site & report bloat & no (programmer) & -- \\
 \midrule
-\textbf{This work} & bytes touched, highest offset, pages per block and site & commit the predicted prefix, rest \texttt{MAP\_NORESERVE}; raise vector capacity; skip zeroing untouched pages & yes (pass or preload) & costs commit accounting only \\
+\textbf{This work} & bytes touched, highest offset and touched page ranges per block, site and calling context; container growth chains per call site & commit the predicted prefix or ranges, the rest \texttt{MAP\_NORESERVE}; raise container capacities per call site; skip zeroing untouched pages & yes (pass or preload) & costs commit accounting only \\
 \bottomrule
 \end{tabular}
 \caption{Profile-guided work on heap allocations, and how a wrong profile affects each.}
@@ -223,6 +228,20 @@ huge-page policy addresses the same bloat from user space, for the specific page
 Yang et al.\ measured the cost of zeroing new memory in managed runtimes and made zeroing cheaper with
 non-temporal and concurrent zeroing~\cite{Yang2011Zeroing}. \libmpr{} instead avoids writing zeros to pages that
 are already zero, which saves resident memory as well as time.
+
+\textbf{Calling contexts, stale profiles and partial commitment.} Several ideas we build on come from profiling
+and operating systems. Calling-context profiling attributes a measurement to the chain of calls that led to it,
+recorded as a calling context tree~\cite{Ammons1997CCT} or encoded cheaply as a probabilistic calling context
+value per thread~\cite{Bond2007PCC}, and MemProf disambiguates allocation contexts by cloning functions under
+LTO~\cite{MemProf}. We split a site by its caller frames, taken with the call frame information at allocation time,
+which is enough to separate the callers of an allocation wrapper. Sample-based profile-guided optimisation keys
+its profile by the line offset from a function's first line so that a profile outlives edits elsewhere in a
+file~\cite{Chen2016AutoFDO,ClangSampleProfile}, and stale profile matching recovers a profile for a changed
+binary~\cite{Ayupov2024Stale}. We use the offset scheme for site identifiers, and GNU build identifiers~\cite{GNUld}
+to refuse address-keyed reservations on another build. Windows lets a program reserve address space and commit
+chosen pages of it later~\cite{MSVirtualAlloc}, and Linux's \texttt{MAP\_NORESERVE} leaves a mapping out of the commit
+charge~\cite{LinuxOvercommit}. Our shaped reservations commit chosen ranges of a block from a profile, without a
+change to the program.
 
 \textbf{LLM serving and memory pools.} PagedAttention allocates an LLM server's KV cache in fixed-size blocks as
 tokens arrive~\cite{Kwon2023vLLM}, which requires paged attention kernels and a memory manager in the serving
@@ -281,36 +300,86 @@ because the capacity is computed inside inlined library code, before any allocat
 \label{sec:profile}
 
 The \texttt{-sites} mode of the Pin tool runs with the exact splitter, \texttt{-track\_frees} and the
-bytes-touched footprint, which keeps one bit per byte for every touched page. It adds four mechanisms.
+bytes-touched footprint, which keeps one bit per byte for every touched page. It records, for every large block,
+what the program asked for and what it did with it, and it writes four files: \texttt{*\_blocks.csv} (one row per
+block of at least 64\,KB), \texttt{*\_sites.csv} (totals per site), \texttt{*\_capacity.csv} (container growth,
+\secref{sec:profile-capacity}) and \texttt{*\_images.csv} (the images that site keys name, with their paths).
 
-\textbf{Site identity.} The tool hooks the allocator's entry points (\texttt{malloc}, \texttt{calloc},
-\texttt{realloc}, the aligned variants and every \texttt{operator new}). For the outermost allocator call of a
-thread it records the call's return address, written as the image name plus the address in the image file
-(for example \texttt{llama-completion+0x92266f}), which stays the same across runs despite address-space
-layout randomisation. Because \texttt{operator new} is hooked as an allocator, an allocation made by inlined
+\subsection{Sites and calling contexts}
+
+The tool hooks the allocator's entry points (\texttt{malloc}, \texttt{calloc}, \texttt{realloc}, the aligned
+variants and every \texttt{operator new}). For the outermost allocator call of a thread it records the call's
+return address, written as the image name plus the address in the image file (for example
+\texttt{llama-completion+0x92266f}), which stays the same across runs despite address-space layout
+randomisation. Because \texttt{operator new} is hooked as an allocator, an allocation made by inlined
 standard-library code resolves to the program's own code. In a program built with \pass{}, the tool also hooks
 \texttt{\_\_mpr\_alloc} and the other runtime entry points, reads the site identifier from the argument the pass
 added, and names the site \texttt{id:0x...}.
 
-\textbf{Block summaries at release.} When a release (a \texttt{free}, a \texttt{realloc} that moves, or an
-\texttt{munmap}) is applied, the tool is about to clear the block's bits from the footprint. Just before it does,
-it reads the block's touched bytes, the offset of its highest touched byte and its number of touched pages from
-the per-page bitmaps. Releases are queued in order with each thread's buffered references, so a summary sees
-every reference the program made to the block before freeing it. Blocks still live at exit are summarised at
-exit.
+A site is a single call, and a call inside an allocation wrapper serves every caller of the wrapper. llama.cpp
+allocates its KV cache, its compute buffers and its weights' scratch space through one function,
+\texttt{ggml\_aligned\_malloc}, so all of them share one site, although the program uses them very differently.
+Calling-context profiling distinguishes the callers of a function by the chain of calls that reached
+it~\cite{Ammons1997CCT,Bond2007PCC}, and LLVM's MemProf records allocation contexts as call stacks for the same
+reason~\cite{MemProf}. With \texttt{-site\_context}~$k$ (2 by default), the tool records, for every allocation of
+at least 64\,KB, the $k$ return addresses above the allocation call. It takes them with \texttt{PIN\_Backtrace},
+which unwinds through the call frame information, so the program needs no frame pointers, and \libmpr{} takes
+the same frames with glibc's \texttt{backtrace()} at run time. The frames are written with the block as image
+keys, \texttt{frame1|frame2}. Backtraces are taken only for large requests, so a program's many small
+allocations add no unwinding cost.
 
-\textbf{Allocator zeroing.} \texttt{calloc} served from reused heap memory zeroes the block with a
-\texttt{memset} that is not the program's own use. The tool queues a probe at the \texttt{calloc} exit, in order
-with the references, and records the bytes touched at that point separately as \texttt{alloc\_touched}.
+\subsection{Block summaries}
 
-\textbf{Outputs.} \texttt{*\_blocks.csv} has one row per block of at least 64\,KB with its site, kind, size,
-birth and death times, touched bytes, highest touched offset, touched and total pages, allocator-touched
-bytes, and whether it was grown from another block. \texttt{*\_sites.csv} aggregates every block per site.
-The test suite checks exact values on programs written for the purpose: a dead block, a block touched only in
-a prefix, a block touched only at its tail (whose highest touched offset is its size), a \texttt{calloc} on a
-reused chunk, a \texttt{realloc} growth chain and a growing vector.
+When a release (a \texttt{free}, a \texttt{realloc} that moves, or an \texttt{munmap}) is applied, the tool is
+about to clear the block's bits from the footprint. Just before it does, it reads the block's touched bytes, the
+offset of its highest touched byte and its number of touched pages from the per-page bitmaps, and it writes the
+block's touched pages as runs, \texttt{first:count} relative to the block's first page, merging the closest runs
+when there are more than 64. Releases are queued in order with each thread's buffered references, so a summary
+sees every reference the program made to the block before freeing it. Blocks still live at exit are summarised
+at exit. \texttt{calloc}'s own zeroing of a reused heap chunk is measured by a probe queued at the
+\texttt{calloc} exit and recorded separately as \texttt{alloc\_touched}.
 
-\textbf{Two further options.} In the course of this work we added \texttt{-clock seconds}, under which the
+\subsection{Zeroing that does not count as a touch}
+
+A program that clears a buffer it has just allocated writes every byte of it, so a bytes-touched profile counts
+the whole buffer as used. llama.cpp clears its 189\,MB KV cache this way and then writes a few rows of it, so the
+first profile reserved all of it. Writing zeros over memory that the program has not yet touched does not change
+what the memory holds, and libmpr skips such writes (\secref{sec:runtime-zero}). With \texttt{-skip\_zeroing}, on by
+default with \texttt{-sites}, the tool leaves these writes out of the footprint. It hooks the entry of every
+\texttt{memset} and \texttt{bzero} implementation in the C library (skipping the IFUNC resolvers that select
+among them, which the loader calls once), libmpr's \texttt{memset} and the pass's \texttt{\_\_mpr\_zero}. At each
+entry it queues, in order with the thread's buffered references, the range that the call clears: $[p, p+n)$ when
+the value is zero and $n \geq 4$\,KB, and an empty range otherwise. Stores made by the code of those routines are
+tagged when they are instrumented, and a tagged store into the current range counts as time but does not set the
+footprint's bits. A later read or write by the program touches the bytes as usual. A byte that was already
+touched stays touched, so the option changes only what zeroing of untouched memory contributes. Yang et al.\
+measured that zeroing new memory costs managed runtimes 2.7 to 4.5\% of their time on average and made it
+cheaper~\cite{Yang2011Zeroing}. Here the point is that zeroing of untouched memory is not use.
+
+\subsection{Container growth chains}
+\label{sec:profile-capacity}
+
+In a program built with \pass{}, a container that grows calls \texttt{\_\_mpr\_capacity} before it allocates its
+new buffer (\secref{sec:pass-capacity}). The tool hooks that call and \texttt{\_\_mpr\_growth}, and it attaches the
+capacity key, the call site that grew the container, to the buffer that the next allocation returns. Buffers with
+the same key form a growth chain when each new buffer is larger than the previous one and is allocated while the
+previous one is still live, which is how \texttt{std::vector}, \texttt{std::string} and hash tables grow. For each
+key, \texttt{*\_capacity.csv} records the number of chains, the number of chains whose final buffer stayed below
+64\,KB and the largest of those, and, for the other chains, the final buffer's size and its highest touched
+offset, which is the bytes the container used.
+
+\subsection{Images and builds}
+
+An image key is an address in one build of an image and names unrelated code in another build. The tool writes
+the full path of every image it saw, and \texttt{sites.py} records each image's GNU build identifier, a hash that
+the linker writes into a note section~\cite{GNUld}, with the reservations (\secref{sec:runtime-build}).
+
+\textbf{Tests.} The suite checks exact values on programs written for the purpose: a dead block, a block touched
+only in a prefix, a block touched only at its tail, a \texttt{calloc} on a reused chunk, a \texttt{realloc} growth
+chain, a growing vector, an allocation wrapper called from two functions that use their blocks differently, and
+a 1\,MB buffer cleared with \texttt{memset} and then written in its first 64\,KB (touched: 64\,KB).
+
+\textbf{Two further options.} In the course of this work we also added \texttt{-clock seconds}, under which the
 timeline's snapshots are taken every $N$ milliseconds of wall time and every row carries a \texttt{Seconds}
 column, and \texttt{-footprint pages}, which counts the 4\,KB pages that hold a touched byte. We use both in
 \secref{sec:clock}.
@@ -319,10 +388,11 @@ column, and \texttt{-footprint pages}, which counts the 4\,KB pages that hold a 
 \label{sec:fit}
 
 \texttt{sites.py} reads the blocks of one or more profiling runs, keeps the blocks of at least 64\,KB (the ones
-\libmpr{} serves), and fits, per site, the number of bytes a block will need as a function of its requested
-size $n$. It fits the highest touched offset rather than the touched bytes, because \libmpr{} commits a block from
-its start, so a prediction is safe for a block only if it reaches the block's last touched byte. Four models
-are considered:
+\libmpr{} serves), and fits, per site, the bytes a block will need as a function of its requested size $n$.
+
+\textbf{Prefix models.} \libmpr{} commits a block from its start, so a prefix prediction is safe for a block only
+if it reaches the block's last touched byte, and the fit uses the highest touched offset. Four models are
+considered:
 \begin{itemize}
   \item \texttt{dead}: $0$, when no block of the site was touched;
   \item \texttt{const}: $a$, when the highest offset does not grow with the request;
@@ -332,8 +402,30 @@ are considered:
 A model \term{covers} a set of blocks if its prediction reaches each block's highest offset. Among the models
 that cover blocks holding at least a quantile $q$ of the site's requested bytes ($q = 0.9$ by default), the fit
 keeps the one that commits the least over the training blocks. A site is left out when its best model would
-commit at least 95\% of what was requested. The output is one line per site, \texttt{site model a b}, which
-\libmpr{} reads at start-up.
+commit at least 95\% of what was requested.
+
+\textbf{Shaped reservations.} A block that is used sparsely across its whole length defeats a prefix. llama2.c's
+KV caches are laid out as [layer][position][dimension], and a run of 128 tokens writes the first rows of every
+layer, so the highest touched offset lies at 93\% of the block while 12.5\% of it is used. The \texttt{runs}
+model commits a set of ranges of the block, given as fractions of its size: the union of the training blocks'
+touched page runs, with the closest ranges merged until at most 32 remain. Windows separates reserving address
+space from committing it, so that a program can commit only the pages it will use in a reserved
+region~\cite{MSVirtualAlloc}, and the \texttt{runs} model applies the same split, chosen from a profile. The fit
+keeps \texttt{runs} when it commits less than 70\% of the best prefix model and saves at least 64\,KB.
+
+\textbf{Calling contexts.} When a site's blocks have caller frames, the fit groups them by their first caller
+frame, then by their first two, and fits each group separately. It keeps the shallowest grouping whose total
+commitment is lower than the merged fit's by at least 5\% of the site's requested bytes. The site then gets one
+line per context, \texttt{site@frame1[@frame2] model a b}, and its merged line, if it saves anything, serves
+contexts that the profile did not see.
+
+\textbf{Container capacities.} For each capacity key with chains whose final buffer reached 64\,KB, the fit
+writes \texttt{key cap A B}: $A$ is the $q$-quantile of the final buffers' used bytes, and $B$ is the largest final
+size of the key's small chains (0 when there are none). \libmpr{} reserves $A$ bytes once a container asks for
+more than $B$, so that the many small containers that a call site may grow keep their usual growth.
+
+\textbf{Builds.} For every image that an address key names, the file gets a line \texttt{\# image name build-id
+hex}, read from the image's ELF note.
 
 A profile can come from the same input the program will run on (we call this \term{own profile}, which
 measures the mechanism) or from other inputs of the same program (\term{held out}, which measures how a
@@ -343,73 +435,123 @@ under-predictions are safe.
 \section{The \pass{} compiler pass}
 \label{sec:pass}
 
-\pass{} is a new-pass-manager plugin for LLVM 21~\cite{Lattner2004LLVM}, 259 lines of C++, loaded into clang with
-\texttt{-fpass-plugin}. It registers the same module pass at two extension points of the optimisation pipeline,
-and it has three modes: \texttt{profile} (the default) routes allocations through the runtime, \texttt{apply}
-also embeds a reservation file, and \texttt{off} does nothing.
-
-\subsection{Allocation calls}
-
-The late instance runs at \texttt{OptimizerLastEP}, after inlining. For every call or invoke whose callee is one
-of the allocation functions in \tabref{tab:rules}, it builds a call to the matching runtime entry point with the
-original arguments, a site identifier and a kind, replaces every use of the old call, takes over its name and
-erases it. \texttt{operator new} under an \texttt{invoke} becomes a plain call followed by a branch to the
-invoke's normal destination, because the runtime reports failure the way \texttt{malloc} does, and the
-landing pad loses that predecessor. Calls that \texttt{free} memory are not rewritten, because \libmpr{}
-recognises its own blocks in \texttt{free}.
+\pass{} is a new-pass-manager plugin for LLVM 21~\cite{Lattner2004LLVM}, 574 lines of C++, loaded into clang with
+\texttt{-fpass-plugin}. It registers the same module pass at two extension points of the optimisation pipeline:
+an early instance at \texttt{PipelineStartEP}, before inlining, which handles growth points, and a late instance at
+\texttt{OptimizerLastEP}, after inlining, which handles everything else. It has three modes: \texttt{profile} (the
+default) routes allocations through the runtime, \texttt{apply} also embeds a reservation file, and \texttt{off}
+does nothing. \tabref{tab:rules} lists what it rewrites.
 
 \begin{table}[t]
-\centering\small
-\begin{tabular}{lll}
+\centering\footnotesize
+\begin{tabular}{L{4.6cm}L{6.2cm}L{3.6cm}}
 \toprule
-Callee & Runtime entry point & Kind \\
+Code & Becomes & Purpose \\
 \midrule
-\texttt{malloc} & \texttt{\_\_mpr\_alloc(n, site, kind, 0)} & malloc \\
-\texttt{calloc} & \texttt{\_\_mpr\_calloc(count, n, site)} & calloc \\
-\texttt{realloc} & \texttt{\_\_mpr\_realloc(p, n, site)} & realloc \\
-\texttt{aligned\_alloc}, \texttt{memalign}, \texttt{valloc} & \texttt{\_\_mpr\_alloc(n, site, kind, align)} & memalign \\
-\texttt{posix\_memalign} & \texttt{\_\_mpr\_posix\_memalign(out, align, n, site)} & memalign \\
-\texttt{operator new}, \texttt{new[]}, aligned & \texttt{\_\_mpr\_alloc(n, site, kind, align)} & new \\
-\texttt{operator new} (nothrow) & \texttt{\_\_mpr\_alloc(n, site, kind, 0)} & malloc \\
+\texttt{malloc}, \texttt{calloc}, \texttt{realloc}, \texttt{aligned\_alloc}, \texttt{memalign}, \texttt{valloc},
+\texttt{posix\_memalign}, every \texttt{operator new} & \texttt{\_\_mpr\_alloc}, \texttt{\_\_mpr\_calloc}, \texttt{\_\_mpr\_realloc},
+\texttt{\_\_mpr\_posix\_memalign} with the original arguments, a site id and a kind & allocation sites \\
+an allocation function used as a value (stored, passed, in a table) & a thunk with the function's type that calls the
+runtime with its own site id & indirect calls \\
+\texttt{memset(p, 0, n)}, \texttt{bzero}, \texttt{llvm.memset} with value 0, $n \geq 4$\,KB or not constant &
+\texttt{\_\_mpr\_zero(p, n, site)} & zeroing \\
 \midrule
-result of \texttt{vector<T>::\_M\_check\_len} & \texttt{\_\_mpr\_capacity(len, 0, 1, site)} & (early pass) \\
+result of \texttt{vector<T>::\_M\_check\_len} (libstdc++), \texttt{\_\_recommend} (libc++ vector and string) &
+\texttt{\_\_mpr\_capacity(len, 0, sizeof(T), point)} & growth point (early) \\
+\texttt{basic\_string::\allowbreak\_M\_create(\allowbreak size\_type\&, size\_type)} & the capacity argument, through \texttt{\_\_mpr\_capacity} & growth point (early) \\
+\texttt{\_Hashtable::\_M\_rehash(n, ...)}, libc++ \texttt{\_\_rehash(n)} & the bucket count, through \texttt{\_\_mpr\_capacity} (8-byte buckets) & growth point (early) \\
+a growth point inlined into the program & its id becomes the call site's, from the inlined location chain & capacity per call site \\
+a call from the program to a container member that may grow it & bracketed by \texttt{\_\_mpr\_growth(id)} and \texttt{\_\_mpr\_growth(0)} & capacity per call site \\
 \bottomrule
 \end{tabular}
-\caption{The calls \pass{} rewrites.}
+\caption{What \pass{} rewrites. Calls that free memory are not rewritten: \libmpr{} recognises its own blocks.}
 \label{tab:rules}
 \end{table}
 
+\subsection{Allocation calls and address-taken allocators}
+
+For every call or invoke whose callee is an allocation function, the late instance builds a call to the matching
+runtime entry point with the original arguments, a site identifier and a kind, replaces every use of the old call,
+takes over its name and erases it. \texttt{operator new} under an \texttt{invoke} becomes a plain call followed by a
+branch to the invoke's normal destination, because the runtime reports failure the way \texttt{malloc} does, and
+the landing pad loses that predecessor.
+
+An allocation function can also reach the program as a value: stored in a variable, passed to a function, or
+placed in a table of function pointers, as libraries that let the caller choose an allocator do. A call through
+such a pointer is an indirect call, and it bypasses the rewriting. The pass replaces every use of an allocation
+function that is not the callee of a call with a thunk, an internal function with the same type whose body calls
+the runtime with a site identifier of its own, derived from the location of the use. The uses in a constant, such
+as an initialiser, share one thunk per module. Allocations made inside shared libraries that the build does not
+compile reach \libmpr{} through symbol interposition~\cite{OracleLinker}: \libmpr{} defines \texttt{malloc} and its
+siblings, so every library's calls resolve to it, with a return-address site and calling contexts.
+
 \subsection{Stable site identifiers}
 
-A site identifier must name the same allocation in a profiling build and an apply build, and it must
-distinguish allocations that the optimiser has inlined into different callers. \pass{} computes a 64-bit FNV-1a
-hash over the callee's name, the name of the function that contains the call after inlining, and the call's
-debug location chain from the innermost location outward through every \texttt{inlinedAt} entry, each as file,
-line and column. An allocation inside an inlined \texttt{std::allocator::allocate} therefore resolves to the
-program line that grew the container. The enclosing function's mangled name is part of the hash, because
-inlined library code has the same location for every element type. Without debug information the hash falls
-back to the function's name and the call's position in it, so the build needs \texttt{-g} (line tables are
-enough). The pass appends one line per site to a site map (\texttt{0x... malloc main.cpp:777:5 ...}), which
-links a profile's sites to source lines. On darknet the pass rewrote 631 calls in 48 files, and the profiling and
-apply builds produced identical identifiers.
+A site identifier must name the same allocation in a profiling build and an apply build, distinguish
+allocations that the optimiser has inlined into different callers, and survive edits elsewhere in the program.
+\pass{} computes a 64-bit FNV-1a hash over the callee's name, the name of the function that contains the call
+after inlining, and the call's debug location chain from the innermost location outward through every
+\texttt{inlinedAt} entry. An allocation inside an inlined \texttt{std::allocator::allocate} therefore resolves to the
+program line that grew the container. Each level of the chain is hashed as the file's base name, the function's
+name, the line relative to the first line of the function, and the column. Sample-based profiles key their counts
+the same way, by the offset from the function's first line, so that a profile survives edits outside the
+function~\cite{Chen2016AutoFDO,ClangSampleProfile}. The base name keeps the identifier independent of the directory
+the program is built in. Without debug information the hash falls back to the function's name and the call's
+position in it, so the build needs \texttt{-g} (line tables are enough). Ayupov et al.\ match stale profiles to a
+new binary by the structure of its code~\cite{Ayupov2024Stale}. We use the simpler line-offset scheme and detect
+what does not match: \texttt{scripts/check\_reservations.py} lists the reservations whose identifiers a new build no
+longer has, from the site map that the pass writes (\texttt{0x... kind file:line function < ...}).
 
-\subsection{Vector growth capacity}
+\subsection{Container capacities}
+\label{sec:pass-capacity}
 
-A \texttt{std::vector} that grows by \texttt{push\_back} or \texttt{emplace\_back} doubles its capacity, copies its
-elements, and frees the old buffer. libstdc++ computes the new capacity in
-\texttt{\_M\_check\_len}, called from \texttt{\_M\_realloc\_insert} and \texttt{\_M\_default\_append}. After
-inlining that call no longer exists, so the early instance of the pass runs at \texttt{PipelineStartEP}, before
-inlining, and wraps the integer result of every \texttt{\_M\_check\_len} call:
+A \texttt{std::vector} that grows by \texttt{push\_back} doubles its capacity, copies its elements, and frees the old
+buffer, so for a moment it holds both. libstdc++ computes the new capacity in \texttt{\_M\_check\_len}, libc++ in
+\texttt{\_\_recommend}, \texttt{std::string} in \texttt{\_M\_create} (which takes the capacity by reference), and a hash
+table chooses its new bucket count before \texttt{\_M\_rehash}. After inlining these calls no longer exist, so the
+early instance wraps them before inlining:
 \begin{lstlisting}
 %len = call i64 @_ZNKSt6vectorI...E12_M_check_lenEmPKc(ptr %this, i64 1, ptr @.str)
-%cap = call i64 @__mpr_capacity(i64 %len, i64 0, i64 1, i64 <site>)   ; uses of %len now use %cap
+%cap = call i64 @__mpr_capacity(i64 %len, i64 0, i64 8, i64 <point>) ; replaces %len
 \end{lstlisting}
-The element size is not known at that point, so the pass passes 1 and the capacity model is expressed in
-elements. \libmpr{} returns the larger of \texttt{len} and the site's predicted final size, so the first growth
-allocates the final capacity and the copy chain disappears. A wrong prediction cannot break the program,
-because the capacity only grows, and an over-large capacity is backed lazily. On miniVite the pass rewrote 73
-allocation calls and 17 growth points. The pattern is specific to libstdc++ (GCC 8 headers here), and
-\secref{sec:limits} discusses the consequence of naming the site before inlining.
+\libmpr{} returns at least \texttt{len}, so the capacity only grows: a wrong prediction cannot shrink a container,
+and an excess is backed lazily. Three refinements make the prediction precise.
+
+\textbf{Element size.} \texttt{\_\_mpr\_capacity} receives a count of elements, and the profile measures bytes. The
+pass reads the element size from the debug information: the function that contains the growth point is a member
+of the container's class, whose first template type parameter is the element type, and its size follows from the
+DWARF type entry through typedefs and qualifiers~\cite{DWARF5}. A hash table's buckets are pointers (8 bytes), and
+when the debug information has no parameters the pass passes 1.
+
+\textbf{One capacity per call site.} The growth point sits in a template instantiation, such as
+\texttt{\_M\_realloc\_insert<long>}, which every vector of that type in the program shares. A single capacity for all
+of them would give the final size of the largest vector to every small one. When the optimiser inlines the growth
+path into the program's code, as clang at \texttt{-O2} did for most \texttt{std::vector} growth in our programs, the late instance
+finds \texttt{\_\_mpr\_capacity} with an inlined location chain that ends at the program's call, and it replaces the
+instantiation's identifier with the call site's. When the growth path stays a call, for example
+\texttt{basic\_string::\_M\_mutate} or \texttt{\_Hashtable::\_M\_insert\_unique\_node}, the pass brackets every call from
+the program's own code to a container member that may grow it (\texttt{push\_back}, \texttt{insert},
+\texttt{append}, \texttt{operator[]} and the libraries' internal growth functions, recognised from the demangled
+name) with \texttt{\_\_mpr\_growth(id)} before it and \texttt{\_\_mpr\_growth(0)} after it, on both edges of an
+\texttt{invoke}. A function is the program's own when its debug information names a file outside the system's
+C++ headers. \texttt{\_\_mpr\_capacity} then uses the per-thread call site that \texttt{\_\_mpr\_growth} set. This is a
+calling context of depth one, maintained by the program as in probabilistic calling context~\cite{Bond2007PCC}.
+The libstdc++ profile mode and Perflint report a vector's suggested initial size to the
+programmer~\cite{LibstdcxxProfile,Liu2009Perflint}, and an IBM patent sets a Java array's initial size from the
+highest index accessed per allocation context~\cite{Odaira2015ArraySize}. Our capacity is set automatically, per
+call site, and only ever raised.
+
+\textbf{Small containers.} A call site can grow many small containers and a few large ones. The \texttt{cap} model
+reserves the final size only once a container asks for more than the largest size that the call site's small
+containers reached in the profile.
+
+\subsection{Zeroing}
+
+The late instance replaces \texttt{memset(p, 0, n)}, \texttt{bzero} and the \texttt{llvm.memset} intrinsic with a zero
+value by \texttt{\_\_mpr\_zero(p, n, site)} when $n$ is at least 4\,KB or not a constant. A call that the compiler
+would have emitted as a \texttt{memset} library call already reaches \libmpr{}'s \texttt{memset}, but code built with
+\texttt{\_FORTIFY\_SOURCE} calls \texttt{\_\_memset\_chk} instead~\cite{GlibcFortify}, and a static binary has no symbol
+to interpose. Smaller constant clears stay as they are, because the compiler expands them into stores.
 
 \subsection{Embedding reservations}
 
@@ -425,34 +567,46 @@ needs no environment.
 clang parses \texttt{-mllvm} options before it loads a \texttt{-fpass-plugin}, so the plugin's options are not
 yet registered when they are parsed. The pass therefore reads \texttt{MPR\_PASS\_MODE},
 \texttt{MPR\_PASS\_RESERVATIONS} and \texttt{MPR\_PASS\_SITEMAP} from the environment, and the same settings remain
-available as options under \texttt{opt}. On our machine clang found a newer GCC's headers first, so builds pass
-\texttt{--gcc-install-dir} for the system GCC 8, whose libstdc++ the programs run with. A build script
-(\texttt{scripts/resize\_build.sh}) builds the plugin and \libmpr{}, sets these variables, and runs the program's own
-build command. Two \texttt{opt}-plus-FileCheck tests check the rewriting of allocation calls and of a growth point,
-and an end-to-end test builds a small program in both modes.
+available as options under \texttt{opt}. Our clang installation carries a configuration file that puts a newer
+GCC's headers first, so builds pass \texttt{--gcc-install-dir} for the system GCC 8, whose libstdc++ the programs run
+with, and \texttt{--no-default-config} where that newer GCC's intrinsics headers break the build. A build script
+(\texttt{scripts/resize\_build.sh}) builds the plugin and \libmpr{}, sets these variables, links with
+\texttt{--build-id}, and runs the program's own build command. Five \texttt{opt}-plus-FileCheck tests check the
+rewriting of allocation calls, growth points of the three container kinds, zeroing and thunks, and end-to-end
+tests build programs with the pass, profile them and run them with their reservations.
 
 \section{The \libmpr{} runtime}
 \label{sec:runtime}
 
-\libmpr{} is about 760 lines of C. It defines \texttt{malloc}, \texttt{calloc}, \texttt{realloc},
+\libmpr{} is about 1{,}000 lines of C. It defines \texttt{malloc}, \texttt{calloc}, \texttt{realloc},
 \texttt{reallocarray}, \texttt{free}, the aligned allocators, \texttt{malloc\_usable\_size}, the \texttt{operator new}
-variants and \texttt{memset}, so it serves both a preloaded binary and a binary built with \pass{}. A block
-smaller than \texttt{MPR\_MIN} (64\,KB) or at a site without a reservation goes to glibc through
-\texttt{\_\_libc\_malloc} and its siblings, unchanged.
+variants, \texttt{memset}, \texttt{\_\_memset\_chk} and \texttt{bzero}, so it serves both a preloaded binary and a binary
+built with \pass{}. A block smaller than \texttt{MPR\_MIN} (64\,KB) or at a site without a reservation goes to glibc
+through \texttt{\_\_libc\_malloc} and its siblings, unchanged.
+
+\subsection{Finding a block's reservation}
+
+A request names its site by return address (preloaded) or by identifier (pass). When the reservation file has
+context lines for that site, \libmpr{} takes the frames above the call with glibc's \texttt{backtrace()}, finds the
+call's own return address among them, and looks up the deepest context line that matches the next frames, then
+shallower ones, then the site's own line. \texttt{backtrace()} loads \texttt{libgcc\_s} on its first use, which
+allocates, so \libmpr{} calls it once at start-up and guards against reentry. Only sites with context lines pay for
+a backtrace, and only for large requests.
 
 \subsection{Serving a block}
 
-For a large block at a reserved site, \libmpr{} computes the prediction $p$ from the site's model, rounds the
-request $n$ and $p$ up to pages, and creates one anonymous mapping of the full size with \texttt{MAP\_NORESERVE}.
-It then maps the first $p$ bytes again with \texttt{MAP\_FIXED} and without \texttt{MAP\_NORESERVE}, which makes the
-prefix accountable. The program receives a pointer to all $n$ bytes. If it touches beyond $p$, the kernel backs
-the page as for any anonymous memory, with no signal the program could observe. A design that protected the
-remainder with \texttt{PROT\_NONE} and grew the block on a fault would also break system calls, because a
-\texttt{read()} into a protected page returns \texttt{EFAULT} instead of faulting. A \texttt{dead} site's block is
-entirely \texttt{MAP\_NORESERVE}. A large \texttt{calloc} needs no \texttt{memset}, because fresh anonymous pages
-are zero. Blocks live in an open-addressing table keyed by address, and \texttt{free} recognises a runtime block
-by its page alignment and a table lookup, records its resident bytes with \texttt{mincore} for telemetry, and
-unmaps it. The tables are themselves mapped \texttt{MAP\_NORESERVE}, so \libmpr{} commits nothing of its own.
+For a large block at a reserved site, \libmpr{} creates one anonymous mapping of the full size with
+\texttt{MAP\_NORESERVE} and maps the predicted part again with \texttt{MAP\_FIXED} and without
+\texttt{MAP\_NORESERVE}, which makes it accountable: the first $p$ bytes for a prefix model, or each range of a
+\texttt{runs} model. The program receives a pointer to all $n$ bytes. If it touches beyond the prediction, the
+kernel backs the page as for any anonymous memory, with no signal the program could observe. A design that
+protected the remainder with \texttt{PROT\_NONE} and grew the block on a fault would also break system calls,
+because a \texttt{read()} into a protected page returns \texttt{EFAULT} instead of faulting. A \texttt{dead} site's block is
+entirely \texttt{MAP\_NORESERVE}. A large \texttt{calloc} needs no \texttt{memset}, because fresh anonymous pages are zero.
+Blocks live in an open-addressing table keyed by address and in a sorted array of start addresses, which finds
+the block that holds an arbitrary address. \texttt{free} recognises a runtime block by its page alignment and a table
+lookup, records its resident bytes with \texttt{mincore} for telemetry, and unmaps it. The tables are themselves
+mapped \texttt{MAP\_NORESERVE}, so \libmpr{} commits nothing of its own.
 
 \subsection{Growing and shrinking}
 
@@ -465,14 +619,22 @@ keeps a tail that was added in place and written separately as its own mapping, 
 \texttt{EFAULT} on a range that spans several mappings. A failed \texttt{mremap(MREMAP\_FIXED)} has also already
 unmapped its destination. Open MPI's start-up (in \texttt{libpciaccess}) grows a table one element at a time
 past the size threshold and crashed on the first version. \libmpr{} now maps the destination again and copies
-such a piece.
+such a piece. A block committed in ranges consists of many mappings, so it grows by a new block and a copy.
+
+\subsection{Container capacities}
+
+\texttt{\_\_mpr\_capacity(len, size, elem, point)} looks up the reservation of the call site that
+\texttt{\_\_mpr\_growth} set on the thread (\texttt{cap:0x<site>}), else of the growth point (\texttt{id:0x<point>}, which
+for an inlined growth point is already the call site's). For a \texttt{cap A B} model it returns
+$\max(\texttt{len}, \lceil A / \texttt{elem} \rceil)$ once $\texttt{len} \cdot \texttt{elem} > B$, and \texttt{len} otherwise.
 
 \subsection{Skipping the zeroing of untouched pages}
+\label{sec:runtime-zero}
 
-Programs that clear a buffer they have just allocated make every page of it resident. \libmpr{} defines
-\texttt{memset}. When the value is zero, the range lies in a runtime block, and the block's first page contains
-the start of the range, \libmpr{} reads the range's entries from \texttt{/proc/self/pagemap}~\cite{LinuxPagemap}
-and writes zeros only to pages that need them:
+Programs that clear a buffer they have just allocated make every page of it resident. When \texttt{memset},
+\texttt{\_\_memset\_chk}, \texttt{bzero} or \texttt{\_\_mpr\_zero} clears at least 16\,KB inside a runtime block, wherever in the
+block it starts, \libmpr{} reads the range's entries from \texttt{/proc/self/pagemap}~\cite{LinuxPagemap} and writes
+zeros only to pages that need them:
 \begin{itemize}
   \item a page that is neither present (bit 63) nor swapped (bit 62) has never been touched since the block
   was mapped, and it reads as zero, so it is skipped;
@@ -493,6 +655,14 @@ marks the pages whose zeroing it skipped \texttt{MADV\_NOHUGEPAGE}. Those are th
 untouched, and a huge page would undo the choice. Pages the program has touched keep huge pages.
 \texttt{MPR\_THP=0} and \texttt{MPR\_THP=1} disable huge pages for all runtime blocks or leave them as the system
 sets them, and \texttt{MPR\_ZERO=0} turns the zero skipping off.
+
+\subsection{Builds}
+\label{sec:runtime-build}
+
+When the reservation file records an image's build identifier, \libmpr{} reads the build identifier of the image
+it has loaded from its \texttt{PT\_NOTE} segment, the first time it makes a key in that image. If the two differ,
+or the loaded image has none, it ignores that image's address keys and says so once on standard error. The pass's
+identifiers do not depend on the build and are not checked.
 
 \subsection{Telemetry and settings}
 
@@ -518,28 +688,33 @@ engines.
 
 The workloads are:
 \begin{itemize}
-  \item darknet AlexNet inference on 10 images~\cite{darknet}, built with GCC (preloaded) and with \pass{};
-  \item miniVite~\cite{minivite} with 32768 vertices and 4 OpenMP threads, built with GCC and with \pass{};
+  \item darknet AlexNet inference on 4 images~\cite{darknet}, built with GCC (preloaded) and with \pass{};
+  \item miniVite~\cite{minivite} with 32768 vertices and 4 OpenMP threads, built with GCC (preloaded) and with
+  \pass{};
   \item llama.cpp b11500~\cite{llamacpp}, CPU only, 4 threads, greedy decoding of "Once upon a time" with
   SmolLM2-135M-Instruct (32 and 128 tokens) and SmolLM2-360M-Instruct (64 tokens), both quantised to
-  Q8\_0~\cite{SmolLM2}, at the model's default 8192-token context;
+  Q8\_0~\cite{SmolLM2}, at the model's default 8192-token context, built with GCC (preloaded) and with clang and
+  \pass{};
   \item llama2.c~\cite{llama2c}, greedy, 128 steps, with the stories15M, 42M and 110M models;
   \item the 23 programs of the scheduling corpus~\cite{memprintsched} at their largest inputs: PolyBench kernels,
   GAP, HPCCG, LULESH, miniFE, Kripke, Quicksilver, NPB, darknet, miniVite, the Lua, Perl and Python
   interpreters, SQLite and GCC's cc1.
 \end{itemize}
-For the LLM engines and the corpus, \libmpr{} is preloaded, and each input has an own profile and a held-out
-profile from the program's other inputs (for darknet, the reference and Extraction networks).
+Each input has an \term{own} profile and a \term{held-out} profile from the program's other inputs (for darknet,
+the reference and Extraction networks; for miniVite, 8192 and 16384 vertices). The profiles use the Pin tool with
+\texttt{-sites}, which includes calling contexts and \texttt{-skip\_zeroing}. We call the system as first built
+(prefix models only, one site per call, the first zero-skipping runtime) the \term{first version}, and the system
+with calling contexts, shaped reservations, zeroing left out of the profile, and per-call-site container
+capacities the \term{refined} version.
 
 \subsection{Headline results}
 
 \begin{table}[t]
 \centering\small
 \input{tables/headline.tex}
-\caption{Peak RSS and peak commit in MB (mean of 3 runs). miniVite's glibc column is the GCC build; its "own
-profile" column is the \pass{} build with the predicted \texttt{edgeList} capacity, and its held-out column is
-\libmpr{} preloaded into the GCC build with reservations from the 8192 and 16384 inputs. All other rows are
-\libmpr{} preloaded, except that darknet's apply build with embedded reservations gives the same 284.6\,MB.}
+\caption{Peak RSS and peak commit in MB (mean of 3 runs) with the refined system. miniVite's glibc column is the
+GCC build; its libmpr columns are the \pass{} build. All other libmpr columns are \libmpr{} preloaded into the GCC
+build.}
 \label{tab:headline}
 \end{table}
 
@@ -551,19 +726,59 @@ identical to glibc's.}
 \label{fig:headline}
 \end{figure}
 
-\tabref{tab:headline} and \figref{fig:headline} summarise the results. \libmpr{} reduces peak commit by 46.8\% on
-darknet, by 34.5\% on llama.cpp with the 135M model and by 25.1\% with the 360M model. It reduces peak RSS by
-49.1\% and 43.3\% on llama.cpp and by 11.5\% on miniVite through the pass's vector capacity, relative to the pass
-build without it. Every run of every workload produced glibc's output, and run time stayed within 5\% of glibc
-for every LLM run (darknet 2\%). The two rows where \libmpr{} does little, llama2.c and darknet's held-out
-profile, are explained in \secref{sec:llama2c} and \secref{sec:darknet}.
+\tabref{tab:headline} and \figref{fig:headline} summarise the results. With its own profile, \libmpr{} reduces peak
+commit by 86.3\% on llama.cpp with the 135M model (404.5 to 55.6\,MB) and by 90.0\% with the 360M model (560.5 to
+56.3\,MB), and it reduces peak RSS by 53.9\% and 45.5\%. It reduces commit by 84.5\% on llama2.c 110M (78.2 to
+12.1\,MB) and by 46.8\% on darknet. Held-out profiles do as well on llama.cpp, where the sites are the same code
+paths at every model size. Every run of every workload produced glibc's output, and run time stayed between
+0.93$\times$ and 1.02$\times$ of glibc.
+
+\subsection{Effect of the refinements}
+\label{sec:refined}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/improvements.pdf}
+\caption{Peak commit and peak RSS under glibc, the first version of the system and the refined version, with
+own profiles. miniVite is the \pass{} build; its glibc bar is the build without reservations.}
+\label{fig:improvements}
+\end{figure}
+
+\begin{table}[t]
+\centering\small
+\input{tables/improvements.tex}
+\caption{The numbers of \figref{fig:improvements} (MB, mean of 3 runs).}
+\label{tab:improvements}
+\end{table}
+
+\figref{fig:improvements} and \tabref{tab:improvements} compare the first and the refined version. The
+refinements reduce llama.cpp's commit by a further 79\% (265.1 to 55.6\,MB) and llama2.c 110M's by 83\% (72.8 to
+12.1\,MB). Three refinements combine on llama.cpp:
+\begin{itemize}
+  \item \textbf{Zeroing left out of the profile.} The first profile counted the start-up \texttt{memset} as touching
+  the whole 189\,MB KV cache, so the cache was committed in full. With \texttt{-skip\_zeroing}, the profile sees the
+  rows the model writes.
+  \item \textbf{Calling contexts.} The KV cache, the compute buffer and several small buffers are allocated through
+  one site in \texttt{ggml\_aligned\_malloc}. The fit splits that site by two caller frames, and each buffer gets
+  its own model.
+  \item \textbf{Shaped reservations.} The KV cache is 60 tensors (30 layers, K and V), each written in its first
+  rows. Its \texttt{runs} reservation commits 1.0\,MB of the cache, against 189\,MB for any prefix, and the compute
+  buffer's commits 0.4\,MB of 115\,MB.
+\end{itemize}
+On llama2.c, the shaped reservation alone does the work: each KV cache gets one committed range per layer.
+RSS falls further too (llama2.c 110M: 486.8 to 452.5\,MB), because ranges committed as separate mappings no longer
+form transparent huge pages across the untouched rows between them. On miniVite, the refined version matches the
+first version's hand-made capacity, with capacities fitted automatically per call site
+(\secref{sec:minivite}).
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/sites.pdf}
 \caption{The five largest allocation sites of four workloads, summed over their blocks: bytes requested, bytes
-up to the highest touched offset (what a prefix reservation must commit), and bytes touched. darknet's first
-site is dead; llama2.c's two KV caches are touched sparsely across the whole block.}
+up to the highest touched offset (what a prefix reservation must commit), and bytes touched, from the refined
+profiles. darknet's first site is dead. llama.cpp's first site is \texttt{ggml\_aligned\_malloc}, which serves the
+KV cache and the compute buffer; with zeroing left out, few of its bytes count as touched. llama2.c's two KV caches
+are touched sparsely across the whole block.}
 \label{fig:sites}
 \end{figure}
 
@@ -578,17 +793,18 @@ profile, \libmpr{} maps them \texttt{MAP\_NORESERVE}, and peak commit falls from
 \pass{} apply build, with the reservations embedded and no environment, gives the same 284.6\,MB. A held-out
 profile from the reference and Extraction networks saves only 15.6\,MB, because those networks have no fully
 connected layers: the profile has no data about the connected layers' site, which holds 234\,MB of AlexNet's
-untouched buffers, and only the convolutional layers' 15\,MB carry over. A profile helps the code paths it covers.
+untouched buffers, and only the convolutional layers' 15\,MB carry over. A profile helps the code paths it covers,
+and no refinement changes that.
 
-\subsection{miniVite: vector growth and where its memory goes}
+\subsection{miniVite: container capacities and where its memory goes}
 \label{sec:minivite}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/minivite.pdf}
 \caption{Left: miniVite's bytes touched, its RSS at peak RSS and its commit at peak commit under glibc, by
-mapping (smaps, 32768 vertices, 4 threads). Right: RSS and commit over time of the \pass{} build without and
-with the predicted \texttt{edgeList} capacity.}
+mapping (smaps, 32768 vertices, 4 threads). Right: RSS and commit over time of the \pass{} build without
+reservations and with its own profile.}
 \label{fig:minivite}
 \end{figure}
 
@@ -611,12 +827,20 @@ gap:
   which 2\,MB is resident. A smaller \texttt{OMP\_STACKSIZE} would remove that commit, which no allocator change
   can.
 \end{itemize}
-The growth is what \pass{} can change. The profile of the 32768-vertex input finds that the growth site's final
-capacity is 271{,}116 elements (6.5\,MB). With that capacity reserved in the pass build, the vector allocates
-once instead of eight times (25\,MB in total), and peak RSS falls from 30.5\,MB to 27.0\,MB and peak commit from
-33.6\,MB to 26.1\,MB, with the same modularity and run time (\figref{fig:minivite}, right). Preloaded into the GCC
-build with held-out reservations, \libmpr{} reduces RSS from 30.3\,MB to 27.0\,MB through fresh zero pages for the
-growth buffers, but it cannot change the capacity.
+Built with \pass{}, miniVite has 20 growth points, 23 of them inlined into call sites in its own code, and 44
+calls to container members bracketed as growth contexts. The profile of the 32768-vertex input yields 12
+capacities: \texttt{edgeList}'s final size (6.5\,MB, one allocation instead of eight totalling 25\,MB) and those of
+11 vectors whose growth stays out of line, reached through growth contexts. Two call sites, a vector and a hash
+table, each grow about half a million small containers and get no capacity, because their chains never reach
+64\,KB. With its own profile, peak RSS falls from 30.3\,MB to 27.0\,MB (11\%) and
+peak commit from 34.0\,MB to 26.5\,MB (22\%), with the same modularity and run time (1.79\,s against 1.80\,s). The
+held-out profile from 8192 and 16384 vertices reserves the 16384-vertex final size, half of what the 32768-vertex
+edge list needs, and saves less (28.6\,MB RSS, 32.2\,MB commit).
+
+The first measurement of the refined pass ran 15\% slower with reservations. The cause was \libmpr{}'s capacity
+lookup, which formatted a key, took a lock and searched the site list at every growth of every container, about a
+million times in this run. A table by numeric identifier, filled when the reservations load and read without the
+lock, removed the cost, and the build without reservations became 17\% faster as well (2.17 to 1.80\,s).
 
 \subsection{LLM inference}
 \label{sec:llm}
@@ -630,47 +854,85 @@ growth buffers, but it cannot change the capacity.
 \includegraphics[width=\linewidth]{figures/llamacpp_timeline.pdf}
 \end{minipage}
 \caption{llama.cpp with SmolLM2-135M. Left: RSS at the peak by buffer, measured from
-\texttt{/proc/<pid>/pagemap} over each buffer's address range (32 tokens; "other" is the mapped weights, the
-heap and code). Right: RSS and commit over a 128-token run.}
+\texttt{/proc/<pid>/pagemap} over each buffer's address range (32 tokens, first version of the runtime; "other" is
+the mapped weights, the heap and code). Right: RSS and commit over a 128-token run with the refined system.}
 \label{fig:llamacpp}
 \end{figure}
 
 \textbf{llama.cpp.} With the 135M model, llama.cpp allocates three large buffers through
-\texttt{ggml\_\allowbreak aligned\_\allowbreak malloc}: a 188.7\,MB KV cache for 8192 tokens, a 115\,MB compute buffer whose highest touched
-offset is 20.6\,MB, and two 44\,MB scheduler arrays (\texttt{ggml\_backend\_sched\_new}) that are never touched. It
-clears the whole KV cache with \texttt{memset} at start-up and again after its warm-up decode. Under glibc, the
-whole cache is therefore resident although a 32-token completion uses 0.4\% of it. The model's weights are
-mapped from the GGUF file, so their 143\,MB count in RSS but not in commit.
+\texttt{ggml\_\allowbreak aligned\_\allowbreak malloc}: a 188.7\,MB KV cache for 8192 tokens, a 115\,MB compute buffer of which 0.3\,MB is
+touched, and two 44\,MB scheduler arrays (\texttt{ggml\_backend\_sched\_new}) that are never touched. It clears the
+whole KV cache with \texttt{memset} at start-up and again after its warm-up decode. Under glibc, the whole cache is
+therefore resident although a 32-token completion uses 0.4\% of it. The model's weights are mapped from the GGUF
+file, so their 143\,MB count in RSS but not in commit.
 
-The two savings have different causes (\figref{fig:llamacpp}). Commit falls from 404.5\,MB to 265.1\,MB because of
-the reservations: the scheduler arrays are \texttt{dead} and become \texttt{MAP\_NORESERVE}, and only the compute
-buffer's 20.6\,MB prefix is committed. The KV cache stays committed in full, because the profile counted the
-zeroing as touching all of it. RSS falls from 379.9\,MB to 193.2\,MB because of the zero skipping. To attribute
-it, we recorded each buffer's address and measured its resident pages at the peak from
-\texttt{/proc/<pid>/pagemap} under four configurations. Without zero skipping, the KV cache holds 188.7\,MB, as
-under glibc. Skipping the zeroing alone leaves 123.7\,MB, all of it huge pages faulted in by the warm-up's writes
-of one row per layer. Skipping the zeroing and keeping huge pages off the skipped pages leaves 1.0\,MB. The
-compute buffer holds 15 to 17\,MB under every configuration, which is the part llama.cpp uses at the peak, and
-the remaining 174\,MB (weights, heap and code) does not change. Held-out profiles from the program's other two
-inputs give the same results, because the sites are the same code paths at every model size. Run time does not
-change (0.85\,s against 0.83\,s for 32 tokens, 2.04\,s against 2.14\,s for the 360M model).
+RSS and commit fall for different reasons (\figref{fig:llamacpp}). RSS falls from 380\,MB to 175\,MB because of
+the zero skipping. To attribute it, we recorded each buffer's address and measured its resident pages at the
+peak from \texttt{/proc/<pid>/pagemap} under four configurations of the first runtime. Without zero skipping,
+the KV cache holds 188.7\,MB, as under glibc. Skipping the zeroing alone leaves 123.7\,MB, all of it huge pages
+faulted in by the warm-up's writes of one row per layer. Skipping the zeroing and keeping huge pages off the
+skipped pages leaves 1.0\,MB. The compute buffer holds 15 to 17\,MB under every configuration, which is the part
+llama.cpp uses at the peak, and the remaining 174\,MB (weights, heap and code) does not change. Commit falls
+from 404.5\,MB to 55.6\,MB because of the reservations (\secref{sec:refined}): the scheduler arrays are
+\texttt{dead}, and the KV cache and the compute buffer are committed in ranges. Run time does not change (0.71\,s
+against 0.73\,s for 32 tokens, 1.81\,s against 1.95\,s for the 360M model).
 
 \label{sec:llama2c}
-\textbf{llama2.c.} llama2.c is not darknet-like in the same way. Its KV caches are also sized for the full
-sequence (37.7\,MB each for the 110M model, of which 4.7\,MB is touched for 128 of 1024 positions), but it
-allocates them with \texttt{calloc} and does not clear them, so their untouched part was never resident. They are
-laid out as [layer][position][dimension], so every layer's first rows are touched and the highest touched offset
-lies at 93\% of the block (\figref{fig:sites}). A prefix reservation must cover it, and commit falls by only 7\%
-(78.2\,MB to 72.8\,MB). Committing only the touched pages would need a reservation shaped like the use, for
-example a period and a prefix per period, which we have not built. RSS is dominated by the memory-mapped weights
-and does not change.
+\textbf{llama2.c.} llama2.c's KV caches are also sized for the full sequence (37.7\,MB each for the 110M model,
+of which 4.7\,MB is touched for 128 of 1024 positions). It allocates them with \texttt{calloc} and does not clear
+them, so their untouched part was never resident under glibc either. They are laid out as
+[layer][position][dimension], so every layer's first rows are touched and the highest touched offset lies at 93\%
+of the block (\figref{fig:sites}). A prefix reservation must cover it: the first version committed 72.8 of
+78.2\,MB. The shaped reservation commits one range per layer, 12.1\,MB in all. The held-out profile, from models
+with 6 and 8 layers, places its ranges where a 12-layer model's are only in part, and commits 45.8\,MB.
+
+\subsection{Built with the pass, or preloaded}
+\label{sec:passpreload}
+
+\begin{table}[t]
+\centering\small
+\input{tables/pass_preload.tex}
+\caption{llama.cpp, peak commit and peak RSS in MB: the GCC build with \libmpr{} preloaded (sites are return
+addresses) against the clang build with \pass{} (sites are the pass's identifiers), each with no reservations,
+its own profile and held-out profiles.}
+\label{tab:passpreload}
+\end{table}
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{L{8.2cm}L{3.0cm}L{3.6cm}}
+\toprule
+Measure & darknet & llama.cpp \\
+\midrule
+Allocation sites rewritten & 631 & 5{,}137 \\
+Zeroing sites, growth points, inlined capacity call sites, growth contexts & -- & 720, 442, 2{,}315, 2{,}066 \\
+Build CPU time without / with the pass (s) & 24.59 / 24.58 & 738.2 / 758.6 \\
+Site ids unchanged after inserting lines (previous pass / \pass{}) & 80.9\% / 96.6\% & -- \\
+\bottomrule
+\end{tabular}
+\caption{What the pass costs and how stable its identifiers are. darknet: mean of three builds; llama.cpp: one
+build each, while other jobs ran. The id test inserts three lines at the top of five darknet files and one line
+inside \texttt{make\_connected\_layer}; with \pass{}, the 22 identifiers that change are all allocations in that
+function below the inserted line.}
+\label{tab:passcost}
+\end{table}
+
+\tabref{tab:passpreload} compares the two ways of running llama.cpp. They save the same: with its own profile the clang build with \pass{} commits 56.0\,MB and holds 177.5\,MB (135M, 32 tokens), against 55.6\,MB and 175.1\,MB for the preloaded GCC build, and held-out profiles give the same in both. In llama.cpp the large buffers come from a few allocation functions, which return addresses name as well as the pass's identifiers do, and none of its growing containers reaches 64\,KB of capacity in a way that a reservation changes. The pass is needed for
+container capacities, which come from inside inlined library code, and it gives identifiers that do not depend on
+the build; a preloaded run needs no rebuild. \tabref{tab:passcost} shows what the pass costs: no measurable compile
+time on darknet and 2.8\% on llama.cpp (one build, while other jobs ran). With the previous identifiers, inserting
+lines at the top of five darknet files changed every identifier in those files (80.9\% of all sites unchanged);
+with line offsets and base file names, only the allocations below a line inserted inside a function change
+(96.6\% unchanged). Rebuilding the program changes its build identifier, and \libmpr{} then refuses the profile's
+address keys, as it did for llama.cpp's calling contexts after a rebuild: the KV cache's context lines no longer
+applied, and its commit rose to 261\,MB until the program was profiled again.
 
 \subsection{The corpus: no regressions}
 
 \begin{table}[t]
 \centering\small
 \input{tables/corpus.tex}
-\caption{The 23 programs of the scheduling corpus at their largest inputs (3 runs each).}
+\caption{The 23 programs of the scheduling corpus at their largest inputs (3 runs each), with the refined system.}
 \label{tab:corpus}
 \end{table}
 
@@ -682,15 +944,16 @@ and does not change.
 \label{fig:corpus}
 \end{figure}
 
-\tabref{tab:corpus} and \figref{fig:corpus} show the 23-program corpus. Under glibc, the median program commits
-1.01$\times$ its bytes touched and holds 1.05$\times$ in RSS, so there is little for a resizer to take. The
-exceptions are darknet (1.98$\times$ commit), miniVite (3.00$\times$), Quicksilver (1.25$\times$), cc1 and Python
-(1.13$\times$) and Lua (1.12$\times$). With own profiles, total peak commit falls by 10.2\%, from 2{,}504\,MB to
-2{,}249\,MB, nearly all of it darknet's. Held-out profiles save 0.7\%. Lua's commit rises by about 2\,MB, because
-its tables grow by \texttt{realloc} and leave the heap for runtime blocks. Every program produced glibc's output in
-every run, and run time stayed between 0.91$\times$ and 1.06$\times$ of glibc. The second version of \libmpr{},
-with zero skipping and the huge-page policy, changed no program's result relative to the first: total RSS moved
-from 2{,}286\,MB to 2{,}285\,MB.
+\tabref{tab:corpus} and \figref{fig:corpus} show the 23-program corpus, profiled again with the refined Pin tool.
+Under glibc, the median program commits 1.01$\times$ its bytes touched and holds 1.05$\times$ in RSS, so there is
+little for a resizer to take. The exceptions are darknet (1.98$\times$ commit), miniVite (3.00$\times$), Quicksilver
+(1.25$\times$), cc1 and Python (1.13$\times$) and Lua (1.12$\times$). With own profiles, total peak commit falls by
+10.7\%, from 2{,}504\,MB to 2{,}236\,MB, most of it darknet's, and Perl's commit falls below its bytes touched
+(0.92$\times$). Held-out profiles save 0.9\%. Total RSS does not change (2{,}290 to 2{,}292\,MB). Every program
+produced glibc's output in every run, and run time stayed between 0.95$\times$ and 1.07$\times$ of glibc with own
+profiles. One regression appeared while we built the refined runtime and was fixed: \libmpr{}'s site table, larger
+once each site can hold 128 ranges, was backed by a 2\,MB huge page at its first entry, which added 2.2\,MB of RSS
+to every program until the table was marked \texttt{MADV\_NOHUGEPAGE}.
 
 \subsection{Robustness to wrong predictions}
 \label{sec:robust}
@@ -699,9 +962,9 @@ Under-prediction is safe by construction, and we tested it. With every predictio
 (\texttt{MPR\_SCALE=0.1}), darknet and miniVite produced identical outputs, and the telemetry reported the
 blocks that used more than predicted. The quantile in the fit leaves blocks uncovered by design, and held-out
 profiles under-predict on the LLM engines and the corpus, again with identical outputs. Over-prediction costs
-commit and nothing else, because the committed prefix is still backed lazily. Two control programs with no
-waste, PolyBench 2mm and HPCCG, with \libmpr{} serving every large block (\texttt{MPR\_ALL}), changed by at most
-1.8\,MB of RSS and 0.1\,MB of commit.
+commit and nothing else, because the committed part is still backed lazily. A container capacity can only raise
+the capacity a container would have chosen. Two control programs with no waste, PolyBench 2mm and HPCCG, with
+\libmpr{} serving every large block (\texttt{MPR\_ALL}), changed by at most 1.8\,MB of RSS and 0.1\,MB of commit.
 
 \subsection{Effect on scheduling}
 \label{sec:schedeffect}
@@ -711,7 +974,7 @@ waste, PolyBench 2mm and HPCCG, with \libmpr{} serving every large block (\textt
 \input{tables/sched_rssmpr.tex}
 \caption{Mean response time (minutes) at 80\% offered load in the DMSched-Sim scheduler of our earlier
 study~\cite{memprintsched}, with calibrated margins, under three truths of what a job holds. The third truth is
-each program's RSS when it runs with \libmpr{} and its own profile.}
+each program's RSS when it runs with \libmpr{} (first version) and its own profile.}
 \label{tab:sched}
 \end{table}
 
@@ -719,10 +982,10 @@ Our earlier study replayed the corpus's measured footprints through a simulator 
 memory pool~\cite{memprintsched}. We added a third truth, the RSS of each program under \libmpr{}
 (\tabref{tab:sched}). The results hardly move from the RSS truth, because the corpus programs' resident memory
 hardly moved: the exact curve gives 103 minutes (91 under the RSS truth) and MemPrint's windowed curves 1{,}727
-(1{,}807). The scheduling study's conclusions therefore do not depend on resizing allocations, since its gain
-comes from reserving a curve instead of a peak. Resizing matters for programs that commit or hold much more than
-they touch, such as darknet and llama.cpp, and for systems with strict overcommit, where the saved commit is
-memory that can be promised to other jobs.
+(1{,}807). The refined system leaves the corpus's total RSS unchanged as well. The scheduling study's conclusions
+therefore do not depend on resizing allocations, since its gain comes from reserving a curve instead of a peak.
+Resizing matters for programs that commit or hold much more than they touch, such as darknet and the LLM engines,
+and for systems with strict overcommit, where the saved commit is memory that can be promised to other jobs.
 
 \section{Discussion}
 \label{sec:discussion}
@@ -764,12 +1027,15 @@ it approximates native time.
 
 \subsection{Bytes touched can exceed the resident set}
 
-Under \libmpr{}, llama.cpp's RSS (193\,MB) falls below its bytes touched as \memprint{} measures them (353\,MB at
-the peak, with the mapped weights). The difference is the zeroing \texttt{memset}: writing zeros to fresh
-anonymous memory counts as touching it, although no reader can distinguish the result from untouched memory.
-The Pin tool already records \texttt{calloc}'s own zeroing separately. Recording a program's zeroing of
-untouched memory in the same way would make the profile, and therefore the reservation, reflect what the
-program uses, and it would let \libmpr{} commit less of the KV cache as well.
+With the first profile, llama.cpp's RSS under \libmpr{} (193\,MB) fell below its bytes touched as \memprint{}
+measured them (353\,MB at the peak, with the mapped weights). The difference was the zeroing \texttt{memset}:
+writing zeros to fresh anonymous memory counts as touching it, although no reader can distinguish the result from
+untouched memory. \texttt{-skip\_zeroing} now leaves such writes out of the profile (\secref{sec:profile}), which is
+what let \libmpr{} commit 1\,MB of the KV cache instead of 189\,MB. It is on with \texttt{-sites} only: the footprint
+truth of the scheduling study keeps its definition, in which a write is a touch whatever it writes. Whether the
+truth should also leave out zeroing of untouched memory is a question of definition. Under it, the truth would
+follow the resident set of a program run with \libmpr{} more closely, and the resident set of a program run
+without it less closely.
 
 \subsection{What the RSS numbers measure}
 
@@ -792,29 +1058,40 @@ uses what it allocates, which is the median program in our corpus, gains nothing
 \section{Limitations and future work}
 \label{sec:limits}
 
-A limitation of prefix reservations is that a block is committed from its start up to the highest predicted
-offset, which commits most of a block that is used sparsely across its whole length, as llama2.c's KV caches
-are. A reservation shaped like the use, committing a prefix of each of several periods, would need the Pin tool
-to record the touched ranges of each block rather than only its highest offset.
+A limitation of the container capacities is that a capacity measured on one input transfers to another only as
+far as the final sizes agree. The final size of miniVite's edge list depends on the graph, so a capacity from the
+8192- and 16384-vertex inputs reserves the 16384-vertex size, half of what the 32768-vertex input needs, and the
+vector still grows once more (\secref{sec:minivite}). Predicting the final size from the input would need a model
+of size against the input's parameters, or \memprint{}'s static route, which estimates footprints from source and
+does not yet produce per-site profiles. The growth points are specific to the containers of libstdc++ and
+libc++ listed in \tabref{tab:rules}; \texttt{std::deque} grows in fixed 512-byte nodes and has no capacity to raise.
 
-A limitation of the vector capacity is that the early pass names the growth site before inlining, inside
-\texttt{\_M\_realloc\_insert<T, Args...>}, so one capacity applies to every vector of that instantiation, and a
-capacity measured on one input does not transfer to another, because the final size depends on the input.
-Predicting it before the run would need \memprint{}'s static route, which estimates footprints from source and
-does not yet produce per-site profiles. The pattern is also specific to libstdc++.
+A limitation of the shaped reservations is that a range is a fraction of the block, so it transfers between
+blocks of the same layout. llama2.c's held-out reservations, from models with 6 and 8 layers, cover a 12-layer
+model's KV caches only partly, and commit 46\,MB against 12\,MB with the model's own profile. A reservation that
+names the layout (the number of periods and the used prefix of each) would transfer between models; the profile
+would have to find the period.
+
+Calling contexts are taken with a backtrace for each large allocation at a site that has context lines. The
+frames are return addresses, so they are tied to a build, as image keys are, and a context deeper than two frames
+is not tried.
 
 Small blocks are left to glibc, so the per-chunk overhead of small allocations, 1.42$\times$ in miniVite, is not
 addressed. Allocators inside interpreters (pymalloc, Lua's tables) and custom \texttt{operator new} are not
 covered beyond the large blocks they request from the system.
 
-The commit saving depends on the overcommit policy. Under strict overcommit the kernel ignores
-\texttt{MAP\_NORESERVE}, so the saving disappears, although correctness is unaffected. The zero skipping reads
-pagemap, which unprivileged processes may read on this kernel without page frame numbers, and its zero-page check
-treats a page shared after \texttt{fork} conservatively by reading it.
+The commit saving depends on the overcommit policy. Under strict overcommit (\texttt{vm.overcommit\_memory=2}) the
+kernel ignores \texttt{MAP\_NORESERVE}, so the saving disappears, although correctness is unaffected; we could not
+set the policy on our machine to measure it. The zero skipping reads pagemap, which unprivileged processes may read
+on this kernel without page frame numbers, and its zero-page check treats a page shared after \texttt{fork}
+conservatively by reading it; no workload we ran forks. Keeping huge pages off the skipped pages cost no time on
+llama.cpp, but a program that clears a buffer and then fills all of it densely would run on 4\,KB pages there.
 
-Profiling is expensive: the Pin tool's exact mode with \texttt{-sites} took 328\,s for a 0.86\,s llama.cpp run and
-528\,s for llama2.c 110M (18\,s natively), so profiles must be reused across runs, which the held-out results show
-is possible when the inputs exercise the same code paths.
+Profiling is expensive: the Pin tool's exact mode with \texttt{-sites} took 300 to 1{,}100\,s for llama.cpp runs of
+0.8 to 2\,s, and 617\,s for llama2.c 110M (18\,s natively), so profiles must be reused across runs, which the
+held-out results show is possible when the inputs exercise the same code paths. Whether a sampled or windowed
+\texttt{-sites} profile would give reservations as good is open. We ran single short completions; an LLM server that
+runs many sequences fills its KV cache over time, and its savings would shrink as it does.
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -822,11 +1099,13 @@ is possible when the inputs exercise the same code paths.
 We passed \memprint{}'s measured per-site footprints to a compiler pass and a runtime as non-binding
 reservations, so that a program is backed by what it touches rather than what it requests, and an
 under-prediction costs accounting instead of correctness. Every program we ran produced its original output.
-\libmpr{} reduced darknet's commit by 46.8\% and halved llama.cpp's resident memory, the pass's predicted vector
-capacity removed miniVite's growth chain, and the 23-program corpus, which already holds about what it touches,
-saw no regressions. The measurements also showed that a footprint curve is most useful to a scheduler on a
-wall-clock axis, and that the bytes a program touches include zeros it writes to fresh memory, which a resident
-set does not.
+Calling contexts, shaped reservations and a profile that does not count zeroing as use took the system from a
+34\% to an 86\% commit reduction on llama.cpp and from 7\% to 85\% on llama2.c, and zero skipping halves
+llama.cpp's resident memory. Per-call-site container capacities, with element sizes from the debug information,
+remove miniVite's vector growth without slowing it, once the runtime's lookup is fast enough for a million
+growths. The 23-program corpus, which already holds about what it touches, saw no regressions. The measurements
+also showed that a footprint curve is most useful to a scheduler on a wall-clock axis, and that what a profile
+counts as use, such as zeros written to fresh memory, decides what can be saved.
 
 \bibliographystyle{plain}
 \bibliography{references}

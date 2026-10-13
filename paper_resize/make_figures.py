@@ -73,16 +73,20 @@ def blocks(d):
 
 # ---------------------------------------------------------------- results tables
 
+def corpus_row(R, prog):
+    """A corpus program's glibc, own-profile and held-out runs (runs/corpus/<prog>/summary.txt)."""
+    s = summary(f"{R}/corpus/{prog}/summary.txt")
+    return s.loc["base"], s.loc["self"], s.loc["heldout"]
+
+
 def headline(data):
     """Per workload: glibc, libmpr (own profile), libmpr (held-out profile) peak RSS and commit."""
     R = data + "/runs"
     rows = []
-    a = summary(f"{R}/darknet-alexnet-self/summary.txt")
-    h = summary(f"{R}/darknet-alexnet/summary.txt")
-    rows.append(("darknet AlexNet", a.loc["base"], a.loc["mpr"], h.loc["mpr"]))
+    rows.append(("darknet AlexNet",) + corpus_row(R, "darknet"))
     m = summary(f"{R}/minivite-32768/summary.txt")
-    p = summary(f"{R}/minivite-pass/summary.txt")
-    rows.append(("miniVite 32768 (pass)", m.loc["base"], p.loc["capacity"], m.loc["mpr"]))
+    p = summary(f"{R}/minivite-v4/summary.txt")
+    rows.append(("miniVite 32768 (pass)", m.loc["base"], p.loc["self"], p.loc["heldout"]))
     names = {"llamacpp-135m-n32": "llama.cpp 135M, 32 tok", "llamacpp-135m-n128": "llama.cpp 135M, 128 tok",
              "llamacpp-360m-n64": "llama.cpp 360M, 64 tok", "llama2c-15M": "llama2.c 15M",
              "llama2c-42M": "llama2.c 42M", "llama2c-110M": "llama2.c 110M"}
@@ -127,6 +131,65 @@ def fig_headline(rows, out):
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, loc="upper center", ncol=3, fontsize=6.5, bbox_to_anchor=(0.55, 1.06))
     save(fig, out, "headline")
+
+
+IMPROVED = [("llama.cpp 135M, 32 tok", "llamacpp-135m-n32"), ("llama.cpp 360M, 64 tok", "llamacpp-360m-n64"),
+            ("llama2.c 42M", "llama2c-42M"), ("llama2.c 110M", "llama2c-110M")]
+
+
+def fig_improvements(data, out):
+    """Commit and RSS under glibc, the first libmpr (runs/ml-v2) and the improved one (runs/ml), own profiles."""
+    R = data + "/runs"
+    rows = []
+    for name, d in IMPROVED:
+        old, new = summary(f"{R}/ml-v2/{d}/summary.txt"), summary(f"{R}/ml/{d}/summary.txt")
+        rows.append((name, new.loc["base"], old.loc["self"], new.loc["self"]))
+    m = summary(f"{R}/minivite-v4/summary.txt")
+    p2 = summary(f"{R}/minivite-pass/summary.txt") if os.path.exists(f"{R}/minivite-pass/summary.txt") else None
+    rows.append(("miniVite 32768 (pass)", m.loc["none"], p2.loc["capacity"] if p2 is not None else m.loc["none"], m.loc["self"]))
+    y = np.arange(len(rows))[::-1]
+    fig, axes = plt.subplots(1, 2, figsize=(6.6, 2.3), sharey=True)
+    for ax, key, title in ((axes[0], "commit", "Peak commit (MB)"), (axes[1], "rss", "Peak RSS (MB)")):
+        for k, (col, lab) in enumerate(((GLIBC, "glibc (pass build: no reservations)"), (PAL[3], "libmpr, first version"),
+                                         (LIBMPR, "libmpr, with the refinements"))):
+            v = np.array([getattr(r[1 + k], key) for r in rows])
+            ax.barh(y + 0.27 - 0.27 * k, v, height=0.25, color=col, label=lab)
+            if k == 2:
+                for yi, vi in zip(y, v):
+                    ax.text(vi + 4, yi - 0.27, f"{vi:.0f}", va="center", fontsize=6)
+        ax.set_xlabel(title)
+        ax.grid(axis="y", visible=False)
+    axes[0].set_yticks(y)
+    axes[0].set_yticklabels([r[0] for r in rows])
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=3, fontsize=6.5, bbox_to_anchor=(0.55, 1.08))
+    save(fig, out, "improvements")
+    lines = [r"\begin{tabular}{lrrrrrr}", r"\toprule",
+             r" & \multicolumn{3}{c}{Peak commit (MB)} & \multicolumn{3}{c}{Peak RSS (MB)} \\",
+             r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
+             r"Workload & glibc & first & refined & glibc & first & refined \\", r"\midrule"]
+    for name, b, o, n in rows:
+        lines.append(f"{name} & {b.commit:.1f} & {o.commit:.1f} & {n.commit:.1f} & {b.rss:.1f} & {o.rss:.1f} & {n.rss:.1f} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/improvements.tex", "w").write("\n".join(lines) + "\n")
+
+
+def table_pass(data, out):
+    """llama.cpp preloaded (GCC build, return-address sites) against built with the pass (pass ids)."""
+    R = data + "/runs"
+    lines = [r"\begin{tabular}{lrrrrrr}", r"\toprule",
+             r" & \multicolumn{3}{c}{Preloaded (GCC build)} & \multicolumn{3}{c}{Built with \pass{} (clang)} \\",
+             r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
+             r"Input & none & own & held out & none & own & held out \\", r"\midrule"]
+    for name, tag in (("135M, 32 tokens", "135m-n32"), ("135M, 128 tokens", "135m-n128"), ("360M, 64 tokens", "360m-n64")):
+        a = summary(f"{R}/ml/llamacpp-{tag}/summary.txt")
+        b = summary(f"{R}/ml-pass/lcpass-{tag}/summary.txt")
+        for key, unit in (("commit", "commit"), ("rss", "RSS")):
+            lines.append(f"{name}, {unit} & {getattr(a.loc['base'], key):.1f} & {getattr(a.loc['self'], key):.1f} & "
+                         f"{getattr(a.loc['heldout'], key):.1f} & {getattr(b.loc['none'], key):.1f} & "
+                         f"{getattr(b.loc['self'], key):.1f} & {getattr(b.loc['heldout'], key):.1f} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/pass_preload.tex", "w").write("\n".join(lines) + "\n")
 
 
 # ---------------------------------------------------------------- per-site profiles
@@ -233,8 +296,8 @@ def fig_minivite(data, out):
     ax.legend(loc="upper center", fontsize=5.5, ncol=3, bbox_to_anchor=(0.45, -0.22))
     ax.set_title("Where miniVite's memory goes (glibc)")
     ax = axes[1]
-    for f, lab, col, ls in ((f"{data}/runs/minivite-pass/none-1.csv", "pass build, no capacity", GLIBC, "-"),
-                            (f"{data}/runs/minivite-pass/capacity-1.csv", "pass build, edgeList capacity", LIBMPR, "-")):
+    for f, lab, col, ls in ((f"{data}/runs/minivite-v4/none-1.csv", "pass build, no reservations", GLIBC, "-"),
+                            (f"{data}/runs/minivite-v4/self-1.csv", "pass build, own profile", LIBMPR, "-")):
         r = pd.read_csv(f)
         ax.plot(r.seconds, r.rss_bytes / MB, color=col, linestyle=ls, label=lab + ", RSS")
         ax.plot(r.seconds, r.commit_bytes / MB, color=col, linestyle=(0, (1, 1.5)), label=lab + ", commit")
@@ -351,6 +414,8 @@ def main():
     a = ap.parse_args()
     os.makedirs(f"{a.out}/figures", exist_ok=True)
     os.makedirs(f"{a.out}/tables", exist_ok=True)
+    fig_improvements(a.data, a.out)
+    table_pass(a.data, a.out)
     rows = headline(a.data)
     table_headline(rows, a.out)
     fig_headline(rows, a.out)

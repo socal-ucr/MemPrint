@@ -1,0 +1,14 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{Preloaded (GCC build)} & \multicolumn{3}{c}{Built with \pass{} (clang)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Input & none & own & held out & none & own & held out \\
+\midrule
+135M, 32 tokens, commit & 404.5 & 55.6 & 56.6 & 405.0 & 56.0 & 57.1 \\
+135M, 32 tokens, RSS & 380.0 & 175.1 & 175.2 & 382.4 & 177.5 & 177.7 \\
+135M, 128 tokens, commit & 404.5 & 56.4 & 56.2 & 405.0 & 56.9 & 56.6 \\
+135M, 128 tokens, RSS & 380.1 & 177.4 & 177.5 & 381.8 & 179.6 & 179.9 \\
+360M, 64 tokens, commit & 560.5 & 56.3 & 57.4 & 560.9 & 56.9 & 57.9 \\
+360M, 64 tokens, RSS & 768.2 & 419.0 & 424.4 & 770.0 & 421.5 & 427.6 \\
+\bottomrule
+\end{tabular}

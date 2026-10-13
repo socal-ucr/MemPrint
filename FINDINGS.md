@@ -136,6 +136,29 @@ miniVite touches 15.4 MB at its peak (17.7 MB counted in whole pages), but peaks
   - Committing only the touched pages would need a reservation shaped like the use, e.g. a period and a prefix per period.
 - **On the corpus, the new libmpr changes nothing.** I reran all 23 programs: outputs identical, total RSS 2,286 to 2,285 MB, commit 2,247 to 2,249 MB, time between -9% and +6% (`runs/corpus` against `runs/corpus-v1`).
 
+### Refinements: calling contexts, shaped reservations, zeroing, capacities per call site, stable ids
+
+Eight refinements, each tested (`tests/pintool`, `resize/tests`), and the effect measured (own profiles, mean of 3 runs, outputs identical):
+
+| Workload | glibc commit | first version | refined | glibc RSS | first | refined |
+|---|---|---|---|---|---|---|
+| llama.cpp 135M, 32 tokens | 404.5 | 265.1 | 55.6 | 380.0 | 193.2 | 175.1 |
+| llama.cpp 360M, 64 tokens | 560.5 | 419.9 | 56.3 | 768.2 | 435.4 | 419.0 |
+| llama2.c 110M | 78.2 | 72.8 | 12.1 | 514.6 | 486.8 | 452.5 |
+| miniVite 32768 (pass build; glibc = no reservations) | 34.0 | 26.1 (hand capacity) | 26.5 | 30.3 | 27.0 | 27.0 |
+
+- **Calling contexts** (`-site_context`, `site@frame1[@frame2]` lines, glibc `backtrace()` at run time): split llama.cpp's `ggml_aligned_malloc` site into the KV cache, the compute buffer and the rest.
+- **Zeroing is not use** (`-skip_zeroing`, on with `-sites`; `__mpr_zero`, `__memset_chk`, `bzero` in libmpr): the KV cache's start-up `memset` no longer makes the profile reserve all 189 MB.
+- **Shaped reservations** (`runs`, up to 128 ranges): the KV cache (60 tensors) commits 1.0 MB, llama2.c's caches one range per layer.
+- **Capacities per call site** (inlined growth points take the call site's id; `__mpr_growth` around out-of-line container calls; `cap A B` fitted from growth chains), **element sizes** from DWARF, **std::string, hash tables, libc++**. miniVite: 12 capacities, RSS 30.3 -> 27.0 MB, commit 34.0 -> 26.5 MB, run time unchanged once libmpr's capacity lookup became a lock-free table (it cost 15% before).
+- **Stable ids**: lines relative to the function, base file names: 96.6% of darknet's ids survive inserting lines (80.9% before). Address keys are refused when the image's build-id differs (seen: llama.cpp's contexts after a rebuild, 56 -> 261 MB commit until re-profiled).
+- **Thunks** for address-taken allocators; library wrappers covered by contexts.
+- **Pass vs preload** (llama.cpp): same savings (56.0 vs 55.6 MB commit). Compile time +0% (darknet), +2.8% (llama.cpp).
+- **Corpus** (re-profiled): commit 2,504 -> 2,236 MB (-10.7%), RSS unchanged, time 0.95 to 1.07.
+- Fixed on the way: Pin missed aligned blocks of pass builds (libmpr taken for an allocator; glibc's `__libc_memalign` tail-jumps); libmpr's 10 MB site table backed by a huge page (+2.2 MB RSS everywhere); `sites.py` with no reservable site. Never overwrite a Pin tool or libmpr that running jobs have loaded.
+
+Paper: `paper_resize/main.pdf`.
+
 ### Reproduce
 
     tests/pintool/run_tests.sh && resize/tests/run_tests.sh                    # with PIN_ROOT set

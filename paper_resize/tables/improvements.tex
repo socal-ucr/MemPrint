@@ -1,0 +1,13 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{Peak commit (MB)} & \multicolumn{3}{c}{Peak RSS (MB)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Workload & glibc & first & refined & glibc & first & refined \\
+\midrule
+llama.cpp 135M, 32 tok & 404.5 & 265.1 & 55.6 & 380.0 & 193.2 & 175.1 \\
+llama.cpp 360M, 64 tok & 560.5 & 419.9 & 56.3 & 768.2 & 435.4 & 419.0 \\
+llama2.c 42M & 36.2 & 32.8 & 6.8 & 201.0 & 197.6 & 175.9 \\
+llama2.c 110M & 78.2 & 72.8 & 12.1 & 514.6 & 486.8 & 452.5 \\
+miniVite 32768 (pass) & 34.0 & 26.1 & 26.5 & 30.3 & 27.0 & 27.0 \\
+\bottomrule
+\end{tabular}
