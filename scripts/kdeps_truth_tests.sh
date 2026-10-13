@@ -22,4 +22,14 @@ run reduce "$t/reduce.cu"
 run stencil "$t/stencil.cu"
 run fileidx "$t/fileidx.cu" "$out/idx.txt" "$out/w.bin"
 run maybe "$t/maybe.cu"
+${PYTHON:-python3} - "$out" <<'PY'
+import sys, random
+random.seed(7); n = 4096
+adj = [[random.randrange(n) for _ in range(random.randint(1, 5))] for _ in range(n)]
+starts = [0]
+for a in adj: starts.append(starts[-1] + len(a))
+lines = [str(n)] + [f"{starts[v]} {len(adj[v])}" for v in range(n)] + ["0", str(starts[-1])] + [f"{u} 1" for a in adj for u in a]
+open(f"{sys.argv[1]}/graph.txt", "w").write("\n".join(lines) + "\n")
+PY
+run rodinia_bfs "$t/rodinia_bfs.cu" "$out/graph.txt"
 column -s, -t "$out/scores.csv"

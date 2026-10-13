@@ -6,6 +6,7 @@ import csv
 import struct
 import sys
 import tempfile
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -107,6 +108,29 @@ with tempfile.TemporaryDirectory() as tmp:
     check("probes (k, sum)", probes, [300.0, sum(w[:2048]) + low])
     check("update -> sum_half (listed indices below n/2)",
           edge(rows, index(it, "update"), index(it, "sum_half"), "RAW", "d_w"), (low, 0, 1, 1))
+
+# Rodinia-style BFS: a graph file in Rodinia's format, an array of structs, bool masks, two kernels per level
+with tempfile.TemporaryDirectory() as tmp:
+    rng = np.random.default_rng(7)
+    n = 4096
+    adj = [list(rng.integers(0, n, rng.integers(1, 6))) for _ in range(n)]
+    starts = np.concatenate([[0], np.cumsum([len(a) for a in adj])])
+    lines = [str(n)] + [f"{starts[v]} {len(adj[v])}" for v in range(n)] + ["0", str(starts[-1])]
+    lines += [f"{u} 1" for a in adj for u in a]
+    Path(tmp, "graph.txt").write_text("\n".join(lines) + "\n")
+    dist = [-1] * n
+    dist[0], queue = 0, deque([0])
+    while queue:
+        v = queue.popleft()
+        for u in adj[v]:
+            if dist[u] < 0:
+                dist[u] = dist[v] + 1
+                queue.append(u)
+    it, probes, rows = run("rodinia_bfs.cu", ["rodinia_bfs", str(Path(tmp, "graph.txt"))])
+    reached = [d for d in dist if d >= 0]
+    check("probes (iterations, reached, cost sum)", probes, [max(reached) + 1, len(reached), sum(reached)])
+    launches = [e for e in it.tracker.events if e["kind"] == "kernel"]
+    check("launches under data control", sum(e["data_control"] for e in launches), 2 * (max(reached) + 1))
 
 # a branch on values the interpreter does not know: may dependences; the unconditional write stays must
 it, probes, rows = run("maybe.cu")
