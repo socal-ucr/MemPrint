@@ -34,9 +34,9 @@ container's successive buffers into growth chains per call site (*_capacity.csv)
 whose containers grow past --min, the line "cap:0x<call site> cap A B" reserves A bytes, the
 --quantile of the final buffers' used bytes (high water), once a container asks for more than B
 bytes, the largest any of the call site's small containers grew to (0 when it has none). Hash tables'
-bucket arrays are left out unless --hash-capacities: their growth copies only pointers, and a large
-bucket array makes every clear() and traversal of the table slower (miniVite: 7% of its run time, no
-memory saved).
+bucket arrays are left out unless --hash-capacities, as a precaution: their growth copies only
+pointers, and a large bucket array makes every clear() and full traversal of the table slower. (In
+our programs no hash table grew past --min, so the choice changed nothing.)
 """
 
 import argparse

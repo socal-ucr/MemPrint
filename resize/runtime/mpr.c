@@ -835,6 +835,33 @@ int __mpr_posix_memalign(void **out, size_t align, size_t size, uint64_t site)
     return 0;
 }
 
+/* Capacity reservations by numeric key, filled while the reservations load and read without the lock
+   afterwards: __mpr_capacity runs at every growth of every container (miniVite: a million), so it must
+   not format a key and search the site list each time. Slot 0 of the key: 1 cap:0x<call site>, 2 id:0x<point>. */
+#define IDMAP 16384
+static struct idmap { uint64_t id; int kind; struct site *s; } idmap[IDMAP];
+
+static void idmap_add(int kind, uint64_t id, struct site *s)
+{
+    for (size_t i = 0; i < IDMAP; i++) {
+        struct idmap *e = &idmap[(hash(id) + kind + i) % IDMAP];
+        if (!e->s || (e->id == id && e->kind == kind)) {
+            e->id = id, e->kind = kind, e->s = s;
+            return;
+        }
+    }
+}
+
+static struct site *idmap_find(int kind, uint64_t id)
+{
+    for (size_t i = 0; i < IDMAP; i++) {
+        struct idmap *e = &idmap[(hash(id) + kind + i) % IDMAP];
+        if (!e->s) return NULL;
+        if (e->id == id && e->kind == kind) return e->s;
+    }
+    return NULL;
+}
+
 /* The program's call site that is growing a container on this thread (the pass brackets calls to
    container members from the program's own code with __mpr_growth(id) ... __mpr_growth(0)). */
 static __thread uint64_t growth_site __attribute__((tls_model("initial-exec")));
@@ -852,15 +879,8 @@ size_t __mpr_capacity(size_t len, size_t size, size_t elem, uint64_t site)
 {
     (void)size;
     if (!ready || !elem) return len;
-    struct site *s = NULL;
-    if (growth_site) {
-        char key[64];
-        snprintf(key, sizeof key, "cap:0x%lx", (unsigned long)growth_site);
-        pthread_mutex_lock(&lock);
-        s = find_key(key);
-        pthread_mutex_unlock(&lock);
-    }
-    if (!s) s = site_of_id(site);
+    struct site *s = growth_site ? idmap_find(1, growth_site) : NULL;
+    if (!s) s = idmap_find(2, site);
     if (!s || s->model == M_NONE || s->model == M_DEAD) return len;
     double bytes;
     if (s->model == M_CAP) {
@@ -892,6 +912,8 @@ static void parse_line(const char *line)
         s->model = m, s->a = a, s->b = b, s->has_model = 1;
     else
         s = add_site(key, m, a, b);
+    if (s && !strchr(key, '@') && (!strncmp(key, "cap:0x", 6) || !strncmp(key, "id:0x", 5)))
+        idmap_add(key[0] == 'c' ? 1 : 2, strtoull(strchr(key, ':') + 1, NULL, 16), s);
     if (s && m == M_RUNS) { /* "key runs K lo1 hi1 ... loK hiK" */
         const char *p = line;
         for (int skip = 0; skip < 3 && *p; skip++) { /* past the key, the model and K */
