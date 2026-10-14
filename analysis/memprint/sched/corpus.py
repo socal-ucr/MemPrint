@@ -44,6 +44,30 @@ def resample(t, v, k=K):
     return last
 
 
+def native_clock(d):
+    """nativerefs (perf stat -I): (share of the run's memory references executed, native seconds), cumulative, or
+    None. A curve on MemPrint's clock of references reaches native time through it: its sample at a share f of
+    the references is placed at the native time when the native run had executed f of its references."""
+    f = f"{d}/refs.txt"
+    if not os.path.exists(f):
+        return None
+    r = pd.read_csv(f, comment="#", header=None, usecols=[0, 1], names=["t", "n"], na_values=["<not counted>"])
+    r = r.dropna().groupby("t").n.sum()
+    if len(r) < 2 or r.sum() <= 0:
+        return None
+    cum = np.concatenate([[0.0], np.cumsum(r.to_numpy(float))])
+    sec = np.concatenate([[0.0], r.index.to_numpy(float)])
+    return cum / cum[-1], sec
+
+
+def on_native_clock(t, v, clock):
+    """(t, v) on the references clock, placed on native seconds by `clock` (native_clock)."""
+    t = np.asarray(t, float)
+    frac, sec = clock
+    f = (t - t.min()) / max(t.max() - t.min(), 1e-12)
+    return np.interp(f, frac, sec), v
+
+
 def _one(pattern):
     f = sorted(glob.glob(pattern))
     return f[0] if f else None
@@ -165,7 +189,19 @@ def static(d):
     return s.p, s.bytes
 
 
-PARSERS = {"static": static, "native": rss, "truth": truth, "W1": windowed, "W5": windowed, "P": windowed,
+def rss_data(d):
+    """nativecode: the RSS without the resident code (executable mappings), on the native run's seconds."""
+    f = f"{d}/rss.csv"
+    if not os.path.exists(f):
+        return None
+    r = pd.read_csv(f)
+    if "code_bytes" not in r:
+        return None
+    r = r[r.rss_bytes > 0]
+    return (r.seconds, (r.rss_bytes - r.code_bytes).clip(lower=0)) if len(r) >= 2 else None
+
+
+PARSERS = {"static": static, "native": rss, "nativecode": rss_data, "truth": truth, "W1": windowed, "W5": windowed, "P": windowed,
            "truthpages": truth, "W5pages": windowed_pages, "W5sec": windowed, "massif": massif,
            "massifpages": massif, "massifi": massif, "massifpagesi": massif, "dhat": dhat, "heaptrack": heaptrack, "gperf": gperf}
 
@@ -187,8 +223,15 @@ def curves(root):
         if c is None:
             continue
         if not method.endswith("sec"):   # W5sec: a W5 run for its Seconds column only
-            rows.append(pd.DataFrame(dict(prog=prog, input=inp, method="rss" if method == "native" else method,
+            name = {"native": "rss", "nativecode": "rssdata"}.get(method, method)
+            rows.append(pd.DataFrame(dict(prog=prog, input=inp, method=name,
                                           k=np.arange(K), bytes=c)))
+        clock = native_clock(os.path.join(os.path.dirname(d.rstrip("/")), "nativerefs"))
+        if clock is not None and PARSERS[method] in (truth, windowed) and not method.endswith("sec") \
+                and method != "truthpages":
+            # the curve on the native wall clock, through the native run's references over time
+            rows.append(pd.DataFrame(dict(prog=prog, input=inp, method=method + "nat", k=np.arange(K),
+                                          bytes=resample(*on_native_clock(*got, clock)))))
         if PARSERS[method] in (truth, windowed, windowed_pages):
             got = PARSERS[method](d.rstrip("/"), clock="Seconds")
             if got is not None:

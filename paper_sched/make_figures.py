@@ -53,6 +53,14 @@ STYLE = {  # oracle: (label, color, marker, dash)
     "request": ("User request", PAL[6], "h", "-"),
     "ml-peak": ("ML peak (quantile GBM)", PAL[7], "p", "-"),
     "reactive": ("Reactive resizing (5 min)", PAL[7], "p", (0, (4, 2))),
+    # the time axis (section "The time axis, the margins and the level"): MemPrint curves on Pin's seconds and on
+    # the native clock, and scaled to an earlier run's RSS peak
+    "memprint-W5sec": ("MemPrint 5%, Pin seconds", PAL[0], "o", (0, (1, 1.5))),
+    "memprint-W5nat": ("MemPrint 5%, native clock", PAL[4], "o", "-"),
+    "memprint-Pnat": ("MemPrint pages, native clock", PAL[4], "D", (0, (1, 1.5))),
+    "memprint-W5-rss": ("MemPrint 5%, RSS level", PAL[0], "o", (0, (6, 2, 1, 2))),
+    "memprint-W5nat-rss": ("MemPrint 5%, native clock, RSS level", PAL[7], "o", "-"),
+    "memprint-Pnat-rss": ("MemPrint pages, native clock, RSS level", PAL[7], "D", (0, (4, 2))),
 }
 METHOD_LABEL = {"W5": "MemPrint W5", "W1": "MemPrint W1", "P": "MemPrint pages", "static": "MemPrint static",
                 "massif": "Massif (ms clock)", "massifpages": "Massif pages (ms clock)", "massifi": "Massif",
@@ -71,7 +79,8 @@ plt.rcParams.update({
     "axes.spines.right": False, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5,
     "lines.linewidth": 1.2, "legend.frameon": False, "pdf.fonttype": 42, "savefig.bbox": "tight",
 })
-SCEN = {"bytes": "truth = bytes touched", "rss": "truth = resident set (RSS)"}
+SCEN = {"bytes": "truth = bytes touched", "rss": "truth = resident set (RSS)",
+        "rssdata": "truth = RSS without code"}
 
 
 def style(o):
@@ -233,9 +242,9 @@ def mean_ci(v):
 
 
 def fig_response_vs_load(g, out, name, oracles, margin="cal", metric="steady_response",
-                         ylabel="Mean response time (min)"):
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.6), sharey=True)
-    for ax, sc in zip(axes, ["bytes", "rss"]):
+                         ylabel="Mean response time (min)", scenarios=("bytes", "rss")):
+    fig, axes = plt.subplots(1, len(scenarios), figsize=(3.5 * len(scenarios), 2.6), sharey=True)
+    for ax, sc in zip(axes, scenarios):
         for o in oracles:
             d = select(g, margin)
             d = d[(d.scenario == sc) & (d.oracle == o)]
@@ -428,6 +437,12 @@ def main():
         fig_response_vs_load(gl, a.out, "llm_response_vs_load",
                              ["exact", "exact-coarse", "exact-peak", "memprint-W5", "memprint-P", "massif-i", "dhat",
                               "heaptrack", "gperf", "rss-peak", "request", "reactive"])
+    v3 = os.path.expanduser("~/memprint-data/2026-10-13-sched-fm")
+    gv = load_grid(v3, "v3m_all.csv")
+    if gv is not None:
+        fig_response_vs_load(gv, a.out, "timeaxis_response_vs_load",
+                             ["exact", "exact-peak", "rss-peak", "memprint-W5", "memprint-W5sec", "memprint-W5nat",
+                              "memprint-W5nat-rss", "memprint-Pnat-rss", "dhat", "request"], scenarios=("rss", "rssdata"))
     cap = load_grid(a.data, "capacity_*.csv")
     if cap is not None:
         need = fig_capacity(cap, a.out)

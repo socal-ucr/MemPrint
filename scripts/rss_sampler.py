@@ -11,6 +11,9 @@ smaps sampling" baseline and the time-resolved RSS truth of the scheduling study
 sizes of the mappings /proc/<pid>/smaps flags "ac" (private writable, not MAP_NORESERVE). Reading smaps is
 slower than smaps_rollup.
 
+--code adds a column code_bytes: the resident bytes of the tree's executable mappings (the program's and its
+libraries' code, from /proc/<pid>/smaps), memory that does not grow with the program's data.
+
 --limit makes it an OOM watchdog: the tree is SIGKILLed the first time its RSS exceeds BYTES and the exit
 status is 137, as under a cgroup memory.max. (cgroup v1 memory limits are not delegated to users on this
 machine, so the limit is enforced by polling: a spike shorter than the interval can pass unseen.)
@@ -70,12 +73,30 @@ def commit(pid):
     return total
 
 
+def code(pid):
+    """Resident bytes of the tree's executable mappings."""
+    total, exe = 0, False
+    for p in descendants(pid):
+        try:
+            with open(f"/proc/{p}/smaps") as f:
+                for line in f:
+                    first = line.split(None, 2)
+                    if "-" in first[0] and len(first) > 1 and len(first[1]) == 4:   # a mapping's header line
+                        exe = "x" in first[1]
+                    elif exe and first[0] == "Rss:":
+                        total += int(first[1]) * 1024
+        except OSError:
+            pass
+    return total
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--interval", type=float, default=0.1)
     ap.add_argument("-o", "--out", default="rss.csv")
     ap.add_argument("--limit", type=float, default=None)
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--code", action="store_true")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args()
     cmd = a.cmd[1:] if a.cmd and a.cmd[0] == "--" else a.cmd
@@ -83,10 +104,11 @@ def main():
     proc = subprocess.Popen(cmd, start_new_session=True)
     killed = False
     with open(a.out, "w") as out:
-        out.write("seconds,rss_bytes,pss_bytes,anon_bytes" + (",commit_bytes" if a.commit else "") + "\n")
+        out.write("seconds,rss_bytes,pss_bytes,anon_bytes" + (",commit_bytes" if a.commit else "")
+                  + (",code_bytes" if a.code else "") + "\n")
         while proc.poll() is None:
             rss, pss, anon = sample(proc.pid)
-            extra = f",{commit(proc.pid)}" if a.commit else ""
+            extra = (f",{commit(proc.pid)}" if a.commit else "") + (f",{code(proc.pid)}" if a.code else "")
             out.write(f"{time.monotonic() - t0:.3f},{rss},{pss},{anon}{extra}\n")
             if a.limit and rss > a.limit and not killed:
                 os.killpg(proc.pid, signal.SIGKILL)

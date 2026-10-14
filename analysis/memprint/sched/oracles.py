@@ -75,7 +75,24 @@ reactive.elastic = True
 
 
 CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",
-               "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec"}
+               "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec", "W1sec": "W1sec", "Psec": "Psec",
+               # on the native wall clock, through the native run's memory references over time (nativerefs)
+               "Tnat": "truthnat", "W5nat": "W5nat", "W1nat": "W1nat", "Pnat": "Pnat"}
+
+
+def _scaled_to_rss(method):
+    """A hybrid: the shape of a MemPrint curve, at the level of an earlier run's RSS (its curve scaled so its peak
+    is the RSS peak). MemPrint's curve knows when the program uses memory; the RSS knows how much the kernel
+    backs, code and allocator caches included."""
+    def f(j, m):
+        c = np.asarray(j.info[method], float)
+        level = np.max(j.info.get("rssview", j.info["rss"]))
+        return curve(c * (level / max(c.max(), 1e-12)), m, windows=20, widen=1, headroom=True)
+    return f
+
+
+HYBRID = {"memprint-W5-rss": "W5", "memprint-W5sec-rss": "W5sec", "memprint-Psec-rss": "Psec",
+          "memprint-W5nat-rss": "W5nat", "memprint-Pnat-rss": "Pnat"}
 
 REAL = {
     "reactive": reactive,
@@ -90,8 +107,10 @@ REAL = {
     **{f"memprint-{n}": _curve(m) for n, m in CLOCK_PAGES.items()},
     "massif": _curve("massif"), "massif-pages": _curve("massifpages"),
     "massif-i": _curve("massifi"), "massif-pages-i": _curve("massifpagesi"), "heaptrack": _curve("heaptrack"),
-    "dhat": _peak("dhat"), "dhat-curve": _curve("dhatcurve"), "dhat-hold": _curve("dhathold"), "gperf": _peak("gperf"), "rss-peak": _peak("rss"),
+    "dhat": _peak("dhat"), "dhat-curve": _curve("dhatcurve"), "dhat-hold": _curve("dhathold"), "gperf": _peak("gperf"),
+    "rss-peak": lambda j, m: peak(j.info.get("rssview", j.info["rss"]), m),
     "request": lambda j, m: np.full(K, j.info["request"]),
+    **{n: _scaled_to_rss(m) for n, m in HYBRID.items()},
 }
 
 
@@ -102,8 +121,8 @@ def available(jobs, name):
             "massif-pages-i": "massifpagesi", "heaptrack": "heaptrack", "dhat": "dhat",
             "gperf": "gperf", "rss-peak": "rss",
             "dhat-curve": "dhatcurve", "dhat-hold": "dhathold",
-            **{f"memprint-{n}": m for n, m in CLOCK_PAGES.items()}}.get(name)
-    return need is None or all(need in j.info for j in jobs)
+            **{f"memprint-{n}": m for n, m in CLOCK_PAGES.items()}, **HYBRID}.get(name)
+    return need is None or all(need in j.info and (name not in HYBRID or "rss" in j.info) for j in jobs)
 
 
 def assign(jobs, oracle, margin=0.3, table=None):

@@ -69,7 +69,11 @@ def scale_arrivals(t, load, cluster, gbmin):
 
 
 # scenario -> (the truth's method in the corpus, the method holding its runtime baseline, if any)
-TRUTHS = {"rss": ("rss", "rssbase"), "bytes": ("truth", None), "rssmpr": ("rssmpr", "rssmprbase")}
+TRUTHS = {"rss": ("rss", "rssbase"), "bytes": ("truth", None), "rssmpr": ("rssmpr", "rssmprbase"),
+          # the RSS without the resident code (executable mappings: program and libraries): what grows with the
+          # job's data. Not rebased: that run's sampler also reads smaps, so its first sample can come after the
+          # program has allocated its data (2mm), and the code is the part that does not grow
+          "rssdata": ("rssdata", None)}
 
 
 def rebase(info):
@@ -79,6 +83,12 @@ def rebase(info):
         if base and method in info:
             info[method] = np.maximum(info[method] - info.get(base, info[method]).min(), 0)
     return info
+
+
+def rss_view(info, scenario):
+    """An earlier run's RSS as the oracles that use one see it: measured as the truth is (without the code
+    under the rssdata truth), the RSS otherwise."""
+    return info.get("rssdata") if scenario == "rssdata" and "rssdata" in info else info.get("rss")
 
 
 def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
@@ -103,6 +113,8 @@ def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
         s = peak / t.max()
         info = {m: c * s for m, c in info.items()}
         info.update(request=r.req_gb, cm5=c, prog=prog, scale=s)
+        if rss_view(info, scenario) is not None:
+            info["rssview"] = rss_view(info, scenario)
         # arrival in trace time; run.Setup rescales it to the offered load
         jobs.append(Job(id=i, arrival=r.arrival, cores=int(r.procs), base=int(r.base), resident=info[truth_method],
                         info=info, shape=prog))

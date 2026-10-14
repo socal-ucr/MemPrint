@@ -46,9 +46,11 @@ curves failed because they saw the weights only in their windows; tracking the p
 windows fixes the latter (386 instead of 4{,}134 minutes on the LLM stream, and 327 instead of 389 on the full
 corpus, where every \memprint{} curve then beats the exact peak). Curves built from DHAT's three recorded points
 do worse than DHAT's peak under every margin. When the truth is the resident set on wall-clock time, every
-measured curve, \memprint{}'s included, needs about 60\% headroom because its clock is not wall-clock time, and
-peaks do better than curves, which shows that a footprint curve is useful to a scheduler only with a faithful
-time axis.
+measured curve, \memprint{}'s included, needs about 60\% headroom and peaks do better than curves. Placing
+\memprint{}'s curve on the native clock, through hardware counts of the native run's memory references, and at the
+level of an earlier run's RSS cuts that headroom to 17\% and its response time from 1{,}873 to 569 minutes, and
+against the resident set without code it matches the exact peak (422 against 429 minutes); a curve still gains
+nothing over a peak there, because the allocator keeps freed memory resident.
 \end{abstract}
 
 \section{Introduction}
@@ -506,7 +508,8 @@ programs is therefore 57\% of the peak for \memprint{} at 5\%, against 6\% under
 (\tabref{tab:margins}), and a curve with 57\% headroom on its peak reserves more than a peak. A curve oracle is thus only as useful as its time
 axis is faithful to wall-clock time. Under the bytes-touched truth the \memprint{} curves share the truth's clock
 of memory references, which favours them, and the RSS truth is the closer model of a real deployment. \memprint{} does not record
-the native time of each snapshot today, and whether doing so closes the gap is left for future work.
+the native time of each snapshot, and \secref{sec:timeaxis} measures what placing its curve on the native clock
+does.
 
 \begin{figure}[t]
 \centering
@@ -640,6 +643,73 @@ to the exact peak (307); the remaining 597 kills per stream come from llama2.c w
 truth the curves still need their wall-clock headroom: 1{,}843 to 1{,}873 minutes on the main stream and 930 to 948
 on the LLM stream, against 423 and 361 for the RSS peak.
 
+\subsection{The time axis, the margins and the level}
+\label{sec:timeaxis}
+
+\begin{table}[t]
+\centering
+\caption{Mean response time (minutes) at load 0.8 under three truths, the main stream, with margins calibrated on
+all the other programs (all) or on the other programs of the same kind (same kind: HPC codes, runtimes, ML).
+\memprint{}'s runs track file mappings (\secref{sec:filemaps}). Under the RSS truths, an earlier run's RSS peak is
+the truth's own peak, and equals the exact peak.}
+\label{tab:timeaxis}
+\resizebox{\textwidth}{!}{\input{tables/time_axis.tex}}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/timeaxis_response_vs_load.pdf}
+\caption{Mean response time against offered load under the RSS truth and the RSS truth without code, calibrated
+90\% margins: \memprint{}'s curve on its clock of references, on Pin's seconds and on the native clock, and scaled
+to an earlier run's RSS peak. The exact peak lies under the RSS peak of an earlier run.}
+\label{fig:timeaxis}
+\end{figure}
+
+Under the RSS truth, \memprint{}'s curves needed about 57\% headroom, and we attributed it to their clock. We
+tested three changes (\tabref{tab:timeaxis}, \figref{fig:timeaxis}) and a fourth to the margins.
+
+\textbf{The native clock.} The Pin tool can stamp every snapshot with the wall time under Pin
+(\texttt{-clock seconds}), but that does not help: \memprint{} at 5\% on Pin's seconds gives 1{,}763 minutes against
+1{,}873 on its clock of references, because Pin slows a program's phases unevenly. GAP's graph construction, which
+holds its peak, takes a fifth of the native run but a twentieth of the run under Pin. We therefore measure the native
+clock instead: one more native run under \texttt{perf stat -I 5} counts the user-level loads and stores every
+5\,ms, which gives the native time at which each share of the run's memory references has executed, and a
+\memprint{} sample taken after a share $f$ of the references is placed at that time. No instrumentation is
+involved, and the run costs what the program costs. On the native clock the margin that covers 90\% of the
+programs falls from 57\% to 24\%, and the response time from 1{,}873 to 694 minutes (633 with margins per kind).
+
+\textbf{The level.} The RSS counts memory \memprint{} does not: code, the allocator's chunk headers and the memory
+it keeps after a free. A hybrid oracle keeps the shape of \memprint{}'s curve on the native clock and scales it so
+its peak is the peak of an earlier run's RSS, so the curve knows when and the RSS how much. Its margin falls to
+17\%, and it gives 609 minutes at 5\% watched and 569 for pages only. With a fixed 10\% margin it gives 415 to 417
+minutes against 423 for the exact peak, with 313 to 316 kills per stream.
+
+\textbf{The code.} The RSS truth scales a program's whole RSS above its smallest sample with the job's size, so the
+code of the program and of its libraries, which does not grow with the job's data, is scaled as if it did. A
+second native run with the sampler reading each executable mapping's resident bytes from \texttt{smaps} measures
+the code: 1 to 27\,MB, 10.4 of miniVite's 30.6\,MB, 19.4 of cc1's 134 and 27 of llama2.c's 514. With the code left
+out of the truth (and of the earlier run's RSS), the hybrid with pages only gives 422 minutes against 429 for the
+exact peak, and the native-clock curve with margins per kind 419. These are the first measured curves that keep up
+with the exact peak under a resident-set truth; plain \memprint{} gives 1{,}920 minutes there.
+
+\textbf{What remains.} No curve beats the peak under the RSS truths, as the exact curve does (89 to 99 minutes).
+Even on the native clock, the true footprint of GAP's construction holds its peak for one or two twentieths of
+the run, while the RSS holds its 76\,MB for four, and Lua's RSS stays at 62\,MB after its live data has fallen to
+17\,MB: the allocator keeps freed memory resident, which an estimate of live bytes cannot see. A curve of the RSS
+itself, taken from an earlier run, would see it, and is the next oracle to test.
+
+\textbf{Margins per kind.} With margins calibrated on the programs of the same kind only, a profiler that
+misreads one kind of program no longer sets the margin of the others: gperftools and heaptrack improve from 10{,}476
+and 11{,}778 to 4{,}020 and 3{,}885 minutes. But the kinds are small, and each holds a program some profiler misreads
+(cc1 among the runtimes, llama2.c among the ML programs), so DHAT and Massif get worse, from 1{,}011 and 2{,}399 to
+3{,}982 and 4{,}761 minutes. \memprint{}'s curves, whose margins are small everywhere, hardly change (327 and 335
+minutes). The calibration policy moves the cost of a misread program around; it cannot remove it.
+
+On the LLM stream under the RSS truth, the hybrids give 400 to 417 minutes against 948 for plain \memprint{} and
+361 for the exact peak. In the memory sweep, \memprint{}'s native-clock curves meet the service level with 192\,GB
+per node under both RSS truths (7.0\,TB), instead of 256\,GB on their clock of references; the exact peak needs
+160\,GB.
+
 \subsection{Memory needed for the same service}
 
 \begin{figure}[t]
@@ -771,8 +841,9 @@ jobs alone it failed, because its curve learned of the weights only in its windo
 its peak in the first percent of the run; tracking the program's file mappings between windows, as its heap blocks
 are tracked, removed that failure and made every \memprint{} curve beat the exact peak on the full corpus. DHAT's three recorded points do not make a
 usable curve. Two results set the direction of further work. First, under the RSS truth every measured curve
-loses its advantage because its clock is not wall-clock time, so \memprint{} should record the native time of
-each snapshot and estimate resident pages as well as bytes touched. Second, the static route predicts footprints
+lost its advantage; placing \memprint{}'s curve on the native clock through hardware counts of memory references,
+at the level of an earlier run's RSS, brings it to the exact peak, but beating the peak there needs an estimate of
+the memory an allocator keeps after a free. Second, the static route predicts footprints
 without running the program, but its errors on programs that free and reallocate memory, and its cost on large
 inputs, limit it today to programs whose footprint is set by their input sizes.
 

@@ -26,7 +26,23 @@ EXCLUDE = {("npb-mg", "A"), ("llamacpp", "360m-n64")}   # the splitter ran out o
 EXACT = {"exact", "exact-coarse", "exact-peak"}
 CALIBRATED = {"memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "memprint-static", "massif",
               "massif-pages", "massif-i", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak",
-              *(f"memprint-{n}" for n in oracles.CLOCK_PAGES)}
+              *(f"memprint-{n}" for n in oracles.CLOCK_PAGES), *oracles.HYBRID}
+# calc: a margin calibrated on the programs of the same kind only (a site knows what kind of job it schedules), so
+# that a few programs an estimator misreads in one kind do not set the margin of every other kind
+CLASS = {"hpc": ("2mm", "gemm", "jacobi-2d", "atax", "gap-", "npb-", "hpccg", "lulesh", "minife", "kripke",
+                 "quicksilver", "miniVite"),
+         "runtime": ("lua", "python", "perl", "sqlite", "cc1"),
+         "ml": ("darknet", "llama2c", "llamacpp")}
+
+
+def kind(prog):
+    """A program's kind; an LLM panel's program is "<engine>-<input>"."""
+    for k, prefixes in CLASS.items():
+        if any(prog.startswith(p) if p.endswith("-") else prog == p or prog.startswith(p + "-") for p in prefixes):
+            return k
+    return "other"
+
+
 ORACLES = ["exact", "exact-coarse", "exact-peak", "memprint-static", "memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "massif",
            "massif-pages", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak", "request", "ml-peak",
            "reactive"]
@@ -101,7 +117,10 @@ class Setup:
                 wide = real.rebase(wide)  # as make_jobs
                 if truth_method not in wide:
                     continue
-                j = Job(id=0, arrival=0, cores=1, base=60, resident=wide[truth_method], info=dict(wide))
+                info = dict(wide)
+                if real.rss_view(info, scenario) is not None:
+                    info["rssview"] = real.rss_view(info, scenario)
+                j = Job(id=0, arrival=0, cores=1, base=60, resident=wide[truth_method], info=info)
                 if not oracles.available([j], name):
                     continue
                 r = oracles.REAL[name](j, 0.0)
@@ -110,10 +129,16 @@ class Setup:
             self._required[key] = out
         return self._required[key]
 
-    def calibrated(self, scenario, name, prog, q=0.9):
-        """The q-quantile of the required margins of the other programs (leave one program out)."""
+    def calibrated(self, scenario, name, prog, q=0.9, by_kind=False):
+        """The q-quantile of the required margins of the other programs (leave one program out); by_kind: of the
+        other programs of the same kind, when there are at least two (else of all the others)."""
         req = self.required(scenario, name)
-        return float(np.quantile([m for p, m in req.items() if p != prog], q))
+        others = {p: m for p, m in req.items() if p != prog}
+        if by_kind:
+            same = [m for p, m in others.items() if kind(p) == kind(prog)]
+            if len(same) >= 2:
+                return float(np.quantile(same, q))
+        return float(np.quantile(list(others.values()), q))
 
     def oracle(self, name):
         return ml.oracle(self.model) if name == "ml-peak" else oracles.REAL[name]
@@ -156,15 +181,15 @@ def _run_one(task):
     if name != "ml-peak" and not oracles.available(jobs, name):
         return None
     f = _setup.oracle(name)
-    if margin in ("cal", "cal100"):
-        q = 0.9 if margin == "cal" else 1.0
+    if margin in ("cal", "cal100", "calc"):
+        q = 1.0 if margin == "cal100" else 0.9
         if name in CALIBRATED:
             base = f
-            f = lambda j, m: base(j, _setup.calibrated(scenario, name, j.info["prog"], q))
+            f = lambda j, m: base(j, _setup.calibrated(scenario, name, j.info["prog"], q, by_kind=margin == "calc"))
             f.elastic = getattr(base, "elastic", False)
         else:
             f, margin = f, 0.1   # oracles without a profile to calibrate (request, ML, reactive) keep 10%
-    jobs = oracles.assign([copy(j) for j in jobs], f, 0.0 if margin in ("cal", "cal100") else margin)
+    jobs = oracles.assign([copy(j) for j in jobs], f, 0.0 if margin in ("cal", "cal100", "calc") else margin)
     sim = Sim(_setup.cluster, jobs)
     d, s = sim.run()
     return dict(stream=_setup.kind, programs=_setup.panel, local_gb=_setup.cluster.local, pool_gb=_setup.cluster.pool,

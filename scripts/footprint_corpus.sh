@@ -7,6 +7,11 @@
 # "<prog> <input> <method> <exit> <wall s> <max RSS KB>" to $CORPUS/done.txt (the cost of the method).
 # EMPTY in the command stands for an empty argument, and _SP_ for a space inside one (a prompt). Methods:
 #   native       the program alone, its RSS every 5 ms (rss.csv) and instruction count (perf.txt)
+#   nativecode   the program alone again, its RSS and the resident bytes of its executable mappings (code) every
+#                5 ms (rss.csv, column code_bytes): the RSS truth without the code, which does not grow with data
+#   nativerefs   the program alone, its memory references (user loads and stores, hardware counters) every 5 ms
+#                (refs.txt): the native time at which each share of its references has executed, which puts a
+#                curve on MemPrint's clock of references on the native wall clock
 #   truth        MemPrint splitter, live bytes touched over time (-track_frees), the full Pin estimate
 #   W1 | W5      MemPrint windowed, 1% / 5% of the run watched
 #   P            MemPrint pages only (page residency x density, nothing watched)
@@ -40,7 +45,7 @@ stdin=/dev/null
 [[ $prog == darknet ]] && stdin=$HOME/memprint-data/2026-10-0x-memory_estimator/win/cand/images.txt
 
 native=$CORPUS/$prog/$input/native
-if [[ $method != native ]]; then
+if [[ $method != native && $method != nativecode && $method != nativerefs ]]; then
     instr=$(awk -F, '$3 ~ /instructions/ {print $1}' "$native/perf.txt")
     snap=$((instr / 1000 > 1000 ? instr / 1000 : 1000))   # about 500 snapshots at ~0.5 references per instruction
     period=$((instr / 40 > 100000 ? instr / 40 : 100000))  # about 20 windows
@@ -53,6 +58,9 @@ timed() { /usr/bin/time -o "$TIMEFILE" -f "%e %M" "$@"; }
 case $method in
   native)      perf stat -x, -e instructions:u -o "$out/perf.txt" "${args[@]}" < $stdin > /dev/null 2>&1
                timed python3 "$HERE/rss_sampler.py" -i 0.005 -o "$out/rss.csv" -- "${args[@]}" ;;
+  nativerefs)  timed perf stat -I 5 -x, -e mem_uops_retired.all_loads:u,mem_uops_retired.all_stores:u -o "$out/refs.txt" \
+                   "${args[@]}" ;;
+  nativecode)  timed python3 "$HERE/rss_sampler.py" -i 0.005 --code -o "$out/rss.csv" -- "${args[@]}" ;;
   truth)       timed "$PIN" -t "$TOOL" -mode splitter -intervals 1000 -bins 1 -track_frees 1 -snapshot $snap -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
   truthpages)  timed "$PIN" -t "$TOOL" -mode splitter -intervals 1000 -bins 1 -track_frees 1 -snapshot $snap -footprint pages -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
   W5pages)     timed "$PIN" -t "$TOOL" -mode spatial -i 100 -s 20 -snapshot $snap -window $((period / 20)) -period $period -window_alloc 0 -footprint pages -outdir "$out" -name "$prog-$input" -- "${args[@]}" ;;
