@@ -9,13 +9,24 @@ failed=0
 echo "runtime"
 gcc -O2 -g -Wall -fPIC -shared -o "$WORK/libmpr.so" "$HERE/../runtime/mpr.c" -ldl -lpthread || exit 1
 gcc -O1 -g -o "$WORK/test_runtime" "$HERE/test_runtime.c" -L"$WORK" -lmpr -lpthread || exit 1
-printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\nid:0x4 runs 2 0 0.25 0.5 0.75\nid:0x5 periodic 4 1024 0 tokens 1\n' > "$WORK/reservations.txt"
-LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_PARAMS=steps=3,tokens=10 MPR_ALL=1 MPR_ZERO_MIN=16384 MPR_REPORT="$WORK/report.csv" \
+printf 'id:0x1 dead 0 0\nid:0x2 ratio 0.25 0\nid:0x3 const 8192 0\nid:0x4 runs 2 0 0.25 0.5 0.75\nid:0x5 periodic 4 1024 0 tokens 1\nid:0x6 ranges 2 prompt 1 0 1024 0 0.5 0 8192\n' > "$WORK/reservations.txt"
+LD_LIBRARY_PATH="$WORK" MPR_RESERVATIONS="$WORK/reservations.txt" MPR_PARAMS=steps=3,tokens=10,prompt=20 MPR_ALL=1 MPR_ZERO_MIN=16384 MPR_REPORT="$WORK/report.csv" \
     "$WORK/test_runtime" || failed=1
 if grep -q '^id:0x1,dead,1,1048576,0,1048576,1,' "$WORK/report.csv"; then
     echo "    ok   telemetry: the dead site's block was all resident, an under-prediction"
 else
     echo "    FAIL telemetry:"; cat "$WORK/report.csv"; failed=1
+fi
+
+# MPR_PROFILE: libmpr profiles the program at native speed (tests/pintool/sites.c's known sizes)
+cc -O1 -g -o "$WORK/sites" "$HERE/../../tests/pintool/sites.c"
+LD_PRELOAD="$WORK/libmpr.so" MPR_PROFILE="$WORK/prof" "$WORK/sites" || failed=1
+got=$(tail -n +2 "$WORK"/prof/*_blocks.csv | awk -F, '{print $3, $6, $7}' | sort | tr '\n' ';')
+want="1048576 0 0;1048576 1048576 1048576;1048576 262144 262144;524288 65536 524288;65536 4096 4096;65536 65536 65536;"
+if [[ $got == "$want" ]] && ls "$WORK"/prof/*_images.csv > /dev/null; then
+    echo "    ok   MPR_PROFILE: dead, prefix, tail, calloc and realloc blocks (size, touched, high water) as Pin measures them"
+else
+    echo "    FAIL MPR_PROFILE: $got"; failed=1
 fi
 
 echo "pass"

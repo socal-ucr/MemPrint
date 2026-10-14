@@ -9,6 +9,19 @@
      MPR_REPORT=<file>        at exit, per site: blocks, requested, predicted (committed), resident
                               at free (mincore), blocks that used more than was predicted, bytes
                               of zeroing skipped
+     MPR_PROFILE=<dir>        profile instead of (or besides) reserving: serve every large block, keep transparent
+                              huge pages off them, and when a block is freed (or at exit) write its site, calling
+                              context, size, touched pages, high water and touched page runs to
+                              <dir>/Libmpr_<program>_<pid>_blocks.csv, in the Pin tool's -sites format, and the
+                              loaded images to _images.csv: memprint.sites fits reservations from it. A block's
+                              pages are fresh when served and libmpr skips the zeroing of untouched pages, so its
+                              resident pages are the pages the program touched, at native speed; bytes are
+                              counted in whole pages
+     MPR_STACKS=0|1           threads' stacks (default 1): a thread created without a stack of its own gets one
+                              mapped MAP_NORESERVE (with a guard page below it), so its stack is not committed
+                              up front (glibc commits the whole stack, 8 MB by default, at pthread_create); the
+                              pages a thread touches are backed as usual. The stack is unmapped at pthread_join
+                              (a detached thread's stays mapped until exit)
      MPR_PARAMS=<k=v,...>     the run's parameters, for periodic reservations (below): MPR_PARAMS=tokens=548
      MPR_THP=0|1|2            transparent huge pages for runtime blocks: 0 none (MADV_NOHUGEPAGE),
                               1 as the system sets them, 2 (default) none on the pages whose zeroing
@@ -32,11 +45,16 @@
    periodic K a b PARAM DEFAULT (a hybrid of the profile and the run's parameters): the block is K
    equal periods (a KV cache's per-layer tensors) and the first a T + b bytes of each are committed,
    T the run's value of PARAM (MPR_PARAMS; DEFAULT when the run does not give it): a KV cache holds
-   a row per token, so its use grows with the tokens the run will process, not with its size. */
+   a row per token, so its use grows with the tokens the run will process, not with its size.
+   ranges K PARAM DEFAULT lo1 a1 b1 ... commits K ranges of the block, each from its start lo (a fraction of the
+   block) for a P + b bytes, P the run's value of PARAM (a compute buffer whose used rows follow the prompt). */
 #define _GNU_SOURCE
 #include "mpr.h"
 
 #include <dlfcn.h>
+#include <link.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <execinfo.h>
 #include <elf.h>
 #include <errno.h>
@@ -59,7 +77,7 @@ extern void *__libc_memalign(size_t, size_t);
 #define PAGE 4096UL
 #define ROUND(n) (((n) + PAGE - 1) & ~(PAGE - 1))
 
-enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS, M_PERIODIC };
+enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS, M_PERIODIC, M_RANGES };
 #define MAX_RUNS 128
 
 struct site {
@@ -71,7 +89,8 @@ struct site {
     atomic_uint_least64_t elided; /* bytes of memset(0) skipped on untouched pages */
     double max_resident_ratio;
     int ctx_depth; /* >0: the site has per-context lines of up to this many frames */
-    int nruns;     /* M_RUNS: the committed ranges, as fractions of the block; M_PERIODIC: the periods */
+    int nruns;     /* M_RUNS: the committed ranges, as fractions of the block; M_PERIODIC: the periods;
+                      M_RANGES: the ranges, [i][0] the start as a fraction, [i][1] the length in bytes */
     double per;    /* M_PERIODIC: bytes committed at the start of each period (a T + b) */
     float runs[MAX_RUNS][2];
     int has_model; /* the site has a line of its own (else: a base for context lines only) */
@@ -89,7 +108,26 @@ static struct cache_entry { uintptr_t ret; struct site *site; int known; } *cach
 
 /* live blocks served by the runtime */
 #define LIVE (1 << 16)
-static struct block { uintptr_t ptr; size_t len, commit, requested; struct site *site; int shaped; } *live;
+static struct block {
+    uintptr_t ptr;
+    size_t len, commit, requested;
+    struct site *site;
+    int shaped;
+    uint64_t born;  /* MPR_PROFILE: microseconds since start-up */
+    char ctx[112];  /* MPR_PROFILE: the two caller frames above the allocation call, as keys */
+} *live;
+static int profile_fd = -1;                       /* MPR_PROFILE: the blocks file */
+static const char *profile_dir;
+static uint64_t start_us;
+static __thread const char *pending_ctx __attribute__((tls_model("initial-exec"))); /* for serve() */
+
+static uint64_t now_us(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000 + (uint64_t)t.tv_nsec / 1000;
+}
+
 static size_t nlive;
 static uintptr_t *starts; /* the live blocks' addresses, sorted: the block holding an address (zeroing) */
 
@@ -310,6 +348,7 @@ static double model_value(const struct site *s, size_t n)
     case M_CONST: p = s->a; break;
     case M_RUNS: p = 0; for (int i = 0; i < s->nruns; i++) p += (s->runs[i][1] - s->runs[i][0]) * n; break;
     case M_PERIODIC: p = s->nruns * (s->per < (double)n / s->nruns ? s->per : (double)n / s->nruns); break;
+    case M_RANGES: p = 0; for (int i = 0; i < s->nruns; i++) p += s->runs[i][1]; break;
     default: p = n; /* no reservation (MPR_ALL): all of it */
     }
     if (s->model != M_NONE) p *= scale;
@@ -456,9 +495,51 @@ static size_t resident_bytes(void *p, size_t len)
     return n * PAGE;
 }
 
+/* MPR_PROFILE: the block's row (Pin tool -sites format, bytes in whole pages); no allocation (lock held) */
+#define PROFILE_RUNS 256
+static void profile_row(const struct block *b, uint64_t died)
+{
+    size_t pages = b->len / PAGE, touched = 0, last = 0, run_start = 0;
+    size_t starts[PROFILE_RUNS], counts[PROFILE_RUNS];
+    int nruns = 0, in = 0;
+    unsigned char vec[4096];
+    for (size_t off = 0; off < pages; off += sizeof vec) {
+        size_t k = pages - off < sizeof vec ? pages - off : sizeof vec;
+        if (mincore((char *)b->ptr + off * PAGE, k * PAGE, vec) != 0) return;
+        for (size_t i = 0; i <= k; i++) {
+            size_t page = off + i;
+            int r = i < k && (vec[i] & 1);
+            if (i == k) break;
+            if (r) {
+                touched++, last = page + 1;
+                if (!in) run_start = page, in = 1;
+            } else if (in) {
+                if (nruns < PROFILE_RUNS) starts[nruns] = run_start, counts[nruns++] = page - run_start;
+                else counts[PROFILE_RUNS - 1] = page - starts[PROFILE_RUNS - 1]; /* merged into the last */
+                in = 0;
+            }
+        }
+    }
+    if (in) {
+        if (nruns < PROFILE_RUNS) starts[nruns] = run_start, counts[nruns++] = pages - run_start;
+        else counts[PROFILE_RUNS - 1] = pages - starts[PROFILE_RUNS - 1];
+    }
+    size_t tb = touched * PAGE, hw = last * PAGE;
+    if (tb > b->requested) tb = b->requested;
+    if (hw > b->requested) hw = b->requested;
+    char line[128 + 112 + PROFILE_RUNS * 24];
+    int n = snprintf(line, sizeof line, "%s,0,%zu,%lu,%lu,%zu,%zu,%zu,%zu,0,0,0,%s,", b->site->key, b->requested,
+                     (unsigned long)b->born, (unsigned long)died, tb, hw, touched, pages, b->ctx);
+    for (int i = 0; i < nruns && n < (int)sizeof line - 48; i++)
+        n += snprintf(line + n, sizeof line - n, "%s%zu:%zu", i ? ";" : "", starts[i], counts[i]);
+    line[n++] = '\n';
+    if (write(profile_fd, line, (size_t)n) < 0) return;
+}
+
 /* telemetry for a block about to go; lock held */
 static void retire(struct block *b)
 {
+    if (profile_fd >= 0) profile_row(b, now_us() - start_us);
     struct site *s = b->site;
     size_t res = resident_bytes((void *)b->ptr, b->len);
     s->resident += res;
@@ -501,15 +582,31 @@ static size_t commit_periodic(char *p, size_t size, size_t len, const struct sit
     return total;
 }
 
+/* M_RANGES: commit each range's length (times MPR_SCALE) from its start */
+static size_t commit_ranges(char *p, size_t len, const struct site *s)
+{
+    size_t total = 0, pages = len / PAGE;
+    for (int i = 0; i < s->nruns; i++) {
+        size_t lo = (size_t)(s->runs[i][0] * pages + 1e-6) * PAGE, hi = ROUND(lo + (size_t)(s->runs[i][1] * scale));
+        if (hi > len) hi = len;
+        if (hi <= lo) continue;
+        if (mmap(p + lo, hi - lo, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+            continue;
+        total += hi - lo;   /* (ranges that overlap are counted once each: an upper bound) */
+    }
+    return total;
+}
+
 static void *serve(size_t size, struct site *s, size_t align)
 {
-    int shaped = s->model == M_RUNS || s->model == M_PERIODIC;
+    int shaped = s->model == M_RUNS || s->model == M_PERIODIC || s->model == M_RANGES;
     size_t len = ROUND(size), commit = shaped ? 0 : ROUND(predict(s, size));
     if (commit > len) commit = len;
     void *p = map_block(len, commit, align);
     if (!p) return NULL;
     if (s->model == M_RUNS) commit = commit_runs(p, len, s);
     if (s->model == M_PERIODIC) commit = commit_periodic(p, size, len, s);
+    if (s->model == M_RANGES) commit = commit_ranges(p, len, s);
     pthread_mutex_lock(&lock);
     struct block *b = slot((uintptr_t)p, 1);
     if (!b) {
@@ -517,7 +614,11 @@ static void *serve(size_t size, struct site *s, size_t align)
         munmap(p, len);
         return NULL;
     }
-    *b = (struct block){(uintptr_t)p, len, commit, size, s, shaped};
+    *b = (struct block){(uintptr_t)p, len, commit, size, s, shaped, 0, ""};
+    if (profile_fd >= 0) {
+        b->born = now_us() - start_us;
+        if (pending_ctx) snprintf(b->ctx, sizeof b->ctx, "%s", pending_ctx);
+    }
     add_start((uintptr_t)p), nlive++;
     s->count++, s->requested += size, s->predicted += commit;
     pthread_mutex_unlock(&lock);
@@ -526,12 +627,39 @@ static void *serve(size_t size, struct site *s, size_t align)
     return p;
 }
 
+/* MPR_PROFILE: the two frames above the allocation call that returns to `ret`, as keys joined by '|' (Pin's
+   -site_context); "" when they cannot be named. Runs without the lock (dladdr takes the loader's). */
+static void profile_context(uintptr_t ret, char *ctx, size_t len)
+{
+    ctx[0] = 0;
+    if (!ret || in_backtrace) return;
+    void *frames[24];
+    in_backtrace = 1;
+    int n = backtrace(frames, 24);
+    in_backtrace = 0;
+    int i = 0;
+    while (i < n && (uintptr_t)frames[i] != ret) i++;
+    size_t used = 0;
+    for (int d = 1; d <= 2 && i + d < n && used + 2 < len; d++) {
+        if (d > 1) ctx[used++] = '|';
+        if (!key_of((uintptr_t)frames[i + d], ctx + used, len - used)) {
+            if (d > 1) used--;
+            ctx[used] = 0;
+            break;
+        }
+        used += strlen(ctx + used);
+    }
+}
+
 static void *alloc_at(size_t size, uintptr_t ret, uint64_t id, int by_id, size_t align, int zero)
 {
     if (ready && size >= min_size) {
         struct site *s = with_context(by_id ? site_of_id(id) : site_of_return(ret), ret);
         if (s) {
+            char ctx[112];
+            if (profile_fd >= 0) profile_context(ret, ctx, sizeof ctx), pending_ctx = ctx;
             void *p = serve(size, s, align);
+            pending_ctx = NULL;
             if (p) return p; /* fresh pages are zero: calloc needs no memset */
         }
     }
@@ -685,7 +813,9 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
             /* a block committed in ranges is many mappings: a new block and a copy */
             struct block old = *b;
             pthread_mutex_unlock(&lock);
+            pending_ctx = old.ctx;
             void *q = size >= min_size ? serve(size, old.site, 0) : NULL;
+            pending_ctx = NULL;
             if (!q) q = __libc_malloc(size ? size : 1);
             if (!q) {
                 errno = ENOMEM;
@@ -736,7 +866,10 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
         /* a glibc block growing past the threshold at a site with a reservation */
         struct site *s = with_context(by_id ? site_of_id(id) : site_of_return(ret), ret);
         if (s) {
+            char ctx[112];
+            if (profile_fd >= 0) profile_context(ret, ctx, sizeof ctx), pending_ctx = ctx;
             void *q = serve(size, s, 0);
+            pending_ctx = NULL;
             if (q) {
                 size_t old = malloc_usable_size(ptr);
                 memcpy(q, ptr, old < size ? old : size);
@@ -939,12 +1072,16 @@ static void parse_line(const char *line)
     double a, b, a2, b2, dflt;
     int k;
     if (!strncmp(line, "# image ", 8)) parse_image(line);
-    if (line[0] == '#' || sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b) != 4) return;
+    if (line[0] == '#') return;
+    int got = sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b);
+    if (got < 2) return;
     int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
           : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST
           : !strcmp(model, "cap") ? M_CAP : !strcmp(model, "runs") ? M_RUNS
-          : !strcmp(model, "periodic") ? M_PERIODIC : M_NONE;
+          : !strcmp(model, "periodic") ? M_PERIODIC : !strcmp(model, "ranges") ? M_RANGES : M_NONE;
     if (m == M_NONE) return;
+    if (m == M_RANGES) a = b = 0;      /* (its parameter's name follows K: parsed below) */
+    else if (got != 4) return;
     if (m == M_PERIODIC) { /* "key periodic K a b PARAM DEFAULT" */
         if (sscanf(line, "%127s %31s %d %lf %lf %31s %lf", key, model, &k, &a2, &b2, pname, &dflt) != 7 || k < 1) return;
         a = k, b = a2 * param(pname, dflt) + b2;
@@ -957,6 +1094,25 @@ static void parse_line(const char *line)
     if (s && !strchr(key, '@') && (!strncmp(key, "cap:0x", 6) || !strncmp(key, "id:0x", 5)))
         idmap_add(key[0] == 'c' ? 1 : 2, strtoull(strchr(key, ':') + 1, NULL, 16), s);
     if (s && m == M_PERIODIC) s->nruns = (int)a, s->per = b;
+    if (s && m == M_RANGES) { /* "key ranges K PARAM DEFAULT lo1 a1 b1 ..." */
+        char pn[32];
+        double dflt;
+        int k;
+        if (sscanf(line, "%*s %*s %d %31s %lf", &k, pn, &dflt) != 3) { s->model = M_NONE, s->has_model = 0; return; }
+        double P = param(pn, dflt);
+        const char *q = line;
+        for (int skip = 0; skip < 5 && *q; skip++) { /* past the key, the model, K, PARAM and DEFAULT */
+            while (*q && *q != ' ' && *q != '\t') q++;
+            while (*q == ' ' || *q == '\t') q++;
+        }
+        if (k > MAX_RUNS) k = MAX_RUNS;
+        for (s->nruns = 0; s->nruns < k; s->nruns++) {
+            char *end;
+            double lo = strtod(q, &end), ra = strtod(end, &end), rb = strtod(end, &end);
+            if (end == q) break;
+            s->runs[s->nruns][0] = (float)lo, s->runs[s->nruns][1] = (float)(ra * P + rb), q = end;
+        }
+    }
     if (s && m == M_RUNS) { /* "key runs K lo1 hi1 ... loK hiK" */
         const char *p = line;
         for (int skip = 0; skip < 3 && *p; skip++) { /* past the key, the model and K */
@@ -1020,6 +1176,93 @@ static void *table(size_t bytes)
     return p;
 }
 
+/* ---- threads' stacks (MPR_STACKS) ---- */
+
+static int stacks_on = 1;
+#define MAX_STACKS 4096
+static struct { pthread_t t; void *base; size_t len; } stacks[MAX_STACKS];
+static pthread_mutex_t stack_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t stacks_served;
+
+/* a copy of attr's settings in `out`, with its stack size and guard size; 0: copied */
+static int copy_attr(const pthread_attr_t *attr, pthread_attr_t *out, size_t *stack, size_t *guard)
+{
+    pthread_attr_t def;
+    if (pthread_attr_init(out)) return -1;
+    if (!attr) { /* the process's default (pthread_setattr_default_np, else RLIMIT_STACK) */
+        if (pthread_getattr_default_np(&def)) return -1;
+        attr = &def;
+    }
+    int v;
+    struct sched_param sp;
+    cpu_set_t cpus;
+    if (!pthread_attr_getdetachstate(attr, &v)) pthread_attr_setdetachstate(out, v);
+    if (!pthread_attr_getinheritsched(attr, &v)) pthread_attr_setinheritsched(out, v);
+    if (!pthread_attr_getschedpolicy(attr, &v)) pthread_attr_setschedpolicy(out, v);
+    if (!pthread_attr_getschedparam(attr, &sp)) pthread_attr_setschedparam(out, &sp);
+    if (!pthread_attr_getscope(attr, &v)) pthread_attr_setscope(out, v);
+    if (!pthread_attr_getaffinity_np(attr, sizeof cpus, &cpus)) {
+        cpu_set_t all;
+        CPU_ZERO(&all);
+        for (int i = 0; i < CPU_SETSIZE; i++) CPU_SET(i, &all);
+        if (!CPU_EQUAL(&cpus, &all) && CPU_COUNT(&cpus) > 0) pthread_attr_setaffinity_np(out, sizeof cpus, &cpus);
+    }
+    if (pthread_attr_getstacksize(attr, stack) || pthread_attr_getguardsize(attr, guard)) return -1;
+    if (attr == &def) pthread_attr_destroy(&def);
+    return 0;
+}
+
+int pthread_create(pthread_t *t, const pthread_attr_t *attr, void *(*fn)(void *), void *arg)
+{
+    static int (*next)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+    if (!next) next = (int (*)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *))dlsym(RTLD_NEXT, "pthread_create");
+    void *own = NULL;
+    size_t ownsize = 0;
+    if (!ready || !stacks_on || (attr && !pthread_attr_getstack(attr, &own, &ownsize) && own))
+        return next(t, attr, fn, arg); /* before start-up, off, or a stack of the caller's */
+    pthread_attr_t a;
+    size_t stack = 0, guard = 0;
+    if (copy_attr(attr, &a, &stack, &guard)) return next(t, attr, fn, arg);
+    guard = guard ? ROUND(guard) : PAGE;
+    stack = ROUND(stack);
+    size_t len = stack + guard;
+    char *p = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_STACK, -1, 0);
+    if (p == MAP_FAILED) { pthread_attr_destroy(&a); return next(t, attr, fn, arg); }
+    mprotect(p, guard, PROT_NONE); /* the guard page below the stack, as glibc's */
+    pthread_attr_setstack(&a, p + guard, stack);
+    int r = next(t, &a, fn, arg);
+    int detached = 0;
+    pthread_attr_getdetachstate(&a, &detached);
+    pthread_attr_destroy(&a);
+    if (r) { munmap(p, len); return r; }
+    __atomic_add_fetch(&stacks_served, 1, __ATOMIC_RELAXED);
+    if (detached == PTHREAD_CREATE_DETACHED) return 0; /* (stays mapped: no join tells when it is free) */
+    pthread_mutex_lock(&stack_lock);
+    for (int i = 0; i < MAX_STACKS; i++)
+        if (!stacks[i].base) { stacks[i].t = *t, stacks[i].base = p, stacks[i].len = len; break; }
+    pthread_mutex_unlock(&stack_lock);
+    return 0;
+}
+
+int pthread_join(pthread_t t, void **ret)
+{
+    static int (*next)(pthread_t, void **);
+    if (!next) next = (int (*)(pthread_t, void **))dlsym(RTLD_NEXT, "pthread_join");
+    int r = next(t, ret);
+    if (r || !stacks_on) return r;
+    void *base = NULL;
+    size_t len = 0;
+    pthread_mutex_lock(&stack_lock);
+    for (int i = 0; i < MAX_STACKS; i++)
+        if (stacks[i].base && pthread_equal(stacks[i].t, t)) {
+            base = stacks[i].base, len = stacks[i].len, stacks[i].base = NULL;
+            break;
+        }
+    pthread_mutex_unlock(&stack_lock);
+    if (base) munmap(base, len);
+    return r;
+}
+
 __attribute__((constructor)) static void init(void)
 {
     const char *v;
@@ -1035,6 +1278,22 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_ZERO"))) zero_skip = atoi(v);
     if ((v = getenv("MPR_ZERO_MIN"))) zero_min = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_THP"))) thp = atoi(v);
+    if ((v = getenv("MPR_STACKS"))) stacks_on = atoi(v);
+    if ((v = getenv("MPR_PROFILE")) && *v) {
+        char exe[256], path[512];
+        ssize_t k = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        exe[k > 0 ? k : 0] = 0;
+        const char *base = strrchr(exe, '/') ? strrchr(exe, '/') + 1 : exe;
+        mkdir(v, 0755);
+        snprintf(path, sizeof path, "%s/Libmpr_%s_%d_blocks.csv", v, base, (int)getpid());
+        profile_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (profile_fd >= 0) {
+            static const char head[] = "site,kind,size,born,died,touched,high_water,pages_touched,pages,alloc_touched,"
+                                       "grown_from,moved,context,runs\n";
+            if (write(profile_fd, head, sizeof head - 1) < 0) profile_fd = -1;
+            profile_dir = v, serve_all = 1, thp = 0, start_us = now_us();
+        }
+    }
     report = getenv("MPR_REPORT");
     libc_memset = (void *(*)(void *, int, size_t))dlsym(RTLD_NEXT, "memset");
     void *prime[2];
@@ -1047,8 +1306,41 @@ __attribute__((constructor)) static void init(void)
     ready = 1;
 }
 
+static int image_line(struct dl_phdr_info *info, size_t size, void *arg)
+{
+    (void)size;
+    int fd = *(int *)arg;
+    char exe[256], line[600];
+    const char *path = info->dlpi_name;
+    if (!path || !*path) { /* the main program */
+        ssize_t k = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        exe[k > 0 ? k : 0] = 0;
+        path = exe;
+    }
+    if (*path != '/') return 0; /* (the vDSO) */
+    const char *name = strrchr(path, '/') + 1;
+    int n = snprintf(line, sizeof line, "%s,%s\n", name, path);
+    if (n > 0 && write(fd, line, (size_t)n) < 0) return 1;
+    return 0;
+}
+
 __attribute__((destructor)) static void fini(void)
 {
+    if (profile_fd >= 0) {
+        pthread_mutex_lock(&lock);
+        uint64_t end = now_us() - start_us;
+        for (size_t i = 0; i < LIVE; i++) /* blocks still live at exit: their rows now */
+            if (live[i].ptr) profile_row(&live[i], end);
+        pthread_mutex_unlock(&lock);
+        close(profile_fd), profile_fd = -1;
+        char path[512];
+        snprintf(path, sizeof path, "%s/Libmpr_%d_images.csv", profile_dir, (int)getpid());
+        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (fd >= 0) {
+            if (write(fd, "name,path\n", 10) == 10) dl_iterate_phdr(image_line, &fd);
+            close(fd);
+        }
+    }
     if (!report) return;
     pthread_mutex_lock(&lock);
     for (size_t i = 0; i < LIVE; i++) /* blocks still live: their residency now */
@@ -1065,7 +1357,7 @@ __attribute__((destructor)) static void fini(void)
     FILE *f = fopen(report, "w");
     if (f) {
         fprintf(f, "site,model,count,requested,predicted,resident,under,max_resident_ratio,elided\n");
-        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap", "runs", "periodic"};
+        static const char *names[] = {"none", "dead", "ratio", "affine", "const", "cap", "runs", "periodic", "ranges"};
         for (int i = 0; i < nsites; i++)
             if (sites[i].count)
                 fprintf(f, "%s,%s,%lu,%lu,%lu,%lu,%lu,%.4f,%lu\n", sites[i].key, names[sites[i].model],

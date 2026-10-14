@@ -52,6 +52,30 @@ static size_t own_pages(const void *p, size_t n)
     return own;
 }
 
+/* bytes of the process's mappings the kernel charges to the commit limit (VmFlags ac) */
+static size_t accountable(void)
+{
+    FILE *f = fopen("/proc/self/smaps", "r");
+    char line[512];
+    size_t size = 0, total = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        if (!strncmp(line, "Size:", 5)) size = strtoull(line + 5, NULL, 10) * KB;
+        else if (!strncmp(line, "VmFlags:", 8) && strstr(line, " ac")) total += size;
+    }
+    if (f) fclose(f);
+    return total;
+}
+
+static pthread_barrier_t stack_barrier;
+static void *deep(void *arg)
+{
+    volatile char buf[512 * KB]; /* half a megabyte of stack, all written */
+    for (size_t i = 0; i < sizeof buf; i += 512) buf[i] = (char)i;
+    pthread_barrier_wait(&stack_barrier); /* held while the parent measures */
+    pthread_barrier_wait(&stack_barrier);
+    return (void *)(uintptr_t)(buf[512] + (uintptr_t)arg);
+}
+
 static void *worker(void *arg)
 {
     unsigned seed = (unsigned)(uintptr_t)arg;
@@ -134,6 +158,15 @@ int main(void)
     CHECK(same(kv, 1 * MB, 6), "periodic block written in full: data kept");
     free(kv);
 
+    /* a ranges site ("ranges 2 prompt 1 0 1024 0 0.5 0 8192", MPR_PARAMS=prompt=20): ranges at 0 of 20 KB (5 pages)
+       and at the middle of 8 KB (2 pages) */
+    committed0 = __mpr_committed();
+    unsigned char *cb = __mpr_alloc(1 * MB, 0x6, MPR_MALLOC, 0);
+    CHECK(__mpr_committed() - committed0 == 7 * 4 * KB, "ranges site: 20 KB at the start and 8 KB at the middle committed");
+    fill(cb, 1 * MB, 7);
+    CHECK(same(cb, 1 * MB, 7), "ranges block written in full: data kept");
+    free(cb);
+
     /* memset(0) over a runtime block writes only the pages the program has touched; the others are
        zero already and stay untouched (memset through a pointer: a real call, as from another
        library) */
@@ -164,6 +197,24 @@ int main(void)
 
     free(dead), free(quarter), free(z), free(aligned);
     CHECK(__mpr_committed() == base, "committed back to %zu after the frees", base);
+
+    /* threads' stacks (MPR_STACKS, default on): mapped MAP_NORESERVE, so 4 threads using 512 KB of stack
+       each add almost nothing to the commit (glibc's stacks: 4 x 8 MB), and are unmapped at join */
+    size_t ac0 = accountable();
+    pthread_t st[4];
+    pthread_barrier_init(&stack_barrier, NULL, 5);
+    for (int i = 0; i < 4; i++) pthread_create(&st[i], NULL, deep, (void *)(uintptr_t)i);
+    pthread_barrier_wait(&stack_barrier);
+    size_t ac1 = accountable();
+    pthread_barrier_wait(&stack_barrier);
+    int stack_ok = 1;
+    for (int i = 0; i < 4; i++) {
+        void *r;
+        pthread_join(st[i], &r);
+        stack_ok &= (uintptr_t)r == (uintptr_t)(char)512 + (uintptr_t)i;
+    }
+    CHECK(stack_ok && ac1 - ac0 < 1 * MB, "4 threads with 512 KB of stack each: commit grew %zu KB, results kept",
+          (ac1 - ac0) / KB);
 
     /* a table grown one element at a time past the threshold, with other large blocks around it
        (libpciaccess's pattern): growths in place, moves, and moves of blocks the kernel keeps as

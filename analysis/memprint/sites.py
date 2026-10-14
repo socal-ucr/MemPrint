@@ -1,6 +1,9 @@
 """Per-site reservations from MemPrint's -sites profiles (the input of libmpr and the MemPrintResize pass).
 
-    python -m memprint.sites DIR [DIR ...] -o reservations.txt [--quantile 0.9] [--min 65536] [--param tokens]
+    python -m memprint.sites DIR [DIR ...] -o reservations.txt [--quantile 0.9] [--min 65536] [--param tokens ...]
+
+DIR is a profile: the Pin tool's -sites run, or a run under libmpr with MPR_PROFILE=DIR (native speed, whole
+pages).
 
 Each DIR is one -sites run of the same program (pintool -sites: *_sites.csv, *_blocks.csv), usually
 at different inputs. For every site with blocks of at least --min bytes (the ones libmpr serves),
@@ -18,6 +21,10 @@ training blocks, by requested bytes (1.0: all of them) and, among the models tha
              touched page runs (column runs), when the blocks are used sparsely across their whole
              length (a KV cache written a few rows per layer) and committing those ranges costs less
              than --runs of the best prefix model
+    ranges K PARAM DEFAULT lo1 a1 b1 ... loK aK bK
+             (with --param) the blocks' touched runs start at the same places (fractions lo of the block) and
+             grow with a run parameter: the run from lo is committed for a P + b bytes (a compute buffer whose
+             used rows follow the prompt's length). Preferred over runs when a run grows with the parameter
     periodic K a b PARAM DEFAULT
              (with --param PARAM, a hybrid of the profile and the run's parameters) every block is K equal
              periods, each touched in one prefix (a KV cache: a tensor per layer, a row per token), and the
@@ -68,16 +75,18 @@ def read_params(d):
     return out
 
 
-def load(dirs, min_size, param=None):
+def load(dirs, min_size, params=()):
     blocks = []
     for i, d in enumerate(dirs):
-        f = glob.glob(os.path.join(d, "*_blocks.csv"))
+        f = sorted(glob.glob(os.path.join(d, "*_blocks.csv")))
         if not f:
-            raise SystemExit(f"{d}: no *_blocks.csv (run the Pin tool with -sites)")
-        b = pd.read_csv(f[0])
+            raise SystemExit(f"{d}: no *_blocks.csv (run the Pin tool with -sites, or libmpr with MPR_PROFILE)")
+        # every process's file (a profile under libmpr has one per process, e.g. a wrapper script's empty one)
+        b = pd.concat([pd.read_csv(x) for x in f], ignore_index=True)
         b["input"] = os.path.basename(os.path.normpath(d))
-        if param:                                                      # the run parameter of this profile
-            b["T"] = read_params(d).get(param, np.nan)
+        pv = read_params(d)
+        for name in params:                                            # the run parameters of this profile
+            b["P:" + name] = pv.get(name, np.nan)
         blocks.append(b[b["size"] >= min_size])
     return pd.concat(blocks, ignore_index=True)
 
@@ -158,16 +167,30 @@ def runs_fit(g):
     return merged, cost
 
 
+def line_fit(t, length):
+    """(a, b) of length = a t + b covering every point: least squares shifted up when there are three values
+    of t or more, else through the origin with the largest length per unit of t."""
+    t, length = np.asarray(t, float), np.asarray(length, float)
+    if len(np.unique(t)) >= 3:
+        a, b = np.polyfit(t, length, 1)
+        a = max(a, 0.0)
+        return float(a), float(np.max(length - a * t))
+    return float(np.max(length / np.maximum(t, 1e-9))), 0.0
+
+
+def param_columns(g):
+    return [c for c in g if c.startswith("P:") and g[c].notna().all()]
+
+
 def periodic_fit(g):
-    """(K, a, b, committed bytes over the training blocks) of the periodic model, or None: every block is
-    K equal periods (K >= 2) each touched in one prefix run of the same length, and the profiles give
-    the run parameter T (column T, from --param). The prefix is fitted as a T + b bytes: through the
-    blocks' points when there are three values of T or more (shifted up to cover each), else through the
-    origin (a = the largest prefix per unit of T, b = 0)."""
-    if "T" not in g or g["T"].isna().any() or "runs" not in g:
+    """(K, a, b, committed bytes over the training blocks, parameter) of the periodic model, or None: every
+    block is K equal periods (K >= 2) each touched in one prefix run of the same length, and the profiles give
+    run parameters (columns P:<name>, from --param). The prefix is fitted as a T + b bytes (line_fit) for each
+    parameter T, and the parameter that commits least on the training blocks is kept."""
+    if "runs" not in g or not param_columns(g):
         return None
-    ks, pts = set(), []
-    for pages, runs, t in zip(g["pages"], g["runs"].fillna("").astype(str), g["T"]):
+    ks, lens_ = set(), []
+    for pages, runs in zip(g["pages"], g["runs"].fillna("").astype(str)):
         spans = [tuple(int(x) for x in r.split(":")) for r in filter(None, runs.split(";"))]
         k = len(spans)
         if k < 2:
@@ -179,19 +202,53 @@ def periodic_fit(g):
         if max(lens) - min(lens) > 1:
             return None
         ks.add(k)
-        pts.append((float(t), max(lens) * PAGE))
+        lens_.append(max(lens) * PAGE)
     if len(ks) != 1:
         return None
     k = ks.pop()
-    t, length = np.array(pts).T
-    if len(np.unique(t)) >= 3:
-        a, b = np.polyfit(t, length, 1)
-        a = max(a, 0.0)
-        b = float(np.max(length - a * t))
-    else:
-        a, b = float(np.max(length / np.maximum(t, 1e-9))), 0.0
-    per = np.minimum(-(-(a * g["T"].to_numpy(float) + b) // PAGE) * PAGE, g["size"].to_numpy(float) / k)
-    return k, float(a), float(b), float(np.minimum(k * per, g["size"].to_numpy(float)).sum())
+    size = g["size"].to_numpy(float)
+    best = None
+    for col in param_columns(g):
+        t = g[col].to_numpy(float)
+        a, b = line_fit(t, lens_)
+        per = np.minimum(-(-(a * t + b) // PAGE) * PAGE, size / k)
+        cost = float(np.minimum(k * per, size).sum())
+        if best is None or cost < best[3]:
+            best = (k, a, b, cost, col[2:])
+    return best
+
+
+def ranges_fit(g, min_slope=1.0):
+    """([(start as a fraction of the block, a, b)], committed bytes, parameter) of the ranges model, or None:
+    the blocks have the same number of pages and their touched runs start at the same places (the starts of
+    the profile with the most runs), and each run's length, from its start to the end of the run that covers
+    it, is fitted as a P + b bytes (line_fit) for each run parameter P; the parameter that commits least is
+    kept. None when no run grows with the parameter (min_slope bytes per unit): the runs model fits as well."""
+    if "runs" not in g or not param_columns(g) or g["pages"].nunique() != 1:
+        return None
+    pages = int(g["pages"].iloc[0])
+    spans = [[tuple(int(x) for x in r.split(":")) for r in filter(None, runs.split(";"))]
+             for runs in g["runs"].fillna("").astype(str)]
+    if not all(spans) or max(len(x) for x in spans) > MAX_RUNS:
+        return None
+    starts = [s0 for s0, _ in max(spans, key=len)]
+    # per block and start: pages from the start to the end of the run covering it (0: not touched there)
+    lengths = np.array([[next((f + n - st for f, n in x if f <= st < f + n), 0) for st in starts] for x in spans],
+                       float) * PAGE
+    size = g["size"].to_numpy(float)
+    best = None
+    for col in param_columns(g):
+        t = g[col].to_numpy(float)
+        fits = [line_fit(t, lengths[:, i]) for i in range(len(starts))]
+        if max(a for a, _ in fits) < min_slope:
+            continue
+        cost = 0.0
+        for j in range(len(g)):
+            cost += min(size[j], sum(min(-(-(a * t[j] + b) // PAGE) * PAGE, pages * PAGE - st * PAGE)
+                                     for (a, b), st in zip(fits, starts)))
+        if best is None or cost < best[1]:
+            best = ([(st / pages, a, b) for st, (a, b) in zip(starts, fits)], cost, col[2:])
+    return best
 
 
 def row(site, g, q, keep, context="", runs_ratio=0.7):
@@ -201,14 +258,19 @@ def row(site, g, q, keep, context="", runs_ratio=0.7):
     if shaped and shaped[1] < runs_ratio * cost and cost - shaped[1] >= 65536:
         ranges, cost = shaped
         model, a, b = "runs", float(len(ranges)), 0.0
+    param = None
     periodic = periodic_fit(g) if model != "dead" else None
+    grown = ranges_fit(g) if model != "dead" and not periodic else None
     if periodic:
         # preferred whenever the blocks have its shape, even when it commits more on the training blocks (a
         # run that stopped before T, as llama2.c at the end of a story): it follows T to other inputs, which
         # the training blocks' ranges do not
-        ranges, model, a, b, cost = periodic[0], "periodic", periodic[1], periodic[2], periodic[3]
+        ranges, model, a, b, cost, param = periodic[0], "periodic", periodic[1], periodic[2], periodic[3], periodic[4]
+    elif grown:
+        # likewise preferred over runs: its ranges grow with the run parameter (a compute buffer with the prompt)
+        ranges, model, a, b, cost, param = grown[0], "ranges", float(len(grown[0])), 0.0, grown[1], grown[2]
     requested = float(g["size"].sum())
-    return dict(site=site, context=context, model=model, a=a, b=b, ranges=ranges, blocks=len(g),
+    return dict(site=site, context=context, model=model, a=a, b=b, ranges=ranges, param=param, blocks=len(g),
                 inputs=g["input"].nunique(), requested=requested, committed=cost, touched=float(g["touched"].sum()),
                 high_water=float(g["high_water"].sum()), keep=cost < keep * requested)
 
@@ -312,7 +374,7 @@ def reservations(blocks, q, keep, frac=0.05):
     for site, g in blocks.groupby("site"):
         rows.append(row(site, g, q, keep))
         rows.extend(split(site, g, q, keep, frac))
-    cols = ["site", "context", "model", "a", "b", "ranges", "blocks", "inputs", "requested", "committed", "touched",
+    cols = ["site", "context", "model", "a", "b", "ranges", "param", "blocks", "inputs", "requested", "committed", "touched",
             "high_water", "keep"]
     return pd.DataFrame(rows, columns=cols).sort_values("requested", ascending=False)
 
@@ -327,19 +389,24 @@ def main(argv=None):
     ap.add_argument("--hash-capacities", action="store_true", help="also reserve hash tables' bucket counts")
     ap.add_argument("--split", type=float, default=0.05,
                     help="split a site by calling context when that commits less by this share of its requested bytes")
-    ap.add_argument("--param", help="the run parameter periodic reservations follow (read from each DIR/params.txt); "
-                                     "libmpr takes the run's value from MPR_PARAMS=<param>=<value>")
+    ap.add_argument("--param", action="append", default=[],
+                    help="a run parameter periodic and ranges reservations may follow (read from each DIR/params.txt; "
+                         "may be given several times, each site keeps the one that fits best); libmpr takes the "
+                         "run's value from MPR_PARAMS=<param>=<value>,...")
     a = ap.parse_args(argv)
     blocks = load(a.dirs, a.min, a.param)
-    param = a.param
-    default = float(blocks["T"].max()) if a.param and "T" in blocks and blocks["T"].notna().any() else 0.0
+    # when a run does not give a parameter, libmpr assumes the largest value profiled
+    default = {n: float(blocks["P:" + n].max()) for n in a.param if "P:" + n in blocks and blocks["P:" + n].notna().any()}
     r = reservations(blocks, a.quantile, a.keep, a.split)
     caps = capacities(a.dirs, a.quantile, a.min, a.hash_capacities)
     with open(a.out, "w") as f:
         f.write(f"# MemPrint reservations from {len(a.dirs)} runs, quantile {a.quantile}, blocks >= {a.min} bytes\n")
         for x in r[r.keep.astype(bool)].itertuples():
             if x.model == "periodic":
-                f.write(f"{x.site} periodic {int(x.ranges)} {x.a:.6g} {x.b:.6g} {param} {default:.6g}\n")
+                f.write(f"{x.site} periodic {int(x.ranges)} {x.a:.6g} {x.b:.6g} {x.param} {default[x.param]:.6g}\n")
+            elif x.model == "ranges":
+                f.write(f"{x.site} ranges {len(x.ranges)} {x.param} {default[x.param]:.6g} "
+                        + " ".join(f"{lo:.6f} {ra:.6g} {rb:.6g}" for lo, ra, rb in x.ranges) + "\n")
             elif x.model == "runs":
                 f.write(f"{x.site} runs {len(x.ranges)} " + " ".join(f"{lo:.6f} {hi:.6f}" for lo, hi in x.ranges) + "\n")
             else:
