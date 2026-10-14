@@ -75,7 +75,7 @@ reactive.elastic = True
 
 
 CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",
-               "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec", "W1sec": "W1sec", "Psec": "Psec",
+               "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec",
                # on the native wall clock, through the native run's memory references over time (nativerefs)
                "Tnat": "truthnat", "W5nat": "W5nat", "W1nat": "W1nat", "Pnat": "Pnat"}
 
@@ -91,8 +91,7 @@ def _scaled_to_rss(method):
     return f
 
 
-HYBRID = {"memprint-W5-rss": "W5", "memprint-W5sec-rss": "W5sec", "memprint-Psec-rss": "Psec",
-          "memprint-W5nat-rss": "W5nat", "memprint-Pnat-rss": "Pnat"}
+HYBRID = {"memprint-W5nat-rss": "W5nat", "memprint-Pnat-rss": "Pnat"}
 
 REAL = {
     "reactive": reactive,

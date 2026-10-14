@@ -132,29 +132,19 @@ def file_maps_table(data, fm, out, load=0.8):
 
 
 def time_axis_table(v3, out, load=0.8):
-    """Items of the section on the time axis: every oracle under the three truths, calibrated 90% margins over all
-    programs (cal) and over the programs of the same kind (calc), main stream."""
+    """The section on the time axis and the level: oracles under the three truths, calibrated 90% margins, main
+    stream (rssdata: the RSS without code)."""
     from make_figures import select
     g = pd.read_csv(f"{v3}/results/v3m_all.csv")
     g["margin"] = g.margin.astype(str)
-    order = ["exact", "exact-peak", "rss-peak", "memprint-W5", "memprint-W5sec", "memprint-W5nat", "memprint-Pnat",
-             "memprint-W5-rss", "memprint-W5nat-rss", "memprint-Pnat-rss", "dhat", "massif-i", "heaptrack", "gperf",
-             "request"]
-    t = {}
-    for m in ("cal", "calc"):
-        s = select(g, m)
-        s = s[s.load == load]
-        t[m] = s.groupby(["oracle", "scenario"]).steady_response.mean()
-    rows = []
-    for o in order:
-        cells = [run_label(o)]
-        for sc in ("bytes", "rss", "rssdata"):
-            cells += [n0f(t["cal"].get((o, sc))), n0f(t["calc"].get((o, sc)))]
-        rows.append(" & ".join(cells) + r" \\")
-    head = (r"\begin{tabular}{lrrrrrr}" "\n" r"\toprule" "\n"
-            r" & \multicolumn{2}{c}{Truth = bytes touched} & \multicolumn{2}{c}{Truth = RSS} & \multicolumn{2}{c}{Truth = RSS without code} \\" "\n"
-            r"\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}" "\n"
-            r"Oracle & all & same kind & all & same kind & all & same kind \\" "\n" r"\midrule")
+    order = ["exact", "exact-peak", "rss-peak", "memprint-W5", "memprint-W5nat", "memprint-Pnat",
+             "memprint-W5nat-rss", "memprint-Pnat-rss", "dhat", "massif-i", "heaptrack", "gperf", "request"]
+    s = select(g, "cal")
+    t = s[s.load == load].groupby(["oracle", "scenario"]).steady_response.mean()
+    rows = [" & ".join([run_label(o)] + [n0f(t.get((o, sc))) for sc in ("bytes", "rss", "rssdata")]) + r" \\"
+            for o in order]
+    head = (r"\begin{tabular}{lrrr}" "\n" r"\toprule" "\n"
+            r"Oracle & Truth = bytes touched & Truth = RSS & Truth = RSS without code \\" "\n" r"\midrule")
     open(f"{out}/time_axis.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 

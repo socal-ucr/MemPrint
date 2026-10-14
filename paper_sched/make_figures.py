@@ -53,12 +53,10 @@ STYLE = {  # oracle: (label, color, marker, dash)
     "request": ("User request", PAL[6], "h", "-"),
     "ml-peak": ("ML peak (quantile GBM)", PAL[7], "p", "-"),
     "reactive": ("Reactive resizing (5 min)", PAL[7], "p", (0, (4, 2))),
-    # the time axis (section "The time axis, the margins and the level"): MemPrint curves on Pin's seconds and on
-    # the native clock, and scaled to an earlier run's RSS peak
-    "memprint-W5sec": ("MemPrint 5%, Pin seconds", PAL[0], "o", (0, (1, 1.5))),
+    # section "The time axis and the level": MemPrint curves on the native clock, and scaled to an earlier
+    # run's RSS peak
     "memprint-W5nat": ("MemPrint 5%, native clock", PAL[4], "o", "-"),
     "memprint-Pnat": ("MemPrint pages, native clock", PAL[4], "D", (0, (1, 1.5))),
-    "memprint-W5-rss": ("MemPrint 5%, RSS level", PAL[0], "o", (0, (6, 2, 1, 2))),
     "memprint-W5nat-rss": ("MemPrint 5%, native clock, RSS level", PAL[7], "o", "-"),
     "memprint-Pnat-rss": ("MemPrint pages, native clock, RSS level", PAL[7], "D", (0, (4, 2))),
 }
@@ -441,7 +439,7 @@ def main():
     gv = load_grid(v3, "v3m_all.csv")
     if gv is not None:
         fig_response_vs_load(gv, a.out, "timeaxis_response_vs_load",
-                             ["exact", "exact-peak", "rss-peak", "memprint-W5", "memprint-W5sec", "memprint-W5nat",
+                             ["exact", "exact-peak", "rss-peak", "memprint-W5", "memprint-W5nat",
                               "memprint-W5nat-rss", "memprint-Pnat-rss", "dhat", "request"], scenarios=("rss", "rssdata"))
     cap = load_grid(a.data, "capacity_*.csv")
     if cap is not None:
