@@ -63,6 +63,11 @@ with one profile per model, and a \term{periodic} reservation that combines the 
 token count leaves no KV cache used beyond its commitment, where a reservation from the profile alone left up to
 27\,MB. Finally, \memprint{}'s static interpreter now produces the same per-site profile from source: on GAP's
 kernels it finds every site Pin finds, with total high water within 0.5\%, and its reservations perform as Pin's do.
+\libmpr{} can also take the profile itself, from the pages each block touched, in one native run: over 28
+configurations its reservations commit what the Pin profile's do (2{,}391 against 2{,}383\,MB) after 95\,s of
+profiling instead of 21{,}676\,s. Mapping threads' stacks \texttt{MAP\_NORESERVE} cuts a further 60\% of the commit of
+miniVite and llama.cpp, and a second run parameter, the prompt's length, leaves nothing beyond the commitment on 9
+of 10 unseen llama.cpp inputs.
 \end{abstract}
 
 \section{Introduction}
@@ -442,6 +447,16 @@ tokenizer) plus the tokens to generate, and for llama2.c the number of steps, wh
 llama2.c stops at the end of a story. This answers, for the KV cache, the limitation that a range reservation
 transfers only between blocks of the same layout and use (\secref{sec:limits}).
 
+A block whose touched runs start at the same places in every profile but grow with a run parameter gets a
+\texttt{ranges} model: the starts, as fractions of the block, and each run's length, from its start to the end of
+the run that covers it, fitted as $a\,P + b$ in the same way. llama.cpp's compute buffer is such a block: its 12
+runs start at fixed pages, and their lengths follow the prompt's length, at about 26\,KB per prompt token, not the
+number of tokens generated. Several run parameters can be recorded with a profile (\texttt{tokens}, \texttt{prompt});
+the fit tries each and keeps, per site, the one that commits least on the training blocks, which puts the KV cache
+on \texttt{tokens} and the compute buffer on \texttt{prompt}. A run's parameter must be the tokens it actually
+processed: a profile of a run that stopped at an end-of-text token before the requested length, recorded at the
+requested length, pulled the KV cache's fitted slope from 384 to 175 bytes per token.
+
 \textbf{Calling contexts.} When a site's blocks have caller frames, the fit groups them by their first caller
 frame, then by their first two, and fits each group separately. It keeps the shallowest grouping whose total
 commitment is lower than the merged fit's by at least 5\% of the site's requested bytes. The site then gets one
@@ -693,6 +708,30 @@ When the reservation file records an image's build identifier, \libmpr{} reads t
 it has loaded from its \texttt{PT\_NOTE} segment, the first time it makes a key in that image. If the two differ,
 or the loaded image has none, it ignores that image's address keys and says so once on standard error. The pass's
 identifiers do not depend on the build and are not checked.
+
+\subsection{Threads' stacks}
+\label{sec:stacks}
+
+glibc maps a thread's stack, 8\,MB by default, as one committed region when the thread is created, although a
+thread touches only as deep as it calls. \libmpr{} wraps \texttt{pthread\_create}: a thread created without a stack
+of its own gets one mapped \texttt{MAP\_NORESERVE}, below a guard page, with the caller's other attributes
+(detach state, scheduling, affinity) copied, and \texttt{pthread\_join} unmaps it. A stack is a reservation like
+a block's, of zero committed bytes, and its pages are backed as the thread touches them, so a deep recursion
+still works. A detached thread's stack stays mapped until exit, because no join says when it is free.
+
+\subsection{Profiling at native speed}
+\label{sec:nprof}
+
+The reservations need a profile of each large block's touched pages, which \libmpr{} can measure itself. With
+\texttt{MPR\_PROFILE=}\textit{dir}, it serves every large block, keeps transparent huge pages off them, and when a
+block is freed (or at exit) writes the block's site, its two caller frames, its size, touched pages, high water and
+runs of touched pages, read with \texttt{mincore}, in the Pin tool's \texttt{-sites} format, and the loaded images
+with their paths for the build identifiers. A block's pages are fresh when \libmpr{} serves it and \libmpr{} skips the
+zeroing of untouched pages, so its resident pages are the pages the program touched; the profile is exact to the
+page, which is what a reservation is made of, and it costs one run at native speed. \texttt{sites.py} reads it like a
+Pin profile. It differs from Pin's in two ways: a block grown by \texttt{realloc} is one row at its final size,
+where the Pin tool records every buffer of the chain, and small blocks and container growth chains are not
+profiled.
 
 \subsection{Telemetry and settings}
 
@@ -1006,11 +1045,28 @@ cache (78.9\,MB for 110M, glibc's 78.2\,MB plus the page rounding of 12 periods)
 commits 12.5\,MB and the run uses 27.2\,MB beyond it; at 256 steps the periodic reservation commits 22.5\,MB and
 covers the run exactly.
 
-What remains beyond the commitment is outside the KV cache. 1.35\,MB is a small site whose \texttt{const}
-reservation came from one profile. The rest is llama.cpp's compute buffer, whose used ranges grow with the number
-of prompt tokens processed in one batch, not with the run's length: 4.3\,MB beyond its ranges with the 136-token
-prompt, and 11.7\,MB for the 360M model with the same prompt. A second parameter, the prompt length, would cover
-it; our profiles all had prompts of 4 to 8 tokens, so the fit had nothing to relate it to.
+What remained beyond the commitment was outside the KV cache: 1.35\,MB at a small site whose \texttt{const}
+reservation came from one profile, and llama.cpp's compute buffer, whose used ranges grow with the number of
+prompt tokens processed in one batch, not with the run's length (4.3\,MB beyond its ranges with the 136-token
+prompt, 11.7\,MB for the 360M model). The profiles had prompts of 4 to 8 tokens, so the fit had nothing to relate
+it to.
+
+\begin{table}[t]
+\centering\small
+\input{tables/prompt.tex}
+\caption{llama.cpp 135M on its unseen inputs: the periodic reservations on \texttt{tokens} from four Pin profiles,
+against reservations from ten \libmpr{} profiles (\secref{sec:nprof}) with prompts of 4 to 279 tokens and 8 to 512
+tokens generated, fitted on \texttt{tokens} and \texttt{prompt} (the KV cache periodic on tokens, the compute buffer
+\texttt{ranges} on the prompt). Mean of 3 runs, interleaved with glibc; every output identical.}
+\label{tab:prompt}
+\end{table}
+
+With ten profiles taken under \libmpr{} (\secref{sec:nprof}), at prompts of 4 to 279 tokens and 8 to 512 generated
+tokens, each in under 1.4\,s, and the prompt's length as a second run parameter, nothing was used beyond the
+commitment on nine of the ten unseen inputs of the 135M model (\tabref{tab:prompt}). The 136-token prompt commits
+63.9\,MB instead of 60.2 and uses nothing beyond it (6.28\,MB before), and RSS falls by 1 to 2\,MB. The exception is
+the 2048-token context, 2.0\,MB beyond: its compute buffer is laid out differently, and a range given as a fraction
+of the block does not carry over between layouts.
 
 \subsection{Built with the pass, or preloaded}
 \label{sec:passpreload}
@@ -1128,6 +1184,43 @@ is not a cheaper way to profile a program that Pin can run. What it shows is tha
 reservations, can come from the source alone, with no instrumented run, and agree with the measured ones on the
 code it can execute. Its limit is the programs it can run: GAP's and the regular C/C++ codes of our earlier study~\cite{memprintstatic}, not miniVite
 (MPI), darknet or the LLM engines, which read their sizes from model files.
+
+\subsection{Threads' stacks}
+
+\begin{table}[t]
+\centering\small
+\input{tables/stacks.tex}
+\caption{\libmpr{}'s \texttt{MAP\_NORESERVE} stacks (\secref{sec:stacks}) on the corpus's largest inputs and
+llama.cpp, with each program's own reservations: peak commit and RSS in MB, time relative to glibc, mean of 3
+runs. The programs whose commit changes by more than 0.5\,MB are listed; every output is identical.}
+\label{tab:stacks}
+\end{table}
+
+\tabref{tab:stacks} shows the stacks on every corpus program and on llama.cpp, whose engines start four threads.
+miniVite's commit falls from 45.1 to 16.5\,MB, because its four
+OpenMP threads no longer commit 8\,MB each; llama.cpp's falls from 56.1 to 22.5\,MB with the 135M model and from
+56.8 to 23.3\,MB with the 360M model, a further 60\% below the reservations alone and 94 to 96\% below glibc.
+Quicksilver and MiniFE lose 8.4\,MB each. The single-threaded programs do not change, RSS does not change, and
+every output is identical.
+
+\subsection{Profiles at native speed}
+
+\begin{table}[t]
+\centering\small
+\resizebox{\linewidth}{!}{\input{tables/nprof.tex}}
+\caption{Reservations from \libmpr{}'s own profile (\secref{sec:nprof}, one native run) against those from the Pin
+tool's \texttt{-sites} profile of the same input, on the corpus's largest inputs and the LLM engines: profiling time
+(Pin's from \tabref{tab:pincost}, upper bounds), and peak commit and RSS with each set of reservations, mean of 3 runs
+(thread stacks off, to compare the reservations alone).}
+\label{tab:nprof}
+\end{table}
+
+\tabref{tab:nprof} replaces the Pin profile by \libmpr{}'s. Over the 28 configurations the reservations commit
+2{,}391\,MB against 2{,}383\,MB from Pin's profiles and hold 3{,}578\,MB of RSS against 3{,}581, every output is
+identical, and run time is 0.92 to 1.03 of glibc's. The profiles took 95\,s in all, against 21{,}676\,s under
+Pin, from 0.07 to 15\,s each. The one program that differs is Perl (61.5 against 52.2\,MB): its large buffers grow by
+\texttt{realloc}, and \libmpr{} records each at its final size, which the program has used almost entirely, so the fit
+keeps no reservation for the site; from the Pin profile, which records every buffer of the chain, it kept one.
 
 \subsection{What a profile costs}
 \label{sec:cost}
@@ -1267,8 +1360,9 @@ blocks of the same layout and use. llama2.c's held-out reservations, from models
 \texttt{periodic} model names the layout and follows the run's length (\secref{sec:inputs}), but its number of
 periods and bytes per token are a model's, so it is fitted per model, and its parameter has to be supplied by
 whoever starts the job; without it, \libmpr{} assumes the largest value profiled. A parameter is only as good as
-its relation to the use: llama2.c's steps bound its tokens from above, so a run that ends early is over-committed,
-and llama.cpp's compute buffer follows the prompt length, which the fit was not given.
+its relation to the use: llama2.c's steps bound its tokens from above, so a run that ends early is over-committed.
+The \texttt{ranges} model's starts are fractions of the block, so they hold for one layout: llama.cpp's compute
+buffer at another context length is laid out differently (\secref{sec:inputs}).
 
 Calling contexts are taken with a backtrace for each large allocation at a site that has context lines. The
 frames are return addresses, so they are tied to a build, as image keys are, and a context deeper than two frames
@@ -1285,12 +1379,12 @@ on this kernel without page frame numbers, and its zero-page check treats a page
 conservatively by reading it; no workload we ran forks. Keeping huge pages off the skipped pages cost no time on
 llama.cpp, but a program that clears a buffer and then fills all of it densely would run on 4\,KB pages there.
 
-Profiling is expensive: the Pin tool's exact mode with \texttt{-sites} took 300 to 1{,}100\,s for llama.cpp runs of
-0.8 to 2\,s, and 617\,s for llama2.c 110M (18\,s natively), so profiles must be reused across runs, which the
-held-out and unseen-input results show is possible when the inputs exercise the same code paths: one profile per
-model served 21 new inputs (\secref{sec:inputs}). The interpreter avoids the instrumented run but was slower than
-Pin on GAP, 1.3 to 14.8 times its time and 3 to 7 times its memory (\secref{sec:staticeval}, \secref{sec:cost}). Whether a sampled or windowed
-\texttt{-sites} profile would give reservations as good is open. We ran single short completions; an LLM server that
+Profiling under Pin is expensive: the Pin tool's exact mode with \texttt{-sites} took 300 to 1{,}100\,s for llama.cpp
+runs of 0.8 to 2\,s, and 617\,s for llama2.c 110M (18\,s natively). \libmpr{}'s own profile removes that cost for
+the large blocks a reservation needs, at the price of whole pages and final sizes (\secref{sec:nprof}); the Pin tool
+is still needed for container growth chains, small blocks and byte-exact footprints. The interpreter avoids the
+instrumented run but was slower than Pin on GAP, 1.3 to 14.8 times its time and 3 to 7 times its memory
+(\secref{sec:staticeval}, \secref{sec:cost}). We ran single short completions; an LLM server that
 runs many sequences fills its KV cache over time, and its savings would shrink as it does.
 
 \section{Conclusion}
@@ -1310,6 +1404,12 @@ on unseen LLM inputs the savings held, and a reservation that takes the KV cache
 length from the run kept the commitment in step with the use. The per-site profile can also come from source:
 \memprint{}'s interpreter reproduces Pin's profiles of GAP site by site, so the static route can now feed the
 same reservations, for the programs it can run.
+
+The runtime can do more of the work itself. Taking the profile from the pages each block touched, in one native run,
+gave the same reservations as the Pin profile at a two-hundredth of its cost; mapping threads' stacks
+\texttt{MAP\_NORESERVE} removed most of the commit that remained in the multithreaded programs; and a second run
+parameter, the prompt's length, let the reservations follow llama.cpp's compute buffer as the first follows its KV
+cache.
 
 \bibliographystyle{plain}
 \bibliography{references}

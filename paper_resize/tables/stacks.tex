@@ -1,0 +1,13 @@
+\begin{tabular}{lrrrrr}
+\toprule
+Program & glibc commit & stacks off & stacks on & RSS off / on & Time on \\
+\midrule
+llamacpp-135m-n32 & 404.6 & 56.1 & 22.5 & 176.2 / 176.3 & 0.91 \\
+llamacpp-360m-n64 & 560.4 & 56.8 & 23.3 & 419.9 / 420.0 & 0.87 \\
+miniVite & 46.2 & 45.1 & 16.5 & 24.2 / 25.8 & 1.01 \\
+minife & 273.0 & 272.0 & 263.6 & 267.8 / 267.8 & 0.98 \\
+quicksilver & 52.8 & 51.8 & 43.4 & 52.9 / 53.0 & 1.00 \\
+\midrule
+20 other programs & 2{,}132 & 1{,}878 & 1{,}877 & 1{,}946 / 1{,}942 & 0.95--1.13 \\
+\bottomrule
+\end{tabular}

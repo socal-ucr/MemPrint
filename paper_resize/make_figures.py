@@ -524,6 +524,63 @@ def table_pin_cost(data, out):
     open(f"{out}/tables/pin_cost.tex", "w").write("\n".join(lines) + "\n")
 
 
+# ---------------------------------------------------------------- 2026-10-14: stacks, profiling under libmpr, prompt
+
+
+def _num(x, d=1):
+    return "--" if pd.isna(x) else f"{x:,.{d}f}".replace(",", "{,}")
+
+
+def table_stacks(data, out):
+    t = pd.read_csv(f"{data}/runs/stacks_summary.csv").set_index("name")
+    keep = t[(t.nostacks_commit - t.stacks_commit).abs() > 0.5]
+    lines = [r"\begin{tabular}{lrrrrr}", r"\toprule",
+             r"Program & glibc commit & stacks off & stacks on & RSS off / on & Time on \\", r"\midrule"]
+    for n, x in keep.iterrows():
+        lines.append(f"{n} & {_num(x.base_commit)} & {_num(x.nostacks_commit)} & {_num(x.stacks_commit)} & "
+                     f"{_num(x.nostacks_rss)} / {_num(x.stacks_rss)} & {x.stacks_time_x:.2f} \\\\")
+    rest = t.drop(keep.index)
+    lines += [r"\midrule", f"{len(rest)} other programs & {_num(rest.base_commit.sum(), 0)} & {_num(rest.nostacks_commit.sum(), 0)} & "
+              f"{_num(rest.stacks_commit.sum(), 0)} & {_num(rest.nostacks_rss.sum(), 0)} / {_num(rest.stacks_rss.sum(), 0)} & "
+              f"{rest.stacks_time_x.min():.2f}--{rest.stacks_time_x.max():.2f} \\\\", r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/stacks.tex", "w").write("\n".join(lines) + "\n")
+
+
+def table_nprof(data, out):
+    t = pd.read_csv(f"{data}/runs/nprof_summary.csv").set_index("name")
+    pin = pd.read_csv(f"{data}/results/pin_cost.csv").set_index("workload")
+    pin = pin.rename(index={"llama2c-15M": "llama2c-15M", "llamacpp-135m-n32": "llamacpp-135m-n32"})
+    t["pin_s"] = [pin.pin_s.get(n, float("nan")) for n in t.index]
+    lines = [r"\begin{tabular}{lrrrrrr}", r"\toprule",
+             r" & \multicolumn{2}{c}{Profiling time (s)} & \multicolumn{3}{c}{Peak commit (MB)} & Peak RSS (MB) \\",
+             r"\cmidrule(lr){2-3} \cmidrule(lr){4-6} \cmidrule(lr){7-7}",
+             r"Program & Pin & libmpr & glibc & Pin's profile & libmpr's & Pin's / libmpr's \\", r"\midrule"]
+    for n, x in t.iterrows():
+        lines.append(f"{n} & {_num(x.pin_s, 0)} & {_num(x.prof_s, 1)} & {_num(x.base_commit)} & {_num(x.pin_commit)} & "
+                     f"{_num(x.native_commit)} & {_num(x.pin_rss)} / {_num(x.native_rss)} \\\\")
+    lines += [r"\midrule", f"Total & {_num(t.pin_s.sum(), 0)} & {_num(t.prof_s.sum(), 0)} & {_num(t.base_commit.sum(), 0)} & "
+              f"{_num(t.pin_commit.sum(), 0)} & {_num(t.native_commit.sum(), 0)} & {_num(t.pin_rss.sum(), 0)} / "
+              f"{_num(t.native_rss.sum(), 0)} \\\\", r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/nprof.tex", "w").write("\n".join(lines) + "\n")
+
+
+def table_prompt(data, out):
+    t = pd.read_csv(f"{data}/runs/prompt_summary.csv").set_index("name")
+    order = ["lc-135m-n16", "lc-135m-p2", "lc-135m-p3", "lc-135m-sampled", "lc-135m-longprompt", "lc-135m-n256",
+             "lc-135m-n512", "lc-135m-n1024", "lc-135m-c2048", "lc-135m-c4096"]
+    lines = [r"\begin{tabular}{lrrrrr}", r"\toprule",
+             r" & \multicolumn{2}{c}{Commit (MB)} & \multicolumn{2}{c}{Beyond the commitment (MB)} & \\",
+             r"\cmidrule(lr){2-3} \cmidrule(lr){4-5}",
+             r"Input & tokens & + prompt & tokens & + prompt & RSS (MB) \\", r"\midrule"]
+    for n in order:
+        x = t.loc[n]
+        lab = INPUT_LABEL.get(n, n).replace("135M, ", "")
+        lines.append(f"{lab} & {_num(x.param_commit)} & {_num(x.param2_commit)} & {_num(x.param_beyond, 2)} & "
+                     f"{_num(x.param2_beyond, 2)} & {_num(x.param2_rss, 0)} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/prompt.tex", "w").write("\n".join(lines) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-12-resize"))
@@ -549,6 +606,9 @@ def main():
         table_inputs(a.data, a.out)
     if os.path.exists(f"{a.data}/results/pin_cost.csv"):
         table_pin_cost(a.data, a.out)
+    for f, fn in (("stacks_summary.csv", table_stacks), ("nprof_summary.csv", table_nprof), ("prompt_summary.csv", table_prompt)):
+        if os.path.exists(f"{a.data}/runs/{f}"):
+            fn(a.data, a.out)
     if os.path.exists(f"{a.data}/static/overhead.csv"):
         table_static(a.data, a.out)
     for name, b, s, h in rows:

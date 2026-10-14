@@ -192,6 +192,13 @@ Eight refinements, each tested (`tests/pintool`, `resize/tests`), and the effect
 
 Paper: `paper_resize/main.pdf` (sections "Run parameters", "Per-site profiles from source", "Unseen inputs and run parameters", "Profiles from source").
 
+### Resizing improvements of 2026-10-14 (all kept: each worked)
+
+- **Threads' stacks `MAP_NORESERVE`** (libmpr wraps `pthread_create`/`pthread_join`; `MPR_STACKS`, default on): commit miniVite 45.1 -> 16.5 MB, llama.cpp 135M 56.1 -> 22.5, 360M 56.8 -> 23.3, Quicksilver and MiniFE -8.4 MB; single-threaded programs, RSS and outputs unchanged (`runs/stacks`, `stacks_eval.sh`).
+- **Profiling under libmpr** (`MPR_PROFILE=<dir>`: every large block served, THP off, at free its touched pages/high water/page runs via mincore in the Pin tool's -sites format, plus images): over 28 configurations (corpus largest inputs + 5 LLM) reservations commit 2,391 MB vs 2,383 from Pin's profiles, RSS 3,578 vs 3,581, outputs identical, time 0.92-1.03; profiling 95 s in all vs 21,676 s under Pin (`runs/nprof`, `nprof_eval.sh`). Differs on Perl (61.5 vs 52.2 MB): realloc-grown buffers are one row at their final size. Not covered: container growth chains, small blocks.
+- **Second run parameter (prompt length) and the `ranges` model** (`sites.py --param tokens --param prompt`; libmpr `ranges K PARAM DEFAULT lo a b ...`): llama.cpp's compute buffer runs start at fixed pages and grow ~26 KB per prompt token. From 10 libmpr profiles (prompts 4-279, 8-512 generated; tokens = those actually processed, from llama.cpp's exit report, since a run stopping at end-of-text pulled the KV slope to 175 B/token): nothing beyond the commitment on 9 of 10 unseen 135M inputs (was 1.35-6.28 MB), long prompt 63.9 MB commit (60.2), RSS -1-2 MB; context 2048 still 2.0 MB beyond (other layout) (`runs/inputs-prompt`, `ml/inputs_prompt.sh`, profiles `ml/prompt-len`).
+- **Strict overcommit: not testable here** (no root, no VM; `vm.overcommit_memory` is global).
+
 ### Reproduce
 
     tests/pintool/run_tests.sh && resize/tests/run_tests.sh                    # with PIN_ROOT set
