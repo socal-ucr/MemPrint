@@ -53,3 +53,7 @@ paper_resize/*.out
 # lit output
 resize/tests/pass/Output/
 resize/tests/pass/.lit_test_times.txt
+
+# NVBit tool: the flush_channel fatbin and its bin2c array (gpu/nvbit_rw/Makefile)
+gpu/nvbit_rw/tool_func/*.fatbin
+gpu/nvbit_rw/tool_func/*.c

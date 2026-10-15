@@ -6,14 +6,14 @@ directory holds the other side: an NVBit tool, `nvbit_rw/rw_trace.so`. It traces
 operations actually reads and writes. `kdeps_score.py` then compares the two. In the footprint studies, the
 Pin tool plays this role.
 
-**Status: none of the code here has been compiled or run.** It was written on a machine with no GPU and no
-nvcc. The interpreter side and the scoring pipeline were tested on that machine without a GPU
-(`tests/static/test_cuda.py`). On a GPU machine, build the tool first; expect small fixes for your NVBit
-version (see Build).
+**Status: built and run** with NVBit 1.8, CUDA 13.4 (driver 610) and an A30 (sm_80). On the test programs of
+`tests/static/cuda` (`scripts/kdeps_truth_tests.sh`) every program aligns, and must precision and recall are 1
+with no units error. `maybe` has must recall 0.6, as intended: its kernel branches on values the interpreter
+cannot know.
 
 ## Requirements
 
-- An NVIDIA GPU supported by NVBit (sm_35 to sm_90 for NVBit 1.7), a driver, and a CUDA toolkit (nvcc) that
+- An NVIDIA GPU supported by NVBit (see the release notes of your NVBit release), a driver, and a CUDA toolkit (nvcc) that
   your NVBit release supports.
 - NVBit, the release tarball from <https://github.com/NVlabs/NVBit/releases>. `NVBIT_PATH` is its `core/`
   directory.
@@ -27,12 +27,18 @@ cd gpu/nvbit_rw
 make NVBIT_PATH=/path/to/nvbit_release/core ARCH=sm_80   # ARCH: your GPU, or all
 ```
 
-`rw_trace.cu` follows NVBit's `tools/mem_trace` example (1.7.x). If the build fails, check these calls
-against the `mem_trace.cu` shipped with your release, because they changed between versions:
+`rw_trace.cu` follows NVBit's `tools/mem_trace` example (1.8). As there, a `flush_channel` kernel is built to a
+fatbin, embedded with `bin2c` and loaded as a tool module; it pushes the records left in the channel to the
+host after each launch and at the end. If the build fails with another NVBit release, check these calls
+against the `mem_trace.cu` shipped with it, because they changed between versions:
 
-- `nvbit_tool_init`
-- `nvbit_set_at_launch` (here `(ctx, f, &value, sizeof value)`)
-- `nvbit_add_call_arg_launch_val64`
+- `nvbit_set_at_launch`: here `(ctx, f, value)`. It must come before `nvbit_enable_instrumented`, otherwise
+  the records carry a wrong event number. Pass a stream only for graph nodes.
+- `nvbit_set_tool_pthread` (renamed `nvbit_set_tool_thread` in 1.8.1, which also builds with CMake)
+- `nvbit_load_tool_module`, `nvbit_launch_kernel`
+
+`KDEPS_VERBOSE=1` names every driver call the program makes on stderr, and every record received. Use it to
+find launches, copies or memsets the tool does not handle.
 
 ## Run
 

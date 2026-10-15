@@ -68,8 +68,11 @@ struct cudaDeviceProp {
     int maxThreadsDim[3], maxGridSize[3];
 };
 
-/* Kernel launches: clang lowers k<<<g, b, s, st>>>(...) to a call configured by this function. */
+/* Kernel launches: clang lowers k<<<g, b, s, st>>>(...) to a call configured by one of these: the first
+   when it finds no CUDA installation (or one before 9.2), the second when it finds a newer one. */
 extern "C" int cudaConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem = 0, cudaStream_t stream = 0);
+extern "C" unsigned __cudaPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem = 0,
+                                                cudaStream_t stream = 0);
 
 /* Runtime API (host). */
 extern "C" {

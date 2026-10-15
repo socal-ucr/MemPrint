@@ -10,8 +10,9 @@
  * Accesses outside every allocation (shared and local memory through generic pointers, __device__
  * variables, the runtime's own memory) are counted, not listed.
  *
- * Written against NVBit 1.7 (tools/mem_trace has the same structure); not compiled on the machine it was
- * written on (no GPU there). See gpu/README.md. */
+ * KDEPS_VERBOSE=1 names every driver call on stderr (to find calls the tool does not handle).
+ *
+ * Built and run with NVBit 1.8 and CUDA 13 (tools/mem_trace has the same structure). See gpu/README.md. */
 #include <assert.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -40,7 +41,11 @@ struct CTXstate {
     ChannelDev *channel_dev;
     ChannelHost channel_host;
     volatile RecvState recv_state;
+    CUmodule tool_module;
+    CUfunction flush_channel_func;  /* pushes the device side's partial buffer to the host */
 };
+
+#include "tool_func/flush_channel.c"
 
 struct Event {
     std::string kind, name, grid, block;
@@ -59,6 +64,7 @@ static uint64_t outside = 0;           /* lane accesses outside every allocation
 static bool skip_callback_flag = false;
 static uint64_t unit = 4;
 static std::string out_dir = ".";
+static bool verbose = false;           /* KDEPS_VERBOSE: name every driver call on stderr */
 
 static Event &new_event(const std::string &kind, const std::string &name) {
     events.push_back(Event());
@@ -77,6 +83,7 @@ void nvbit_at_init() {
     setenv("CUDA_MANAGED_FORCE_DEVICE_ALLOC", "1", 1);
     if (getenv("KDEPS_OUT")) out_dir = getenv("KDEPS_OUT");
     if (getenv("KDEPS_UNIT")) unit = strtoull(getenv("KDEPS_UNIT"), 0, 10);
+    verbose = getenv("KDEPS_VERBOSE") && atoi(getenv("KDEPS_VERBOSE"));
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
@@ -132,6 +139,10 @@ static void *recv_thread_fun(void *args) {
         pthread_mutex_lock(&mutex);
         for (uint32_t off = 0; off + sizeof(mem_access_t) <= num_recv_bytes; off += sizeof(mem_access_t)) {
             mem_access_t *ma = (mem_access_t *)&recv_buffer[off];
+            if (verbose)
+                fprintf(stderr, "rw_trace: record event %llu mask %08x flags %u size %u addr0 0x%llx\n",
+                        (unsigned long long)ma->event, ma->active_mask, ma->flags, ma->size,
+                        (unsigned long long)ma->addrs[__builtin_ctz(ma->active_mask | 0x80000000u)]);
             if (ma->event >= events.size()) continue;
             Event &ev = events[ma->event];
             for (int lane = 0; lane < 32; lane++) {
@@ -153,8 +164,20 @@ static void *recv_thread_fun(void *args) {
 
 void nvbit_at_ctx_init(CUcontext ctx) {
     pthread_mutex_lock(&mutex);
-    ctx_state_map[ctx] = new CTXstate;
+    CTXstate *ctx_state = new CTXstate;
+    ctx_state_map[ctx] = ctx_state;
+    nvbit_load_tool_module(ctx, (const void *)flush_channel_bin, &ctx_state->tool_module);
+    nvbit_find_function_by_name(ctx, ctx_state->tool_module, "flush_channel", &ctx_state->flush_channel_func);
     pthread_mutex_unlock(&mutex);
+}
+
+/* Wait for the device, then push what the instrumented code left in the channel to the receiver. */
+static void flush_channel(CUcontext ctx) {
+    CTXstate *ctx_state = ctx_state_map[ctx];
+    cudaDeviceSynchronize();
+    void *args[] = {&ctx_state->channel_dev};
+    nvbit_launch_kernel(ctx, ctx_state->flush_channel_func, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr);
+    cudaDeviceSynchronize();
 }
 
 void nvbit_tool_init(CUcontext ctx) {
@@ -199,25 +222,44 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid, cons
         return;
     }
     skip_callback_flag = true;
+    if (verbose && !is_exit) fprintf(stderr, "rw_trace: %s\n", name);
     switch (cbid) {
     case API_CUDA_cuLaunchKernel:
-    case API_CUDA_cuLaunchKernel_ptsz: {
-        cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
+    case API_CUDA_cuLaunchKernel_ptsz:
+    case API_CUDA_cuLaunchCooperativeKernel:
+    case API_CUDA_cuLaunchCooperativeKernel_ptsz:
+    case API_CUDA_cuLaunchKernelEx:
+    case API_CUDA_cuLaunchKernelEx_ptsz: {
+        /* the runtime launches through cuLaunchKernelEx since CUDA 12; its grid and block are in config */
+        CUfunction f;
+        unsigned g[3], b[3];
+        if (cbid == API_CUDA_cuLaunchKernelEx || cbid == API_CUDA_cuLaunchKernelEx_ptsz) {
+            cuLaunchKernelEx_params *p = (cuLaunchKernelEx_params *)params;
+            const CUlaunchConfig *c = p->config;
+            f = p->f;
+            g[0] = c->gridDimX, g[1] = c->gridDimY, g[2] = c->gridDimZ;
+            b[0] = c->blockDimX, b[1] = c->blockDimY, b[2] = c->blockDimZ;
+        } else {  /* the cooperative launch has the same parameters */
+            cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
+            f = p->f;
+            g[0] = p->gridDimX, g[1] = p->gridDimY, g[2] = p->gridDimZ;
+            b[0] = p->blockDimX, b[1] = p->blockDimY, b[2] = p->blockDimZ;
+        }
         if (!is_exit) {
-            instrument_function_if_needed(ctx, p->f);
-            nvbit_enable_instrumented(ctx, p->f, true);
+            instrument_function_if_needed(ctx, f);
             pthread_mutex_lock(&mutex);
-            Event &ev = new_event("kernel", nvbit_get_func_name(ctx, p->f));
+            Event &ev = new_event("kernel", nvbit_get_func_name(ctx, f));
             char buf[96];
-            snprintf(buf, sizeof buf, "%ux%ux%u", p->gridDimX, p->gridDimY, p->gridDimZ);
+            snprintf(buf, sizeof buf, "%ux%ux%u", g[0], g[1], g[2]);
             ev.grid = buf;
-            snprintf(buf, sizeof buf, "%ux%ux%u", p->blockDimX, p->blockDimY, p->blockDimZ);
+            snprintf(buf, sizeof buf, "%ux%ux%u", b[0], b[1], b[2]);
             ev.block = buf;
             launch_event = events.size() - 1;
             pthread_mutex_unlock(&mutex);
-            nvbit_set_at_launch(ctx, p->f, &launch_event, sizeof(uint64_t));
+            nvbit_set_at_launch(ctx, f, launch_event);  /* a stream only for graph nodes */
+            nvbit_enable_instrumented(ctx, f, true);  /* after nvbit_set_at_launch, as in mem_trace */
         } else {
-            cudaDeviceSynchronize();  /* its records are in the channel; the receiver files them by event */
+            flush_channel(ctx);  /* its records reach the receiver, which files them by event */
         }
         break;
     }
@@ -345,7 +387,7 @@ void nvbit_at_ctx_term(CUcontext ctx) {
     skip_callback_flag = true;
     CTXstate *ctx_state = ctx_state_map[ctx];
     pthread_mutex_unlock(&mutex);
-    cudaDeviceSynchronize();
+    flush_channel(ctx);
     ctx_state->recv_state = RecvState::STOP;
     while (ctx_state->recv_state != RecvState::FINISHED) usleep(1000);
     ctx_state->channel_host.destroy(false);
