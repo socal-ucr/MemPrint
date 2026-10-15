@@ -774,7 +774,7 @@ class CppInterpreter(Containers, Interpreter):
             self.exec(init) if init.kind == K.DECL_STMT else self.eval(init)
         entry = self._lookup(var)
         start = entry[1] if entry else UNK
-        bound = self.no_charge(lambda: self.eval(bound_c))
+        bound = self._loop_bound(bound_c)
         esize = 1
         if pointer:
             if not (isinstance(start, Ptr) and isinstance(bound, Ptr)) or start.obj is not bound.obj or \
@@ -962,6 +962,11 @@ class CppInterpreter(Containers, Interpreter):
         if self.loop_flags:
             self.frames[-1].vars[self.loop_flags[-1][1]] = [None, 0]  # continue applies to one iteration
         self._fresh(lambda: Interpreter._iteration(self, body, inc))
+
+    def _loop_bound(self, bound_c):
+        """The bound of a loop run as a batch. Not charged: it is loop-invariant, and an optimised build keeps
+        it in a register (interp_cuda charges it once: a dependence needs the read, not its count)."""
+        return self.no_charge(lambda: self.eval(bound_c))
 
     def _eval_condition(self, idx, cond):
         return self.run_subset(idx, lambda: self._condition(cond), propagate=True)

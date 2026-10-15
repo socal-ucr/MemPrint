@@ -122,8 +122,10 @@ class Tracker:
                             "block": "x".join(map(str, ev.block)) if ev.block else "", "threads": ev.threads,
                             "data_control": int(ev.data_control), "note": ev.note})
         objs = list(ev.bits) + [o for o in ev.all if o not in ev.bits]
-        if ev.unknown:                                                 # an unknown object: any object so far
-            objs += [o for o in self.states if o not in objs]
+        if ev.unknown:                                                 # an unknown object: any object so far,
+            device = ev.kind == "kernel"                               # in a kernel any the device can reach
+            objs += [o for o in self.states if o not in objs and
+                     (not device or o.kind in ("device", "managed", "pinned", "device-global"))]
         for obj in objs:
             self._object(obj)
             bits = self._units(ev, obj)

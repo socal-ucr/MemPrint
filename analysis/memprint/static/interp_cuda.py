@@ -35,6 +35,7 @@ from .interp_cpp import REGISTER_BYTES, CppInterpreter, InMemory, _body, _breaks
 THREADS_PER_BATCH = 1 << 18  # threads (whole blocks) run together
 BUILTINS = ("threadIdx", "blockIdx", "blockDim", "gridDim")
 LAUNCH_CONFIG = ("cudaConfigureCall", "__cudaPushCallConfiguration")
+MAX_TARGETS = 64  # objects a pointer loaded per thread may name before the threads are no longer split by it
 ALLOCS = {"cudaMalloc": "device", "cudaMallocManaged": "managed", "cudaMallocHost": "pinned",
           "cudaHostAlloc": "pinned"}
 FREES = {"cudaFree", "cudaFreeHost"}
@@ -368,6 +369,15 @@ class DataFacts:
         return any(self.value(x) for x in kids if x.kind.is_expression())
 
 
+class _Diverge(Exception):
+    """A pointer loaded from memory names a different object for different threads: the statement being run,
+    and the rest of its block, run once per group of threads that share a target (CudaInterpreter._stmt)."""
+
+    def __init__(self, groups):
+        super().__init__()
+        self.groups = groups
+
+
 class CudaInterpreter(CppInterpreter):
     COPY_VALUES = True
 
@@ -382,6 +392,8 @@ class CudaInterpreter(CppInterpreter):
         self.tracker = None  # kdeps.Tracker: events are folded into dependences as they close
         self._gpu_work_memo = {}
         self.facts = DataFacts(self.functions)
+        self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
+        self._stmt_marks = []  # per statement being run in a kernel block: (effects, batch weights) at its start
 
     # ------------------------------------------------------------ events
 
@@ -417,9 +429,49 @@ class CudaInterpreter(CppInterpreter):
     # ------------------------------------------------------------ references
 
     def access(self, loc, write=False):
+        if write:
+            self.effects += 1
         if self.charging and not loc.array:
             self._note(loc, write)
         return super().access(loc, write)
+
+    def _mem_store(self, loc, type_, value):
+        self.effects += 1
+        return super()._mem_store(loc, type_, value)
+
+    def _loop_bound(self, bound_c):
+        return self.eval(bound_c)                                      # read once per point (CppInterpreter)
+
+    def _ptr_load(self, loc):
+        """A pointer loaded from memory. In a kernel, where the threads load pointers to different objects
+        (a table of device pointers indexed by data), the threads are split by target (_Diverge) if the
+        statement has had no effect yet; otherwise the pointer is unknown, as on the host."""
+        p = super()._ptr_load(loc)
+        if p.obj is not UNK or self.kernel is None or not self._stmt_marks:
+            return p
+        effects, w = self._stmt_marks[-1]
+        if effects != self.effects or w is not self.w:
+            return p
+        groups = self._targets(loc)
+        if groups is None:
+            return p
+        raise _Diverge(groups)
+
+    def _targets(self, loc):
+        """The batch points grouped by the object the pointer at loc names, or None."""
+        ptrs = getattr(loc.obj, "ptrs", None)
+        if ptrs is None or not isinstance(loc.off, np.ndarray) or loc.off.shape != (self.L,):
+            return None
+        units = loc.off // 4
+        if units.min() < 0 or units.max() >= len(ptrs):
+            return None
+        uids = ptrs[units]
+        if np.any(uids == -1):
+            return None
+        keys = np.unique(uids)
+        if not 1 < len(keys) <= MAX_TARGETS:
+            return None
+        return [np.flatnonzero(uids == k) for k in keys]
 
     def _note(self, loc, write):
         """Record a reference in the current event."""
@@ -479,7 +531,9 @@ class CudaInterpreter(CppInterpreter):
             self.access(loc, write=True)
             self._mem_store(loc, c.type, value)
             return loc
-        return super()._store(c, value)
+        loc = super()._store(c, value)
+        self.effects += 1                                              # after the target is evaluated (_ptr_load)
+        return loc
 
     # ------------------------------------------------------------ variables
 
@@ -579,6 +633,8 @@ class CudaInterpreter(CppInterpreter):
 
     def exec(self, c):
         kind = c.kind
+        if self.kernel is not None and kind == K.COMPOUND_STMT and not getattr(self.frames[-1], "returned", False):
+            return self._block(c)
         if self.kernel is not None and kind == K.RETURN_STMT:
             frame = self.frames[-1]
             if getattr(frame, "returned", False):
@@ -597,6 +653,48 @@ class CudaInterpreter(CppInterpreter):
                     self.exec(body)
                 return self._loop_with_break(cond, None, body)
         return super().exec(c)
+
+    def _block(self, c):
+        """A block in a kernel: as CppInterpreter.exec runs it, but a statement whose threads load pointers
+        to different objects runs, with the rest of the block, once per group of threads (_stmt)."""
+        saved_top = self.scratch_top
+        self.scopes.append([])
+        try:
+            self._stmts(list(c.get_children()))
+        finally:
+            scope = self.scopes.pop()
+            for decl, dest, t in reversed(scope):
+                if decl is not None:
+                    self._destroy(dest, t)
+            self.scratch_top = max(saved_top, 0) if not scope else self.scratch_top
+
+    def _stmts(self, kids):
+        for i in range(len(kids)):
+            if getattr(self.frames[-1], "returned", False):
+                break
+            active = self._active_points()
+            if active is None:
+                done = self._stmt(kids, i)
+            elif len(active):
+                done = self.run_subset(active, lambda i=i: self._stmt(kids, i))
+            else:
+                break
+            if done:
+                break
+
+    def _stmt(self, kids, i):
+        """Run kids[i]; True if it diverged and the rest of the block has been run per group of threads."""
+        self._stmt_marks.append((self.effects, self.w))
+        try:
+            self.exec(kids[i])
+            return False
+        except _Diverge as d:
+            groups = d.groups
+        finally:
+            self._stmt_marks.pop()
+        for g in groups:
+            self.run_subset(g, lambda: self._stmts(kids[i:]))
+        return True
 
     def _for(self, c):
         init, cond, inc, body = ca.for_parts(c)

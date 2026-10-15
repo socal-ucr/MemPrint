@@ -31,14 +31,15 @@ def run(name, argv=None):
     print(name)
     it, errors, _ = ic.analyze(HERE / name, argv=argv)
     check("parse errors", errors, [])
-    probes = [float(p.v) if isinstance(p, ic.Real) else int(p) for p in it.probes]
+    probes = [float(v) for p in it.probes if isinstance(p, ic.Real) for v in np.ravel(p.v)] + \
+        [int(v) for p in it.probes if not isinstance(p, ic.Real) for v in np.ravel(p)]   # a probe in a loop: one per pass
     return it, probes, it.tracker.edge_rows()
 
 
 def edge(rows, src, dst, kind, obj):
     """The (units must, units may, input dependent, needed) of a dependence between events src -> dst."""
     for r in rows:
-        if r["src"] == src and r["dst"] == dst and r["kind"] == kind and r["object"].split("@")[0] == obj:
+        if r["src"] == src and r["dst"] == dst and r["kind"] == kind and obj in (r["object"], r["object"].split("@")[0]):
             return r["units_must"], r["units_may"], r["input_dependent"], r["needed"]
     return None
 
@@ -137,6 +138,28 @@ it, probes, rows = run("maybe.cu")
 t, c = index(it, "threshold"), index(it, "count")
 check("threshold -> count through flag (may)", edge(rows, t, c, "RAW", "flag"), (0, 512, 1, 1))
 check("threshold -> count through seen (must)", edge(rows, t, c, "RAW", "seen"), (512, 0, 0, 1))
+
+# buffers chosen by the data: the producer writes through a device table of pointers, the bucket chosen by the
+# key; the threads are split by the bucket they load, so each consumer depends on its own bucket, for certain
+it, probes, rows = run("ptrsel.cu", ["ptrsel"])
+check("probes (sums per bucket)", probes, [166833, 166333, 0, 166334])
+dist = index(it, "distribute")
+for k, units in enumerate((334, 333, None, 333)):
+    obj = "d_bucket@30" + (f"#{k}" if k else "")
+    got = edge(rows, dist, index(it, "consume", k), "RAW", obj)
+    check(f"distribute -> consume {k}", got[:2] if got else None, (units, 0) if units else None)
+
+# a struct field pointing into one of two lists, a pointer kept in a local, a divergent load in a loop: all
+# split; a load after an atomic in the same statement is not, and its references are may, to device objects
+it, probes, rows = run("ptrsel2.cu", ["ptrsel2"])
+check("probes", probes, [17316, 5798])
+split_out, late = index(it, "split_out"), index(it, "late_load")
+check("degree_sum -> split_out", edge(rows, index(it, "degree_sum"), split_out, "RAW", "d_out")[:2], (2048, 0))
+check("split_out -> sum a", edge(rows, split_out, index(it, "sum", 0), "RAW", "d_a")[:2], (1927, 0))
+check("split_out -> sum b", edge(rows, split_out, index(it, "sum", 1), "RAW", "d_b")[:2], (121, 0))
+check("split_out -> late_load: may", edge(rows, split_out, late, "WAW", "d_a")[:2], (0, 1927))
+check("late_load reaches no host object",
+      [r["object"] for r in rows if r["dst"] == late and r["object"].startswith("malloc")], [])
 
 # the scoring pipeline (kdeps_score against gpu/nvbit_rw's truth format), on the interpreter's own access
 # sets written as a truth: every dependence must come back, with its units
