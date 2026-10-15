@@ -1,0 +1,21 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{2}{c}{Exact units} & \multicolumn{2}{c}{One interval} & \multicolumn{2}{c}{Whole allocation} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+Program & Pairs & Needed & Pairs & Needed & Pairs & Needed \\
+\midrule
+\texttt{chain} & 5 & 4 & 5 & 4 & 5 & 4 \\
+\texttt{reduce} & 4 & 4 & 4 & 4 & 4 & 4 \\
+\texttt{stencil} & 17 & 6 & 17 & 6 & 17 & 6 \\
+\texttt{scatter} & 6 & 5 & 7 & 5 & 7 & 5 \\
+\texttt{fileidx} & 5 & 4 & 5 & 4 & 5 & 4 \\
+\texttt{histogram} & 13 & 9 & 13 & 9 & 13 & 9 \\
+\texttt{maybe} & 4 & 3 & 4 & 3 & 4 & 3 \\
+\texttt{bfs} & 916 & 48 & 916 & 48 & 916 & 48 \\
+\texttt{rodinia\_bfs} & 1009 & 69 & 1009 & 69 & 1009 & 69 \\
+\texttt{wl\_bfs} & 1185 & 55 & 1190 & 55 & 1191 & 55 \\
+\texttt{ptrsel} & 17 & 13 & 18 & 13 & 21 & 9 \\
+\texttt{ptrsel2} & 26 & 18 & 26 & 18 & 27 & 15 \\
+\texttt{cc} & 2328 & 75 & 2328 & 75 & 2328 & 75 \\
+\bottomrule
+\end{tabular}

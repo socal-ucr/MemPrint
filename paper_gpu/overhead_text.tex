@@ -1,0 +1,28 @@
+The interpreter's cost is its run time on the CPU. \figref{fig:overhead} and \tabref{tab:overhead} compare it with
+the program's own run on the GPU and with the run under the NVBit tool, for six programs at three input sizes
+each. The GPU runs take \numNativeLo{} to \numNativeHi{} seconds, and almost all of that time is the start-up of
+the CUDA runtime, because at these sizes the kernels themselves take milliseconds. Against the whole GPU run, the
+interpreter in lockstep takes \numOverheadLo{} to \numOverheadHi{} times as long, and the NVBit tool \numNvbitLo{}
+to \numNvbitHi{} times. Against the kernels alone, the interpreter is several orders of magnitude slower, as
+expected from simulating every thread in Python on one CPU core.
+
+\textit{Most of the interpreter's time is spent in host code, not in kernels.} The ``In kernels'' column of
+\tabref{tab:overhead} gives the share of the time spent running kernels. The kernels of \code{chain}, with
+\numChainThreads{} GPU threads, take \numChainKernelS{} seconds, and those of \code{rodinia\_bfs}, with
+\numRbfsThreads{} threads, take less than one second, so \code{rodinia\_bfs} as a whole takes \numRbfsLockS{}
+seconds, against \numRbfsNvbitS{} seconds under NVBit. The time spent in kernels alone is \numKernelRatioLo{} to
+\numKernelRatioHi{} times the whole GPU run, with a median of \numKernelRatioMedian{}. The programs that take
+longest, \code{wl\_bfs} (\numWlbfsLockS{} seconds, of which \numWlbfsKernelS{} in kernels) and \code{bfs}
+(\numBfsLockS{} seconds, of which \numBfsKernelS{} in kernels), spend up to \numHostShareMax{} of their time in host
+loops that carry a value from one iteration to the next. These loops are the random-number generator that builds
+the graph in \code{wl\_bfs} and \code{cc}, and a running maximum over the result in \code{bfs}. The interpreter runs
+all iterations of a loop at once only when the iterations do not depend on each other, so it runs these loops one
+iteration at a time, at about a millisecond per iteration. Such loops belong to the test harness here, not to the
+computation on the GPU, but real programs contain them as well, for example when they read or generate their input.
+
+Running all four thread orders costs \numScheduleLo{} to \numScheduleHi{} times as much as lockstep alone
+(\numScheduleCost{} on average). Where host code dominates, the cost is close to four times, because each order runs
+the host code once more. Where kernels dominate, the orders that run one block at a time cost much more than
+lockstep, because they carry out every statement once per block instead of once per group of up to $2^{18}$ threads.
+A tool could run the extra orders only for kernels that read memory that other threads of the same launch write,
+which is where the order can change the result. We have not done so.

@@ -1,0 +1,19 @@
+\begin{tabular}{llrrrr}
+\toprule
+Program & What it exercises & Lines & Kernels & Operations & Dependences \\
+\midrule
+\texttt{chain} & elementwise kernels in a chain & 32 & 3 & 5 & 5 \\
+\texttt{reduce} & a reduction through shared memory & 39 & 2 & 5 & 4 \\
+\texttt{stencil} & a stencil repeated over two buffers & 22 & 1 & 7 & 16 \\
+\texttt{scatter} & writes at indices built on the host & 35 & 3 & 6 & 5 \\
+\texttt{fileidx} & indices and weights read from files & 41 & 2 & 5 & 6 \\
+\texttt{histogram} & atomic updates of bins chosen by the data & 45 & 2 & 10 & 14 \\
+\texttt{maybe} & a branch on values the interpreter does not model & 30 & 2 & 4 & 5 \\
+\texttt{bfs} & breadth-first search, one kernel per level & 50 & 1 & 49 & 359 \\
+\texttt{rodinia\_bfs} & breadth-first search in the style of Rodinia & 103 & 2 & 59 & 609 \\
+\texttt{wl\_bfs} & breadth-first search with a frontier queue & 60 & 1 & 56 & 345 \\
+\texttt{ptrsel} & a buffer chosen by the data through a pointer table & 35 & 2 & 10 & 21 \\
+\texttt{ptrsel2} & pointer fields in structs, pointers in variables & 88 & 4 & 16 & 29 \\
+\texttt{cc} & connected components, labels lowered in place & 49 & 2 & 76 & 685 \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,14 @@
+\begin{tabular}{llrrrrrrr}
+\toprule
+Program & Interpreter & Certain & Possible & \shortstack{Certain\\precision} & Recall & \shortstack{Certain\\recall} & \shortstack{Needed cert.\\recall} & \shortstack{Units\\error} \\
+\midrule
+\texttt{ptrsel} & Full interpreter & 21 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 0.00 \\
+\texttt{ptrsel} & Without thread splitting & 18 & 14 & 1.00 & 1.00 & 0.86 & 0.50 & 0.00 \\
+\addlinespace
+\texttt{ptrsel2} & Full interpreter & 23 & 34 & 1.00 & 1.00 & 0.79 & 0.81 & 0.07 \\
+\texttt{ptrsel2} & Without thread splitting & 16 & 93 & 1.00 & 1.00 & 0.55 & 0.10 & 0.47 \\
+\addlinespace
+\texttt{cc} & Full interpreter & 240 & 466 & 1.00 & 0.98 & 0.35 & 0.53 & 0.12 \\
+\texttt{cc} & Lockstep schedule only & 703 & 0 & 0.96 & 0.98 & 0.98 & 1.00 & 0.03 \\
+\bottomrule
+\end{tabular}

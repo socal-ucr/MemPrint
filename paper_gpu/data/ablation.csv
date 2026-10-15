@@ -1,0 +1,7 @@
+ablation,program,variant,aligned,truth,must,may,must_precision,recall,must_recall,units_error,needed_truth,needed_must,needed_may,needed_must_precision,needed_recall,needed_must_recall,needed_units_error
+no thread splitting,ptrsel,full,1,21,21,0,1.0,1.0,1.0,0.0,20,20,0,1.0,1.0,1.0,0.0
+no thread splitting,ptrsel,no thread splitting,1,21,18,14,1.0,1.0,0.8571,0.0005,20,10,13,1.0,0.65,0.5,0.0005
+no thread splitting,ptrsel2,full,1,29,23,34,1.0,1.0,0.7931,0.0671,21,17,7,1.0,0.9048,0.8095,0.0918
+no thread splitting,ptrsel2,no thread splitting,1,29,16,93,1.0,1.0,0.5517,0.47,21,2,33,1.0,0.4286,0.0952,0.3377
+lockstep only,cc,full,1,685,240,466,1.0,0.9839,0.3504,0.1231,76,40,36,1.0,1.0,0.5263,0.0311
+lockstep only,cc,lockstep only,1,685,703,0,0.9587,0.9839,0.9839,0.0319,76,76,0,1.0,1.0,1.0,0.0028

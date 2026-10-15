@@ -1,0 +1,18 @@
+\begin{tabular}{lrrrrr}
+\toprule
+Program & \shortstack{Between\\kernels} & \shortstack{Through data-\\dependent bytes} & \shortstack{Reported\\certain} & \shortstack{Certain and\\in the trace} & \shortstack{In the trace\\(any)} \\
+\midrule
+\texttt{scatter} & 1 & 1 & 1 & 1 & 1 \\
+\texttt{fileidx} & 1 & 1 & 1 & 1 & 1 \\
+\texttt{histogram} & 1 & 1 & 1 & 1 & 1 \\
+\texttt{maybe} & 2 & 1 & 0 & 0 & 1 \\
+\texttt{bfs} & 233 & 233 & 233 & 233 & 233 \\
+\texttt{rodinia\_bfs} & 454 & 454 & 454 & 454 & 454 \\
+\texttt{wl\_bfs} & 181 & 181 & 181 & 181 & 181 \\
+\texttt{ptrsel} & 6 & 6 & 6 & 6 & 6 \\
+\texttt{ptrsel2} & 22 & 11 & 2 & 2 & 6 \\
+\texttt{cc} & 538 & 538 & 153 & 153 & 509 \\
+\midrule
+Total & 1452 & 1427 & 1032 & 1032 & 1393 \\
+\bottomrule
+\end{tabular}
