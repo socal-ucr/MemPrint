@@ -72,6 +72,25 @@ class Tracker:
         gpu/nvbit_rw's truth_access.csv format."""
         self.access = []
 
+    def _object(self, obj):
+        if obj not in self.objects:
+            site = getattr(obj, "site", None) or {}
+            loc = site.get("loc")
+            name = obj.name                                            # one site run several times (a loop of
+            seen = sum(1 for o in self.objects if o.name == obj.name)  # cudaMalloc): d_bucket@30, d_bucket@30#1
+            if seen:
+                name = f"{name}#{seen}"
+            self.objects[obj] = {"name": name, "kind": obj.kind, "bytes": obj.nbytes,
+                                 "site": f"{loc[0]}:{loc[1]}" if loc else "",
+                                 "alloc": getattr(obj, "alloc_index", "")}
+
+    def register(self, obj):
+        """A new device allocation. A reference through a pointer the interpreter could not place may reach
+        any of them (Event.unknown), also one no event has named yet."""
+        self._object(obj)
+        if obj not in self.states:
+            self.states[obj] = _State(max(obj.nbytes + self.unit - 1, self.unit) // self.unit)
+
     def _units(self, ev, obj):
         """uint8 bits per unit of an event's references to obj."""
         u = self.unit
@@ -106,12 +125,7 @@ class Tracker:
         if ev.unknown:                                                 # an unknown object: any object so far
             objs += [o for o in self.states if o not in objs]
         for obj in objs:
-            if obj not in self.objects:
-                site = getattr(obj, "site", None) or {}
-                loc = site.get("loc")
-                self.objects[obj] = {"name": obj.name, "kind": obj.kind, "bytes": obj.nbytes,
-                                     "site": f"{loc[0]}:{loc[1]}" if loc else "",
-                                     "alloc": getattr(obj, "alloc_index", "")}
+            self._object(obj)
             bits = self._units(ev, obj)
             st = self.states.get(obj)
             if st is None:

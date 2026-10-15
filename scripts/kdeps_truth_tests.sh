@@ -22,6 +22,9 @@ run reduce "$t/reduce.cu"
 run stencil "$t/stencil.cu"
 run fileidx "$t/fileidx.cu" "$out/idx.txt" "$out/w.bin"
 run maybe "$t/maybe.cu"
+run wl_bfs "$t/wl_bfs.cu"
+run ptrsel "$t/ptrsel.cu"
+run cc "$t/cc.cu"            # rounds depend on thread interleaving: traced runs differ from each other
 ${PYTHON:-python3} - "$out" <<'PY'
 import sys, random
 random.seed(7); n = 4096

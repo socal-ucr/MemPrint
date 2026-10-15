@@ -670,6 +670,10 @@ class CudaInterpreter(CppInterpreter):
         return super()._call(c, sret)
 
     def _runtime(self, name, c):
+        if self.L > 1 and (name in ALLOCS or name in COPIES or name in SETS or name in SYMBOL_COPIES):
+            for p in range(self.L):                                    # in a batched host region, one point at
+                self.run_subset(np.array([p]), lambda: self._runtime(name, c))  # a time: an object or event each
+            return 0
         args_c = list(c.get_arguments())
         if name in ALLOCS:
             p = self.eval(args_c[0])
@@ -683,6 +687,8 @@ class CudaInterpreter(CppInterpreter):
             if ALLOCS[name] in ("device", "managed"):                  # the n-th device allocation (kdeps_score)
                 obj.alloc_index = self.__dict__.setdefault("device_allocs", 0)
                 self.device_allocs += 1
+                if self.tracker is not None:
+                    self.tracker.register(obj)
             self.objects.append(obj)
             if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK:
                 self._ptr_store(Loc(p.obj, p.off, 8), Ptr(obj, 0))
