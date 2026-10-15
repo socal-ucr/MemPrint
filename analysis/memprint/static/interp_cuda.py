@@ -35,6 +35,7 @@ from .interp_cpp import REGISTER_BYTES, CppInterpreter, InMemory, _body, _breaks
 THREADS_PER_BATCH = 1 << 18  # threads (whole blocks) run together
 BUILTINS = ("threadIdx", "blockIdx", "blockDim", "gridDim")
 LAUNCH_CONFIG = ("cudaConfigureCall", "__cudaPushCallConfiguration")
+SCHEDULES = ("lockstep", "blocks", "reverse", "random")  # how a launch's threads are run (CudaInterpreter.schedule)
 MAX_TARGETS = 64  # objects a pointer loaded per thread may name before the threads are no longer split by it
 ALLOCS = {"cudaMalloc": "device", "cudaMallocManaged": "managed", "cudaMallocHost": "pinned",
           "cudaHostAlloc": "pinned"}
@@ -392,6 +393,8 @@ class CudaInterpreter(CppInterpreter):
         self.tracker = None  # kdeps.Tracker: events are folded into dependences as they close
         self._gpu_work_memo = {}
         self.facts = DataFacts(self.functions)
+        self.schedule = "lockstep"  # all threads statement by statement; or one block after another, in order,
+                                    # in reverse, or in a random order (rng): other legal schedules
         self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
         self._stmt_marks = []  # per statement being run in a kernel block: (effects, batch weights) at its start
 
@@ -1132,7 +1135,7 @@ class CudaInterpreter(CppInterpreter):
         ev.threads = bsz * nblocks
         if bsz <= 0 or nblocks <= 0:
             return
-        per = max(1, THREADS_PER_BATCH // bsz)
+        per = max(1, THREADS_PER_BATCH // bsz) if self.schedule == "lockstep" else 1
         saved = (self.frames, self.w, self.loop_flags, self.kernel, self.shared, self.dyn_shared)
         w0 = float(np.ravel(self.w)[0])
         globals_frame = self.frames[0]
@@ -1144,7 +1147,12 @@ class CudaInterpreter(CppInterpreter):
             return tuple(_SCALAR(a) if np.ndim(a) else int(a) for a in (x, y, z))
 
         try:
-            for b0 in range(0, nblocks, per):
+            starts = list(range(0, nblocks, per))
+            if self.schedule == "reverse":
+                starts.reverse()
+            elif self.schedule == "random":
+                starts = [starts[i] for i in self.rng.permutation(len(starts))]
+            for b0 in starts:
                 nb = min(per, nblocks - b0)
                 L = nb * bsz
                 tid = np.arange(L, dtype=np.int64)
@@ -1333,7 +1341,7 @@ def _walk_nodes(node):
         stack.extend(n.get_children())
 
 
-def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep_access=False):
+def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep_access=False, schedule="lockstep"):
     """Run a CUDA program from main; returns the interpreter, with its events (Event) and their dependences
     (interp.tracker, a kdeps.Tracker at `unit` bytes)."""
     from . import interp
@@ -1343,6 +1351,7 @@ def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep
 
     def make(tu_, seed_):
         it = CudaInterpreter(tu_, seed_, stubs, opt, host_events)
+        it.schedule = schedule
         it.tracker = Tracker(unit)
         if keep_access:
             it.tracker.keep_access()
@@ -1356,12 +1365,14 @@ def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep
     return it
 
 
-def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_events=True, keep_access=False):
+def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_events=True, keep_access=False,
+            schedule="lockstep"):
     """Parse a CUDA source and run it: (interpreter, parse errors, seconds)."""
     import time
 
     start = time.time()
     tu = ca.parse(source, defines, includes, cuda=True)
     errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
-    it = run(tu, argv=argv, seed=seed, unit=unit, host_events=host_events, keep_access=keep_access)
+    it = run(tu, argv=argv, seed=seed, unit=unit, host_events=host_events, keep_access=keep_access,
+             schedule=schedule)
     return it, errors, time.time() - start

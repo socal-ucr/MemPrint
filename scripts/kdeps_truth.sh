@@ -7,7 +7,8 @@
 # Builds SOURCE with nvcc, runs it under rw_trace.so (OUT_DIR/NAME/truth), runs the static interpreter on the
 # same source and command line (OUT_DIR/NAME/static), and appends the scores to OUT_DIR/scores.csv.
 # Environment: PYTHON (python3), RW_TRACE (the tool), ARCH (nvcc -arch, native), UNIT (bytes, 4),
-# NVCC_FLAGS (extra flags, e.g. -I for the program's headers).
+# NVCC_FLAGS (extra flags, e.g. -I for the program's headers), SCHEDULES (the interpreter's thread schedules,
+# lockstep,blocks,reverse,random: dependences not in all of them are may).
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 out=$(mkdir -p "$1" && cd "$1" && pwd)
@@ -25,6 +26,6 @@ nvcc -O2 -arch="$ARCH" ${NVCC_FLAGS:-} -o "$dir/$name" "$src" "$here/gpu/probe.c
 LD_PRELOAD=$TOOL KDEPS_OUT="$dir/truth" KDEPS_UNIT=$UNIT "$dir/$name" "$@" > "$dir/traced.log" 2>&1
 cd "$here/analysis"
 $PYTHON -m memprint.static.kdeps "$src" "$dir/static" --name "$name" --argv "$name" "$@" --no-host \
-    --unit "$UNIT" --access > "$dir/static.log" 2>&1
+    --unit "$UNIT" --access --schedules "${SCHEDULES:-lockstep,blocks,reverse,random}" > "$dir/static.log" 2>&1
 $PYTHON -m memprint.static.kdeps_score "$dir/static" "$name" "$dir/truth" --unit "$UNIT" --out "$out/scores.csv" |
     tee "$dir/score.txt"

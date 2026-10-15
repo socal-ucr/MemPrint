@@ -5,8 +5,11 @@
 INTERP_DIR/NAME_*.csv come from `python -m memprint.static.kdeps SOURCE INTERP_DIR --no-host` (device
 operations only); TRUTH_DIR/truth_*.csv from running the program under rw_trace.so (gpu/README.md). The
 truth's per-event bytes are folded into dependences by the same Tracker, so the two sides differ only in
-which bytes each event touched. Events are matched by their order among device operations (the run must
-issue the same launches, copies and memsets in the same order: the check is reported), objects by the
+which bytes each event touched. Events are matched by their order among device operations (the run should
+issue the same launches, copies and memsets in the same order: the check is reported; if it does not, as
+when a loop the host repeats until the device says so runs a different number of rounds, the common start
+and the common end are matched, kdeps.align_ends, and the run's dependences through events between count
+as missed), objects by the
 order of their device allocations (cudaMalloc / cudaMallocManaged); dependences through other objects
 (__device__ variables, pinned host memory) are left out.
 
@@ -26,7 +29,7 @@ import sys
 import numpy as np
 
 from .interp_cuda import Event
-from .kdeps import Tracker, reduce_edges
+from .kdeps import Tracker, align_ends, reduce_edges
 
 
 class _Alloc:
@@ -77,15 +80,28 @@ def interp_edges(interp_dir, name):
     return events, edges
 
 
+def _same(x, y):
+    return x["kind"] == y["kind"] and (x["kind"] != "kernel" or x["name"] in y["name"])
+
+
 def aligned(interp_events, truth_events):
     """Do the two runs issue the same device operations in the same order (kinds, and kernel names)?"""
     a = [e for e in interp_events if e["kind"] != "host"]
     if len(a) != len(truth_events):
         return False, f"{len(a)} device events statically, {len(truth_events)} traced"
     for x, y in zip(a, truth_events):
-        if x["kind"] != y["kind"] or (x["kind"] == "kernel" and x["name"] not in y["name"]):
+        if not _same(x, y):
             return False, f"event {x['index']}: {x['kind']} {x['name']} statically, {y['kind']} {y['name']} traced"
     return True, ""
+
+
+def match_truth(interp_events, truth_events, truth):
+    """The run's dependences with its events renumbered as the interpreter's (align_ends over device
+    events); a dependence through an event without a match keeps a key no interpreter dependence has."""
+    a = [e for e in interp_events if e["kind"] != "host"]
+    m = {t: int(a[i]["index"]) for t, i in align_ends(truth_events, a, lambda y, x: _same(x, y)).items()}
+    return {(m.get(s, ("traced", s)), m.get(d, ("traced", d)), kind, obj): v
+            for (s, d, kind, obj), v in truth.items()}
 
 
 def score(interp, truth):
@@ -117,14 +133,16 @@ def main(argv=None):
     te, tedges = truth_edges(args.truth_dir, args.unit)
     ok, why = aligned(ie, te)
     if not ok:
-        print(f"{args.name}: the device operations differ ({why}); scores compare events by position",
+        print(f"{args.name}: the device operations differ ({why}); the common start and end are matched",
               file=sys.stderr)
+    tneeded = match_truth(ie, te, needed(tedges))                     # reduced in the run's own numbering
+    tedges = match_truth(ie, te, tedges)
     row = {"name": args.name, "aligned": int(ok)}
-    for prefix, a, b in (("", iedges, tedges), ("needed_", needed(iedges), needed(tedges))):
+    for prefix, a, b in (("", iedges, tedges), ("needed_", needed(iedges), tneeded)):
         for k, v in score(a, b).items():
             row[prefix + k] = round(v, 4) if isinstance(v, float) else v
     print(" ".join(f"{k}={v}" for k, v in row.items()))
-    missed = sorted(set(tedges) - set(iedges))
+    missed = sorted(set(tedges) - set(iedges), key=str)
     wrong = sorted(k for k, v in iedges.items() if v[0] and k not in tedges)
     for label, keys in (("missed", missed), ("must but not traced", wrong)):
         for k in keys[:20]:

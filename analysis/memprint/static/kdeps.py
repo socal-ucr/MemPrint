@@ -66,6 +66,7 @@ class Tracker:
         self.events = []
         self.edges = {}  # (src, dst, kind, object name) -> [must units, may units, dd units]
         self.access = None  # a list to keep each event's units of device allocations in (keep_access)
+        self.schedule_edges = set()  # edges keys whose presence or certainty depends on the schedule (merge)
 
     def keep_access(self):
         """Also keep, per event and device allocation, the runs of units it read (1) and wrote (2), in
@@ -120,7 +121,8 @@ class Tracker:
         self.events.append({"index": ev.index, "kind": ev.kind, "name": ev.name, "site": ev.site,
                             "grid": "x".join(map(str, ev.grid)) if ev.grid else "",
                             "block": "x".join(map(str, ev.block)) if ev.block else "", "threads": ev.threads,
-                            "data_control": int(ev.data_control), "note": ev.note})
+                            "data_control": int(ev.data_control), "note": ev.note,
+                            "schedule_dependent": 0})
         objs = list(ev.bits) + [o for o in ev.all if o not in ev.bits]
         if ev.unknown:                                                 # an unknown object: any object so far,
             device = ev.kind == "kernel"                               # in a kernel any the device can reach
@@ -195,11 +197,69 @@ class Tracker:
             rows.append({"src": s, "dst": d, "src_name": names.get(s, ""), "dst_name": names.get(d, ""),
                          "kind": kind, "object": obj, "units_must": must, "units_may": may, "units_dd": dd,
                          "bytes": (must + may) * self.unit, "certainty": "must" if must else "may",
-                         "input_dependent": int(bool(dd) or bool(control.get(s)) or bool(control.get(d)))})
+                         "input_dependent": int(bool(dd) or bool(control.get(s)) or bool(control.get(d))),
+                         "schedule_dependent": int((s, d, kind, obj) in self.schedule_edges)})
         needed = reduce_edges({(r["src"], r["dst"]) for r in rows})
         for r in rows:
             r["needed"] = int((r["src"], r["dst"]) in needed)
         return rows
+
+
+def _signature(e):
+    return (e["kind"], e["name"], e["site"])
+
+
+def align_ends(a, b, same=lambda x, y: x == y):
+    """Match two event sequences of one program as a loop with a different trip count leaves them: the common
+    start forward, then the common end backward. Returns {index in a: index in b}; the events between (the
+    rounds one run has and the other has not) stay unmatched."""
+    n = min(len(a), len(b))
+    head = next((i for i in range(n) if not same(a[i], b[i])), n)
+    out = {i: i for i in range(head)}
+    k = 1
+    while k <= n - head and same(a[-k], b[-k]):
+        out[len(a) - k] = len(b) - k
+        k += 1
+    return out
+
+
+def merge_schedules(trackers):
+    """Fold the runs of one program under several thread schedules (interp_cuda.SCHEDULES) into the first.
+    Events are matched by align_ends (a loop the host repeats until the device says so can run a different
+    number of rounds). Events of the first run some other run has no match for, and dependences that are not
+    in every run, or not must in every run, become may and schedule-dependent; dependences another run has
+    between matched events and the first has not are added as may. Returns the number of events matched in
+    every run."""
+    base = trackers[0]
+    sig0 = [_signature(e) for e in base.events]
+    maps = [align_ends([_signature(e) for e in t.events], sig0) for t in trackers[1:]]
+    everywhere = set(range(len(base.events)))
+    for m in maps:
+        everywhere &= set(m.values())
+    for e in base.events:
+        if e["index"] not in everywhere:
+            e["schedule_dependent"] = 1
+    others = []
+    for t, m in zip(trackers[1:], maps):
+        others.append({(m[k[0]], m[k[1]], k[2], k[3]): v for k, v in t.edges.items() if k[0] in m and k[1] in m})
+    for key, val in base.edges.items():
+        runs = [o.get(key) for o in others]
+        if key[0] in everywhere and key[1] in everywhere and all(r is not None for r in runs):
+            must = min([val[0]] + [r[0] for r in runs])
+            total = max([val[0] + val[1]] + [r[0] + r[1] for r in runs])
+            if must != val[0] or total != val[0] + val[1]:
+                base.schedule_edges.add(key)
+            val[0], val[1] = must, total - must
+        else:
+            val[1] += val[0]
+            val[0] = 0
+            base.schedule_edges.add(key)
+    for o in others:
+        for key, val in o.items():
+            if key not in base.edges:
+                base.edges[key] = [0, val[0] + val[1], val[2]]
+                base.schedule_edges.add(key)
+    return len(everywhere)
 
 
 def reduce_edges(pairs):
@@ -224,7 +284,8 @@ def write(out_dir, name, tracker):
     os.makedirs(out_dir, exist_ok=True)
     ev_path = os.path.join(out_dir, f"{name}_events.csv")
     with open(ev_path, "w", newline="") as f:
-        cols = ["index", "kind", "name", "site", "grid", "block", "threads", "data_control", "note"]
+        cols = ["index", "kind", "name", "site", "grid", "block", "threads", "data_control", "note",
+                "schedule_dependent"]
         wr = csv.DictWriter(f, cols)
         wr.writeheader()
         wr.writerows(tracker.events)
@@ -232,7 +293,7 @@ def write(out_dir, name, tracker):
     edge_path = os.path.join(out_dir, f"{name}_edges.csv")
     with open(edge_path, "w", newline="") as f:
         cols = ["src", "dst", "src_name", "dst_name", "kind", "object", "units_must", "units_may", "units_dd",
-                "bytes", "certainty", "input_dependent", "needed"]
+                "bytes", "certainty", "input_dependent", "needed", "schedule_dependent"]
         wr = csv.DictWriter(f, cols)
         wr.writeheader()
         wr.writerows(rows)
@@ -268,6 +329,9 @@ def main(argv=None):
     ap.add_argument("--unit", type=int, default=4, help="bytes per dependence unit")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-host", action="store_true", help="no host segments: only device operations")
+    ap.add_argument("--schedules", default="lockstep",
+                    help="thread schedules to run each launch under, comma-separated (lockstep, blocks, reverse, "
+                         "random): dependences not in every one become may (schedule_dependent)")
     ap.add_argument("--access", action="store_true",
                     help="also write NAME_access.csv: each event's units of device allocations (truth format)")
     args = ap.parse_args(argv)
@@ -279,10 +343,19 @@ def main(argv=None):
     name = args.name or os.path.splitext(os.path.basename(sources[0]))[0]
     os.makedirs(args.out_dir, exist_ok=True)
     start = time.time()
-    it, errors, _ = analyze(source, args.defines, args.includes, argv=args.argv, seed=args.seed, unit=args.unit,
-                            host_events=not args.no_host, keep_access=args.access)
+    runs = []
+    for schedule in args.schedules.split(","):
+        it, errors, _ = analyze(source, args.defines, args.includes, argv=args.argv, seed=args.seed,
+                                unit=args.unit, host_events=not args.no_host, keep_access=args.access,
+                                schedule=schedule)
+        runs.append(it)
+    it = runs[0]
     for e in errors[:20]:
         print("parse error:", e, file=sys.stderr)
+    if len(runs) > 1:
+        matched = merge_schedules([r.tracker for r in runs])
+        counts = ", ".join(f"{s} {len(r.tracker.events)}" for s, r in zip(args.schedules.split(","), runs))
+        print(f"{name}: events per schedule: {counts}; {matched} of the first run's matched in all")
     ev_path, edge_path, rows = write(args.out_dir, name, it.tracker)
     kernels = [e for e in it.tracker.events if e["kind"] != "host"]
     print(f"{name}: {len(it.tracker.events)} events ({len(kernels)} device), {len(rows)} dependences "

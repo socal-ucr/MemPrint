@@ -95,8 +95,16 @@ The same four scores are also computed over the transitive reductions (`needed_*
 - **Compiler optimisation.** The traced binary is optimised (`-O2`), so it may skip loads the source makes
   (a value kept in a register), or make extra ones. Dependences are about bytes, so this rarely changes an
   edge, but it can change `units_error`.
-- **Thread interleaving.** The interpreter runs threads in lockstep and atomics in thread order. A kernel
-  whose touched addresses depend on the interleaving can differ from any one traced run. An example is a
-  worklist filled through `atomicAdd` positions: the set of positions is the same, the contents are not.
+- **Thread interleaving.** A kernel that reads what other threads of the same launch write (label
+  propagation with `atomicMin` in place, `cc.cu`) can touch different bytes, and the host loop around it can
+  run a different number of rounds, from one run to the next: five traced runs of `cc` took 22 to 24 rounds.
+  The scripts run the interpreter under four legal schedules (`--schedules`: all threads in lockstep, and
+  one block after another in order, in reverse and at random). Events after the start and end shared by
+  every schedule, and dependences not must in every schedule, are may and marked `schedule_dependent`.
+  The scorer then matches the trace's events to the interpreter's the same way (common start, common end).
+  Four schedules are a sample, not every interleaving: a traced run can have a dependence none of them has
+  (`cc`: recall 0.98 to 0.995 over five runs, must precision 1). A worklist filled through `atomicAdd`
+  positions (`wl_bfs.cu`) does not depend on the schedule at this level: the set of positions and the set
+  of vertices are the same in every run, only which vertex goes where is not.
 - **Copy direction.** Copies through `cuMemcpy` / `cuMemcpyAsync` (unified addressing) are classified by
   whether each pointer falls in a known allocation.

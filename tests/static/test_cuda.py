@@ -161,6 +161,22 @@ check("split_out -> late_load: may", edge(rows, split_out, late, "WAW", "d_a")[:
 check("late_load reaches no host object",
       [r["object"] for r in rows if r["dst"] == late and r["object"].startswith("malloc")], [])
 
+# thread schedules: label propagation with atomicMin in place takes a different number of rounds under each,
+# so the rounds past the common ones, and the dependences not in every schedule, are may; a BFS is the same
+# under all of them and keeps every dependence must
+check("align_ends", kdeps.align_ends(list("abxxyz"), list("abxyz")), {0: 0, 1: 1, 2: 2, 4: 3, 5: 4})
+for name, argv, varies in (("cc.cu", ["cc", "1024"], True), ("bfs.cu", ["bfs", "500"], False)):
+    runs = [ic.analyze(HERE / name, argv=argv, host_events=False, schedule=s)[0].tracker for s in ic.SCHEDULES]
+    counts = [len(t.events) for t in runs]
+    matched = kdeps.merge_schedules(runs)
+    rows = runs[0].edge_rows()
+    print(name, "under", ic.SCHEDULES)
+    check("event counts differ", len(set(counts)) > 1, varies)
+    check("some dependences schedule-dependent", any(r["schedule_dependent"] for r in rows), varies)
+    late = {e["index"] for e in runs[0].events if e["schedule_dependent"]}
+    check("no must dependence into an event not in every schedule",
+          [r for r in rows if r["certainty"] == "must" and (r["src"] in late or r["dst"] in late)], [])
+
 # the scoring pipeline (kdeps_score against gpu/nvbit_rw's truth format), on the interpreter's own access
 # sets written as a truth: every dependence must come back, with its units
 with tempfile.TemporaryDirectory() as tmp:
