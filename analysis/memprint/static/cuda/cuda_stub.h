@@ -10,6 +10,10 @@
 #define MEMPRINT_CUDA_STUB_H
 
 #include <stddef.h>
+/* nvcc includes CUDA's runtime header in every .cu file, and it includes the C math and stdlib headers, so
+   programs call ceil or malloc without including them. */
+#include <math.h>
+#include <stdlib.h>
 
 #define __global__ __attribute__((global))
 #define __device__ __attribute__((device))
@@ -113,8 +117,27 @@ template <class T> cudaError_t cudaMemcpyToSymbol(const T &symbol, const void *s
                                                   cudaMemcpyKind kind = cudaMemcpyHostToDevice);
 template <class T> cudaError_t cudaMemcpyFromSymbol(void *dst, const T &symbol, size_t count, size_t offset = 0,
                                                     cudaMemcpyKind kind = cudaMemcpyDeviceToHost);
+template <class T> cudaError_t cudaGetSymbolAddress(void **devPtr, const T &symbol);
+template <class T> cudaError_t cudaGetSymbolSize(size_t *size, const T &symbol);
 
 /* Device functions. */
+/* Fast single-precision intrinsics (evaluated as their exact counterparts, interp_cuda.CUDA_MATH). */
+__device__ float __powf(float, float);
+__device__ float __expf(float);
+__device__ float __exp10f(float);
+__device__ float __logf(float);
+__device__ float __log2f(float);
+__device__ float __log10f(float);
+__device__ float __sinf(float);
+__device__ float __cosf(float);
+__device__ float __tanf(float);
+__device__ float __fdividef(float, float);
+__device__ float __fsqrt_rn(float);
+__device__ float __saturatef(float);
+__device__ float rsqrtf(float);
+__device__ double rsqrt(double);
+__device__ float exp10f(float);
+__device__ double exp10(double);
 extern "C" __device__ void __syncthreads(void);
 extern "C" __device__ int __syncthreads_or(int);
 extern "C" __device__ int __syncthreads_and(int);

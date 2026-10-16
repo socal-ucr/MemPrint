@@ -57,3 +57,9 @@ resize/tests/pass/.lit_test_times.txt
 # NVBit tool: the flush_channel fatbin and its bin2c array (gpu/nvbit_rw/Makefile)
 gpu/nvbit_rw/tool_func/*.fatbin
 gpu/nvbit_rw/tool_func/*.c
+
+# paper_gpu: raw traces, binaries and logs of accuracy.py / overhead.py (only the summary CSVs are kept)
+paper_gpu/data/runs/
+paper_gpu/data/overhead_runs/
+paper_gpu/data/*.log
+gpu/hybrid/libkdeps_cudart.so

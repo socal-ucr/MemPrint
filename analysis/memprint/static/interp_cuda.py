@@ -30,12 +30,22 @@ import numpy as np
 from . import clangast as ca
 from .clangast import K
 from .interp import (Loc, Obj, Ptr, Real, SENTINEL, UNK, _SCALAR, _as_int, _is_unk, _key, _map_frames_with, _real)
-from .interp_cpp import REGISTER_BYTES, CppInterpreter, InMemory, _body, _breaks, _system
+from .interp_cpp import MATH, REGISTER_BYTES, CppInterpreter, InMemory, _body, _breaks, _system
 
 THREADS_PER_BATCH = 1 << 18  # threads (whole blocks) run together
 BUILTINS = ("threadIdx", "blockIdx", "blockDim", "gridDim")
 LAUNCH_CONFIG = ("cudaConfigureCall", "__cudaPushCallConfiguration")
 SCHEDULES = ("lockstep", "blocks", "reverse", "random")  # how a launch's threads are run (CudaInterpreter.schedule)
+# math functions of device code beyond interp_cpp.MATH: the single-precision forms and CUDA's fast intrinsics,
+# evaluated exactly (values stored to float memory are rounded to float there)
+CUDA_MATH = {**{k + "f": v for k, v in MATH.items() if k not in ("abs", "labs", "llabs")},
+             "__powf": MATH["pow"], "__expf": MATH["exp"], "__logf": MATH["log"], "__log2f": MATH["log2"],
+             "__log10f": MATH["log10"], "__sinf": MATH["sin"], "__cosf": MATH["cos"], "__tanf": MATH["tan"],
+             "__fsqrt_rn": MATH["sqrt"], "__fdividef": (2, np.divide),
+             "__exp10f": (1, lambda x: np.power(10.0, x)), "exp10": (1, lambda x: np.power(10.0, x)),
+             "exp10f": (1, lambda x: np.power(10.0, x)), "rsqrt": (1, lambda x: 1.0 / np.sqrt(x)),
+             "rsqrtf": (1, lambda x: 1.0 / np.sqrt(x)), "__saturatef": (1, lambda x: np.clip(x, 0.0, 1.0)),
+             "fma": (3, lambda a, b, c: a * b + c), "fmaf": (3, lambda a, b, c: a * b + c)}
 MAX_TARGETS = 64  # objects a pointer loaded per thread may name before the threads are no longer split by it
 ALLOCS = {"cudaMalloc": "device", "cudaMallocManaged": "managed", "cudaMallocHost": "pinned",
           "cudaHostAlloc": "pinned"}
@@ -442,6 +452,17 @@ class CudaInterpreter(CppInterpreter):
         self.effects += 1
         return super()._mem_store(loc, type_, value)
 
+    def _library_cpp(self, c, ref, obj, args_c, sret):
+        m = CUDA_MATH.get(ref.spelling)
+        if m is None or not args_c:
+            return super()._library_cpp(c, ref, obj, args_c, sret)
+        reals = [_real(self.eval(x)) for x in args_c][: m[0]]
+        if len(reals) < m[0] or any(r is UNK for r in reals):
+            return UNK
+        with np.errstate(all="ignore"):
+            out = m[1](*[np.asarray(r.v, dtype=float) for r in reals])
+        return Real(out if np.ndim(out) else float(out))
+
     def _loop_bound(self, bound_c):
         return self.eval(bound_c)                                      # read once per point (CppInterpreter)
 
@@ -838,6 +859,16 @@ class CudaInterpreter(CppInterpreter):
             ev.data_control = self.facts.under_data_control(c) or bool(self.uncertain_depth)
             self._copy(ev, symp if to else other, other if to else symp, n)
             self._close_event()
+            return 0
+        if name in ("cudaGetSymbolAddress", "cudaGetSymbolSize") and len(args_c) > 1:
+            p = self.eval(args_c[0])
+            sym = self.lvalue(args_c[1])
+            if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK:
+                if name == "cudaGetSymbolAddress":
+                    self._ptr_store(Loc(p.obj, p.off, 8), Ptr(sym.obj, sym.off) if isinstance(sym.obj, Obj)
+                                    else Ptr(UNK, UNK))
+                else:
+                    p.obj.store(p.off, sym.obj.nbytes if isinstance(sym.obj, Obj) else UNK, 8)
             return 0
         if name == "cudaGetDeviceCount" and args_c:
             p = self.eval(args_c[0])

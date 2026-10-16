@@ -152,13 +152,17 @@ class Tracker:
         w_must = (bits & W) != 0
         w_any = (bits & (W | WM)) != 0
         dd = (bits & (RD | WD)) != 0
+        maybe_since = np.zeros(len(st.last), dtype=bool)               # units an event possibly wrote since
+        for _, mask, _ in st.may_writers:                              # their last certain write
+            maybe_since |= mask
         for kind, mine, mine_must in (("RAW", r_any, r_must), ("WAW", w_any, w_must)):
             if not mine.any():
                 continue
             hit = mine & (st.last >= 0) & (st.last != i)
             if hit.any():
                 srcs = st.last[hit]
-                must = mine_must[hit]
+                must = (mine_must & ~maybe_since)[hit]                  # certain only if nothing possibly wrote
+                                                                       # the unit in between
                 ddh = dd[hit] | st.last_dd[hit]
                 for s in np.unique(srcs):
                     sel = srcs == s
