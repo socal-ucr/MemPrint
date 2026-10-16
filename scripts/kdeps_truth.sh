@@ -25,7 +25,7 @@ nvcc -O2 -arch="$ARCH" ${NVCC_FLAGS:-} -o "$dir/$name" "$src" "$here/gpu/probe.c
 "$dir/$name" "$@" > "$dir/plain.log" 2>&1                     # the program's own output, untraced
 LD_PRELOAD=$TOOL KDEPS_OUT="$dir/truth" KDEPS_UNIT=$UNIT "$dir/$name" "$@" > "$dir/traced.log" 2>&1
 cd "$here/analysis"
-$PYTHON -m memprint.static.kdeps "$src" "$dir/static" --name "$name" --argv "$name" "$@" --no-host \
-    --unit "$UNIT" --access --schedules "${SCHEDULES:-lockstep,blocks,reverse,random}" > "$dir/static.log" 2>&1
+$PYTHON -m memprint.static.kdeps "$src" "$dir/static" --name "$name" --no-host --unit "$UNIT" --access \
+    --schedules "${SCHEDULES:-lockstep,blocks,reverse,random}" --argv "$name" "$@" > "$dir/static.log" 2>&1
 $PYTHON -m memprint.static.kdeps_score "$dir/static" "$name" "$dir/truth" --unit "$UNIT" --out "$out/scores.csv" |
     tee "$dir/score.txt"

@@ -1,6 +1,6 @@
 """Memory dependences between the kernels (and copies) of a CUDA program, from its source.
 
-    python -m memprint.static.kdeps SOURCE[,SOURCE...] OUT_DIR [--argv ARG ...] [-D X] [-I DIR] [--unit 4]
+    python -m memprint.static.kdeps SOURCE[,SOURCE...] OUT_DIR [-D X] [-I DIR] [--unit 4] [--argv ARG ...]
 
 The CUDA interpreter (interp_cuda) runs the program and records, for every kernel launch, device copy and
 memset (and the host code between them), which bytes it read and wrote. Events are folded in program order
@@ -232,8 +232,11 @@ def merge_schedules(trackers):
     Events are matched by align_ends (a loop the host repeats until the device says so can run a different
     number of rounds). Events of the first run some other run has no match for, and dependences that are not
     in every run, or not must in every run, become may and schedule-dependent; dependences another run has
-    between matched events and the first has not are added as may. Returns the number of events matched in
-    every run."""
+    between matched events and the first has not are added as may. Where the runs issue different events
+    (the rounds in the middle differ), a dependence from before the point where they part to after the
+    differing rounds is may as well, even if every run has it: which event last wrote a unit, or read it, is
+    decided by those rounds, and other legal orders than the ones run can decide it differently. Returns the
+    number of events matched in every run."""
     base = trackers[0]
     sig0 = [_signature(e) for e in base.events]
     maps = [align_ends([_signature(e) for e in t.events], sig0) for t in trackers[1:]]
@@ -243,12 +246,23 @@ def merge_schedules(trackers):
     for e in base.events:
         if e["index"] not in everywhere:
             e["schedule_dependent"] = 1
+    spans = []                                     # (events before the parting, first event after the middle)
+    for t, m in zip(trackers[1:], maps):
+        head = 0
+        while m.get(head) == head and head < len(base.events):
+            head += 1
+        if head == len(base.events) == len(t.events):
+            continue
+        tail = min((b for o, b in m.items() if o >= head), default=len(base.events))
+        spans.append((head, tail))
+    crosses = lambda s_, d_: any(s_ < h and d_ >= tl for h, tl in spans)  # noqa: E731
     others = []
     for t, m in zip(trackers[1:], maps):
         others.append({(m[k[0]], m[k[1]], k[2], k[3]): v for k, v in t.edges.items() if k[0] in m and k[1] in m})
     for key, val in base.edges.items():
         runs = [o.get(key) for o in others]
-        if key[0] in everywhere and key[1] in everywhere and all(r is not None for r in runs):
+        if key[0] in everywhere and key[1] in everywhere and all(r is not None for r in runs) and \
+                not crosses(key[0], key[1]):
             must = min([val[0]] + [r[0] for r in runs])
             total = max([val[0] + val[1]] + [r[0] + r[1] for r in runs])
             if must != val[0] or total != val[0] + val[1]:
@@ -327,7 +341,9 @@ def main(argv=None):
     ap.add_argument("source", help="a .cu file, or several separated by commas (one translation unit)")
     ap.add_argument("out_dir")
     ap.add_argument("--name", default=None)
-    ap.add_argument("--argv", nargs="*", default=None, help="the command line (argv[0] first)")
+    ap.add_argument("--argv", nargs=argparse.REMAINDER, default=None,
+                    help="the command line, argv[0] first (last option: everything after it is the program's, "
+                         "--options included)")
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("-I", dest="includes", action="append", default=[])
     ap.add_argument("--unit", type=int, default=4, help="bytes per dependence unit")
@@ -343,6 +359,7 @@ def main(argv=None):
     from .interp_cuda import analyze
 
     sources = args.source.split(",")
+    os.makedirs(args.out_dir, exist_ok=True)                       # the unity file goes there
     source = sources[0] if len(sources) == 1 else unity(sources, os.path.join(args.out_dir, "unity.cu"))
     name = args.name or os.path.splitext(os.path.basename(sources[0]))[0]
     os.makedirs(args.out_dir, exist_ok=True)

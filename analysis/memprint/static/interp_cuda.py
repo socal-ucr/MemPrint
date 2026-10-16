@@ -33,6 +33,7 @@ from .interp import (Loc, Obj, Ptr, Real, SENTINEL, UNK, _SCALAR, _as_int, _is_u
 from .interp_cpp import MATH, REGISTER_BYTES, CppInterpreter, InMemory, _body, _breaks, _system
 
 THREADS_PER_BATCH = 1 << 18  # threads (whole blocks) run together
+WARP_SIZE = 32
 BUILTINS = ("threadIdx", "blockIdx", "blockDim", "gridDim")
 LAUNCH_CONFIG = ("cudaConfigureCall", "__cudaPushCallConfiguration")
 SCHEDULES = ("lockstep", "blocks", "reverse", "random")  # how a launch's threads are run (CudaInterpreter.schedule)
@@ -103,14 +104,30 @@ class Event:
         if offs.size > 1:
             offs = np.unique(offs)
         b = (offs[:, None] + np.arange(max(size, 1))).ravel() if size > 1 else offs
-        self._arr(obj, int(b[-1]) + 1)[b] |= bits
+        arr = self._arr(obj, int(b[-1]) + 1)
+        arr[b] |= _exposed(arr[b], bits)
 
     def mark_range(self, obj, lo, n, bits):
         if n > 0 and lo >= 0:
-            self._arr(obj, lo + n)[lo: lo + n] |= bits
+            arr = self._arr(obj, lo + n)
+            arr[lo: lo + n] |= _exposed(arr[lo: lo + n], bits)
 
     def mark_all(self, obj, bits):
         self.all[obj] = self.all.get(obj, 0) | bits
+
+
+def _exposed(cur, bits):
+    """The bits to add for a reference to bytes whose bits so far are cur. A read of a byte the event already
+    wrote for certain reads the event's own value (tmp[i] = 0; tmp[i] += ...), not an earlier event's: it is
+    not recorded as a read. References are marked in the order the interpreter carries them out."""
+    if not bits & (R | RM | RD):
+        return np.uint8(bits)
+    own = (cur & W) != 0
+    if not own.any():
+        return np.uint8(bits)
+    out = np.full(cur.shape, bits, dtype=np.uint8)
+    out[own] &= np.uint8(~(R | RM | RD) & 0xFF)
+    return out
 
 
 def _scalarize(v):
@@ -1183,15 +1200,34 @@ class CudaInterpreter(CppInterpreter):
                 starts.reverse()
             elif self.schedule == "random":
                 starts = [starts[i] for i in self.rng.permutation(len(starts))]
-            for b0 in starts:
-                nb = min(per, nblocks - b0)
-                L = nb * bsz
-                tid = np.arange(L, dtype=np.int64)
-                local_block = tid // bsz
+            # batches: (first block, blocks, first thread, end thread) of a block. In the schedules other than
+            # lockstep, a block's warps also run one after another (in the same order as the blocks) when the
+            # kernel has no barrier and no shared memory, which is then a legal order too
+            warps = list(range(0, bsz, WARP_SIZE))
+            if self.schedule != "lockstep" and len(warps) > 1 and not self._block_sync(fdef):
+                if self.schedule == "reverse":
+                    warps.reverse()
+                batches = []
+                for b0 in starts:
+                    order = [warps[i] for i in self.rng.permutation(len(warps))] if self.schedule == "random" \
+                        else warps
+                    batches += [(b0, 1, w, min(w + WARP_SIZE, bsz)) for w in order]
+            else:
+                batches = [(b0, min(per, nblocks - b0), 0, bsz) for b0 in starts]
+            for b0, nb, t_lo, t_hi in batches:
+                if nb > 1 or (t_lo, t_hi) == (0, bsz):
+                    L = nb * bsz
+                    tid = np.arange(L, dtype=np.int64)
+                    local_block = tid // bsz
+                    tin = tid % bsz
+                else:
+                    tin = np.arange(t_lo, t_hi, dtype=np.int64)
+                    L = len(tin)
+                    local_block = np.zeros(L, dtype=np.int64)
                 g0 = _map_frames_with([globals_frame], lambda a: a[np.zeros(L, dtype=np.int64)])[0]
                 before = {k: e[1] for k, e in g0.vars.items()}
                 g0.vars[BLOCK_KEY] = [None, local_block if nb > 1 else 0]
-                for bname, vals in (("threadIdx", split(tid % bsz, bx, by)),
+                for bname, vals in (("threadIdx", split(tin, bx, by)),
                                     ("blockIdx", split(b0 + local_block, gx, gy)),
                                     ("blockDim", (bx, by, bz)), ("gridDim", (gx, gy, gz))):
                     for f, v in zip("xyz", vals):
@@ -1211,6 +1247,31 @@ class CudaInterpreter(CppInterpreter):
                         globals_frame.vars[k][1] = UNK
         finally:
             self.frames, self.w, self.loop_flags, self.kernel, self.shared, self.dyn_shared = saved
+
+    def _block_sync(self, fdef):
+        """Whether a kernel (or a function it calls) uses __syncthreads or __shared__ memory: its warps must then
+        run together (the threads of a block meet at barriers and share memory)."""
+        memo = self.__dict__.setdefault("_block_sync_memo", {})
+        key = _key(fdef)
+        if key in memo:
+            return memo[key]
+        memo[key] = False                                              # recursion
+        found = False
+        for n in fdef.walk_preorder():
+            if n.kind == K.CALL_EXPR:
+                if n.spelling.startswith("__syncthreads"):                 # __syncwarp: within a warp only
+                    found = True
+                    break
+                ref = n.referenced
+                d = ref.get_definition() if ref is not None else None
+                if d is not None and d != fdef and not _system(d) and self._block_sync(d):
+                    found = True
+                    break
+            elif n.kind == K.VAR_DECL and K.CUDASHARED_ATTR in _attrs(n):
+                found = True
+                break
+        memo[key] = found
+        return found
 
     # ------------------------------------------------------------ atomics
 

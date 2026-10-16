@@ -79,8 +79,8 @@ def score_dirs(static_dir, name, truth_dir):
 def analyse(name, out, schedules="lockstep,blocks,reverse,random"):
     """kdeps on a test program into out (quietly)."""
     with redirect_stdout(io.StringIO()):
-        kdeps.main([str(CUDA / f"{name}.cu"), str(out), "--name", name, "--argv", name, *argv_of(name),
-                    "--no-host", "--access", "--schedules", schedules])
+        kdeps.main([str(CUDA / f"{name}.cu"), str(out), "--name", name, "--no-host", "--access",
+                    "--schedules", schedules, "--argv", name, *argv_of(name)])
 
 
 # ---------------------------------------------------------------- GPU runs

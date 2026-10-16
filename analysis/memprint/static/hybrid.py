@@ -36,11 +36,14 @@ from . import clangast as ca
 from . import interp_cuda as ic
 from .clangast import K
 from .interp import Loc, Obj, Ptr, Real, SENTINEL, UNK, _key
+from .interp_cpp import _referee
 from .kdeps import R, W, Tracker, merge_schedules, write
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHIM = os.path.join(HERE, "..", "..", "..", "gpu", "hybrid", "libkdeps_cudart.so")
 INT_TYPES = {1: np.uint8, 2: np.int16, 4: np.int32, 8: np.int64}
+UINT_TYPES = {1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.int64}  # 64-bit: int64 with the same bits, as the
+                                                                     # interpreter keeps unsigned 64-bit values
 FLOAT_TYPES = {4: np.float32, 8: np.float64}
 UNSIGNED = {ca.ci.TypeKind.BOOL, ca.ci.TypeKind.UCHAR, ca.ci.TypeKind.CHAR_U, ca.ci.TypeKind.USHORT,
             ca.ci.TypeKind.UINT, ca.ci.TypeKind.ULONG, ca.ci.TypeKind.ULONGLONG}
@@ -48,7 +51,11 @@ COPY_KINDS = {1: "H2D", 2: "D2H", 3: "D2D"}
 
 
 class RawObj(Obj):
-    """A device allocation backed by the program's own memory: loads and stores read and write its bytes."""
+    """A device allocation backed by the program's own memory: loads and stores read and write its bytes.
+    Integer loads read the bytes as signed unless RawObj.unsigned is set (by HybridInterpreter._typed, for a
+    load of an unsigned type): a uint32_t 0xffffffff is 4294967295, as the whole-program interpreter has it."""
+
+    unsigned = False
 
     def __init__(self, name, kind, addr, nbytes):
         super().__init__(name, kind, nbytes)
@@ -80,7 +87,7 @@ class RawObj(Obj):
                 self.buf[o: o + size] = np.frombuffer(np.asarray(v, dtype=dtype).tobytes(), dtype=np.uint8)
 
     def load(self, off, size=4):
-        dtype = INT_TYPES.get(size)
+        dtype = (UINT_TYPES if RawObj.unsigned else INT_TYPES).get(size)
         offs, ok = self._offsets(off, size)
         out = np.full(offs.shape, SENTINEL, dtype=np.int64)
         if dtype is not None and np.any(ok):
@@ -299,6 +306,28 @@ class HybridInterpreter(ic.CudaInterpreter):
         base, _, obj = self.live[first]
         off = a - base
         return Ptr(obj, off if off.ndim else int(off))
+
+    @staticmethod
+    def _typed(type_, fn):
+        """Run fn with integer loads from the program's memory read with type_'s signedness."""
+        t = type_.get_canonical() if type_ is not None else None
+        saved = RawObj.unsigned
+        RawObj.unsigned = t is not None and t.kind in UNSIGNED
+        try:
+            return fn()
+        finally:
+            RawObj.unsigned = saved
+
+    def _mem_load(self, loc, type_):
+        return self._typed(_referee(type_), lambda: super(HybridInterpreter, self)._mem_load(loc, type_))
+
+    def _rmw_add(self, loc, type_, delta):
+        return self._typed(type_, lambda: super(HybridInterpreter, self)._rmw_add(loc, type_, delta))
+
+    def _atomic_cuda(self, name, c):
+        args_c = list(c.get_arguments())
+        t = args_c[0].type.get_canonical().get_pointee() if args_c else None
+        return self._typed(t, lambda: super(HybridInterpreter, self)._atomic_cuda(name, c))
 
     def _ptr_load(self, loc):
         if not isinstance(loc.obj, RawObj):
@@ -587,6 +616,7 @@ def main(argv=None):
     sys.stdout.flush()
     finish()
     sys.stderr.flush()
+    ctypes.CDLL(None).fflush(None)                                     # the program's buffered output
     os._exit(0 if status == 0 and not it.failures else 1)              # not the program's static destructors
 
 
@@ -630,6 +660,8 @@ def _several(args, argv):
         t.objects = {i: row for i, row in enumerate(d["objects"])}
         trackers.append(t)
         failures += d["failures"]
+        if d["failures"]:                                  # the run's own report of what failed
+            print(f"{name}: schedule {schedule}: {d['failures']} failures:\n{done.stderr[-3000:]}", file=sys.stderr)
         counts.append(f"{schedule} {len(t.events)}")
     matched = merge_schedules(trackers)
     ev_path, edge_path, rows = write(args.out_dir, name, trackers[0])

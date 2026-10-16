@@ -1295,7 +1295,7 @@ class Interpreter:
                 new = Ptr(old.obj, UNK if old.off is UNK else _SCALAR(old.off + delta * size), old.src)
             else:
                 o = _as_int(old)
-                new = UNK if o is UNK else _SCALAR(o + delta)
+                new = UNK if o is UNK else wrap_int(_SCALAR(o + delta), kid.type)   # unsigned 0xffffffff + 1 is 0
             self.access(loc, write=True)
             self._set_value(kid, new)
             return old if op.startswith("post") else new
@@ -1615,6 +1615,8 @@ class Interpreter:
         entry[1] = saved
 
         total = int(trips.sum())
+        first_ev, written = _events(body, floats=getattr(self, "REALS", False))
+        plain = [k for k in written if first_ev.get(k) == "w" and k != _key(var)]
         if total and self.SYMBOLIC and not self.timeline and np.ndim(step) == 0 and _symbolic_ok(body, var):
             # the innermost loop counted symbolically: one pass, the loop variable an affine value, every
             # reference charged once per trip (scalars) or on its whole progression (array elements)
@@ -1648,6 +1650,7 @@ class Interpreter:
                             self.tlo, self.thi = lo + within * width, lo + (within + 1) * width
                     self._lookup(var)[1] = start_arr[point] + step * within
                     self.exec(body)
+                    self._merge_last_writes(plain, saved_frames, point, len(saved_w))
                     self._drop(self.w)
             finally:
                 self.frames, self.w = saved_frames, saved_w
@@ -1657,6 +1660,61 @@ class Interpreter:
         entry = self._lookup(var)
         entry[1] = _SCALAR(start + step * trips) if np.ndim(start) or np.ndim(trips) else start + step * trips
         self._forget_float_writes(body)
+
+    def _merge_last_writes(self, keys, saved_frames, point, n_out):
+        """After a batch of loop iterations: a variable of an enclosing scope that the body assigns (without
+        reading it first, as `found = 1` or `changed = true` under a condition) holds, per enclosing point, the
+        value of the last iteration that changed it, or its value before the loop if none did. The batch ran on
+        copies of the variables (the frames mapped to the iteration points), which are dropped afterwards."""
+        for k in keys:
+            e = next((fr.vars[k] for fr in saved_frames[::-1] if k in fr.vars), None)
+            h = next((fr.vars[k] for fr in self.frames[::-1] if k in fr.vars), None)
+            if e is None or h is None or h[1] is e[1] or isinstance(e[0], Loc) and e[0].array:
+                continue
+            old, new = e[1], h[1]
+            if isinstance(old, Ptr) or isinstance(new, Ptr):
+                if isinstance(old, Ptr) and isinstance(new, Ptr) and old.obj is new.obj and \
+                        not _is_unk(old.off, new.off) and not isinstance(old.off, Aff) and not isinstance(new.off, Aff):
+                    off = self._last_values(np.asarray(old.off, dtype=np.int64), np.asarray(new.off, dtype=np.int64),
+                                            point, n_out)
+                    if off is not None:
+                        e[1] = Ptr(old.obj, off, old.src)
+                    continue
+                e[1] = Ptr(UNK, UNK)
+                continue
+            if isinstance(old, Real) or isinstance(new, Real):
+                o, n = _real(old), _real(new)
+                if o is UNK or n is UNK:
+                    e[1] = UNK
+                    continue
+                v = self._last_values(np.asarray(o.v, dtype=float), np.asarray(n.v, dtype=float), point, n_out)
+                if v is not None:
+                    e[1] = Real(v)
+                continue
+            o, n = _as_int(old), _as_int(new)
+            if _is_unk(o, n) or isinstance(o, Aff) or isinstance(n, Aff):
+                e[1] = UNK
+                continue
+            v = self._last_values(np.asarray(o, dtype=np.int64), np.asarray(n, dtype=np.int64), point, n_out)
+            if v is not None:
+                e[1] = v
+
+    @staticmethod
+    def _last_values(old, new, point, n_out):
+        """Per enclosing point: the new value of its last iteration whose value differs from the old one (None:
+        no iteration changed anything)."""
+        new = np.broadcast_to(new, (len(point),))
+        start = np.broadcast_to(old, (n_out,))[point]
+        changed = (new != start) & ~(np.isnan(new) & np.isnan(start)) if new.dtype.kind == "f" else new != start
+        if not changed.any():
+            return None
+        out = np.array(np.broadcast_to(old, (n_out,)), dtype=np.result_type(old, new))
+        idx = np.flatnonzero(changed)[::-1]                             # the last iteration of each point first
+        pts, first = np.unique(point[idx], return_index=True)
+        out[pts] = new[idx[first]]
+        if n_out == 1:
+            return out[0].item()
+        return _SCALAR(out) if out.dtype.kind != "f" else out
 
     def _loop_general(self, init, cond, inc, body, do=False):
         """Run a loop one iteration at a time for all batch points still in it."""

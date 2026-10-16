@@ -687,7 +687,10 @@ class CppInterpreter(Containers, Interpreter):
                 found[k] = op
             uses[k] = uses.get(k, 0) - n_refs
 
-        def walk(n):
+        statements = (K.COMPOUND_STMT, K.FOR_STMT, K.WHILE_STMT, K.DO_STMT, K.IF_STMT, K.CASE_STMT, K.DEFAULT_STMT,
+                      K.LABEL_STMT)
+
+        def walk(n, parent=None):
             kind = n.kind
             if kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
                 lhs, rhs = ca.children(n)
@@ -704,13 +707,16 @@ class CppInterpreter(Containers, Interpreter):
             elif kind == K.UNARY_OPERATOR and ca.unary_op(n) in ("post++", "pre++", "post--", "pre--"):
                 d = _decl_ref(ca.children(n)[0])
                 if d is not None:
-                    note(d, "+", 1)
+                    # its value used (a[m++] = x, if (m++)): each iteration needs its own m, a scan
+                    valued = parent is None or parent.kind not in statements or (
+                        parent.kind in (K.IF_STMT, K.WHILE_STMT) and ca.children(parent)[0] == n)
+                    note(d, "+", 0 if valued else 1)
             if kind == K.DECL_REF_EXPR:
                 d = _decl_ref(n)
                 if d is not None:
                     uses[_key(d)] = uses.get(_key(d), 0) + 1
             for kid in n.get_children():
-                walk(kid)
+                walk(kid, n)
 
         walk(body)
         return {k: op for k, op in found.items() if op is not None and uses.get(k, 0) == 0 and k not in nonint}
@@ -835,6 +841,8 @@ class CppInterpreter(Containers, Interpreter):
                     scan_final = self._run_scans(scan_entries, body, point, len(g), scan_v0, len(saved_w)) \
                         if scan_entries else None
                     self.exec(body)
+                    self._merge_last_writes([k for k in written if first.get(k) == "w" and k not in reductions
+                                             and k not in scans and k != _key(var)], saved_frames, point, len(saved_w))
                     if scan_final is not None:
                         for k, e in scan_entries.items():
                             e[1] = scan_final[k]
@@ -1186,6 +1194,8 @@ class CppInterpreter(Containers, Interpreter):
             return o // 8
         kids = ca.children(member)
         for t in ([kids[0].type] if kids else []) + self.this_types[-1:]:
+            if t is None:                                              # no object type to look the field up in
+                continue
             t = _referee(t)
             if ca.is_pointer(t):
                 t = t.get_pointee()

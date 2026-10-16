@@ -181,7 +181,7 @@ for name, argv, varies in (("cc.cu", ["cc", "1024"], True), ("bfs.cu", ["bfs", "
 # sets written as a truth: every dependence must come back, with its units
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
-    kdeps.main([str(HERE / "bfs.cu"), str(out), "--argv", "bfs", "500", "--no-host", "--access"])
+    kdeps.main([str(HERE / "bfs.cu"), str(out), "--no-host", "--access", "--argv", "bfs", "500"])
     with open(out / "bfs_objects.csv") as f:
         allocs = sorted((int(r["alloc"]), int(r["bytes"])) for r in csv.DictReader(f) if r["alloc"])
     with open(out / "truth_allocs.csv", "w") as f:
