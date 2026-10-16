@@ -64,16 +64,7 @@ def argv_of(name):
 
 
 def score_dirs(static_dir, name, truth_dir):
-    ie, iedges = ks.interp_edges(static_dir, name)
-    te, tedges = ks.truth_edges(truth_dir, 4)
-    ok, _ = ks.aligned(ie, te)
-    tneeded = ks.match_truth(ie, te, ks.needed(tedges))
-    tedges = ks.match_truth(ie, te, tedges)
-    row = {"aligned": int(ok)}
-    for prefix, a, b in (("", iedges, tedges), ("needed_", ks.needed(iedges), tneeded)):
-        for k, v in ks.score(a, b).items():
-            row[prefix + k] = round(v, 4) if isinstance(v, float) else v
-    return row
+    return ks.score_run(static_dir, name, truth_dir, 4)[0]
 
 
 def analyse(name, out, schedules="lockstep,blocks,reverse,random"):

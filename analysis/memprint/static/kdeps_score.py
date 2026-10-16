@@ -23,13 +23,14 @@ and the same over the needed dependences (the transitive reductions).
 
 import argparse
 import csv
+import json
 import os
 import sys
 
 import numpy as np
 
 from .interp_cuda import Event
-from .kdeps import Tracker, align_ends, reduce_edges
+from .kdeps import Tracker, align_ends, instantiate_loop, reduce_edges
 
 
 class _Alloc:
@@ -95,13 +96,39 @@ def aligned(interp_events, truth_events):
     return True, ""
 
 
+def truth_map(interp_events, truth_events):
+    """The run's device events renumbered as the interpreter's (align_ends): {run index: interpreter index}."""
+    a = [e for e in interp_events if e["kind"] != "host"]
+    return {t: int(a[i]["index"]) for t, i in align_ends(truth_events, a, lambda y, x: _same(x, y)).items()}
+
+
 def match_truth(interp_events, truth_events, truth):
     """The run's dependences with its events renumbered as the interpreter's (align_ends over device
     events); a dependence through an event without a match keeps a key no interpreter dependence has."""
-    a = [e for e in interp_events if e["kind"] != "host"]
-    m = {t: int(a[i]["index"]) for t, i in align_ends(truth_events, a, lambda y, x: _same(x, y)).items()}
+    m = truth_map(interp_events, truth_events)
     return {(m.get(s, ("traced", s)), m.get(d, ("traced", d)), kind, obj): v
             for (s, d, kind, obj), v in truth.items()}
+
+
+def loop_edges(interp_dir, name, interp_events, truth_events):
+    """The interpreter's loop template (NAME_loop.json: the rounds that differ between schedules) instantiated
+    for the traced run's rounds, as possible dependences keyed like match_truth's: {key: (0, units, 0)}; {} if
+    there is no template or the run's events do not fit it."""
+    path = os.path.join(interp_dir, f"{name}_loop.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        loop = json.load(f)
+    a, p, post = loop["start"], loop["period"], loop["post"]
+    n = len(truth_events)
+    if n - post < a or (n - post - a) % p or not all(
+            _same(loop["phases"][(i - a) % p], truth_events[i]) for i in range(a, n - post)):
+        return {}
+    with open(os.path.join(interp_dir, f"{name}_objects.csv")) as f:
+        alloc = {r["name"]: int(r["alloc"]) for r in csv.DictReader(f) if r["alloc"] != ""}
+    m = truth_map(interp_events, truth_events)
+    return {(m.get(s, ("traced", s)), m.get(d, ("traced", d)), kind, alloc[obj]): (0, units, 0)
+            for (s, d, kind, obj), units in instantiate_loop(loop, n).items() if obj in alloc}
 
 
 def score(interp, truth):
@@ -121,6 +148,25 @@ def needed(edges):
     return {k: v for k, v in edges.items() if (k[0], k[1]) in keep}
 
 
+def score_run(interp_dir, name, truth_dir, unit=4):
+    """Score the interpreter's output in interp_dir against a traced run: (scores, interpreter dependences,
+    run's dependences, why the event sequences differ or ""). Both keyed as match_truth's."""
+    ie, iedges = interp_edges(interp_dir, name)
+    te, tedges = truth_edges(truth_dir, unit)
+    ok, why = aligned(ie, te)
+    tneeded = match_truth(ie, te, needed(tedges))                     # reduced in the run's own numbering
+    tedges = match_truth(ie, te, tedges)
+    ineeded = needed(iedges)
+    for k, v in loop_edges(interp_dir, name, ie, te).items():         # the rounds the run had, as possible
+        if k not in iedges:
+            iedges[k] = ineeded[k] = v
+    row = {"aligned": int(ok)}
+    for prefix, a, b in (("", iedges, tedges), ("needed_", ineeded, tneeded)):
+        for k, v in score(a, b).items():
+            row[prefix + k] = round(v, 4) if isinstance(v, float) else v
+    return row, iedges, tedges, why
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("interp_dir")
@@ -129,18 +175,11 @@ def main(argv=None):
     ap.add_argument("--unit", type=int, default=4)
     ap.add_argument("--out", help="append a row of scores to this CSV")
     args = ap.parse_args(argv)
-    ie, iedges = interp_edges(args.interp_dir, args.name)
-    te, tedges = truth_edges(args.truth_dir, args.unit)
-    ok, why = aligned(ie, te)
-    if not ok:
+    row, iedges, tedges, why = score_run(args.interp_dir, args.name, args.truth_dir, args.unit)
+    if why:
         print(f"{args.name}: the device operations differ ({why}); the common start and end are matched",
               file=sys.stderr)
-    tneeded = match_truth(ie, te, needed(tedges))                     # reduced in the run's own numbering
-    tedges = match_truth(ie, te, tedges)
-    row = {"name": args.name, "aligned": int(ok)}
-    for prefix, a, b in (("", iedges, tedges), ("needed_", needed(iedges), tneeded)):
-        for k, v in score(a, b).items():
-            row[prefix + k] = round(v, 4) if isinstance(v, float) else v
+    row = {"name": args.name, **row}
     print(" ".join(f"{k}={v}" for k, v in row.items()))
     missed = sorted(set(tedges) - set(iedges), key=str)
     wrong = sorted(k for k, v in iedges.items() if v[0] and k not in tedges)

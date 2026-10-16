@@ -20,6 +20,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -163,9 +164,17 @@ def flags(b, sd):
 
 
 def wall(cmd, cwd, env=None, timeout=None):
+    """Run cmd; on a timeout, kill it and everything it started (the hybrid runs a process per schedule)."""
     start = time.time()
-    done = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
-    return time.time() - start, done
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise
+    return time.time() - start, subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 def gpu(b):
@@ -211,17 +220,19 @@ def interp(b, which, timeout):
     if which == "full":
         cmd.append("--no-host")
     cmd += ["--argv", b["name"], *argv(b, w)]
-    env = dict(os.environ)
-    if b.get("flags"):
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "analysis"))       # run in the work directory: files the
+    if b.get("flags"):                                                 # program writes stay there
         env["NVCC_APPEND_FLAGS"] = " ".join(b["flags"])            # nvcc reads it: the hybrid's build of the program
     try:
-        t, done = wall(cmd, ROOT / "analysis", env, timeout)
+        t, done = wall(cmd, w, env, timeout)
     except subprocess.TimeoutExpired:
         return {f"{which}_s": timeout, f"{which}_status": "timeout"}
     (w / f"{which}.log").write_text(done.stdout + done.stderr)
     res = {f"{which}_s": round(t, 2)}
     errs = [l for l in done.stderr.splitlines() if l.startswith("parse error")]
     res[f"{which}_parse_errors"] = len(errs)
+    res[f"{which}_host_warning"] = int("not fully understood" in done.stderr)
+    res[f"{which}_out_of_bounds"] = int("past the end of a device buffer" in done.stdout + done.stderr)
     if not (out / f"{b['name']}_events.csv").exists():
         last = (done.stderr.strip().splitlines() or ["no output"])[-1]
         res[f"{which}_status"] = "failed: " + last[:150]
@@ -234,15 +245,11 @@ def interp(b, which, timeout):
 
 
 def score(out, name, truth):
-    ie, iedges = ks.interp_edges(out, name)
-    te, tedges = ks.truth_edges(truth, 4)
-    ok, _ = ks.aligned(ie, te)
-    tneeded = ks.match_truth(ie, te, ks.needed(tedges))
-    tm = ks.match_truth(ie, te, tedges)
-    row = {"aligned": int(ok), "ops": len([e for e in ie if e["kind"] != "host"]), "truth_ops": len(te)}
-    for prefix, a, c in (("", iedges, tm), ("needed_", ks.needed(iedges), tneeded)):
-        for k, v in ks.score(a, c).items():
-            row[prefix + k] = round(v, 4) if isinstance(v, float) else v
+    ie, _ = ks.interp_edges(out, name)
+    te, _ = ks.truth_edges(truth, 4)
+    scores, _, tm, _ = ks.score_run(out, name, truth, 4)
+    row = {"aligned": scores.pop("aligned"), "ops": len([e for e in ie if e["kind"] != "host"]), "truth_ops": len(te)}
+    row.update(scores)
     # dependences between two kernels through data-dependent bytes, and how many the trace has
     rows = list(csv.DictReader(open(out / f"{name}_edges.csv")))
     alloc = {r["name"]: int(r["alloc"]) for r in csv.DictReader(open(out / f"{name}_objects.csv")) if r["alloc"]}
@@ -257,7 +264,10 @@ def score(out, name, truth):
 
 def run_interp(args):
     name, which, timeout = args
-    return name, interp(BENCH[name], which, timeout)
+    try:
+        return name, interp(BENCH[name], which, timeout)
+    except Exception as e:                                         # one benchmark's failure ends only its row
+        return name, {f"{which}_status": f"driver error: {type(e).__name__}: {e}"[:200]}
 
 
 def main():

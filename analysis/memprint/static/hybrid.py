@@ -454,7 +454,7 @@ class HybridInterpreter(ic.CudaInterpreter):
                 r[1] = max(r[1], ptr + n)
                 r[2].nbytes = max(r[2].nbytes, r[1] - r[0])
                 return r[2], ptr - r[0]
-        obj = Obj(f"host@{ptr:x}", "heap", n)
+        obj = Obj(f"host{len(self.host_regions)}", "heap", n)       # by order: addresses differ between runs
         obj.site = {}
         self.objects.append(obj)
         self.host_regions.append([ptr, ptr + n, obj])
@@ -529,6 +529,7 @@ def main(argv=None):
                          "process of its own) and the runs are merged as kdeps --schedules does")
     ap.add_argument("--seed", type=int, default=0, help="the random schedule's block order")
     ap.add_argument("--dump", help=argparse.SUPPRESS)  # one schedule's dependences, for the merging process
+    ap.add_argument("--racy", default=None, help=argparse.SUPPRESS)  # the kernels to reorder (lockstep's racy_seen)
     args = ap.parse_args(argv)
     if args.schedules and len(args.schedules.split(",")) > 1:
         return _several(args, argv)
@@ -548,6 +549,10 @@ def main(argv=None):
     for e in errors[:20]:
         print("parse error:", e, file=sys.stderr)
     it = HybridInterpreter(tu, seed=args.seed, unit=args.unit, keep_access=args.access, schedule=args.schedule)
+    if args.dump:
+        it.tracker.keep_touch()                                        # merged with the other schedules' runs
+    if args.racy is not None:
+        it.racy = set(x for x in args.racy.split(",") if x)
     done = []
 
     def guarded(fn):
@@ -568,7 +573,8 @@ def main(argv=None):
             t = it.tracker
             with open(args.dump, "wb") as f:
                 pickle.dump({"unit": t.unit, "events": t.events, "edges": t.edges, "access": t.access,
-                             "objects": list(t.objects.values()), "failures": len(it.failures)}, f)
+                             "touch": t.touch, "objects": list(t.objects.values()),
+                             "failures": len(it.failures), "racy": sorted(it.racy_seen), "oob": it.oob}, f)
         ev_path, edge_path, rows = write(args.out_dir, name, it.tracker)
         unknown = sum(o.unknown_stores for o in it.objects if isinstance(o, RawObj))
         print(f"{name}: {len(it.tracker.events)} events, {len(rows)} dependences "
@@ -576,6 +582,10 @@ def main(argv=None):
               f"{it.launches} launches, {unknown} unknown stores, {len(it.failures)} failures, "
               f"{time.time() - start:.1f} s", flush=True)
         print(f"  {ev_path}\n  {edge_path}", flush=True)
+        if it.oob:
+            print(f"  {len(it.oob)} places reference past the end of a device buffer (possible references to every "
+                  f"buffer): " + ", ".join(f"{k} x{v}" for k, v in sorted(it.oob.items(), key=lambda kv: -kv[1])[:5]),
+                  flush=True)
         if it.unknown_sites:
             top = sorted(it.unknown_sites.items(), key=lambda kv: -kv[1])[:5]
             print("  unknown values stored at: " + ", ".join(f"{k} ({v})" for k, v in top), flush=True)
@@ -635,7 +645,7 @@ def _several(args, argv):
         rest, prog_argv = rest[:cut], rest[cut:]
     else:
         prog_argv = []
-    drop = {"--schedules", "--so", "--dump", "--schedule"}
+    drop = {"--schedules", "--so", "--dump", "--schedule", "--racy"}
     opts, i = [], 2                                        # SOURCE OUT_DIR first
     while i < len(rest):
         if rest[i] in drop:
@@ -643,28 +653,45 @@ def _several(args, argv):
             continue
         opts.append(rest[i])
         i += 1
-    trackers, failures, counts = [], 0, []
-    for schedule in args.schedules.split(","):
+    trackers, failures, counts, racy, oob = [], 0, [], None, {}
+    order = args.schedules.split(",")
+    order = [s for s in order if s == "lockstep"] + [s for s in order if s != "lockstep"]   # lockstep first
+    for schedule in order:
         sub = os.path.join(args.out_dir, f"schedule_{schedule}")
         dump = os.path.join(sub, "run.pkl")
         os.makedirs(sub, exist_ok=True)
         cmd = [sys.executable, "-m", "memprint.static.hybrid", rest[0], sub, *opts, "--so", so,
-               "--schedule", schedule, "--dump", dump, *prog_argv]
-        done = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.join(HERE, "..", ".."))
+               "--schedule", schedule, "--dump", dump, *(["--racy", ",".join(racy)] if racy is not None else []),
+               *prog_argv]
+        pkg = os.path.abspath(os.path.join(HERE, "..", ".."))           # the program runs where we were started
+        env = dict(os.environ, PYTHONPATH=pkg + os.pathsep + os.environ.get("PYTHONPATH", ""))
+        done = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if not os.path.exists(dump):
             raise SystemExit(f"{name}: the run under schedule {schedule} failed:\n{done.stdout}{done.stderr}")
         with open(dump, "rb") as f:
             d = pickle.load(f)
+        os.remove(dump)                                    # large (every event's units); merged below
+        for f in os.listdir(sub):                          # the merged run's access file is the one kept
+            if f.endswith("_access.csv"):
+                os.remove(os.path.join(sub, f))
         t = Tracker(d["unit"])
-        t.events, t.edges, t.access = d["events"], d["edges"], d["access"]
+        t.events, t.edges, t.access, t.touch = d["events"], d["edges"], d["access"], d.get("touch")
         t.objects = {i: row for i, row in enumerate(d["objects"])}
         trackers.append(t)
         failures += d["failures"]
+        if schedule == "lockstep":
+            racy = d.get("racy", [])
+        for k, v in d.get("oob", {}).items():
+            oob[k] = max(oob.get(k, 0), v)
         if d["failures"]:                                  # the run's own report of what failed
             print(f"{name}: schedule {schedule}: {d['failures']} failures:\n{done.stderr[-3000:]}", file=sys.stderr)
         counts.append(f"{schedule} {len(t.events)}")
     matched = merge_schedules(trackers)
     ev_path, edge_path, rows = write(args.out_dir, name, trackers[0])
+    if oob:
+        print(f"{name}: {len(oob)} places reference past the end of a device buffer (possible references to "
+              f"every buffer): " + ", ".join(f"{k} x{v}" for k, v in sorted(oob.items(), key=lambda kv: -kv[1])[:5]),
+              file=sys.stderr)
     print(f"{name}: events per schedule: {', '.join(counts)}; {matched} of the first run's matched in all")
     print(f"{name}: {len(trackers[0].events)} events, {len(rows)} dependences ({sum(r['needed'] for r in rows)} "
           f"needed, {sum(r['certainty'] == 'may' for r in rows)} may), {failures} failures, "

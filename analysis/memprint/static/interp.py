@@ -595,6 +595,37 @@ ARITH = {
     "||": lambda a, b: ((np.asarray(a) != 0) | (np.asarray(b) != 0)).astype(np.int64),
 }
 _SCALAR = lambda v: v if np.ndim(v) else int(v)  # noqa: E731
+MASK64 = 2 ** 64 - 1
+# operators whose result on unsigned 64-bit operands differs from the result on their int64 bits
+UNSIGNED_OPS = {"/": lambda a, b: a // b, "%": lambda a, b: a % b, ">>": lambda a, b: a >> b,
+                "<": lambda a, b: a < b, ">": lambda a, b: a > b, "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b}
+
+
+def _u64(v):
+    """An integer (int64 bits, or a Python int) as its unsigned 64-bit value."""
+    if np.ndim(v):
+        return np.asarray(v, dtype=np.int64).view(np.uint64)
+    return np.uint64(int(v) & MASK64)
+
+
+def _from_u64(v):
+    """An unsigned 64-bit result as int64 bits."""
+    if np.ndim(v):
+        return np.asarray(v, dtype=np.uint64).view(np.int64)
+    return _wrap64(int(v))
+
+
+def _unsigned64(c):
+    """Whether a binary operator works on unsigned 64-bit values (an operand, after the usual conversions, is
+    unsigned long or unsigned long long)."""
+    if c is None:
+        return False
+    tk = ca.ci.TypeKind
+    for k in ca.children(c)[:2]:
+        t = k.type.get_canonical()
+        if t.kind in (tk.ULONG, tk.ULONGLONG):
+            return True
+    return False
 
 ALLOC = {"malloc": (0,), "xmalloc": (0,), "calloc": (0, 1), "polybench_alloc_data": (0, 1),
          "aligned_alloc": (1,), "realloc": (1,), "valloc": (0,), "pvalloc": (0,)}
@@ -1250,7 +1281,14 @@ class Interpreter:
             return UNK
         if op in ("/", "%") and np.any(np.asarray(b) == 0):
             return UNK
-        return _SCALAR(ARITH[op](a, b))
+        if op in UNSIGNED_OPS and _unsigned64(c):                     # uint64 values are kept as int64 bits
+            ua, ub = _u64(a), _u64(b)
+            r = UNSIGNED_OPS[op](ua, ub)
+            return _from_u64(r) if op in ("/", "%", ">>") else _SCALAR(np.asarray(r).astype(np.int64))
+        r = ARITH[op](a, b)
+        if not np.ndim(r) and not -2 ** 63 <= r < 2 ** 63:               # 64-bit arithmetic wraps
+            r = _wrap64(r)
+        return _SCALAR(r)
 
     def _ptr_arith(self, op, a, b, c):
         if isinstance(a, Ptr) and isinstance(b, Ptr):

@@ -286,6 +286,11 @@ class _Batch:
                 full[slice(None) if idx is None else idx] = lst[0]
 
 
+# library calls that only produce output: not modelled, and nothing depends on them
+QUIET = ("operator<<", "printf", "puts", "putchar", "endl", "flush", "perror", "fputs", "fputc", "cout", "cerr",
+         "exit", "abort", "assert", "gettimeofday", "clock_gettime", "clock", "time", "srand")   # srand: rand() is
+                                                                    # drawn from its distribution (interp.RANDOM)
+
 class CppInterpreter(Containers, Interpreter):
     REALS = True
     SYMBOLIC = False  # -O3 counting needs every batch point (per-point load cache)
@@ -2440,10 +2445,25 @@ class CppInterpreter(Containers, Interpreter):
             return UNK
         if name in ("move", "forward") and len(args_c) == 1:
             return self.eval(args_c[0])
+        if name == "posix_memalign" and len(args_c) == 3:              # *memptr = an aligned heap block
+            p = self.eval(args_c[0])
+            self.eval(args_c[1])
+            n = _as_int(self.eval(args_c[2]))
+            obj = Obj(f"{name}#{len(self.objects)}", "heap", int(np.max(n)) if n is not UNK else 0)
+            obj.site = self.site_of(getattr(self, "_site_cursor", None))
+            obj.alloc_kind = name
+            self.objects.append(obj)
+            self.heap_events.append(("new", obj))
+            if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK:
+                self._ptr_store(Loc(p.obj, p.off, 8), Ptr(obj, 0))
+            return 0
         if name in ("malloc", "calloc", "realloc", "free"):
             return Interpreter._library(self, name, args_c)
         if name in FREE:
             return Interpreter._library(self, name, args_c)
+        if not any(w in name for w in QUIET):                          # a library call not modelled: its result
+            un = self.__dict__.setdefault("unmodelled", {})            # and effects are unknown
+            un[name] = un.get(name, 0) + 1
         for x in args_c:
             if x.kind.is_expression() and not _record(_referee(x.type)):
                 self.eval(x)

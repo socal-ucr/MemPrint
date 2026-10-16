@@ -422,6 +422,9 @@ class CudaInterpreter(CppInterpreter):
         self.facts = DataFacts(self.functions)
         self.schedule = "lockstep"  # all threads statement by statement; or one block after another, in order,
                                     # in reverse, or in a random order (rng): other legal schedules
+        self.oob = {}  # source location (object) -> references past the end of a device buffer
+        self.racy_seen = set()  # kernels with a launch that read and wrote one unit (another order may differ)
+        self.racy = None  # in a schedule other than lockstep: the kernels to reorder (None: all), as racy_seen
         self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
         self._stmt_marks = []  # per statement being run in a kernel block: (effects, batch weights) at its start
 
@@ -438,6 +441,10 @@ class CudaInterpreter(CppInterpreter):
         if self.events and getattr(self.events[-1], "open", True):
             ev = self.events[-1]
             ev.open = False
+            if ev.kind == "kernel" and any(((b & (R | RM)) != 0).any() and ((b & (W | WM)) != 0).any() and
+                                           (((b & (R | RM)) != 0) & ((b & (W | WM)) != 0)).any()
+                                           for b in ev.bits.values()):
+                self.racy_seen.add(ev.name)
             if self.tracker is not None:
                 self.tracker.add(ev)
             ev.summary = {obj.name: int(np.count_nonzero(b)) for obj, b in ev.bits.items()}
@@ -542,6 +549,18 @@ class CudaInterpreter(CppInterpreter):
             may = (bits & (RD | WD)) | (WM if write else RM)
             ev.mark_all(obj, may)
             return
+        if obj.kind in ("device", "managed", "device-global") and obj.nbytes > 0:
+            offs = np.asarray(off, dtype=np.int64)
+            out = (offs < 0) | (offs + (loc.size or 8) > obj.nbytes)
+            if out.any():                                              # past the end of its buffer: on the GPU
+                site = f"{_loc_text(cur)} ({obj.name})" if cur is not None else obj.name   # it reaches whatever
+                self.oob[site] = self.oob.get(site, 0) + int(np.count_nonzero(out))    # lies there: any buffer
+                ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
+                ev.note = (ev.note + "; " if ev.note else "") + "out of bounds" if "out of bounds" not in ev.note \
+                    else ev.note
+                if out.all():
+                    return
+                off = offs[~out] if offs.ndim else off
         ev.mark(obj, off, loc.size or 8, bits)
 
     def lvalue(self, c):
@@ -1183,7 +1202,9 @@ class CudaInterpreter(CppInterpreter):
         ev.threads = bsz * nblocks
         if bsz <= 0 or nblocks <= 0:
             return
-        per = max(1, THREADS_PER_BATCH // bsz) if self.schedule == "lockstep" else 1
+        reorder = self.schedule != "lockstep" and (self.racy is None or fdef.spelling in self.racy)
+        per = max(1, THREADS_PER_BATCH // bsz) if not reorder else 1   # a kernel no launch of which read and
+                                                                       # wrote one unit gives the same in any order
         saved = (self.frames, self.w, self.loop_flags, self.kernel, self.shared, self.dyn_shared)
         w0 = float(np.ravel(self.w)[0])
         globals_frame = self.frames[0]
@@ -1196,7 +1217,9 @@ class CudaInterpreter(CppInterpreter):
 
         try:
             starts = list(range(0, nblocks, per))
-            if self.schedule == "reverse":
+            if not reorder:
+                pass
+            elif self.schedule == "reverse":
                 starts.reverse()
             elif self.schedule == "random":
                 starts = [starts[i] for i in self.rng.permutation(len(starts))]
@@ -1204,7 +1227,7 @@ class CudaInterpreter(CppInterpreter):
             # lockstep, a block's warps also run one after another (in the same order as the blocks) when the
             # kernel has no barrier and no shared memory, which is then a legal order too
             warps = list(range(0, bsz, WARP_SIZE))
-            if self.schedule != "lockstep" and len(warps) > 1 and not self._block_sync(fdef):
+            if reorder and len(warps) > 1 and not self._block_sync(fdef):
                 if self.schedule == "reverse":
                     warps.reverse()
                 batches = []
@@ -1433,7 +1456,8 @@ def _walk_nodes(node):
         stack.extend(n.get_children())
 
 
-def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep_access=False, schedule="lockstep"):
+def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep_access=False, schedule="lockstep",
+        keep_touch=False, racy=None):
     """Run a CUDA program from main; returns the interpreter, with its events (Event) and their dependences
     (interp.tracker, a kdeps.Tracker at `unit` bytes)."""
     from . import interp
@@ -1444,9 +1468,12 @@ def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep
     def make(tu_, seed_):
         it = CudaInterpreter(tu_, seed_, stubs, opt, host_events)
         it.schedule = schedule
+        it.racy = racy
         it.tracker = Tracker(unit)
         if keep_access:
             it.tracker.keep_access()
+        if keep_touch:
+            it.tracker.keep_touch()
         made.append(it)
         return it
 
@@ -1458,7 +1485,7 @@ def run(tu, argv=None, seed=0, stubs=None, opt=3, unit=4, host_events=True, keep
 
 
 def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_events=True, keep_access=False,
-            schedule="lockstep"):
+            schedule="lockstep", keep_touch=False, racy=None):
     """Parse a CUDA source and run it: (interpreter, parse errors, seconds)."""
     import time
 
@@ -1466,5 +1493,5 @@ def analyze(source, defines=(), includes=(), argv=None, seed=0, unit=4, host_eve
     tu = ca.parse(source, defines, includes, cuda=True)
     errors = [str(d) for d in tu.diagnostics if d.severity >= 3]
     it = run(tu, argv=argv, seed=seed, unit=unit, host_events=host_events, keep_access=keep_access,
-             schedule=schedule)
+             schedule=schedule, keep_touch=keep_touch, racy=racy)
     return it, errors, time.time() - start

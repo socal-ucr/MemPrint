@@ -26,6 +26,7 @@ edges a scheduler must keep).
 
 import argparse
 import csv
+import json
 import os
 import sys
 import time
@@ -67,6 +68,12 @@ class Tracker:
         self.edges = {}  # (src, dst, kind, object name) -> [must units, may units, dd units]
         self.access = None  # a list to keep each event's units of device allocations in (keep_access)
         self.schedule_edges = set()  # edges keys whose presence or certainty depends on the schedule (merge)
+        self.touch = None  # event index -> {object name: (read, write) packed unit bits} (keep_touch, for merging)
+        self.loop = None  # the rounds that differ between schedules, as a template (merge_schedules)
+
+    def keep_touch(self):
+        """Also keep which units each event read and wrote, certainly or possibly (merge_schedules needs them)."""
+        self.touch = {}
 
     def keep_access(self):
         """Also keep, per event and device allocation, the runs of units it read (1) and wrote (2), in
@@ -138,6 +145,11 @@ class Tracker:
             if len(bits) < len(st.last):
                 bits = np.concatenate([bits, np.zeros(len(st.last) - len(bits), dtype=np.uint8)])
             self._fold(ev, obj, st, bits)
+            if self.touch is not None:
+                r_any, w_any = (bits & (R | RM)) != 0, (bits & (W | WM)) != 0
+                if r_any.any() or w_any.any():
+                    self.touch.setdefault(ev.index, {})[self.objects[obj]["name"]] = \
+                        (np.packbits(r_any), np.packbits(w_any), len(bits))
             if self.access is not None and getattr(obj, "alloc_index", None) is not None:
                 rw = ((bits & (R | RM)) != 0).astype(np.uint8) | (((bits & (W | WM)) != 0).astype(np.uint8) << 1)
                 cuts = np.flatnonzero(np.diff(rw)) + 1
@@ -277,7 +289,187 @@ def merge_schedules(trackers):
             if key not in base.edges:
                 base.edges[key] = [0, val[0] + val[1], val[2]]
                 base.schedule_edges.add(key)
+    if all(t.touch is not None for t in trackers):
+        _union_dependences(base, trackers, maps)
     return len(everywhere)
+
+
+# ---------------------------------------------------------------- what other schedules could do
+
+def _unpack(entry):
+    r, w, n = entry
+    return np.unpackbits(r)[:n].astype(bool), np.unpackbits(w)[:n].astype(bool)
+
+
+def _union_touch(entries):
+    """The union of several events' (read, write) unit sets per object name."""
+    out = {}
+    for touch in entries:
+        for name, entry in (touch or {}).items():
+            r, w = _unpack(entry)
+            if name in out:
+                r0, w0 = out[name]
+                n = max(len(r0), len(r))
+                out[name] = (np.pad(r0, (0, n - len(r0))) | np.pad(r, (0, n - len(r))),
+                             np.pad(w0, (0, n - len(w0))) | np.pad(w, (0, n - len(w))))
+            else:
+                out[name] = (r, w)
+    return out
+
+
+def _conflicts(a, b):
+    """[(kind, object, units)] for an earlier event touching a and a later one touching b (unit sets)."""
+    out = []
+    for name in a.keys() & b.keys():
+        (ra, wa), (rb, wb) = a[name], b[name]
+        n = min(len(ra), len(rb))
+        for kind, x, y in (("RAW", wa, rb), ("WAW", wa, wb), ("WAR", ra, wb)):
+            k = int(np.count_nonzero(x[:n] & y[:n]))
+            if k:
+                out.append((kind, name, k))
+    return out
+
+
+def _find_loop(sig, a, b):
+    """(start, end, period) of the repeating run of signatures that contains [a, b) (b > a), or None."""
+    n = len(sig)
+    for p in range(1, b - a + 1):
+        lo, hi = a, b
+        while lo - 1 >= 0 and lo - 1 + p < n and sig[lo - 1] == sig[lo - 1 + p]:
+            lo -= 1
+        while hi < n and hi - p >= 0 and sig[hi] == sig[hi - p]:
+            hi += 1
+        if all(sig[i] == sig[i + p] for i in range(lo, hi - p)) and (hi - lo) % p == 0 and hi - lo >= 2 * p:
+            return lo, hi, p
+    return None
+
+
+def _union_dependences(base, trackers, maps):
+    """Possible dependences that other legal schedules than the ones run could have (merge_schedules).
+
+    Where the runs issue different events (a loop the host repeats until the device says so ran a different
+    number of rounds), the rounds are folded into a template: per position in a round (phase), the units any
+    run touched in any round; and every conflict, between two phases (in one round, or from a round to any
+    later one), between an event before the loop and a phase, a phase and an event after the loop, and an
+    event before and one after the loop, is a possible dependence for every number of rounds (base.loop,
+    written as NAME_loop.json; kdeps_score instantiates it for the traced run). Where the runs issue the same
+    events but an event touched different units in different runs, every conflict between it and another
+    event, on the union of what each touched, is a possible dependence."""
+    sigs = [[_signature(e) for e in t.events] for t in trackers]
+    longest = max(range(len(trackers)), key=lambda k: len(trackers[k].events))
+    sl, nl = sigs[longest], len(sigs[longest])
+    head = min(next((i for i in range(min(nl, len(sg))) if sg[i] != sl[i]), min(nl, len(sg))) for sg in sigs)
+    tail = min(next((i for i in range(min(nl, len(sg)) - head) if sg[-1 - i] != sl[-1 - i]),
+                    min(nl, len(sg)) - head) for sg in sigs)
+    nb = len(base.events)
+
+    def add(key, units):
+        if key[0] == key[1]:
+            return
+        e = base.edges.get(key)
+        if e is None:
+            base.edges[key] = [0, units, 0]
+            base.schedule_edges.add(key)
+
+    loop = None
+    if any(len(sg) != nl for sg in sigs) and nl - tail > head:
+        loop = _find_loop(sl, head, nl - tail)
+        if loop is not None:
+            a, b, p = loop
+            post = nl - b
+            for sg in sigs:                                            # every run: prefix, rounds, suffix fit
+                end = len(sg) - post
+                if (end - a) % p or end < a or sg[:a] != sl[:a] or sg[end:] != sl[b:] or \
+                        any(sg[i] != sl[a + (i - a) % p] for i in range(a, end)):
+                    loop = None
+                    break
+    if loop is not None:
+        a, b, p = loop
+        post = nl - b
+        pre_t = [_union_touch([t.touch.get(i) for t in trackers]) for i in range(a)]
+        post_t = [_union_touch([t.touch.get(len(t.events) - q) for t in trackers]) for q in range(1, post + 1)]
+        phase_t = [_union_touch([t.touch.get(i) for t in trackers for i in range(a + ph, len(t.events) - post, p)])
+                   for ph in range(p)]
+        rows = []
+        for ps in range(p):
+            for pd in range(p):
+                for delta in (["0", "+"] if ps < pd else ["+"]):
+                    rows += [(("p", ps), ("p", pd), delta, k, o, u) for k, o, u in _conflicts(phase_t[ps], phase_t[pd])]
+        for i in range(a):
+            for pd in range(p):
+                rows += [(("e", i), ("p", pd), "", k, o, u) for k, o, u in _conflicts(pre_t[i], phase_t[pd])]
+            for q in range(1, post + 1):
+                rows += [(("e", i), ("q", q), "", k, o, u) for k, o, u in _conflicts(pre_t[i], post_t[q - 1])]
+        for ps in range(p):
+            for q in range(1, post + 1):
+                rows += [(("p", ps), ("q", q), "", k, o, u) for k, o, u in _conflicts(phase_t[ps], post_t[q - 1])]
+        base.loop = {"start": a, "period": p, "post": post,
+                     "phases": [{"kind": base.events[a + ph]["kind"], "name": base.events[a + ph]["name"]}
+                                for ph in range(p)],
+                     "rows": [{"src": f"{s_[0]}{s_[1]}", "dst": f"{d_[0]}{d_[1]}", "delta": dl, "kind": k,
+                               "object": o, "units": u} for s_, d_, dl, k, o, u in rows]}
+        for key, units in instantiate_loop(base.loop, nb).items():    # the template on the first run's rounds
+            add(key, units)
+        for e in base.events[a: nb - post]:
+            e["schedule_dependent"] = 1
+    # events every run issues, that touched different units in different runs
+    matched = [i for i in range(nb) if all(i in m.values() for m in maps)]
+    inv = [{v: k for k, v in m.items()} for m in maps]
+    in_loop = set(range(loop[0], nb - (nl - loop[1]))) if loop is not None else set()
+    union, unstable = {}, set()
+    for i in matched:
+        if i in in_loop:
+            continue
+        own = [_union_touch([base.touch.get(i)])] + \
+            [_union_touch([t.touch.get(iv[i])]) for t, iv in zip(trackers[1:], inv)]
+        union[i] = _union_touch([{n: (np.packbits(r), np.packbits(w), len(r)) for n, (r, w) in o.items()}
+                                 for o in own])
+        if any(o.keys() != own[0].keys() or any(not (np.array_equal(o[n][0], own[0][n][0]) and
+                                                     np.array_equal(o[n][1], own[0][n][1])) for n in o)
+               for o in own[1:]):
+            unstable.add(i)
+    for i in sorted(union):
+        for j in sorted(union):
+            if i < j and (i in unstable or j in unstable):
+                for k, o, u in _conflicts(union[i], union[j]):
+                    add((i, j, k, o), u)
+    for i in unstable:
+        base.events[i]["schedule_dependent"] = 1
+
+
+def instantiate_loop(loop, n_events):
+    """A loop template (Tracker.loop) as dependences {(src, dst, kind, object): units} between the events of a
+    run with n_events events, or {} if they do not fit it."""
+    a, p, post = loop["start"], loop["period"], loop["post"]
+    end = n_events - post
+    if end < a or (end - a) % p:
+        return {}
+    rounds = (end - a) // p
+
+    def where(tag, r=None):
+        k, x = tag[0], int(tag[1:])
+        return x if k == "e" else n_events - x if k == "q" else a + r * p + x
+
+    out = {}
+    for row in loop["rows"]:
+        s_, d_ = row["src"], row["dst"]
+        pairs = []
+        if s_[0] == "p" and d_[0] == "p":
+            for r in range(rounds):
+                if row["delta"] == "0":
+                    pairs.append((where(s_, r), where(d_, r)))
+                else:
+                    pairs += [(where(s_, r), where(d_, r2)) for r2 in range(r + 1, rounds)]
+        elif s_[0] == "p":
+            pairs = [(where(s_, r), where(d_)) for r in range(rounds)]
+        elif d_[0] == "p":
+            pairs = [(where(s_), where(d_, r)) for r in range(rounds)]
+        else:
+            pairs = [(where(s_), where(d_))]
+        for x, y in pairs:
+            key = (x, y, row["kind"], row["object"])
+            out[key] = max(out.get(key, 0), row["units"])
+    return out
 
 
 def reduce_edges(pairs):
@@ -320,6 +512,9 @@ def write(out_dir, name, tracker):
         wr = csv.DictWriter(f, ["name", "kind", "bytes", "site", "alloc"])
         wr.writeheader()
         wr.writerows(tracker.objects.values())
+    if tracker.loop is not None:
+        with open(os.path.join(out_dir, f"{name}_loop.json"), "w") as f:
+            json.dump(tracker.loop, f)
     if tracker.access is not None:
         with open(os.path.join(out_dir, f"{name}_access.csv"), "w", newline="") as f:
             wr = csv.writer(f)
@@ -365,14 +560,36 @@ def main(argv=None):
     os.makedirs(args.out_dir, exist_ok=True)
     start = time.time()
     runs = []
+    several = len(args.schedules.split(",")) > 1
+    racy = None                                    # after a lockstep run: the kernels other orders reorder
     for schedule in args.schedules.split(","):
         it, errors, _ = analyze(source, args.defines, args.includes, argv=args.argv, seed=args.seed,
                                 unit=args.unit, host_events=not args.no_host, keep_access=args.access,
-                                schedule=schedule)
+                                schedule=schedule, keep_touch=several, racy=racy)
+        if schedule == "lockstep":
+            racy = set(it.racy_seen)
         runs.append(it)
     it = runs[0]
     for e in errors[:20]:
         print("parse error:", e, file=sys.stderr)
+    unmodelled = {}
+    for r in runs:
+        for k, v in getattr(r, "unmodelled", {}).items():
+            unmodelled[k] = max(unmodelled.get(k, 0), v)
+    if errors or unmodelled:
+        print(f"{name}: WARNING the host code was not fully understood ({len(errors)} parse errors; library "
+              f"calls not modelled: " + (", ".join(f"{k} x{v}" for k, v in sorted(unmodelled.items(),
+                                                                                key=lambda kv: -kv[1])[:8]) or "none")
+              + "). Values the program computes from them are unknown or wrong, and the operations it issues may "
+              "be too; the hybrid interpreter (memprint.static.hybrid) runs the host code natively.", file=sys.stderr)
+    oob = {}
+    for r in runs:
+        for k, v in r.oob.items():
+            oob[k] = max(oob.get(k, 0), v)
+    if oob:
+        print(f"{len(oob)} places reference past the end of a device buffer (taken as possible references to every "
+              f"buffer): " + ", ".join(f"{k} x{v}" for k, v in sorted(oob.items(), key=lambda kv: -kv[1])[:5]),
+              file=sys.stderr)
     if len(runs) > 1:
         matched = merge_schedules([r.tracker for r in runs])
         counts = ", ".join(f"{s} {len(r.tracker.events)}" for s, r in zip(args.schedules.split(","), runs))
