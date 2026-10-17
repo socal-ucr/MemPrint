@@ -1,6 +1,6 @@
 program,aligned,truth,must,may,must_precision,recall,must_recall,units_error,needed_truth,needed_must,needed_may,needed_must_precision,needed_recall,needed_must_recall,needed_units_error
 bfs,1,359,359,0,1.0,1.0,1.0,0.0,50,50,0,1.0,1.0,1.0,0.0
-cc,0,653,32,1058,1.0,1.0,0.049,0.146,73,12,64,1.0,0.9589,0.1644,0.0335
+cc,0,644,32,1058,1.0,1.0,0.0497,0.1838,73,12,64,1.0,0.9589,0.1644,0.0296
 chain,1,5,5,0,1.0,1.0,1.0,0.0,5,5,0,1.0,1.0,1.0,0.0
 fileidx,1,6,6,0,1.0,1.0,1.0,0.0,5,5,0,1.0,1.0,1.0,0.0
 histogram,1,14,14,0,1.0,1.0,1.0,0.0,12,12,0,1.0,1.0,1.0,0.0

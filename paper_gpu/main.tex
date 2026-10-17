@@ -504,6 +504,9 @@ that the host issues are made in every order as well. For each position in a rou
 that every round of every run wrote in this way, and a template dependence through a unit that some operation
 between its two ends writes in this way is dropped; such a unit's dependence is on that operation instead. Where
 only the operations between two consecutive rounds are in the way, the dependence is kept for the next round only.
+The same rule applies to the union of an operation that every run issues but that touched different units in
+different runs: no dependence is added through a unit that an operation between the two, in every run, wrote in
+this way.
 Conversely, a dependence of an operation in the rounds through a buffer whose units that position touched
 differently in different rounds or runs is reported as possible, not certain, even when every run had it: another
 order could touch other units.
@@ -702,14 +705,19 @@ is exact: every dependence certain, every unit count equal to the GPU's, nothing
 two kernels read one row past the end of their input arrays (\code{srad\_kernel.cu} lines 45, 46, 55 and 200), which
 on the GPU reaches the next buffer; the interpreter reports the out-of-bounds reads and makes them possible accesses
 to every buffer. In GraphBIG's \code{bfs-topo-atomic}, \code{bfs-data-thread-centric} and \code{connected-comp},
-threads lower values in place with atomics, so the number of rounds or the units touched depend on thread order,
-and the over-approximation of \secref{sec:schedules} adds every dependence another order could produce.
+threads lower values in place or claim worklist slots with atomics, so the number of rounds or the units touched
+depend on thread order, and the over-approximation of \secref{sec:schedules} adds every dependence another order
+could produce. In \code{bfs-topo-atomic}, every round reads every level and lowers some with \code{atomicMin}, and
+which round last lowers a level depends on the order, so a dependence from one round to any later one through the
+levels can occur and remains possible. In \code{bfs-data-thread-centric}, the remaining ones pass through a kernel
+launched with as many threads as the previous round pushed onto the worklist, a number read back from the GPU, so
+none of its writes is made in every order.
 Without the writes that every order makes, the over-approximation reported 1{,}443 such dependences, 1{,}253 of
-them in \code{connected-comp}; with them, it reports \numBenchHyPossNo{}. Because the number of rounds of
+them in \code{connected-comp} and 66 in \code{bfs-data-thread-centric}; with them, it reports \numBenchHyPossNo{}. Because the number of rounds of
 \code{connected-comp} changes from run to run, we traced it eight more times: the runs issued 46 to 70
 operations, more than any of the interpreter's orders, and against every one of them the hybrid interpreter missed
 no dependence and reported no certain dependence that did not occur, with 40 to 103 possible dependences that did
-not occur. The same holds for eight more runs of \code{bfs-topo-atomic}.
+not occur. The same holds for eight more runs each of \code{bfs-topo-atomic} and \code{bfs-data-thread-centric}.
 
 The whole-program interpreter is exact on the \numBenchFuNoFN{} programs whose host code it can run: six of the
 Rodinia programs and all of PolyBench. It misses \numBenchFuFN{} dependences, all in the 11 programs whose host code

@@ -506,10 +506,13 @@ def _union_dependences(base, trackers, maps):
                                                      np.array_equal(o[n][1], own[0][n][1])) for n in o)
                for o in own[1:]):
             unstable.add(i)
+    kills = {i: _kills([base.touch.get(i)] + [t.touch.get(iv[i]) for t, iv in zip(trackers[1:], inv)])
+             for i in union}                                       # what each wrote in every run, in any order
     for i in sorted(union):
         for j in sorted(union):
-            if i < j and (i in unstable or j in unstable):
-                for k, o, u in _conflicts(union[i], union[j]):
+            if i < j and (i in unstable or j in unstable):          # not through a unit an event between
+                between = [kills[k] for k in range(i + 1, j) if k in kills and kills[k]]   # overwrote
+                for k, o, u in _conflicts(union[i], union[j], between):
                     add((i, j, k, o), u)
     for i in unstable:
         base.events[i]["schedule_dependent"] = 1
