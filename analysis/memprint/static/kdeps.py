@@ -33,7 +33,7 @@ import time
 
 import numpy as np
 
-R, W, RM, WM, RD, WD = 1, 2, 4, 8, 16, 32
+R, W, RM, WM, RD, WD, WX = 1, 2, 4, 8, 16, 32, 64
 
 
 class _State:
@@ -68,11 +68,12 @@ class Tracker:
         self.edges = {}  # (src, dst, kind, object name) -> [must units, may units, dd units]
         self.access = None  # a list to keep each event's units of device allocations in (keep_access)
         self.schedule_edges = set()  # edges keys whose presence or certainty depends on the schedule (merge)
-        self.touch = None  # event index -> {object name: (read, write) packed unit bits} (keep_touch, for merging)
+        self.touch = None  # event index -> {object name: (read, write, n, kill) packed unit bits} (keep_touch)
         self.loop = None  # the rounds that differ between schedules, as a template (merge_schedules)
 
     def keep_touch(self):
-        """Also keep which units each event read and wrote, certainly or possibly (merge_schedules needs them)."""
+        """Also keep which units each event read and wrote, certainly or possibly, and which it wrote in any
+        legal schedule: certainly, at an address and under conditions that read no memory (merge_schedules)."""
         self.touch = {}
 
     def keep_access(self):
@@ -147,9 +148,10 @@ class Tracker:
             self._fold(ev, obj, st, bits)
             if self.touch is not None:
                 r_any, w_any = (bits & (R | RM)) != 0, (bits & (W | WM)) != 0
+                kill = (bits & (W | WX)) == (W | WX)
                 if r_any.any() or w_any.any():
                     self.touch.setdefault(ev.index, {})[self.objects[obj]["name"]] = \
-                        (np.packbits(r_any), np.packbits(w_any), len(bits))
+                        (np.packbits(r_any), np.packbits(w_any), len(bits), np.packbits(kill))
             if self.access is not None and getattr(obj, "alloc_index", None) is not None:
                 rw = ((bits & (R | RM)) != 0).astype(np.uint8) | (((bits & (W | WM)) != 0).astype(np.uint8) << 1)
                 cuts = np.flatnonzero(np.diff(rw)) + 1
@@ -297,8 +299,40 @@ def merge_schedules(trackers):
 # ---------------------------------------------------------------- what other schedules could do
 
 def _unpack(entry):
-    r, w, n = entry
+    r, w, n = entry[:3]
     return np.unpackbits(r)[:n].astype(bool), np.unpackbits(w)[:n].astype(bool)
+
+
+def _kills(entries):
+    """Per object name, the units every one of several events (rounds of a loop, in every run) wrote in any
+    legal schedule (Tracker.keep_touch): a dependence through such a unit cannot reach past such an event."""
+    out = None
+    for touch in entries:
+        got = {}
+        for name, entry in (touch or {}).items():
+            if len(entry) > 3:
+                got[name] = np.unpackbits(entry[3])[:entry[2]].astype(bool)
+        if out is None:
+            out = got
+            continue
+        for name in list(out):
+            if name not in got:
+                del out[name]
+                continue
+            n = min(len(out[name]), len(got[name]))
+            out[name] = out[name][:n] & got[name][:n]
+    return out or {}
+
+
+def _without(units, kill_sets):
+    """A unit set minus the units of every kill set (_kills) that names the same object."""
+    name, x = units
+    for k in kill_sets:
+        if name in k:
+            n = min(len(x), len(k[name]))
+            x = x.copy()
+            x[:n] &= ~k[name][:n]
+    return x
 
 
 def _union_touch(entries):
@@ -317,14 +351,18 @@ def _union_touch(entries):
     return out
 
 
-def _conflicts(a, b):
-    """[(kind, object, units)] for an earlier event touching a and a later one touching b (unit sets)."""
+def _conflicts(a, b, between=()):
+    """[(kind, object, units)] for an earlier event touching a and a later one touching b (unit sets), with no
+    unit some event in between wrote in any legal schedule (between: _kills of those events)."""
     out = []
     for name in a.keys() & b.keys():
         (ra, wa), (rb, wb) = a[name], b[name]
         n = min(len(ra), len(rb))
         for kind, x, y in (("RAW", wa, rb), ("WAW", wa, wb), ("WAR", ra, wb)):
-            k = int(np.count_nonzero(x[:n] & y[:n]))
+            z = x[:n] & y[:n]
+            if between and z.any():
+                z = _without((name, z), between)
+            k = int(np.count_nonzero(z))
             if k:
                 out.append((kind, name, k))
     return out
@@ -390,19 +428,39 @@ def _union_dependences(base, trackers, maps):
         post_t = [_union_touch([t.touch.get(len(t.events) - q) for t in trackers]) for q in range(1, post + 1)]
         phase_t = [_union_touch([t.touch.get(i) for t in trackers for i in range(a + ph, len(t.events) - post, p)])
                    for ph in range(p)]
+        kill = [_kills([t.touch.get(i) for t in trackers for i in range(a + ph, len(t.events) - post, p)])
+                for ph in range(p)]                                    # what each phase overwrites every round
         rows = []
+
+        def tiers(src, dst, near, far, labels):
+            """Rows for the conflicts not killed by the events between (near: the nearest pair of rounds,
+            far: any farther), labelled labels[0] when farther rounds have them too, else labels[1]."""
+            out = []
+            nears = {(k, o): u for k, o, u in _conflicts(src, dst, near)}
+            fars = {(k, o): u for k, o, u in _conflicts(src, dst, far)}
+            for (k, o), u in nears.items():
+                out.append((labels[0] if (k, o) in fars else labels[1], k, o, u))
+            return out
+
         for ps in range(p):
             for pd in range(p):
-                for delta in (["0", "+"] if ps < pd else ["+"]):
-                    rows += [(("p", ps), ("p", pd), delta, k, o, u) for k, o, u in _conflicts(phase_t[ps], phase_t[pd])]
+                if ps < pd:                                            # within a round
+                    rows += [(("p", ps), ("p", pd), "0", k, o, u)
+                             for k, o, u in _conflicts(phase_t[ps], phase_t[pd], kill[ps + 1: pd])]
+                rows += [(("p", ps), ("p", pd), dl, k, o, u)          # to the next round ("1") or any later ("+")
+                         for dl, k, o, u in tiers(phase_t[ps], phase_t[pd], kill[ps + 1:] + kill[:pd], kill,
+                                                  ("+", "1"))]
         for i in range(a):
-            for pd in range(p):
-                rows += [(("e", i), ("p", pd), "", k, o, u) for k, o, u in _conflicts(pre_t[i], phase_t[pd])]
-            for q in range(1, post + 1):
-                rows += [(("e", i), ("q", q), "", k, o, u) for k, o, u in _conflicts(pre_t[i], post_t[q - 1])]
+            for pd in range(p):                                        # to every round ("") or the first ("first")
+                rows += [(("e", i), ("p", pd), dl, k, o, u)
+                         for dl, k, o, u in tiers(pre_t[i], phase_t[pd], kill[:pd], kill, ("", "first"))]
+            for q in range(1, post + 1):                               # past every round ("") or none ("none")
+                rows += [(("e", i), ("q", q), dl, k, o, u)
+                         for dl, k, o, u in tiers(pre_t[i], post_t[q - 1], (), kill, ("", "none"))]
         for ps in range(p):
-            for q in range(1, post + 1):
-                rows += [(("p", ps), ("q", q), "", k, o, u) for k, o, u in _conflicts(phase_t[ps], post_t[q - 1])]
+            for q in range(1, post + 1):                               # from every round ("") or the last ("last")
+                rows += [(("p", ps), ("q", q), dl, k, o, u)
+                         for dl, k, o, u in tiers(phase_t[ps], post_t[q - 1], kill[ps + 1:], kill, ("", "last"))]
         base.loop = {"start": a, "period": p, "post": post,
                      "phases": [{"kind": base.events[a + ph]["kind"], "name": base.events[a + ph]["name"]}
                                 for ph in range(p)],
@@ -410,6 +468,26 @@ def _union_dependences(base, trackers, maps):
                                "object": o, "units": u} for s_, d_, dl, k, o, u in rows]}
         for key, units in instantiate_loop(base.loop, nb).items():    # the template on the first run's rounds
             add(key, units)
+        # a dependence of a round's event through an object whose units that phase touched differently in
+        # different rounds or runs is not certain: another order can touch other units
+        def same(entries):
+            entries = [e for e in entries]
+            return all((x is None) == (entries[0] is None) and
+                       (x is None or all(np.array_equal(x[j], entries[0][j]) for j in range(3)))
+                       for x in entries)
+        varies = set()
+        for ph in range(p):
+            insts = [t.touch.get(i) or {} for t in trackers for i in range(a + ph, len(t.events) - post, p)]
+            for o in set().union(*[set(x) for x in insts]):
+                if not same([x.get(o) for x in insts]):
+                    varies.add((ph, o))
+        phase_of = lambda i: (i - a) % p if a <= i < nb - post else None  # noqa: E731
+        for key, val in base.edges.items():
+            s_, d_, _, o = key
+            if val[0] and any(phase_of(i) is not None and (phase_of(i), o) in varies for i in (s_, d_)):
+                val[1] += val[0]
+                val[0] = 0
+                base.schedule_edges.add(key)
         for e in base.events[a: nb - post]:
             e["schedule_dependent"] = 1
     # events every run issues, that touched different units in different runs
@@ -454,17 +532,20 @@ def instantiate_loop(loop, n_events):
     for row in loop["rows"]:
         s_, d_ = row["src"], row["dst"]
         pairs = []
+        dl = row["delta"]                                              # see _union_dependences
         if s_[0] == "p" and d_[0] == "p":
             for r in range(rounds):
-                if row["delta"] == "0":
+                if dl == "0":
                     pairs.append((where(s_, r), where(d_, r)))
+                elif dl == "1":
+                    pairs += [(where(s_, r), where(d_, r + 1))] if r + 1 < rounds else []
                 else:
                     pairs += [(where(s_, r), where(d_, r2)) for r2 in range(r + 1, rounds)]
         elif s_[0] == "p":
-            pairs = [(where(s_, r), where(d_)) for r in range(rounds)]
+            pairs = [(where(s_, r), where(d_)) for r in (range(rounds) if dl != "last" else range(rounds)[-1:])]
         elif d_[0] == "p":
-            pairs = [(where(s_), where(d_, r)) for r in range(rounds)]
-        else:
+            pairs = [(where(s_), where(d_, r)) for r in (range(rounds) if dl != "first" else range(rounds)[:1])]
+        elif dl != "none" or rounds == 0:
             pairs = [(where(s_), where(d_))]
         for x, y in pairs:
             key = (x, y, row["kind"], row["object"])

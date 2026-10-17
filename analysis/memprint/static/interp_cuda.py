@@ -70,6 +70,7 @@ TRACKED = {"device", "managed", "pinned", "device-global", "heap", "global", "st
 DEVICE_KINDS = {"device", "managed", "device-global"}
 
 R, W, RM, WM, RD, WD = 1, 2, 4, 8, 16, 32
+WX = 64  # with W: a write every legal schedule makes (its address and conditions read no memory; OrderFacts)
 RET_KEY = ("__cuda", "returned")  # per point: has the thread returned from the current function
 BLOCK_KEY = ("__cuda", "block")  # per point: its block's index within the threads being run
 
@@ -81,7 +82,7 @@ class Event:
         self.index, self.kind, self.name, self.site = index, kind, name, site
         self.grid = self.block = None
         self.threads = 0
-        self.bits = {}  # Obj -> uint8 per byte (R, W, RM, WM, RD, WD)
+        self.bits = {}  # Obj -> uint8 per byte (R, W, RM, WM, RD, WD, WX)
         self.all = {}  # Obj -> bits for every byte (a reference whose address is unknown)
         self.unknown = 0  # bits of references to an unknown object
         self.data_control = False  # issued under host control that depends on memory contents
@@ -213,10 +214,14 @@ class DataFacts:
     MAKES_DERIVED = {"cudaMemcpy", "cudaMemcpyAsync", "cudaMemcpyFromSymbol", "memcpy", "memmove", "fread",
                      "read"}  # &x passed as their destination makes x data-derived
 
-    def __init__(self, functions):
+    def __init__(self, functions, launches=True, jumps=False):
+        self.launches = launches  # a launch under guarded host code guards the kernel
+        self.jumps = jumps  # a return, break or continue under a guarded condition guards what follows it
+        self._jumped = False
         self.functions = {n: f for n, f in functions.items() if not _system(f)}
         self.derived, self.ret, self.guarded_fn = set(), set(), set()
         self.sites, self.calls = {}, {}
+        self.config_derived = set()  # kernels with a launch whose grid or block size is data-derived
         self._fn = None
         for _ in range(16):
             before = (len(self.derived), len(self.ret), len(self.guarded_fn))
@@ -249,6 +254,15 @@ class DataFacts:
     def _walk(self, n, g):
         k = n.kind
         kids = ca.children(n)
+        if self.jumps:
+            if k in (K.RETURN_STMT, K.BREAK_STMT, K.CONTINUE_STMT, K.GOTO_STMT) and g:
+                self._jumped = True
+            if k == K.COMPOUND_STMT:                                   # after a guarded jump, the rest is guarded
+                outer, self._jumped = self._jumped, False
+                for kid in kids:
+                    self._walk(kid, g or self._jumped)
+                self._jumped = outer or self._jumped
+                return
         if k == K.IF_STMT:
             gg = g or self.value(kids[0])
             self._walk(kids[0], g)
@@ -307,6 +321,9 @@ class DataFacts:
         args = list(n.get_arguments())
         if _launch_config(n) is not None or name in COPIES or name in SETS or name in SYMBOL_COPIES:
             self.calls[_site_key(n)] = g
+        cfg = _launch_config(n)
+        if cfg is not None and any(self.value(a) for a in cfg.get_arguments()):
+            self.config_derived.add(name)
         if name in self.MAKES_DERIVED and args:
             t = ca.strip(args[0])
             while t.kind in (K.CSTYLE_CAST_EXPR, K.CXX_STATIC_CAST_EXPR, K.CXX_REINTERPRET_CAST_EXPR) and ca.children(t):
@@ -321,7 +338,7 @@ class DataFacts:
             for p, a in zip(params, args):
                 if self.value(a):
                     self._set(p)
-            if g:
+            if g and (self.launches or _launch_config(n) is None):
                 self.guarded_fn.add(name)
 
     # ------------------------------------------------------------ expressions
@@ -397,6 +414,15 @@ class DataFacts:
         return any(self.value(x) for x in kids if x.kind.is_expression())
 
 
+class OrderFacts(DataFacts):
+    """Which references a launch makes in every legal schedule, given its arguments: DataFacts within the
+    kernel, where whether the host issues the launch at all does not count (the launch's own event says so),
+    and a guarded return, break or continue guards what follows it."""
+
+    def __init__(self, functions):
+        super().__init__(functions, launches=False, jumps=True)
+
+
 class _Diverge(Exception):
     """A pointer loaded from memory names a different object for different threads: the statement being run,
     and the rest of its block, run once per group of threads that share a target (CudaInterpreter._stmt)."""
@@ -420,6 +446,7 @@ class CudaInterpreter(CppInterpreter):
         self.tracker = None  # kdeps.Tracker: events are folded into dependences as they close
         self._gpu_work_memo = {}
         self.facts = DataFacts(self.functions)
+        self.order_facts = OrderFacts(self.functions)
         self.schedule = "lockstep"  # all threads statement by statement; or one block after another, in order,
                                     # in reverse, or in a random order (rng): other legal schedules
         self.oob = {}  # source location (object) -> references past the end of a device buffer
@@ -541,6 +568,9 @@ class CudaInterpreter(CppInterpreter):
                 bits |= WD if write else RD
         elif getattr(self, "_guarded_depth", 0):
             bits |= WD if write else RD
+        if write and not self.uncertain_depth and cur is not None and self.kernel is not None and \
+                self.kernel.name not in self.order_facts.config_derived and not any(self.order_facts.site(cur)):
+            bits |= WX
         if not isinstance(obj, Obj):
             ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
             return
@@ -1081,6 +1111,8 @@ class CudaInterpreter(CppInterpreter):
             self.uncertain += w0 * len(offs)
         if ev is not None and (obj.kind in TRACKED or obj.kind == "device-global"):
             bits = (W if write else R) << (2 if self.uncertain_depth else 0)
+            if write and not self.uncertain_depth and self.kernel is None:
+                bits |= WX                                             # the host's copy: in every schedule
             ev.mark_range(obj, off, n, bits)
 
     def _copy(self, ev, d, s, n):

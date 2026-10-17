@@ -1,6 +1,6 @@
 program,kernel_deps,data_deps,data_must,data_must_traced,data_traced
 bfs,233,233,233,233,233
-cc,1152,538,120,120,445
+cc,876,538,0,0,492
 chain,4,0,0,0,0
 fileidx,1,1,1,1,1
 histogram,1,1,1,1,1

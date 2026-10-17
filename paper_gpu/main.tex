@@ -493,6 +493,21 @@ loop, and between the operations before and after the loop. A tool instantiates 
 the program actually runs; the scorer does so for the traced run. This over-approximation removes missed dependences
 at the cost of reporting dependences that a given run does not have.
 
+\paragraph{Writes that every order makes.} Much of that cost is avoidable. In GraphBIG's connected components,
+one kernel copies every label from a second array into the first in every round, at the index of the thread, under
+the condition that the thread number is below the number of vertices. Whatever order the threads run in, this
+kernel overwrites every label, so no dependence through a label can reach from one round past it into a later
+round. The interpreter marks such writes: a write is made in every order if it is certain, if neither its address
+nor any condition it runs under (including an earlier \code{return}, \code{break} or \code{continue} under a
+condition) uses a value loaded from memory, and if the launch's grid and block sizes do not either. Copies and fills
+that the host issues are made in every order as well. For each position in a round, the interpreter keeps the units
+that every round of every run wrote in this way, and a template dependence through a unit that some operation
+between its two ends writes in this way is dropped; such a unit's dependence is on that operation instead. Where
+only the operations between two consecutive rounds are in the way, the dependence is kept for the next round only.
+Conversely, a dependence of an operation in the rounds through a buffer whose units that position touched
+differently in different rounds or runs is reported as possible, not certain, even when every run had it: another
+order could touch other units.
+
 \subsection{What the interpreters cannot know}
 \label{sec:unknown}
 
@@ -689,6 +704,12 @@ on the GPU reaches the next buffer; the interpreter reports the out-of-bounds re
 to every buffer. In GraphBIG's \code{bfs-topo-atomic}, \code{bfs-data-thread-centric} and \code{connected-comp},
 threads lower values in place with atomics, so the number of rounds or the units touched depend on thread order,
 and the over-approximation of \secref{sec:schedules} adds every dependence another order could produce.
+Without the writes that every order makes, the over-approximation reported 1{,}443 such dependences, 1{,}253 of
+them in \code{connected-comp}; with them, it reports \numBenchHyPossNo{}. Because the number of rounds of
+\code{connected-comp} changes from run to run, we traced it eight more times: the runs issued 46 to 70
+operations, more than any of the interpreter's orders, and against every one of them the hybrid interpreter missed
+no dependence and reported no certain dependence that did not occur, with 40 to 103 possible dependences that did
+not occur. The same holds for eight more runs of \code{bfs-topo-atomic}.
 
 The whole-program interpreter is exact on the \numBenchFuNoFN{} programs whose host code it can run: six of the
 Rodinia programs and all of PolyBench. It misses \numBenchFuFN{} dependences, all in the 11 programs whose host code
@@ -739,9 +760,11 @@ the interpreter reports all of its dependences as certain, and only \numCcLockPr
 them occur in a given run, so the rest are false. With the four orders merged and the round template added, the
 certain precision is 1.00 and the recall is 1.00 against every run: no run has a dependence the interpreter does
 not report. The interpreter reports \numCcMustRecallLo{} to \numCcMustRecallHi{} of each run's dependences as
-certain, mostly those of the setup and of the first round, which every order shares. The price of the recall is in
-the possible dependences: the round template allows every round to depend on every earlier round through every
-unit any round touched, which gives \numCcPossible{} possible dependences against a traced run's \numCcTruth{}.
+certain, those of the setup, which every order shares; every dependence of a round is possible, because the
+labels each round touches differ between rounds and runs. The price of the recall is in the possible dependences:
+the round template allows every round to depend on every earlier round through every label any round touched,
+since no operation overwrites the labels in every order. This gives \numCcPossible{} possible dependences against
+a traced run's \numCcTruth{} (3{,}047 before the writes that every order makes were taken into account).
 Without the over-approximation, merging the four orders alone left 0.5\% to 2\% of each run's dependences
 unreported, for example a label written in one round and next overwritten three rounds later.
 
@@ -763,7 +786,7 @@ traced dependences are reported as certain and only half of the needed ones; in 
 falls from 0.72 to 0.14 and certain recall of the needed dependences from 0.81 to 0.10. Recall stays at 1.00,
 because the unknown pointer makes the accesses possible accesses to every buffer, which includes the right one.
 Without the extra thread orders, \code{cc} reports false certain dependences, as \secref{sec:eval-cc} showed, and
-misses 2\% of the run's dependences.
+misses up to 1.3\% of a run's dependences.
 
 \begin{table}[tbp]
 \centering

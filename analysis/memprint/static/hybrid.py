@@ -463,7 +463,7 @@ class HybridInterpreter(ic.CudaInterpreter):
     def on_copy(self, dst, src, n, kind):
         ev = self._new_event("copy", f"cudaMemcpy {COPY_KINDS.get(kind, '?')}", None)
         ev.data_control = self._site_control(ic.COPIES | ic.SYMBOL_COPIES)
-        for ptr, bits in ((src, R), (dst, W)):
+        for ptr, bits in ((src, R), (dst, W | ic.WX)):
             obj, off = self._range(ptr, n)
             if obj is None and ptr:
                 obj, off = self._host_range(ptr, n)
@@ -476,7 +476,7 @@ class HybridInterpreter(ic.CudaInterpreter):
         ev.data_control = self._site_control(ic.SETS)
         obj, off = self._range(ptr, n)
         if obj is not None:
-            ev.mark_range(obj, off, n, W)
+            ev.mark_range(obj, off, n, W | ic.WX)
         self._close_event()
 
     def on_launch(self, name, grid, block, shmem, args):
