@@ -6,6 +6,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
 \usepackage{url}
@@ -47,29 +48,26 @@
 A CUDA program runs as a sequence of operations on the GPU: kernel launches, copies between host and device
 memory, and memory fills. One operation depends on an earlier one when it reads bytes the earlier one wrote, or
 writes bytes the earlier one read or wrote. A runtime system that knows these dependences can run independent
-operations at the same time, reorder them, or place their data, but in graph programs and other irregular code the
-bytes a kernel touches are chosen by values in memory, such as the neighbour lists of a graph, so a compiler cannot
-determine them from the source code. We present an interpreter that runs the program's CUDA source, host code and
-kernels together, on the CPU with the program's real input, and records which bytes every operation reads and
-writes. The interpreter runs all the threads of a kernel at once as arrays, one statement at a time, so a value
-loaded from memory, a branch on such a value, and an address computed from it are all known exactly. Two further
-mechanisms handle cases that a single run in this form would get wrong. When the threads of a kernel load
-pointers that name different buffers, the interpreter splits the threads into groups by buffer and runs each group
-separately. When the bytes a kernel touches depend on the order in which threads run, the interpreter runs the
-program under four legal thread orders and reports a dependence as certain only if every order produces it. We
-compare the interpreter against the bytes each operation actually touched on an NVIDIA A30 GPU, recorded with an
-NVBit tool we built for the purpose, on \numPrograms{} test programs that include three breadth-first searches,
-a connected-components kernel and kernels that choose buffers through tables of pointers. Every dependence the
-interpreter reports as certain occurs on the GPU (\numMustTotal{} certain dependences, none wrong), and the
-interpreter finds every dependence of 12 of the 13 programs. On connected components, where \numCcGpuRuns{} runs
-on the GPU took \numCcGpuRoundsLo{} to \numCcGpuRoundsHi{} rounds and every traced run touched different bytes, it
-finds \numCcRecallLo{} to \numCcRecallHi{} of each run's dependences. Of the \numDataDeps{} dependences between kernels that pass through bytes chosen by data,
-\numDataMust{} are reported as certain and all of those occur on the GPU. The cost is the interpreter's run time on
-the CPU, which for the inputs we measured is \numOverheadLo{} to \numOverheadHi{} times the program's whole run on
-the GPU. Most of that time goes to host loops that the interpreter runs one iteration at a time, and the kernels
-alone take \numKernelRatioLo{} to \numKernelRatioHi{} times the whole GPU run. Running all four thread orders costs
-\numScheduleCost{} times as much as lockstep alone, on average. The exact bytes depend on the input, so they can be known only once the input
-is known, but the pattern of dependences between kernels was the same for three different graphs.
+operations at the same time or reorder them, but in graph programs and other irregular code the bytes a kernel
+touches are chosen by values in memory, such as the neighbour lists of a graph, so a compiler cannot determine them
+from the source code. We present two interpreters that determine them before the program runs on the GPU, from the
+program's CUDA source and its input. The whole-program interpreter runs host code and kernels from source on the
+CPU. The hybrid interpreter runs the host code natively, compiled against a stand-in CUDA runtime whose device
+memory is host memory, and interprets each kernel on the real memory contents. Both run all threads of a kernel at
+once as arrays, so a value loaded from memory, a branch on it and an address computed from it are known exactly.
+When threads load pointers to different buffers, the interpreter splits them into groups by buffer. When the bytes a
+kernel touches depend on the order in which threads run, the interpreter runs several legal thread orders, reports a
+dependence as certain only if every order produces it, and adds every dependence any order could produce as
+possible, generalised over the number of rounds a loop on the host runs. We compare the interpreters against the
+bytes each operation touched on an NVIDIA A30, recorded with an NVBit tool. On \numBenchHyDone{} unmodified programs
+from Rodinia, GraphBIG and PolyBench-GPU, the hybrid interpreter reports none of the GPU's \numBenchHyTruth{}
+dependences wrongly and misses none: \numBenchHyCertTP{} are reported as certain and \numBenchHyPossYes{} as possible,
+and it reports \numBenchHyPossNo{} possible dependences that the traced run did not have, all in programs whose
+behaviour depends on thread order or that read past the end of a buffer. The whole-program interpreter is exact on
+the \numBenchFuNoFN{} programs whose host code it can run, and misses dependences where it cannot, such as host code
+that reads its input through C++ streams; it reports this. The cost is \numBenchHyTimeLo{} to
+\numBenchHyTimeHi{} seconds per program (median \numBenchHyTimeMedian{}) for the hybrid interpreter under four
+thread orders.
 \end{abstract}
 
 \section{Introduction}
@@ -89,34 +87,40 @@ need to know which operations depend on which.
 An operation \emph{depends} on an earlier one when they touch the same bytes and at least one of them writes them.
 For regular code, where every address is a simple function of the thread index and the sizes, a compiler can work
 out the bytes each kernel touches from the source code alone~\cite{Feautrier1991Dataflow}. For irregular code it
-cannot. In a graph program the addresses a kernel touches are read from memory. For example, a breadth-first search visits
-\code{cost[edges[i]]}, where \code{edges} holds the graph, and it runs that statement only for vertices whose
+cannot. In a graph program the addresses a kernel touches are read from memory. For example, a breadth-first search
+visits \code{cost[edges[i]]}, where \code{edges} holds the graph, and it runs that statement only for vertices whose
 entry in a frontier array is set, an array that the previous kernel wrote. Which bytes the kernel touches is
 therefore a function of the input graph and of everything the program computed before the launch. Graph
 benchmark suites for GPUs consist mostly of such kernels~\cite{Che2013Pannotia,Burtscher2012Irregular,Wang2016Gunrock}.
 
-In this work we determine these dependences by running the program's source code on the CPU, with its input, in an
-interpreter that records the bytes every operation touches. The interpreter extends \memprint{}'s interpreter for
-C and C++ programs~\cite{memprintGeneralization}, which runs a program's syntax tree from \code{main()} and keeps
-the values the program stores in memory, so that an address read from memory is known. We add the execution of
-kernels, the bookkeeping that turns touched bytes into dependences, and two mechanisms that irregular GPU code
+A tool that schedules operations from predicted dependences pays differently for its two kinds of error. A
+dependence it misses (a \term{false negative}) lets it run two operations in the wrong order, which must then be
+detected and undone, an expensive rollback. A dependence it reports that does not occur (a \term{false positive})
+only costs parallelism. The aim is therefore to miss none, and to report as few that do not occur as possible.
+
+In this work we determine these dependences by running the program, with its input, in an interpreter that
+records the bytes every operation touches. The first interpreter extends \memprint{}'s interpreter for C and C++
+programs~\cite{memprintGeneralization}, which runs a program's syntax tree from \code{main()} and keeps the values
+the program stores in memory, so that an address read from memory is known. The second runs the host code natively
+and interprets only the kernels, which removes the limits of interpreting host code. We add the execution of
+kernels, the bookkeeping that turns touched bytes into dependences, and the mechanisms that irregular GPU code
 needs, and we measure the result against a GPU.
 
 In this work, we make the following contributions:
 \begin{itemize}
-\item We describe an interpreter that runs a CUDA program's host code and kernels from source, runs all threads
-of a kernel together as arrays, and reports for every pair of operations whether they depend on each other, through
-which buffer, over how many bytes, and whether the dependence is certain or only possible (\secref{sec:interp}).
+\item We describe a whole-program interpreter and a hybrid interpreter that run all threads of a kernel together as
+arrays, and report for every pair of operations whether they depend on each other, through which buffer, over how
+many bytes, and whether the dependence is certain or only possible (\secref{sec:interp}).
 \item We show how to handle a kernel whose threads use different buffers chosen through pointers stored in
 memory, by splitting the threads into groups by buffer (\secref{sec:split}), and a kernel whose touched bytes
-depend on the order in which threads run, by running several legal thread orders and keeping as certain only what
-they agree on (\secref{sec:schedules}).
+depend on the order in which threads run, by running several legal thread orders and generalising what they could do
+over any number of rounds (\secref{sec:schedules}).
 \item We build an NVBit~\cite{Villa2019NVBit} tool that records the bytes each operation touches on a real GPU,
 and a scoring method that compares two runs even when they issue a different number of operations
 (\secref{sec:truth}).
-\item We evaluate the interpreter on \numPrograms{} programs on an NVIDIA A30: every certain dependence it reports
-occurs on the GPU, it finds all dependences in 12 of 13 programs, and it costs \numOverheadLo{} to
-\numOverheadHi{} times the program's whole run on the GPU, most of it in host code (\secref{sec:eval}).
+\item We evaluate both interpreters on \numPrograms{} test programs and on \numBenchTotal{} unmodified benchmarks on
+an NVIDIA A30. The hybrid interpreter misses no dependence and reports no wrong certain dependence on the
+\numBenchHyDone{} benchmarks it completes (\secref{sec:eval}).
 \end{itemize}
 
 \section{Background and terms}
@@ -170,7 +174,7 @@ in the style of Rodinia's \code{bfs}~\cite{Che2009Rodinia}. Which threads pass t
 which elements of \code{edges} they read, and which elements of \code{cost} and \code{updating} they write all
 depend on the graph and on the previous levels of the search.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \begin{lstlisting}
 __global__ void expand(const Node *nodes, const int *edges, bool *mask, bool *updating,
                        const bool *visited, int *cost, int n) {
@@ -198,19 +202,23 @@ bytes the kernel reads and writes depend on the graph and on what earlier launch
 \subsection{Overview}
 \label{sec:overview}
 
-The interpreter takes the program's CUDA source files and its command line, and runs the program on the CPU from
-\code{main()}. It does not compile the program and needs no GPU. \figref{fig:overview} shows the steps. First,
-libclang~\cite{libclang} parses the source into a syntax tree. CUDA's own headers are replaced by a small header
-of our own that declares the runtime functions (\code{cudaMalloc}, \code{cudaMemcpy} and so on), so no CUDA
-installation is needed. Second, the interpreter executes the syntax tree. Host code runs as in \memprint{}'s C++
-interpreter~\cite{memprintGeneralization}, and each call to a CUDA runtime function or kernel launch becomes an
-operation. Third, each operation records the units it read and wrote in each buffer. Fourth, the operations are
-folded, in order, into the dependences between them. The output is a list of operations, a list of dependences
-with their kinds, buffers, unit counts and certainty, and optionally the address ranges each operation touched.
+Both interpreters take the program's CUDA source files and its command line, run the program on the CPU from
+\code{main()}, and need no GPU. They differ in how they run the host code. \figref{fig:overview} shows the steps.
+First, libclang~\cite{libclang} parses the source into a syntax tree. CUDA's own headers are replaced by a small
+header of our own that declares the runtime functions (\code{cudaMalloc}, \code{cudaMemcpy} and so on). Second, the
+program runs. The whole-program interpreter executes the host code's syntax tree as \memprint{}'s C++
+interpreter does~\cite{memprintGeneralization} (\secref{sec:host}); the hybrid interpreter compiles the host code
+and runs it natively (\secref{sec:hybrid}). In both, each call to a CUDA runtime function or kernel launch becomes
+an operation, and every kernel is interpreted from its syntax tree (\secref{sec:kernels}). Third, each operation
+records the units it read and wrote in each buffer. Fourth, the operations are folded, in order, into the
+dependences between them. The program runs several times, under different thread orders, and the runs are merged
+(\secref{sec:schedules}). The output is a list of operations, a list of dependences with their kinds, buffers, unit
+counts and certainty, a template of the dependences of rounds whose number the thread order decides, and
+optionally the address ranges each operation touched.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
-\begin{tikzpicture}[node distance=4mm and 6mm, font=\footnotesize,
+\begin{tikzpicture}[node distance=4mm and 5mm, font=\footnotesize,
   box/.style={draw=muted, rounded corners=2pt, align=center, inner sep=4pt, minimum height=9mm, text width=25mm},
   data/.style={draw=muted, dashed, rounded corners=2pt, align=center, inner sep=3pt, minimum height=7mm,
                text width=23mm},
@@ -218,21 +226,24 @@ with their kinds, buffers, unit counts and certainty, and optionally the address
 \node[data] (src) {CUDA source and\\command line};
 \node[data, below=of src] (input) {Input files};
 \node[box, right=of src] (parse) {Parse with libclang\\(own CUDA header)};
-\node[box, right=of parse] (run) {Run from \code{main()}:\\host code, then each\\kernel for all threads};
-\node[box, right=of run] (events) {Record per operation:\\units read and\\written, per buffer};
-\node[box, below=of events] (deps) {Fold into\\dependences:\\RAW, WAR, WAW};
-\node[data, left=of deps] (out) {Operations,\\dependences,\\address ranges};
+\node[box, right=of parse, yshift=7mm] (whole) {Whole program:\\interpret host code};
+\node[box, right=of parse, yshift=-7mm, draw=pblue] (hyb) {Hybrid: host code\\native, own runtime};
+\node[box, right=10mm of parse, xshift=29mm] (kern) {Each kernel: all\\threads as arrays};
+\node[box, right=of kern] (events) {Per operation:\\units read and\\written, per buffer};
+\node[box, below=of events] (deps) {Merge thread\\orders; fold into\\RAW, WAR, WAW};
+\node[data, left=of deps] (out) {Operations,\\dependences,\\round template};
 \draw[arr] (src) -- (parse);
-\draw[arr] (parse) -- (run);
-\draw[arr] (input.east) -| (run.south);
-\draw[arr] (run) -- (events);
+\draw[arr] (parse.east) -- (whole.west);
+\draw[arr] (parse.east) -- (hyb.west);
+\draw[arr] (whole.east) -- (kern.west);
+\draw[arr] (hyb.east) -- (kern.west);
+\draw[arr] (input.east) -| (hyb.south);
+\draw[arr] (kern) -- (events);
 \draw[arr] (events) -- (deps);
 \draw[arr] (deps) -- (out);
-\node[box, above=of run, text width=58mm, minimum height=7mm, draw=pblue] (mech)
-  {Threads split by buffer (\secref{sec:split}); four thread orders (\secref{sec:schedules})};
-\draw[arr, color=pblue] (mech) -- (run);
 \end{tikzpicture}
-\caption{The steps of the interpreter. Nothing runs on the GPU.}
+\caption{The steps of the two interpreters. Nothing runs on the GPU. The input reaches the whole-program interpreter
+through the interpreted host code, and the hybrid interpreter through the native host code.}
 \label{fig:overview}
 \end{figure}
 
@@ -257,6 +268,34 @@ A loop on the host that issues GPU work runs one iteration at a time, in program
 runs short counted loops as one step over all iterations (\secref{sec:kernels}), and we changed it so that an
 allocation, copy or fill inside such a loop is carried out once per iteration, because each iteration creates a
 different buffer or a different operation.
+
+\subsection{Running the host program natively: the hybrid interpreter}
+\label{sec:hybrid}
+
+The whole-program interpreter must understand every line of the host code. Real host code reads its input with C++
+streams and strings, uses library containers, or is written in old C dialects, and where the interpreter does not
+model what the code does it computes a wrong execution: in our benchmarks, a graph read through
+\code{std::ifstream} came out empty. The hybrid interpreter avoids interpreting the host code at all.
+
+The program is compiled by \code{nvcc} as a shared library, with its \code{main()}, against a stand-in for the CUDA
+runtime instead of CUDA's own. In the stand-in runtime, device memory is ordinary host memory: \code{cudaMalloc}
+allocates zeroed host memory, a copy or fill is a \code{memcpy} or \code{memset}, and \code{\_\_device\_\_} and
+\code{\_\_constant\_\_} variables live in the host copy that \code{nvcc} creates for each of them. The interpreter loads
+the library into its own process and calls the program's \code{main()}, so the host code runs at native speed with
+every library it uses. Every allocation, copy, fill and launch calls back into the interpreter. At a launch, the
+interpreter binds the kernel's arguments from the launch's argument array (a pointer argument becomes the buffer it
+points into, a structure passed by value is copied field by field) and runs the kernel as in \secref{sec:kernels}.
+The kernel's loads read the program's real bytes, with the signedness of their C type, and its stores write them, so
+the host code continues from the kernel's results. Every value is concrete, so the hybrid interpreter knows values
+that the whole-program interpreter does not, such as those of \code{drand48}.
+
+Two pieces of information that the whole-program interpreter takes from the host code are recovered differently.
+Whether an operation was issued under data control (\secref{sec:events}) is decided from the source for each call
+site; the stand-in runtime records the return address of every copy and fill, and \code{addr2line} maps it to its
+line. The host side of a copy, which the whole-program interpreter tracks as an object, is tracked as a region of
+host memory named in order of first use; locals on the stack are left out, as the whole-program interpreter keeps
+scalar locals out of memory. Because the program's native state cannot be reset, each thread order runs in a
+process of its own, and the processes' results are merged.
 
 \subsection{Running a kernel: all threads at once}
 \label{sec:kernels}
@@ -288,18 +327,24 @@ to bound its memory use.
 
 Every operation records, per object and per byte, whether it read the byte and whether it wrote it. A kernel
 records every load and store that its threads carry out, a copy records the bytes it reads at the source and writes
-at the destination, and a fill records the bytes it writes. The interpreter also records the host code between two
-operations as an operation of its own, which a tool can ignore; the evaluation leaves it out.
+at the destination, and a fill records the bytes it writes. A read of a byte that the operation has already written
+for certain is not recorded as a read, because it reads the operation's own value, not an earlier operation's: in
+\code{tmp[i] = 0; tmp[i] += a[i][j] * x[j];} the kernel does not depend on whoever wrote \code{tmp} before it. The
+interpreter also records the host code between two operations as an operation of its own, which a tool can ignore;
+the evaluation leaves it out.
 
 A record has two further marks. The first says whether the access is only possible, which is the case when the
 interpreter could not compute the access exactly. An address it could not compute covers the whole object it
 points into, and an access under a branch whose condition is unknown is recorded but marked as possible. An access
-through a pointer whose object is unknown is recorded as a possible access to every device buffer. The second mark
-says whether the access is data-dependent (\secref{sec:background}). The interpreter decides this from the source
-code before the program runs, by marking every value that is loaded from memory, or computed from such a value, or
-assigned under a condition that is, and repeating until nothing changes. An access whose address or whose enclosing
-conditions use a marked value is data-dependent, and so is every access of a launch that the host issued from a
-loop whose condition depends on device data, such as a loop that runs until the GPU reports that nothing changed.
+through a pointer whose object is unknown is recorded as a possible access to every device buffer, and so is an
+access past the end (or before the start) of a device buffer. On the GPU such an access reaches whatever memory lies
+there, often the next buffer, which the interpreter cannot know; it reports where the access happens, because it is
+usually a bug in the program. The second mark says whether the access is data-dependent (\secref{sec:background}).
+The interpreter decides this from the source code before the program runs, by marking every value that is loaded
+from memory, or computed from such a value, or assigned under a condition that is, and repeating until nothing
+changes. An access whose address or whose enclosing conditions use a marked value is data-dependent, and so is every
+access of an operation that the host issued from a loop whose condition depends on device data, such as a loop that
+runs until the GPU reports that nothing changed.
 
 \subsection{From touched bytes to dependences}
 \label{sec:deps}
@@ -307,12 +352,13 @@ loop whose condition depends on device data, such as a loop that runs until the 
 The operations are folded into dependences in the order they were issued. For every unit of every object the
 interpreter keeps the last operation that certainly wrote it, the operations that possibly wrote it since then,
 and the operations that read it since then. When the next operation arrives, every unit it reads produces a RAW
-dependence on the last writer, every unit it writes produces a WAW dependence on the last writer and a WAR
-dependence on each reader, and then the operation's own writes replace the history of those units. A dependence is
-certain if both of its accesses are certain, and possible otherwise. The counts of units are summed per
-dependence. \figref{fig:example} shows the result for a short program.
+dependence on the last writer and on each possible writer since, every unit it writes produces a WAW dependence on
+them and a WAR dependence on each reader, and then the operation's own writes replace the history of those units. A
+dependence is certain if both of its accesses are certain and no operation possibly wrote the unit in between, and
+possible otherwise. The counts of units are summed per dependence. \figref{fig:example} shows the result for a short
+program.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \begin{minipage}{0.47\linewidth}
 \begin{lstlisting}
@@ -357,7 +403,7 @@ an offset, so it cannot represent ``buffer 0 for these threads and buffer 3 for 
 described here, such a pointer became unknown, every write through it became a possible write to every device
 buffer, and every dependence from the kernel to the four consumers was only possible.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \begin{lstlisting}
 __global__ void distribute(const int *keys, int *const *bucket, int *count, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -395,13 +441,13 @@ labels of the two ends of edge $e$ and writes the smaller into the larger with \
 lowered one of those labels earlier in the same launch, thread $e$ reads the new value, otherwise the old one, so
 which threads write, and which units, depends on the order. The host repeats the kernel until a launch changes
 nothing, so the number of launches depends on the order too. On the GPU, \numCcGpuRuns{} runs of this program took
-\numCcGpuRoundsLo{} to \numCcGpuRoundsHi{} rounds, and each of \numCcReps{} traced runs touched different bytes. In lockstep, every
-thread reads its labels before any thread of the launch writes one, so no update reaches another thread within the
-same round, and the program takes 24 rounds. With lockstep alone, the interpreter reported all of its dependences as
-certain, and \numCcLockFalseLo{} to \numCcLockFalseHi{} of them did not occur in a given GPU run
+\numCcGpuRoundsLo{} to \numCcGpuRoundsHi{} rounds, and each of \numCcReps{} traced runs touched different bytes. In
+lockstep, every thread reads its labels before any thread of the launch writes one, so no update reaches another
+thread within the same round, and the program takes 24 rounds. With lockstep alone, the interpreter reported all of
+its dependences as certain, and \numCcLockFalseLo{} to \numCcLockFalseHi{} of them did not occur in a given GPU run
 (\secref{sec:eval-cc}).
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \begin{lstlisting}
 __global__ void hook(const int *src, const int *dst, int *label, int *changed, int m) {
     int e = blockIdx.x * blockDim.x + threadIdx.x;
@@ -416,29 +462,49 @@ __global__ void hook(const int *src, const int *dst, int *label, int *changed, i
 \label{fig:cc}
 \end{figure}
 
-To detect such kernels, the interpreter runs the whole program under several thread orders. All are legal on the
-GPU. The first is lockstep. In the other three, each block runs to completion before the next starts, in the
-order of block numbers, in reverse order, or in a random order. A later block then sees what earlier blocks wrote.
-We match the operations of the runs by their common beginning and their common end, because a loop that runs a
-different number of rounds adds or removes operations in the middle of the sequence. The operations before the
-loop and the first rounds match from the front, and the operations after the loop match from the back. A dependence stays certain only if
-every run has it between matched operations and every run reports it as certain. All other dependences of the
-first run, and the dependences that only the other runs have between matched operations, become possible and are
-marked as depending on the schedule. A program whose kernels do not depend on the order, such as all three
-breadth-first searches in our tests, gives the same dependences under all four orders and loses nothing.
+\paragraph{Several legal orders.} The interpreter runs the whole program under four thread orders. The first is
+lockstep. In the other three, each block runs to completion before the next starts, in the order of block numbers,
+in reverse order, or in a random order, and within a block the warps of 32 threads run one after another in the
+same order, unless the kernel uses \code{\_\_syncthreads} or shared memory, which require the warps of a block to
+run together. A later block or warp then sees what earlier ones wrote. Only some kernels need these orders. A launch
+in which no unit is both read and written (by any thread, an atomic counting as both) computes the same result in
+any order, so the lockstep run notes which kernels had a launch that read and wrote one unit, and the other orders
+reorder only those and run the rest in lockstep.
 
-Four orders are a sample of the legal orders, not all of them, so a GPU run can still produce a dependence that
-none of the four produced. We return to this in \secref{sec:eval-cc}.
+\paragraph{Merging the runs.} We match the operations of the runs by their common beginning and their common end,
+because a loop that runs a different number of rounds adds or removes operations in the middle of the sequence. A
+dependence stays certain only if every run has it between operations that every run has, every run reports it as
+certain, and it does not lead from before the point where the runs part to after the rounds that differ, since
+those rounds decide which operation last wrote each unit. All other dependences of the first run, and those that
+only other runs have, become possible and are marked as depending on the schedule.
 
-\subsection{What the interpreter cannot know}
+\paragraph{What other orders could do.} Four orders are a sample. A GPU run can interleave threads differently and
+produce a dependence none of the four produced, and a tool that relies on the result must not miss it. The
+interpreter therefore over-approximates where the orders disagree. Each run keeps, per operation and buffer, the
+units read and written. For an operation that every run issues but that touched different units in different
+runs, the interpreter takes the union over the runs, and adds a possible dependence between it and every other
+operation whose union conflicts with it (one writes a unit the other reads or writes). Where the runs issue
+different numbers of operations, the interpreter finds the shortest repeating sequence of operations that covers
+the part where they differ, such as \emph{fill the flag, launch the kernel, copy the flag back}, and writes a
+\term{round template}. For each position in a round it takes the union of the units touched over every round of
+every run, and it records every conflict as a possible dependence: between two positions in one round, from a round
+to any later round, from an operation before the loop to every round, from every round to an operation after the
+loop, and between the operations before and after the loop. A tool instantiates the template for the number of rounds
+the program actually runs; the scorer does so for the traced run. This over-approximation removes missed dependences
+at the cost of reporting dependences that a given run does not have.
+
+\subsection{What the interpreters cannot know}
 \label{sec:unknown}
 
-The interpreter needs the program's input, because the bytes an irregular kernel touches are a function of it.
-It does not model floating-point values stored in memory, the values of some library functions (for example
-\code{drand48}), or a pointer loaded in a statement after a store. Accesses that depend on such values are
-recorded as possible, so the dependences through them are possible too. The \code{maybe} test program checks this
-case. A kernel whose result depends on thread order is handled by sampling orders (\secref{sec:schedules}), and a
-data race whose outcome no sampled order reproduces is not detected.
+Both interpreters need the program's input, because the bytes an irregular kernel touches are a function of it. In
+a kernel they do not model floating-point values stored in memory or a pointer loaded in a statement after a store,
+and accesses that depend on such values are recorded as possible. The whole-program interpreter also does not model
+every library function the host code calls (for example \code{drand48}, C++ file streams and strings); the
+\code{maybe} test program checks the first case. When the host code calls such functions, the values the program
+computes from them are unknown or wrong, and the operations it issues may be too. The interpreter counts these calls
+and its parse errors and warns that the result is unreliable, but it cannot recover the operations it did not see;
+the hybrid interpreter, which runs the host code natively, is the remedy. A kernel whose result depends on thread
+order is handled by sampling orders and over-approximating what other orders could do (\secref{sec:schedules}).
 
 \section{Measuring the truth on a GPU}
 \label{sec:truth}
@@ -463,12 +529,19 @@ that clang uses when it finds a recent CUDA installation on the machine.
 \paragraph{Comparing two runs.} The traced run's bytes are folded into dependences by the same code as the
 interpreter's, so the two sides differ only in which bytes each operation touched. Buffers are matched by the
 order of their allocation, and operations by their order. When the two runs issue different numbers of operations,
-as \code{cc} does, operations are matched by common beginning and common end as in \secref{sec:schedules}, and a
-traced dependence through an unmatched operation counts as missed. We report four scores. \term{Certain precision}
-is the share of the interpreter's certain dependences that the traced run has. \term{Recall} is the share of the
-traced run's dependences that the interpreter reports, certain or possible. \term{Certain recall} is the share it
-reports as certain. \term{Units error} is, over the dependences both have, the summed difference in unit counts
-divided by the traced units. We compute the same scores over the needed dependences of each side.
+as \code{cc} does, operations are matched by common beginning and common end as in \secref{sec:schedules}, the
+interpreter's round template is instantiated for the traced run's rounds and added as possible dependences, and a
+traced dependence through an operation that remains unmatched counts as missed. A dependence is identified by its
+source and destination operation, its kind and its buffer. Comparing the interpreter's dependences with the traced
+run's gives five counts: certain dependences the run has (true positives) and does not have (false positives),
+possible dependences the run has and does not have, and the run's dependences the interpreter does not report at
+all (false negatives). From them we compute three scores. \term{Certain precision} is the share of the
+interpreter's certain dependences that the traced run has. \term{Recall} is the share of the traced run's
+dependences that the interpreter reports, certain or possible. \term{Certain recall} is the share it reports as
+certain. \term{Units error} is, over the dependences both have, the summed difference in unit counts divided by
+the traced units. Dependences through memory that is not a \code{cudaMalloc} buffer (\code{\_\_device\_\_} variables, host
+memory) are not scored, since the tool does not see them as buffers. We also compute the scores over the needed
+dependences of each side.
 
 \section{Evaluation}
 \label{sec:eval}
@@ -477,16 +550,17 @@ divided by the traced units. We compute the same scores over the needed dependen
 \label{sec:setup}
 
 We ran the GPU programs on an NVIDIA A30 (compute capability 8.0) with driver 610.57, CUDA 13.4 and NVBit 1.8,
-and the interpreter on the same machine's CPU, with Python 3.10, NumPy and libclang 18.1. The programs were compiled
+and the interpreters on the same machine's CPU, with Python 3.10, NumPy and libclang 18.1. The programs were compiled
 with \code{nvcc -O2}. \tabref{tab:programs} lists the \numPrograms{} test programs. They are small, between 22 and
 103 lines of code, and each exercises one pattern: regular elementwise kernels, shared memory, scattered writes
 through host-built or file-provided indices, atomics, values the interpreter does not model, three versions of
 breadth-first search (one kernel per level, Rodinia's two-kernel form with a graph file, and a frontier queue
-filled with \code{atomicAdd}), buffers chosen through pointer tables, and connected components. The graphs have
+filled with \code{atomicAdd}), buffers chosen through pointer tables, \code{\_\_device\_\_} and
+\code{\_\_constant\_\_} variables written with symbol copies, and connected components. The graphs have
 4{,}096 vertices with 1 to 5 random neighbours each. We wrote the programs together with the interpreter, so they
 test the patterns it was built for; \secref{sec:limits} discusses what this does not show.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4pt}
@@ -499,29 +573,32 @@ copies and fills the program issues, and dependences the number of dependences o
 \subsection{Accuracy of the dependences}
 \label{sec:eval-acc}
 
-\tabref{tab:accuracy} compares the interpreter, run under all four thread orders, with one traced run of each
-program. \textit{Every dependence the interpreter reports as certain occurs on the GPU}: the certain precision is
-1.00 for all 13 programs, over \numMustTotal{} certain dependences. The interpreter finds every traced dependence of
-12 programs, and \numCcRecall{} of those of \code{cc}. In 10 of the 13 programs it reports every dependence as
-certain, and the unit counts match exactly.
+\tabref{tab:accuracy} compares both interpreters, run under all four thread orders, with one traced run of each
+test program. \textit{Neither interpreter misses a dependence, and every dependence either reports as certain occurs
+on the GPU}: recall and certain precision are 1.00 for all \numPrograms{} programs, over \numMustTotal{} certain
+dependences. In 11 of the 14 programs the whole-program interpreter reports every dependence as certain and the
+unit counts match exactly; the hybrid interpreter does so in 12, and otherwise gives the same result.
 
-The three exceptions are the programs built to contain what the interpreter cannot resolve exactly. In
-\code{maybe}, a branch on \code{drand48} values makes two dependences possible, and one of them did not occur on
-the GPU. In \code{ptrsel2}, one kernel loads its pointer after an atomic operation in the same statement, so its
-threads cannot be split (\secref{sec:split}), and its accesses are possible accesses to every device buffer; the
-other three kernels of the program are exact. In \code{cc}, the dependences of rounds whose touched bytes depend on
-thread order are possible (\secref{sec:eval-cc}).
+The exceptions are the programs built to contain what the interpreters cannot resolve exactly. In \code{maybe}, a
+branch on \code{drand48} values makes three dependences possible for the whole-program interpreter, which does not
+model \code{drand48}, and one of them did not occur on the GPU. The hybrid interpreter runs \code{drand48} natively,
+knows the values and reports all five dependences as certain. In \code{ptrsel2}, one kernel loads its pointer after
+an atomic operation in the same statement, so its threads cannot be split (\secref{sec:split}), and its accesses are
+possible accesses to every device buffer; the other three kernels of the program are exact. In \code{cc}, the
+dependences of the rounds whose touched bytes depend on thread order are possible, and the over-approximation of
+\secref{sec:schedules} adds every dependence another order could produce: \numCcPossible{} possible dependences
+against the traced run's \numCcTruth{} (\secref{sec:eval-cc}).
 
-\begin{table*}[t]
+\begin{table*}[tbp]
 \centering
 \footnotesize
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3.5pt}
 \input{tables/accuracy}
-\caption{The interpreter against one traced run per program. Certain and Possible count the interpreter's
-dependences. Precision and recall are defined in \secref{sec:truth}; ``Needed'' columns score only the needed
-dependences of each side. The address-range columns compare, for every operation, buffer, and read or write, the
-set of units touched: Exact sets counts how many of these sets are identical, and unit precision and recall are
-the shares of the interpreter's units the GPU touched and of the GPU's units the interpreter reported.}
+\caption{Both interpreters against one traced run per program. Cert.\ and Poss.\ count the interpreter's certain and
+possible dependences. Certain precision, recall and certain recall are defined in \secref{sec:truth}. The
+address-range columns compare, for every operation, buffer, and read or write, the set of units the whole-program
+interpreter touched with the GPU's: Exact sets counts how many of these sets are identical, and unit precision and
+recall are the shares of the interpreter's units the GPU touched and of the GPU's units the interpreter reported.}
 \label{tab:accuracy}
 \end{table*}
 
@@ -540,7 +617,7 @@ certain, with the exact number of elements, and the consumer of the bucket that 
 producer. The remaining dependences of this kind are the possible ones of \code{maybe}, \code{ptrsel2} and \code{cc}
 described above.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
 \small
 \input{tables/datadep}
@@ -551,18 +628,19 @@ run has. Programs with none are omitted.}
 \end{table}
 
 \paragraph{Address ranges.} The right part of \tabref{tab:accuracy} compares the units each operation touched,
-not only the dependences. For 11 programs every set of units is identical to the GPU's. The interpreter's sets
-are larger only where it reports possible accesses: \code{maybe} (512 units possibly written, 254 written),
-\code{ptrsel2} (the kernel whose pointer could not be split covers every buffer) and \code{cc}.
+not only the dependences. For 12 programs every set of units is identical to the GPU's. The interpreter's sets
+are larger only where it reports possible accesses, in \code{maybe} (512 units possibly written, 254 written) and
+\code{ptrsel2} (the kernel whose pointer could not be split covers every buffer), and they differ in \code{cc},
+whose rounds touch different units in each run.
 
 \paragraph{How much the exact ranges add.} In our programs, most kernels touch all or most of every buffer they
-use, so tracking whole buffers instead of exact units gives the same dependences for 10 of the 13 programs
+use, so tracking whole buffers instead of exact units gives the same dependences for 11 of the 14 programs
 (\tabref{tab:granularity}). Exact ranges matter in \code{ptrsel} and \code{ptrsel2}, where several kernels touch
 disjoint parts of shared buffers, and they remove one false pair in \code{scatter} and \code{wl\_bfs}. The test
 programs therefore show that the interpreter finds the exact bytes, but not that exact bytes are needed; programs
 whose kernels partition buffers, such as blocked matrix factorisations, would show that.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
 \small
 \input{tables/granularity}
@@ -572,17 +650,83 @@ whole buffer.}
 \label{tab:granularity}
 \end{table}
 
+\subsection{Unmodified benchmarks}
+\label{sec:eval-bench}
+
+The test programs exercise one pattern each and were written together with the interpreters. To see how the
+interpreters fare on code we did not write, we ran them on \numBenchTotal{} unmodified programs from three suites:
+8 from Rodinia~\cite{Che2009Rodinia} (\code{bfs} with a graph of 4{,}096 vertices, \code{gaussian}, \code{nw},
+\code{pathfinder}, \code{hotspot} with generated temperature and power files, \code{lud}, \code{backprop} and
+\code{srad}), the 10 GPU programs of GraphBIG~\cite{Nai2015GraphBIG} on its small social-network graph (1{,}000
+vertices, 29{,}790 edges), and 20 programs of PolyBench-GPU~\cite{Grauer2012PolyBenchGPU}. Inputs were chosen small
+enough for the tracer. The sources were not changed, except where CUDA 13 no longer has an API they use:
+\code{cudaThreadSynchronize} is defined as \code{cudaDeviceSynchronize}, two \code{printf} calls of
+\code{gaussian} that print removed device properties are commented out, and PolyBench's problem sizes are set in its
+headers. Rodinia's \code{kmeans} is left out because it uses texture references, which CUDA 13 removed. Each program
+was traced once with NVBit, at \numBenchNvbitLo{} to \numBenchNvbitHi{} times its run time, and each interpreter ran
+it under the four thread orders, 12 interpreter runs at a time, with a limit of two hours per run.
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/bench_summary}
+\caption{The interpreters against one traced run of each benchmark, summed per suite: the GPU's dependences, the
+interpreter's certain and possible dependences split by whether the run has them, and the run's dependences the
+interpreter does not report (false negatives). GraphBIG's \code{betweenness} timed out in both interpreters and is
+not included.}
+\label{tab:bench-summary}
+\end{table}
+
+\tabref{tab:bench-summary} sums the results per suite and \tabref{tab:benchmarks} lists every program.
+\textit{The hybrid interpreter misses none of the GPU's dependences and reports no certain dependence that the GPU
+does not have}, on the \numBenchHyDone{} programs it completes. Of the \numBenchHyTruth{} dependences on the GPU it
+reports \numBenchHyCertTP{} as certain and \numBenchHyPossYes{} as possible. On \numBenchHyExact{} programs its result
+is exact: every dependence certain, every unit count equal to the GPU's, nothing reported that did not occur. The
+\numBenchHyPossNo{} possible dependences that the traced run did not have come from four programs. In \code{srad},
+two kernels read one row past the end of their input arrays (\code{srad\_kernel.cu} lines 45, 46, 55 and 200), which
+on the GPU reaches the next buffer; the interpreter reports the out-of-bounds reads and makes them possible accesses
+to every buffer. In GraphBIG's \code{bfs-topo-atomic}, \code{bfs-data-thread-centric} and \code{connected-comp},
+threads lower values in place with atomics, so the number of rounds or the units touched depend on thread order,
+and the over-approximation of \secref{sec:schedules} adds every dependence another order could produce.
+
+The whole-program interpreter is exact on the \numBenchFuNoFN{} programs whose host code it can run: six of the
+Rodinia programs and all of PolyBench. It misses \numBenchFuFN{} dependences, all in the 11 programs whose host code
+it cannot run. GraphBIG reads its graph through the openG library, with \code{std::ifstream}, \code{getline} and
+\code{std::string}, which the interpreter does not model, so the graph comes out empty. Rodinia's \code{backprop}
+uses K\&R-style function definitions, which do not parse as C++. Rodinia's \code{lud} reads its options with
+\code{getopt\_long}, which the interpreter does not model, so it runs a different matrix size. The interpreter warns
+on all 11, and on three programs where its result is nevertheless exact. It reports no certain dependence the GPU
+does not have, here as on the test programs.
+
+GraphBIG's \code{betweenness}, whose traced run has 165{,}863 dependences, ten times more than any other program,
+did not finish in two hours in either interpreter. The other programs took \numBenchHyTimeLo{} to
+\numBenchHyTimeHi{} seconds in the hybrid interpreter (median \numBenchHyTimeMedian{}), with 12 runs sharing the
+machine.
+
+\begin{table*}[tbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\input{tables/benchmarks}
+\caption{Every benchmark. Ops is the number of operations in the traced run, GPU deps its dependences. Per
+interpreter: certain dependences (all of which the traced run has), possible dependences the run has (Poss.\ yes) and
+does not have (Poss.\ no), the run's dependences not reported (FN), and the interpreter's run time in seconds under
+four thread orders.}
+\label{tab:benchmarks}
+\end{table*}
+
 \subsection{Kernels whose result depends on thread order}
 \label{sec:eval-cc}
 
 \figref{fig:cc-rounds} shows how many rounds \code{cc} takes. On the GPU, \numCcPlain{} plain runs and
 \numCcReps{} runs under NVBit took between \numCcGpuRoundsLo{} and \numCcGpuRoundsHi{} rounds. The interpreter's
 orders took \numCcInterpRoundsLo{} to \numCcInterpRoundsHi{} rounds. Lockstep takes the most rounds, because no
-label update reaches another thread within a round. Running blocks one after another lets labels flow from earlier
-blocks to later ones within a round, which takes fewer rounds. The GPU, which runs many blocks at once but not all
-of them, lies between the two, inside the interpreter's range.
+label update reaches another thread within a round. Running blocks and warps one after another lets labels flow
+from earlier ones to later ones within a round, which takes fewer rounds. The GPU, which runs many blocks at once
+but not all of them, lies between the two, inside the interpreter's range.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=0.75\linewidth]{figures/cc_rounds}
 \caption{Rounds of \code{cc} until no label changes, on the GPU and in the interpreter. Each dot is a round count,
@@ -591,15 +735,17 @@ its size and the number above it give how many runs produced it. The random orde
 \end{figure}
 
 \figref{fig:cc-scores} scores the interpreter against each of the \numCcReps{} traced runs. With lockstep alone,
-the interpreter reports all of its dependences as certain, and \numCcLockPrecLo{} to \numCcLockPrecHi{} of them
-occur in a given run, so the rest are false. With the four orders merged, the certain precision is 1.00 against
-every run, and the interpreter reports \numCcMustRecallLo{} to \numCcMustRecallHi{} of each run's dependences as
-certain and \numCcRecallLo{} to \numCcRecallHi{} as certain or possible. The certain ones are mostly those of the
-early rounds and of the setup, which every order shares. A run's dependences that the interpreter misses come
-from orders that none of the four produced, for example a label written in one round and next overwritten three
-rounds later.
+the interpreter reports all of its dependences as certain, and only \numCcLockPrecLo{} to \numCcLockPrecHi{} of
+them occur in a given run, so the rest are false. With the four orders merged and the round template added, the
+certain precision is 1.00 and the recall is 1.00 against every run: no run has a dependence the interpreter does
+not report. The interpreter reports \numCcMustRecallLo{} to \numCcMustRecallHi{} of each run's dependences as
+certain, mostly those of the setup and of the first round, which every order shares. The price of the recall is in
+the possible dependences: the round template allows every round to depend on every earlier round through every
+unit any round touched, which gives \numCcPossible{} possible dependences against a traced run's \numCcTruth{}.
+Without the over-approximation, merging the four orders alone left 0.5\% to 2\% of each run's dependences
+unreported, for example a label written in one round and next overwritten three rounds later.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=0.62\linewidth]{figures/cc_scores}
 \caption{\code{cc} against each traced run: the share of the interpreter's certain dependences that the run has
@@ -614,11 +760,12 @@ reports false certain dependences, and the four orders together do not.}
 \tabref{tab:ablation} turns each of the two mechanisms off in turn. Without splitting threads by buffer, every
 dependence through the buckets of \code{ptrsel} becomes possible, so only \numPtrselNoSplitMust{} of the 21
 traced dependences are reported as certain and only half of the needed ones; in \code{ptrsel2}, certain recall
-falls from 0.79 to 0.55 and certain recall of the needed dependences from 0.81 to 0.10. Recall stays at 1.00,
+falls from 0.72 to 0.14 and certain recall of the needed dependences from 0.81 to 0.10. Recall stays at 1.00,
 because the unknown pointer makes the accesses possible accesses to every buffer, which includes the right one.
-Without the extra thread orders, \code{cc} reports false certain dependences, as \secref{sec:eval-cc} showed.
+Without the extra thread orders, \code{cc} reports false certain dependences, as \secref{sec:eval-cc} showed, and
+misses 2\% of the run's dependences.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4pt}
@@ -632,24 +779,25 @@ Without the extra thread orders, \code{cc} reports false certain dependences, as
 
 \input{overhead_text}
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\linewidth]{figures/overhead}
 \caption{Wall-clock time against input size, both axes logarithmic: the program on the GPU (CUDA start-up
-included), the program under the NVBit tool, the interpreter in lockstep, the part of that time spent running
-kernels, and the interpreter under all four thread orders together.}
+included), the program under the NVBit tool, the whole-program interpreter in lockstep, the part of that time spent
+running kernels, and under all four thread orders together, and the hybrid interpreter in lockstep and under all
+four orders.}
 \label{fig:overhead}
 \end{figure}
 
-\begin{table*}[t]
+\begin{table*}[tbp]
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4pt}
 \input{tables/overhead}
 \caption{Run times. GPU threads is the total number of threads of all launches. The GPU columns are wall-clock
 times of the whole program, CUDA start-up included (median of three runs). ``In kernels'' is the share of the
-lockstep interpreter's time spent running kernels; the rest runs host code. The last column divides the lockstep
-interpreter's time by the GPU run.}
+lockstep whole-program interpreter's time spent running kernels; the rest runs host code. ``Four orders'' is the
+total time of the runs under all four thread orders.}
 \label{tab:overhead}
 \end{table*}
 
@@ -670,7 +818,7 @@ a tool. Run without the input, the interpreter today stops after one round of th
 condition comes from the GPU and is unknown, and it reports \numNoInputPatterns{} of the \numNoInputPatternsOf{}
 patterns that connect operations at most six apart, nearly all of them as possible.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
 \small
 \setlength{\tabcolsep}{4pt}
@@ -681,6 +829,7 @@ its operations, kind, buffer and distance in operations.}
 \label{tab:patterns}
 \end{table}
 
+\clearpage
 \section{Related work}
 \label{sec:related}
 
@@ -689,68 +838,73 @@ addresses are affine functions of loop indices with the polyhedral model~\cite{F
 but an address read from memory falls outside that model. GPUVerify~\cite{Betts2012GPUVerify} proves that a kernel
 is free of data races for all inputs, and GKLEE~\cite{Li2012GKLEE} explores a kernel's behaviour with symbolic
 inputs. Both reason about one kernel and treat memory contents as arbitrary, so neither tells which bytes a kernel
-touches on a given input, and neither relates one launch to the next. Our interpreter answers the latter question,
+touches on a given input, and neither relates one launch to the next. Our interpreters answer the latter question,
 for one input.
 
-\paragraph{Dynamic analysis.} NVBit~\cite{Villa2019NVBit} and race detectors such as
+\paragraph{Dynamic analysis and emulation.} NVBit~\cite{Villa2019NVBit} and race detectors such as
 BARRACUDA~\cite{Eizenberg2017Barracuda} observe the accesses of a running program on the GPU, as our ground-truth
 tool does. They give the exact bytes of one run, but only by running the program on the GPU with instrumentation,
-and only after the fact. The interpreter gives the same information before the program runs on the GPU, from the
-source and the input.
+and only after the fact. GPU emulators and simulators such as Ocelot~\cite{Diamos2010Ocelot} and
+GPGPU-Sim~\cite{Bakhoda2009GPGPUSim} run compiled kernels on the CPU, one thread or warp after another, and could
+record the same bytes for one order of execution. Our interpreters run kernels from source with all threads as
+arrays, report which dependences are certain and which only possible, and cover other orders than the one they
+ran.
 
 \paragraph{Inspector and executor.} Runtime parallelisation of irregular loops runs an \term{inspector} that reads
 the index arrays to compute the loop's dependences, and then an \term{executor} that runs the loop in an order that
-respects them~\cite{Saltz1991Inspector}. The interpreter is an inspector for a whole CUDA program. For accesses
+respects them~\cite{Saltz1991Inspector}. The interpreters are inspectors for a whole CUDA program. For accesses
 whose indices come only from the input, an inspector can be cheap, but in the breadth-first searches the indices
 depend on values earlier kernels computed, so finding the dependences means computing those values, which the
-interpreter does.
+interpreters do.
 
 \paragraph{Dependence-driven GPU scheduling.} Wireframe~\cite{Abdolrashidi2017Wireframe} and
 BlockMaestro~\cite{Abdolrashidi2021BlockMaestro} run GPU work from a dependence graph between thread blocks of
 consecutive kernels, and CUDA graphs~\cite{cudaguide} let the programmer state dependences between operations.
 They need the dependences as input. BlockMaestro derives them from the kernels' memory accesses when these are
-regular; the interpreter could supply them for irregular kernels when the input is known.
-
-\paragraph{Irregular GPU benchmarks.} Rodinia~\cite{Che2009Rodinia}, Pannotia~\cite{Che2013Pannotia}, the
-LonestarGPU programs~\cite{Burtscher2012Irregular} and Gunrock~\cite{Wang2016Gunrock} contain the patterns of our
-test programs: frontier arrays, frontier queues filled with atomics, and label propagation. We have not yet run the
-interpreter on these suites.
+regular; the interpreters could supply them for irregular kernels when the input is known.
 
 \section{Limitations}
 \label{sec:limits}
 
-A limitation of the evaluation is that the test programs are small and were written together with the
-interpreter, which means that they show that the mechanisms work on the patterns they target, not how often real
-programs contain patterns the interpreter does not support. Unmodified benchmark suites will use library calls,
-templates, streams and larger inputs that the tests do not.
+A limitation of the interpreters is that they need the program's input, which means that their results are for
+that input only (\secref{sec:eval-input}). A tool that schedules from them must run them on the input it will use.
 
-A limitation of the interpreter is that it needs the program's input, which means that its exact results are for
-that input only (\secref{sec:eval-input}).
+A limitation of the whole-program interpreter is that it must understand all of the host code, which means that
+programs whose host code uses C++ streams, option parsers or old C dialects come out with operations missing
+(\secref{sec:eval-bench}). It warns when this happens; the hybrid interpreter does not have this limitation.
 
-A limitation of the thread orders is that they are four samples of the legal orders, which means that a GPU run of
-a kernel whose result depends on the order can produce dependences the interpreter misses (\numCcMissLo{} to
-\numCcMissHi{} of the traced dependences of \code{cc}).
+A limitation of the over-approximation for thread order is that it reports every dependence another order could
+produce, which means that kernels whose result depends on thread order come out with many possible dependences that a
+given run does not have (\numBenchHyPossNo{} over the benchmarks). It also rests on the units the sampled orders
+touched: a GPU run that touched a unit none of the four orders touched could still produce a dependence that is not
+reported, although none of our traced runs did.
 
 A limitation of splitting threads is that it applies only to a pointer loaded before any store in its statement,
 which means that a pointer loaded after an atomic operation in the same statement still makes every access through
 it a possible access to every buffer.
 
-A limitation of the cost is that the interpreter simulates every GPU thread on one CPU core in Python, which means
-that its run time grows with the number of threads and with sequential host loops, and that the three extra thread
-orders cost more than lockstep because they run one block at a time (\secref{sec:eval-overhead}).
+A limitation of the cost is that the interpreters simulate every GPU thread on one CPU core in Python, which means
+that their run time grows with the number of threads, and that GraphBIG's \code{betweenness}, ten times larger than
+any other benchmark, did not finish in two hours. The whole-program interpreter's run time also grows with
+sequential host loops, and the extra thread orders
+multiply the cost of either interpreter by up to \numHyOrdersHi{} for programs whose reordered kernels have many
+warps (\secref{sec:eval-overhead}).
+
+A limitation of the evaluation is that every program was traced once on one GPU, with inputs small enough for the
+tracer, which means that the scores are for those runs and inputs.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
 We showed that the memory dependences between the operations of a CUDA program, including those that pass through
-bytes chosen by data, can be found before the program runs on the GPU, by interpreting its source on the CPU with
-its input. Running all threads of a kernel at once as arrays keeps the cost proportional to the work of the
-kernels, splitting threads by the buffer their pointers name makes accesses through pointer tables exact, and
-running several legal thread orders keeps the reported certain dependences correct when a kernel's result depends
-on the order. Against an NVIDIA A30, every certain dependence the interpreter reported occurred, and it missed
-dependences only in a kernel whose behaviour changed from run to run. The next steps are to run the interpreter on
-unmodified graph benchmarks at full input sizes, and to derive the input-independent pattern of dependences
-without the input.
+bytes chosen by data, can be found before the program runs on the GPU, by running its kernels in an interpreter on
+the CPU with its input. Running all threads of a kernel at once as arrays keeps the cost proportional to the work of
+the kernels, splitting threads by the buffer their pointers name makes accesses through pointer tables exact, and
+running several legal thread orders, with an over-approximation of what other orders could do, keeps every
+dependence a GPU run has among the reported ones. Running the host code natively removes the need to understand
+it. On \numBenchHyDone{} unmodified benchmarks, the hybrid interpreter missed no dependence and reported no wrong
+certain dependence. The next steps are to reduce the possible dependences reported for kernels whose result depends
+on thread order, and to reduce the cost for programs with very many launches.
 
 \bibliographystyle{plain}
 \bibliography{references}

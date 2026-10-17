@@ -1,6 +1,6 @@
 program,events,exact_pairs,exact_needed,interval_pairs,interval_needed,allocation_pairs,allocation_needed
 bfs,49,916,48,916,48,916,48
-cc,76,2328,75,2328,75,2328,75
+cc,70,1958,69,1958,69,1958,69
 chain,5,5,4,5,4,5,4
 fileidx,5,5,4,5,4,5,4
 histogram,10,13,9,13,9,13,9
@@ -11,4 +11,5 @@ reduce,5,4,4,4,4,4,4
 rodinia_bfs,59,1009,69,1009,69,1009,69
 scatter,6,6,5,7,5,7,5
 stencil,7,17,6,17,6,17,6
+symbols,8,6,4,6,4,6,4
 wl_bfs,56,1185,55,1190,55,1191,55

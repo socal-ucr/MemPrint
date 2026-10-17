@@ -277,11 +277,29 @@ def patterns():
     write("patterns.csv", rows)
 
 
+def hybrid_scores():
+    """The hybrid interpreter (host code native) on the same programs and traces, under the four schedules."""
+    rows = []
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "analysis"))
+    for name in programs():
+        out = RUNS / "hybrid" / name
+        out.mkdir(parents=True, exist_ok=True)
+        done = subprocess.run([PY, "-m", "memprint.static.hybrid", str(CUDA / f"{name}.cu"), str(out), "--name", name,
+                               "--access", "--schedules", "lockstep,blocks,reverse,random", "--argv", name,
+                               *argv_of(name)], cwd=out, env=env, capture_output=True, text=True)
+        r = {"program": name, "status": "ok" if done.returncode == 0 else f"exit {done.returncode}"}
+        if (out / f"{name}_events.csv").exists():
+            r.update(score_dirs(out, name, TRUTH / name / "truth"))
+        rows.append(r)
+    write("hybrid_scores.csv", rows)
+
+
 def main():
     DATA.mkdir(parents=True, exist_ok=True)
     if "--skip-gpu" not in sys.argv:
         gpu_runs()
     scores()
+    hybrid_scores()
     ranges()
     datadep()
     cc_runs()

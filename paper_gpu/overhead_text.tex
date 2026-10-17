@@ -1,28 +1,34 @@
-The interpreter's cost is its run time on the CPU. \figref{fig:overhead} and \tabref{tab:overhead} compare it with
-the program's own run on the GPU and with the run under the NVBit tool, for six programs at three input sizes
+The interpreters' cost is their run time on the CPU. \figref{fig:overhead} and \tabref{tab:overhead} compare it
+with the program's own run on the GPU and with the run under the NVBit tool, for six programs at three input sizes
 each. The GPU runs take \numNativeLo{} to \numNativeHi{} seconds, and almost all of that time is the start-up of
-the CUDA runtime, because at these sizes the kernels themselves take milliseconds. Against the whole GPU run, the
-interpreter in lockstep takes \numOverheadLo{} to \numOverheadHi{} times as long, and the NVBit tool \numNvbitLo{}
-to \numNvbitHi{} times. Against the kernels alone, the interpreter is several orders of magnitude slower, as
-expected from simulating every thread in Python on one CPU core.
+the CUDA runtime, because at these sizes the kernels themselves take milliseconds. The NVBit tool takes
+\numNvbitLo{} to \numNvbitHi{} times as long as the GPU run. Against the kernels alone, both interpreters are
+several orders of magnitude slower, as expected from simulating every thread in Python on one CPU core.
 
-\textit{Most of the interpreter's time is spent in host code, not in kernels.} The ``In kernels'' column of
-\tabref{tab:overhead} gives the share of the time spent running kernels. The kernels of \code{chain}, with
-\numChainThreads{} GPU threads, take \numChainKernelS{} seconds, and those of \code{rodinia\_bfs}, with
-\numRbfsThreads{} threads, take less than one second, so \code{rodinia\_bfs} as a whole takes \numRbfsLockS{}
-seconds, against \numRbfsNvbitS{} seconds under NVBit. The time spent in kernels alone is \numKernelRatioLo{} to
-\numKernelRatioHi{} times the whole GPU run, with a median of \numKernelRatioMedian{}. The programs that take
-longest, \code{wl\_bfs} (\numWlbfsLockS{} seconds, of which \numWlbfsKernelS{} in kernels) and \code{bfs}
-(\numBfsLockS{} seconds, of which \numBfsKernelS{} in kernels), spend up to \numHostShareMax{} of their time in host
-loops that carry a value from one iteration to the next. These loops are the random-number generator that builds
-the graph in \code{wl\_bfs} and \code{cc}, and a running maximum over the result in \code{bfs}. The interpreter runs
-all iterations of a loop at once only when the iterations do not depend on each other, so it runs these loops one
-iteration at a time, at about a millisecond per iteration. Such loops belong to the test harness here, not to the
-computation on the GPU, but real programs contain them as well, for example when they read or generate their input.
+\paragraph{In lockstep.} \textit{The hybrid interpreter in lockstep takes \numHyLockLoS{} to \numHyLockHiS{}
+seconds, \numHyOverheadLo{} to \numHyOverheadHi{} times the GPU run (median \numHyOverheadMedian{}).} Most of
+this is a fixed cost of about one second for starting Python and parsing the kernels; the rest is running the
+kernels. The whole-program interpreter takes \numOverheadLo{} to \numOverheadHi{} times the GPU run, and the
+difference is host code. The kernels of \code{chain}, with \numChainThreads{} GPU threads, take \numChainKernelS{}
+seconds in both, and those of \code{rodinia\_bfs}, with \numRbfsThreads{} threads, take less than one second, so
+\code{rodinia\_bfs} as a whole takes \numRbfsLockS{} seconds, against \numRbfsNvbitS{} seconds under NVBit. But
+\code{wl\_bfs} takes \numWlbfsLockS{} seconds in the whole-program interpreter, of which \numWlbfsKernelS{} in
+kernels, and \code{bfs} \numBfsLockS{} seconds, of which \numBfsKernelS{} in kernels: up to \numHostShareMax{} of
+the time goes to host loops that carry a value from one iteration to the next, the random-number generator that
+builds the graph in \code{wl\_bfs} and \code{cc}, and a running maximum over the result in \code{bfs}. The
+whole-program interpreter runs all iterations of a loop at once only when they do not depend on each other, so it
+runs these loops one iteration at a time, at about a millisecond per iteration. The hybrid interpreter runs them
+natively and takes \numWlbfsHyLockS{} and \numBfsHyLockS{} seconds for the same two programs.
 
-Running all four thread orders costs \numScheduleLo{} to \numScheduleHi{} times as much as lockstep alone
-(\numScheduleCost{} on average). Where host code dominates, the cost is close to four times, because each order runs
-the host code once more. Where kernels dominate, the orders that run one block at a time cost much more than
-lockstep, because they carry out every statement once per block instead of once per group of up to $2^{18}$ threads.
-A tool could run the extra orders only for kernels that read memory that other threads of the same launch write,
-which is where the order can change the result. We have not done so.
+\paragraph{Under four thread orders.} The extra thread orders are the main cost. Running all four costs the hybrid
+interpreter \numHyOrdersLo{} to \numHyOrdersHi{} times as much as lockstep alone, up to \numHyAllS{} seconds for
+\code{rodinia\_bfs} with 65{,}536 vertices, and the whole-program interpreter \numScheduleLo{} to \numScheduleHi{}
+times (\numRbfsAllS{} seconds for the same run). Only kernels that read and write the same unit in one launch are
+reordered (\secref{sec:schedules}), but in the breadth-first searches and \code{cc} these are the main kernels, and
+in the reordered orders the interpreter carries out every statement once per warp of 32 threads instead of once
+per group of up to $2^{18}$ threads, so the cost grows with the number of warps. \code{wl\_bfs}, whose launches have
+few threads, takes \numWlbfsHyAllS{} seconds under all four orders in the hybrid interpreter, less than the
+whole-program interpreter's lockstep run. Both interpreters run the orders one after another. After the lockstep run
+the other three are independent of each other, so they could run at the same time on separate cores, and a
+cheaper way to sample orders, such as reordering only the warps whose units overlap, would reduce their cost
+further.

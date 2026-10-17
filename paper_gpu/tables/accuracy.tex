@@ -1,21 +1,21 @@
-\begin{tabular}{lrrrrrrrrrr}
+\begin{tabular}{lrrrrr|rrrrr|rrr}
 \toprule
- & \multicolumn{7}{c}{Dependences} & \multicolumn{3}{c}{Address ranges} \\
-\cmidrule(lr){2-8} \cmidrule(lr){9-11}
-Program & Certain & Possible & \shortstack{Certain\\precision} & Recall & \shortstack{Certain\\recall} & \shortstack{Needed cert.\\precision} & \shortstack{Needed\\recall} & \shortstack{Exact\\sets} & \shortstack{Unit\\precision} & \shortstack{Unit\\recall} \\
+ & \multicolumn{5}{c|}{Whole program} & \multicolumn{5}{c|}{Hybrid} & \multicolumn{3}{c}{Ranges (whole program)} \\
+Program & Cert. & Poss. & \shortstack{Cert.\\prec.} & Recall & \shortstack{Cert.\\recall} & Cert. & Poss. & \shortstack{Cert.\\prec.} & Recall & \shortstack{Cert.\\recall} & \shortstack{Exact\\sets} & \shortstack{Unit\\prec.} & \shortstack{Unit\\recall} \\
 \midrule
-\texttt{chain} & 5 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 8/8 & 1.00 & 1.00 \\
-\texttt{reduce} & 4 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 7/7 & 1.00 & 1.00 \\
-\texttt{stencil} & 16 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 11/11 & 1.00 & 1.00 \\
-\texttt{scatter} & 5 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 9/9 & 1.00 & 1.00 \\
-\texttt{fileidx} & 6 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 8/8 & 1.00 & 1.00 \\
-\texttt{histogram} & 14 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 17/17 & 1.00 & 1.00 \\
-\texttt{maybe} & 3 & 2 & 1.00 & 1.00 & 0.60 & 1.00 & 1.00 & 7/8 & 0.94 & 1.00 \\
-\texttt{bfs} & 359 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 108/108 & 1.00 & 1.00 \\
-\texttt{rodinia\_bfs} & 609 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 195/195 & 1.00 & 1.00 \\
-\texttt{wl\_bfs} & 345 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 172/172 & 1.00 & 1.00 \\
-\texttt{ptrsel} & 21 & 0 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 25/25 & 1.00 & 1.00 \\
-\texttt{ptrsel2} & 23 & 34 & 1.00 & 1.00 & 0.79 & 1.00 & 0.90 & 31/49 & 0.57 & 1.00 \\
-\texttt{cc} & 240 & 466 & 1.00 & 0.98 & 0.35 & 1.00 & 1.00 & 151/170 & 0.99 & 0.99 \\
+\texttt{chain} & 5 & 0 & 1.00 & 1.00 & 1.00 & 5 & 0 & 1.00 & 1.00 & 1.00 & 8/8 & 1.00 & 1.00 \\
+\texttt{reduce} & 4 & 0 & 1.00 & 1.00 & 1.00 & 4 & 0 & 1.00 & 1.00 & 1.00 & 7/7 & 1.00 & 1.00 \\
+\texttt{stencil} & 16 & 0 & 1.00 & 1.00 & 1.00 & 16 & 0 & 1.00 & 1.00 & 1.00 & 11/11 & 1.00 & 1.00 \\
+\texttt{scatter} & 5 & 0 & 1.00 & 1.00 & 1.00 & 5 & 0 & 1.00 & 1.00 & 1.00 & 9/9 & 1.00 & 1.00 \\
+\texttt{fileidx} & 6 & 0 & 1.00 & 1.00 & 1.00 & 6 & 0 & 1.00 & 1.00 & 1.00 & 8/8 & 1.00 & 1.00 \\
+\texttt{histogram} & 14 & 0 & 1.00 & 1.00 & 1.00 & 14 & 0 & 1.00 & 1.00 & 1.00 & 17/17 & 1.00 & 1.00 \\
+\texttt{maybe} & 2 & 3 & 1.00 & 1.00 & 0.40 & 5 & 0 & 1.00 & 1.00 & 1.00 & 7/8 & 0.94 & 1.00 \\
+\texttt{bfs} & 359 & 0 & 1.00 & 1.00 & 1.00 & 359 & 0 & 1.00 & 1.00 & 1.00 & 108/108 & 1.00 & 1.00 \\
+\texttt{rodinia\_bfs} & 609 & 0 & 1.00 & 1.00 & 1.00 & 609 & 0 & 1.00 & 1.00 & 1.00 & 195/195 & 1.00 & 1.00 \\
+\texttt{wl\_bfs} & 345 & 0 & 1.00 & 1.00 & 1.00 & 345 & 0 & 1.00 & 1.00 & 1.00 & 172/172 & 1.00 & 1.00 \\
+\texttt{ptrsel} & 21 & 0 & 1.00 & 1.00 & 1.00 & 21 & 0 & 1.00 & 1.00 & 1.00 & 25/25 & 1.00 & 1.00 \\
+\texttt{ptrsel2} & 21 & 36 & 1.00 & 1.00 & 0.72 & 21 & 36 & 1.00 & 1.00 & 0.72 & 31/49 & 0.57 & 1.00 \\
+\texttt{symbols} & 6 & 0 & 1.00 & 1.00 & 1.00 & 6 & 0 & 1.00 & 1.00 & 1.00 & 8/8 & 1.00 & 1.00 \\
+\texttt{cc} & 182 & 3047 & 1.00 & 1.00 & 0.30 & 182 & 3047 & 1.00 & 1.00 & 0.30 & 134/171 & 0.89 & 0.97 \\
 \bottomrule
 \end{tabular}

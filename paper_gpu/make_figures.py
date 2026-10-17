@@ -100,7 +100,10 @@ def fig_overhead(out):
     series = (("native_s", "GPU run", INK, "o", "-"), ("nvbit_s", "GPU run under NVBit", MUTED, "s", (0, (4, 2))),
               ("interp_lockstep_s", "Interpreter, lockstep", PAL[0], "D", "-"),
               ("interp_kernels_s", "Interpreter, lockstep, kernels only", PAL[0], "D", (0, (1, 1.5))),
-              ("interp_all_s", "Interpreter, four schedules", PAL[1], "^", "-"))
+              ("interp_all_s", "Interpreter, four orders", PAL[1], "^", "-"),
+              ("hybrid_lockstep_s", "Hybrid, lockstep", PAL[2], "v", "-"),
+              ("hybrid_all_s", "Hybrid, four orders", PAL[2], "v", (0, (4, 2))))
+    series = tuple(x for x in series if x[0] in d.columns)
     for ax, p in zip(axes.flat, progs):
         g = d[d.program == p].sort_values("n")
         for col, label, color, marker, dash in series:
@@ -116,7 +119,7 @@ def fig_overhead(out):
     for ax in axes[:, 0]:
         ax.set_ylabel("Seconds")
     h, lab = axes[0, 0].get_legend_handles_labels()
-    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    fig.tight_layout(rect=(0, 0, 1, 0.86))
     fig.legend(h, lab, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.02))
     save(fig, out, "overhead")
 
