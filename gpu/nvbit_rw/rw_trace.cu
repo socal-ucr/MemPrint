@@ -12,6 +12,10 @@
  *
  * KDEPS_VERBOSE=1 names every driver call on stderr (to find calls the tool does not handle).
  *
+ * KDEPS_BLOCKS=1 also writes dir/truth_block_access.csv (event, alloc, block, unit_lo, unit_hi, bits): per
+ * kernel launch, the units each block (blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z)) read
+ * and wrote.
+ *
  * Built and run with NVBit 1.8 and CUDA 13 (tools/mem_trace has the same structure). See gpu/README.md. */
 #include <assert.h>
 #include <pthread.h>
@@ -23,6 +27,7 @@
 
 #include <map>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -50,6 +55,7 @@ struct CTXstate {
 struct Event {
     std::string kind, name, grid, block;
     std::unordered_map<uint64_t, uint8_t> units;  /* global unit number (address / unit) -> bits */
+    std::unordered_map<uint64_t, std::unordered_map<uint32_t, uint8_t>> blocks;  /* unit -> block -> bits */
 };
 
 static pthread_mutex_t mutex;          /* tool state below, shared with the receiver threads */
@@ -65,6 +71,7 @@ static bool skip_callback_flag = false;
 static uint64_t unit = 4;
 static std::string out_dir = ".";
 static bool verbose = false;           /* KDEPS_VERBOSE: name every driver call on stderr */
+static bool per_block = false;         /* KDEPS_BLOCKS: also keep which block made each access */
 
 static Event &new_event(const std::string &kind, const std::string &name) {
     events.push_back(Event());
@@ -84,6 +91,7 @@ void nvbit_at_init() {
     if (getenv("KDEPS_OUT")) out_dir = getenv("KDEPS_OUT");
     if (getenv("KDEPS_UNIT")) unit = strtoull(getenv("KDEPS_UNIT"), 0, 10);
     verbose = getenv("KDEPS_VERBOSE") && atoi(getenv("KDEPS_VERBOSE"));
+    per_block = getenv("KDEPS_BLOCKS") && atoi(getenv("KDEPS_BLOCKS"));
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
@@ -153,6 +161,9 @@ static void *recv_thread_fun(void *args) {
                 --it;
                 if (a >= it->first + it->second.first) { outside++; continue; }
                 mark(ev, a, ma->size, (uint8_t)ma->flags);
+                if (per_block && ma->size)
+                    for (uint64_t u = a / unit; u <= (a + ma->size - 1) / unit; u++)
+                        ev.blocks[u][ma->cta] |= (uint8_t)ma->flags;
             }
         }
         pthread_mutex_unlock(&mutex);
@@ -378,6 +389,43 @@ static void write_outputs() {
                                 (unsigned long long)hi, bits);
     }
     fclose(f);
+    if (per_block) {
+        path = out_dir + "/truth_block_access.csv";
+        f = fopen(path.c_str(), "w");
+        fprintf(f, "event,alloc,block,unit_lo,unit_hi,bits\n");
+        for (size_t i = 0; i < events.size(); i++) {
+            /* per allocation and block, runs of units with the same bits */
+            std::map<std::tuple<int, uint32_t, uint64_t>, uint8_t> sorted;
+            for (auto &kv : events[i].blocks) {
+                uint64_t a = kv.first * unit;
+                auto it = allocs.upper_bound(a);
+                if (it == allocs.begin()) continue;
+                --it;
+                if (a >= it->first + it->second.first) continue;
+                for (auto &bb : kv.second)
+                    sorted[std::make_tuple(it->second.second, bb.first, (a - it->first) / unit)] |= bb.second;
+            }
+            int alloc = -1;
+            uint32_t block = 0;
+            uint64_t lo = 0, hi = 0;
+            uint8_t bits = 0;
+            for (auto &kv : sorted) {
+                int a = std::get<0>(kv.first);
+                uint32_t b = std::get<1>(kv.first);
+                uint64_t u = std::get<2>(kv.first);
+                if (a == alloc && b == block && u == hi && kv.second == bits) {
+                    hi++;
+                    continue;
+                }
+                if (alloc >= 0) fprintf(f, "%zu,%d,%u,%llu,%llu,%u\n", i, alloc, block, (unsigned long long)lo,
+                                        (unsigned long long)hi, bits);
+                alloc = a, block = b, lo = u, hi = u + 1, bits = kv.second;
+            }
+            if (alloc >= 0) fprintf(f, "%zu,%d,%u,%llu,%llu,%u\n", i, alloc, block, (unsigned long long)lo,
+                                    (unsigned long long)hi, bits);
+        }
+        fclose(f);
+    }
     fprintf(stderr, "rw_trace: %zu events, %zu allocations, %llu lane accesses outside them -> %s\n",
             events.size(), alloc_list.size(), (unsigned long long)outside, out_dir.c_str());
 }

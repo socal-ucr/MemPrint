@@ -70,11 +70,63 @@ class Tracker:
         self.schedule_edges = set()  # edges keys whose presence or certainty depends on the schedule (merge)
         self.touch = None  # event index -> {object name: (read, write, n, kill) packed unit bits} (keep_touch)
         self.loop = None  # the rounds that differ between schedules, as a template (merge_schedules)
+        self.blocks = None  # kernel event index -> {object name: (blocks, units, bits)} or None (keep_blocks)
 
     def keep_touch(self):
         """Also keep which units each event read and wrote, certainly or possibly, and which it wrote in any
         legal schedule: certainly, at an address and under conditions that read no memory (merge_schedules)."""
         self.touch = {}
+
+    def keep_blocks(self):
+        """Also keep, per kernel event and object, which block referenced which unit (Event.block_marks), with
+        the event's bits (R, W, RM, WM, RD, WD, WX); None for an event with a reference to an unknown object."""
+        self.blocks = {}
+
+    def _block_rows(self, ev):
+        u = self.unit
+        per = {}
+        for blk, off, size, bits, obj in ev.block_marks:
+            self._object(obj)
+            n = max(obj.nbytes + u - 1, u) // u
+            if off is None:
+                b, units = np.repeat(blk, n), np.tile(np.arange(n, dtype=np.int64), len(blk))
+            else:
+                first = np.asarray(off, dtype=np.int64) // u
+                last = (np.asarray(off, dtype=np.int64) + max(int(size), 1) - 1) // u
+                span = int(np.max(last - first)) + 1 if len(first) else 1
+                if span == 1:
+                    b, units = blk, first
+                else:
+                    units = (first[:, None] + np.arange(span)).ravel()
+                    keep = units <= np.repeat(last, span)
+                    b, units = np.repeat(blk, span)[keep], units[keep]
+            ok = (units >= 0) & (units < n)
+            per.setdefault(obj, (n, []))[1].append((b[ok], units[ok], int(bits)))
+        out = {}
+        for obj, (n, recs) in per.items():
+            written = np.empty(0, dtype=np.int64)                      # (block, unit) keys certainly written
+            keys, vals = [], []
+            for b, units, bits in recs:
+                k = b * n + units
+                if bits & (R | RM | RD) and written.size:              # a block reading what it wrote itself
+                    own = np.isin(k, written)
+                    if own.any():
+                        rest = bits & ~(R | RM | RD)
+                        if rest:
+                            keys.append(k[own])
+                            vals.append(np.full(int(own.sum()), rest, dtype=np.uint8))
+                        k = k[~own]
+                keys.append(k)
+                vals.append(np.full(len(k), bits, dtype=np.uint8))
+                if bits & W:
+                    written = np.union1d(written, k)
+            k = np.concatenate(keys) if keys else np.empty(0, dtype=np.int64)
+            v = np.concatenate(vals) if vals else np.empty(0, dtype=np.uint8)
+            uk, inv = np.unique(k, return_inverse=True)
+            bv = np.zeros(len(uk), dtype=np.uint8)
+            np.bitwise_or.at(bv, inv, v)
+            out[self.objects[obj]["name"]] = ((uk // n).astype(np.int32), (uk % n).astype(np.int32), bv)
+        return out
 
     def keep_access(self):
         """Also keep, per event and device allocation, the runs of units it read (1) and wrote (2), in
@@ -126,6 +178,9 @@ class Tracker:
         e[2] += int(dd)
 
     def add(self, ev):
+        if self.blocks is not None and ev.kind == "kernel":
+            self.blocks[ev.index] = None if ev.block_unknown or ev.block_marks is None else self._block_rows(ev)
+            ev.block_marks = None
         self.events.append({"index": ev.index, "kind": ev.kind, "name": ev.name, "site": ev.site,
                             "grid": "x".join(map(str, ev.grid)) if ev.grid else "",
                             "block": "x".join(map(str, ev.block)) if ev.block else "", "threads": ev.threads,
@@ -576,6 +631,12 @@ def reduce_edges(pairs):
 
 def write(out_dir, name, tracker):
     os.makedirs(out_dir, exist_ok=True)
+    if tracker.blocks is not None:                                     # NAME_blocks.npz: per kernel event and
+        arrays = {"unknown": np.array([e for e, v in tracker.blocks.items() if v is None], dtype=np.int64)}
+        for e, objs in tracker.blocks.items():                         # object, which block referenced which
+            for obj, (b, u, bits) in (objs or {}).items():             # unit, with the event's bits
+                arrays[f"{e}/{obj}/block"], arrays[f"{e}/{obj}/unit"], arrays[f"{e}/{obj}/bits"] = b, u, bits
+        np.savez_compressed(os.path.join(out_dir, f"{name}_blocks.npz"), **arrays)
     ev_path = os.path.join(out_dir, f"{name}_events.csv")
     with open(ev_path, "w", newline="") as f:
         cols = ["index", "kind", "name", "site", "grid", "block", "threads", "data_control", "note",

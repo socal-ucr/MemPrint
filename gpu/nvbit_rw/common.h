@@ -11,5 +11,5 @@ typedef struct {
     uint32_t active_mask;  /* lanes that executed the instruction (its guard predicate true) */
     uint32_t flags;        /* RW_READ | RW_WRITE */
     uint32_t size;         /* bytes per lane */
-    uint32_t pad;
+    uint32_t cta;          /* the block: blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z) */
 } mem_access_t;

@@ -523,6 +523,8 @@ def main(argv=None):
     ap.add_argument("-I", dest="includes", action="append", default=[])
     ap.add_argument("--unit", type=int, default=4)
     ap.add_argument("--access", action="store_true")
+    ap.add_argument("--blocks", action="store_true", help="also write NAME_blocks.npz: which block of each kernel "
+                    "referenced which unit (per schedule, in OUT_DIR/schedule_*/ with --schedules)")
     ap.add_argument("--schedule", default="lockstep", choices=ic.SCHEDULES)
     ap.add_argument("--schedules", default=None,
                     help="several thread schedules, comma-separated: the program runs once per schedule (each in a "
@@ -549,6 +551,9 @@ def main(argv=None):
     for e in errors[:20]:
         print("parse error:", e, file=sys.stderr)
     it = HybridInterpreter(tu, seed=args.seed, unit=args.unit, keep_access=args.access, schedule=args.schedule)
+    if args.blocks:
+        it.tracker.keep_blocks()
+        it.record_blocks = True
     if args.dump:
         it.tracker.keep_touch()                                        # merged with the other schedules' runs
     if args.racy is not None:

@@ -19,7 +19,7 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred, int flags, int 
     ma.active_mask = active_mask;
     ma.flags = flags;
     ma.size = size;
-    ma.pad = 0;
+    ma.cta = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
     if (first_laneid == laneid) {
         ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
         channel_dev->push(&ma, sizeof(mem_access_t));

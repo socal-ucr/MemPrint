@@ -87,6 +87,9 @@ class Event:
         self.unknown = 0  # bits of references to an unknown object
         self.data_control = False  # issued under host control that depends on memory contents
         self.note = ""
+        self.block_marks = None  # a kernel's references per block (CudaInterpreter.record_blocks): a list of
+                                 # (blocks, byte offsets or None for the whole object, size, bits, Obj)
+        self.block_unknown = False  # a reference whose object is unknown: which block made it is not kept
 
     def _arr(self, obj, hi):
         arr = self.bits.get(obj)
@@ -451,6 +454,8 @@ class CudaInterpreter(CppInterpreter):
                                     # in reverse, or in a random order (rng): other legal schedules
         self.oob = {}  # source location (object) -> references past the end of a device buffer
         self.racy_seen = set()  # kernels with a launch that read and wrote one unit (another order may differ)
+        self.record_blocks = False  # also keep which block made each reference (Event.block_marks)
+        self._b0, self._nb = 0, 1  # the first block of the threads being run, and how many blocks they are
         self.racy = None  # in a schedule other than lockstep: the kernels to reorder (None: all), as racy_seen
         self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
         self._stmt_marks = []  # per statement being run in a kernel block: (effects, batch weights) at its start
@@ -573,11 +578,13 @@ class CudaInterpreter(CppInterpreter):
             bits |= WX
         if not isinstance(obj, Obj):
             ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
+            ev.block_unknown = True
             return
         off = loc.off
         if off is UNK or not isinstance(off, (int, np.integer, np.ndarray)):
             may = (bits & (RD | WD)) | (WM if write else RM)
             ev.mark_all(obj, may)
+            self._note_blocks(ev, obj, None, 0, may)
             return
         if obj.kind in ("device", "managed", "device-global") and obj.nbytes > 0:
             offs = np.asarray(off, dtype=np.int64)
@@ -586,12 +593,44 @@ class CudaInterpreter(CppInterpreter):
                 site = f"{_loc_text(cur)} ({obj.name})" if cur is not None else obj.name   # it reaches whatever
                 self.oob[site] = self.oob.get(site, 0) + int(np.count_nonzero(out))    # lies there: any buffer
                 ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
+                ev.block_unknown = True
                 ev.note = (ev.note + "; " if ev.note else "") + "out of bounds" if "out of bounds" not in ev.note \
                     else ev.note
                 if out.all():
                     return
+                self._note_blocks(ev, obj, off, loc.size or 8, bits, keep=~out if offs.ndim else None)
                 off = offs[~out] if offs.ndim else off
+                ev.mark(obj, off, loc.size or 8, bits)
+                return
+        self._note_blocks(ev, obj, off, loc.size or 8, bits)
         ev.mark(obj, off, loc.size or 8, bits)
+
+    def _note_blocks(self, ev, obj, off, size, bits, keep=None):
+        """Keep which blocks made a reference (record_blocks): the block of each thread taking part, from the
+        per-thread block index of the threads being run; every block being run if the shapes do not pair up."""
+        if ev.block_marks is None or self.kernel is None or ev is not self.kernel:
+            return
+        blk = self.frames[0].vars.get(BLOCK_KEY, [None, 0])[1]
+        blk = self._b0 + (np.asarray(blk, dtype=np.int64) if np.ndim(blk) else int(blk))
+        if off is not None and np.ndim(off) and np.ndim(blk) and np.size(off) == np.size(blk):
+            blk = np.asarray(blk).ravel()
+            off = np.asarray(off, dtype=np.int64).ravel()
+            if keep is not None:
+                blk, off = blk[np.asarray(keep).ravel()], off[np.asarray(keep).ravel()]
+        elif off is not None and np.ndim(off) == 0:
+            blk = np.unique(np.asarray(blk).ravel())
+            off = np.full(len(blk), int(off), dtype=np.int64)
+        else:                                                          # every block, every offset
+            blocks = np.arange(self._b0, self._b0 + self._nb, dtype=np.int64)
+            if off is not None:
+                offs = np.asarray(off, dtype=np.int64).ravel()
+                if keep is not None:
+                    offs = offs[np.asarray(keep).ravel()]
+                offs = np.unique(offs)
+                blk, off = np.repeat(blocks, len(offs)), np.tile(offs, len(blocks))
+            else:
+                blk = blocks
+        ev.block_marks.append((np.asarray(blk, dtype=np.int64), off, size, bits, obj))
 
     def lvalue(self, c):
         s = ca.strip(c)
@@ -1234,6 +1273,8 @@ class CudaInterpreter(CppInterpreter):
         ev.threads = bsz * nblocks
         if bsz <= 0 or nblocks <= 0:
             return
+        if self.record_blocks and ev.block_marks is None:
+            ev.block_marks = []
         reorder = self.schedule != "lockstep" and (self.racy is None or fdef.spelling in self.racy)
         per = max(1, THREADS_PER_BATCH // bsz) if not reorder else 1   # a kernel no launch of which read and
                                                                        # wrote one unit gives the same in any order
@@ -1282,6 +1323,7 @@ class CudaInterpreter(CppInterpreter):
                 g0 = _map_frames_with([globals_frame], lambda a: a[np.zeros(L, dtype=np.int64)])[0]
                 before = {k: e[1] for k, e in g0.vars.items()}
                 g0.vars[BLOCK_KEY] = [None, local_block if nb > 1 else 0]
+                self._b0, self._nb = b0, nb
                 for bname, vals in (("threadIdx", split(tin, bx, by)),
                                     ("blockIdx", split(b0 + local_block, gx, gy)),
                                     ("blockDim", (bx, by, bz)), ("gridDim", (gx, gy, gz))):

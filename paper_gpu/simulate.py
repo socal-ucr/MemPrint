@@ -121,12 +121,12 @@ def _fits(ops, truth_events):
     return out if k == len(ops) else None
 
 
-def profile(name, tries=8):
-    """Profile one benchmark until a run issues the traced run's operations; write sim_ops.csv. Returns
-    (status, gaps)."""
+def profile(name, tries=8, truth_sub="truth", out_name="sim_ops.csv"):
+    """Profile one benchmark until a run issues the operations of its traced run (data/bench/NAME/truth_sub);
+    write out_name. Returns (status, gaps)."""
     b = B.BENCH[name]
     w = B.workdir(b)
-    truth = list(csv.DictReader(open(w / "truth" / "truth_events.csv")))
+    truth = list(csv.DictReader(open(w / truth_sub / "truth_events.csv")))
     out = w / "nsys"
     for k in range(tries):
         done = subprocess.run(["nsys", "profile", "--trace=cuda", "--force-overwrite=true", "--export=sqlite",
@@ -137,7 +137,7 @@ def profile(name, tries=8):
         ops, gaps = nsys_ops(w / "nsys.sqlite")
         ops = _fits(ops, truth)
         if ops is not None:
-            with open(w / "sim_ops.csv", "w", newline="") as f:
+            with open(w / out_name, "w", newline="") as f:
                 wr = csv.DictWriter(f, ["index", "kind", "name", "dur_ns", "blocks", "threads", "regs", "smem",
                                         "bytes"])
                 wr.writeheader()
@@ -178,13 +178,13 @@ def _predicted(interp_dir, name, truth_events):
     return pairs
 
 
-def dependences(name):
-    """{policy: {event: set of predecessor events}} over the traced run's events."""
+def dependences(name, truth_sub="truth"):
+    """{policy: {event: set of predecessor events}} over the events of the traced run in truth_sub."""
     w = B.workdir(B.BENCH[name])
-    truth_events = list(csv.DictReader(open(w / "truth" / "truth_events.csv")))
+    truth_events = list(csv.DictReader(open(w / truth_sub / "truth_events.csv")))
     n = len(truth_events)
-    _, tedges = ks.truth_edges(w / "truth", 4)
-    touched = _touched(w / "truth")
+    _, tedges = ks.truth_edges(w / truth_sub, 4)
+    touched = _touched(w / truth_sub)
     pairs = {"sequential": {(i - 1, i) for i in range(1, n)},
              "truth": {(s, d) for (s, d, _, _) in tedges}}
     for policy, write in (("buffer", False), ("buffer-rw", True)):

@@ -219,6 +219,8 @@ def interp(b, which, timeout):
            "--schedules", SCHEDULES]
     if which == "full":
         cmd.append("--no-host")
+    else:
+        cmd.append("--blocks")                                         # per-block references (simulate_blocks.py)
     cmd += ["--argv", b["name"], *argv(b, w)]
     env = dict(os.environ, PYTHONPATH=str(ROOT / "analysis"))       # run in the work directory: files the
     if b.get("flags"):                                                 # program writes stay there
@@ -277,6 +279,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--only", default=None)
     ap.add_argument("--timeout", type=int, default=3600)
+    ap.add_argument("--which", default="hybrid,full", help="the interpreters to run (--interp)")
     args = ap.parse_args()
     names = args.only.split(",") if args.only else list(BENCH)
     WORK.mkdir(parents=True, exist_ok=True)
@@ -304,7 +307,7 @@ def main():
             rows[n].update(r)
             save()
     if args.interp:
-        jobs = [(n, which, args.timeout) for n in names for which in ("hybrid", "full")]
+        jobs = [(n, which, args.timeout) for n in names for which in args.which.split(",")]
         with ProcessPoolExecutor(args.jobs) as pool:
             for n, r in pool.map(run_interp, jobs):
                 print(n, r, flush=True)
