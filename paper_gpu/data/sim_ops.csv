@@ -1,0 +1,1829 @@
+name_of,index,kind,name,dur_ns,blocks,threads,regs,smem,bytes
+rodinia-bfs,0,copy,cudaMemcpy H2D,4704,0,0,0,0,32768
+rodinia-bfs,1,copy,cudaMemcpy H2D,5984,0,0,0,0,48736
+rodinia-bfs,2,copy,cudaMemcpy H2D,1664,0,0,0,0,4096
+rodinia-bfs,3,copy,cudaMemcpy H2D,1664,0,0,0,0,4096
+rodinia-bfs,4,copy,cudaMemcpy H2D,1664,0,0,0,0,4096
+rodinia-bfs,5,copy,cudaMemcpy H2D,2880,0,0,0,0,16384
+rodinia-bfs,6,copy,cudaMemcpy H2D,1376,0,0,0,0,1
+rodinia-bfs,7,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",5408,8,512,22,0,0
+rodinia-bfs,8,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3264,8,512,16,0,0
+rodinia-bfs,9,copy,cudaMemcpy D2H,2784,0,0,0,0,1
+rodinia-bfs,10,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,11,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6016,8,512,22,0,0
+rodinia-bfs,12,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3072,8,512,16,0,0
+rodinia-bfs,13,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+rodinia-bfs,14,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,15,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6560,8,512,22,0,0
+rodinia-bfs,16,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3072,8,512,16,0,0
+rodinia-bfs,17,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+rodinia-bfs,18,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,19,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6400,8,512,22,0,0
+rodinia-bfs,20,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3104,8,512,16,0,0
+rodinia-bfs,21,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,22,copy,cudaMemcpy H2D,1568,0,0,0,0,1
+rodinia-bfs,23,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6400,8,512,22,0,0
+rodinia-bfs,24,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3168,8,512,16,0,0
+rodinia-bfs,25,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,26,copy,cudaMemcpy H2D,1537,0,0,0,0,1
+rodinia-bfs,27,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6976,8,512,22,0,0
+rodinia-bfs,28,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3136,8,512,16,0,0
+rodinia-bfs,29,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,30,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,31,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",7264,8,512,22,0,0
+rodinia-bfs,32,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3168,8,512,16,0,0
+rodinia-bfs,33,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,34,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,35,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",7456,8,512,22,0,0
+rodinia-bfs,36,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3136,8,512,16,0,0
+rodinia-bfs,37,copy,cudaMemcpy D2H,2144,0,0,0,0,1
+rodinia-bfs,38,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,39,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",7040,8,512,22,0,0
+rodinia-bfs,40,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3136,8,512,16,0,0
+rodinia-bfs,41,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,42,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,43,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6272,8,512,22,0,0
+rodinia-bfs,44,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3104,8,512,16,0,0
+rodinia-bfs,45,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,46,copy,cudaMemcpy H2D,1568,0,0,0,0,1
+rodinia-bfs,47,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",6016,8,512,22,0,0
+rodinia-bfs,48,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",3040,8,512,16,0,0
+rodinia-bfs,49,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,50,copy,cudaMemcpy H2D,1568,0,0,0,0,1
+rodinia-bfs,51,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",5632,8,512,22,0,0
+rodinia-bfs,52,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",2912,8,512,16,0,0
+rodinia-bfs,53,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+rodinia-bfs,54,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+rodinia-bfs,55,kernel,"Kernel(Node *, int *, bool *, bool *, bool *, int *, int)",4096,8,512,22,0,0
+rodinia-bfs,56,kernel,"Kernel2(bool *, bool *, bool *, bool *, int)",2848,8,512,16,0,0
+rodinia-bfs,57,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+rodinia-bfs,58,copy,cudaMemcpy D2H,3584,0,0,0,0,16384
+rodinia-gaussian,0,copy,cudaMemcpy H2D,3520,0,0,0,0,16384
+rodinia-gaussian,1,copy,cudaMemcpy H2D,3296,0,0,0,0,16384
+rodinia-gaussian,2,copy,cudaMemcpy H2D,1344,0,0,0,0,256
+rodinia-gaussian,3,kernel,"Fan1(float *, float *, int, int)",3744,1,512,16,0,0
+rodinia-gaussian,4,kernel,"Fan2(float *, float *, float *, int, int, int)",4096,256,16,16,0,0
+rodinia-gaussian,5,kernel,"Fan1(float *, float *, int, int)",3200,1,512,16,0,0
+rodinia-gaussian,6,kernel,"Fan2(float *, float *, float *, int, int, int)",3744,256,16,16,0,0
+rodinia-gaussian,7,kernel,"Fan1(float *, float *, int, int)",3200,1,512,16,0,0
+rodinia-gaussian,8,kernel,"Fan2(float *, float *, float *, int, int, int)",3648,256,16,16,0,0
+rodinia-gaussian,9,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,10,kernel,"Fan2(float *, float *, float *, int, int, int)",3680,256,16,16,0,0
+rodinia-gaussian,11,kernel,"Fan1(float *, float *, int, int)",3168,1,512,16,0,0
+rodinia-gaussian,12,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,13,kernel,"Fan1(float *, float *, int, int)",3168,1,512,16,0,0
+rodinia-gaussian,14,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,15,kernel,"Fan1(float *, float *, int, int)",3200,1,512,16,0,0
+rodinia-gaussian,16,kernel,"Fan2(float *, float *, float *, int, int, int)",3648,256,16,16,0,0
+rodinia-gaussian,17,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,18,kernel,"Fan2(float *, float *, float *, int, int, int)",3648,256,16,16,0,0
+rodinia-gaussian,19,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,20,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,21,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,22,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,23,kernel,"Fan1(float *, float *, int, int)",3168,1,512,16,0,0
+rodinia-gaussian,24,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,25,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,26,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,27,kernel,"Fan1(float *, float *, int, int)",3168,1,512,16,0,0
+rodinia-gaussian,28,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,29,kernel,"Fan1(float *, float *, int, int)",3168,1,512,16,0,0
+rodinia-gaussian,30,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,31,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,32,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,33,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,34,kernel,"Fan2(float *, float *, float *, int, int, int)",3584,256,16,16,0,0
+rodinia-gaussian,35,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,36,kernel,"Fan2(float *, float *, float *, int, int, int)",3616,256,16,16,0,0
+rodinia-gaussian,37,kernel,"Fan1(float *, float *, int, int)",3168,1,512,16,0,0
+rodinia-gaussian,38,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,39,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,40,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,41,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,42,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,43,kernel,"Fan1(float *, float *, int, int)",3136,1,512,16,0,0
+rodinia-gaussian,44,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,45,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,46,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,47,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,48,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,49,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,50,kernel,"Fan2(float *, float *, float *, int, int, int)",3584,256,16,16,0,0
+rodinia-gaussian,51,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,52,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,53,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,54,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,55,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,56,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,57,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,58,kernel,"Fan2(float *, float *, float *, int, int, int)",3456,256,16,16,0,0
+rodinia-gaussian,59,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,60,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,61,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,62,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,63,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,64,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,65,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,66,kernel,"Fan2(float *, float *, float *, int, int, int)",3584,256,16,16,0,0
+rodinia-gaussian,67,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,68,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,69,kernel,"Fan1(float *, float *, int, int)",3104,1,512,16,0,0
+rodinia-gaussian,70,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,71,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,72,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,73,kernel,"Fan1(float *, float *, int, int)",3072,1,512,16,0,0
+rodinia-gaussian,74,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,75,kernel,"Fan1(float *, float *, int, int)",3040,1,512,16,0,0
+rodinia-gaussian,76,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,77,kernel,"Fan1(float *, float *, int, int)",3040,1,512,16,0,0
+rodinia-gaussian,78,kernel,"Fan2(float *, float *, float *, int, int, int)",3552,256,16,16,0,0
+rodinia-gaussian,79,kernel,"Fan1(float *, float *, int, int)",3041,1,512,16,0,0
+rodinia-gaussian,80,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,81,kernel,"Fan1(float *, float *, int, int)",3040,1,512,16,0,0
+rodinia-gaussian,82,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,83,kernel,"Fan1(float *, float *, int, int)",3040,1,512,16,0,0
+rodinia-gaussian,84,kernel,"Fan2(float *, float *, float *, int, int, int)",3520,256,16,16,0,0
+rodinia-gaussian,85,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,86,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,87,kernel,"Fan1(float *, float *, int, int)",3040,1,512,16,0,0
+rodinia-gaussian,88,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,89,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,90,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,91,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,92,kernel,"Fan2(float *, float *, float *, int, int, int)",3521,256,16,16,0,0
+rodinia-gaussian,93,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,94,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,95,kernel,"Fan1(float *, float *, int, int)",2976,1,512,16,0,0
+rodinia-gaussian,96,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,97,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,98,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,99,kernel,"Fan1(float *, float *, int, int)",2976,1,512,16,0,0
+rodinia-gaussian,100,kernel,"Fan2(float *, float *, float *, int, int, int)",3456,256,16,16,0,0
+rodinia-gaussian,101,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,102,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,103,kernel,"Fan1(float *, float *, int, int)",3008,1,512,16,0,0
+rodinia-gaussian,104,kernel,"Fan2(float *, float *, float *, int, int, int)",3456,256,16,16,0,0
+rodinia-gaussian,105,kernel,"Fan1(float *, float *, int, int)",2976,1,512,16,0,0
+rodinia-gaussian,106,kernel,"Fan2(float *, float *, float *, int, int, int)",3456,256,16,16,0,0
+rodinia-gaussian,107,kernel,"Fan1(float *, float *, int, int)",2784,1,512,16,0,0
+rodinia-gaussian,108,kernel,"Fan2(float *, float *, float *, int, int, int)",3456,256,16,16,0,0
+rodinia-gaussian,109,kernel,"Fan1(float *, float *, int, int)",2848,1,512,16,0,0
+rodinia-gaussian,110,kernel,"Fan2(float *, float *, float *, int, int, int)",3488,256,16,16,0,0
+rodinia-gaussian,111,kernel,"Fan1(float *, float *, int, int)",2848,1,512,16,0,0
+rodinia-gaussian,112,kernel,"Fan2(float *, float *, float *, int, int, int)",3456,256,16,16,0,0
+rodinia-gaussian,113,kernel,"Fan1(float *, float *, int, int)",2784,1,512,16,0,0
+rodinia-gaussian,114,kernel,"Fan2(float *, float *, float *, int, int, int)",2976,256,16,16,0,0
+rodinia-gaussian,115,kernel,"Fan1(float *, float *, int, int)",2784,1,512,16,0,0
+rodinia-gaussian,116,kernel,"Fan2(float *, float *, float *, int, int, int)",2976,256,16,16,0,0
+rodinia-gaussian,117,kernel,"Fan1(float *, float *, int, int)",2752,1,512,16,0,0
+rodinia-gaussian,118,kernel,"Fan2(float *, float *, float *, int, int, int)",2944,256,16,16,0,0
+rodinia-gaussian,119,kernel,"Fan1(float *, float *, int, int)",2784,1,512,16,0,0
+rodinia-gaussian,120,kernel,"Fan2(float *, float *, float *, int, int, int)",2944,256,16,16,0,0
+rodinia-gaussian,121,kernel,"Fan1(float *, float *, int, int)",2784,1,512,16,0,0
+rodinia-gaussian,122,kernel,"Fan2(float *, float *, float *, int, int, int)",2976,256,16,16,0,0
+rodinia-gaussian,123,kernel,"Fan1(float *, float *, int, int)",2656,1,512,16,0,0
+rodinia-gaussian,124,kernel,"Fan2(float *, float *, float *, int, int, int)",2912,256,16,16,0,0
+rodinia-gaussian,125,kernel,"Fan1(float *, float *, int, int)",2656,1,512,16,0,0
+rodinia-gaussian,126,kernel,"Fan2(float *, float *, float *, int, int, int)",2944,256,16,16,0,0
+rodinia-gaussian,127,kernel,"Fan1(float *, float *, int, int)",2656,1,512,16,0,0
+rodinia-gaussian,128,kernel,"Fan2(float *, float *, float *, int, int, int)",2912,256,16,16,0,0
+rodinia-gaussian,129,copy,cudaMemcpy D2H,3520,0,0,0,0,16384
+rodinia-gaussian,130,copy,cudaMemcpy D2H,3328,0,0,0,0,16384
+rodinia-gaussian,131,copy,cudaMemcpy D2H,2528,0,0,0,0,256
+rodinia-nw,0,copy,cudaMemcpy H2D,8736,0,0,0,0,66564
+rodinia-nw,1,copy,cudaMemcpy H2D,8384,0,0,0,0,66564
+rodinia-nw,2,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",9057,1,16,32,2180,0
+rodinia-nw,3,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8736,2,16,32,2180,0
+rodinia-nw,4,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8544,3,16,32,2180,0
+rodinia-nw,5,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8320,4,16,32,2180,0
+rodinia-nw,6,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8448,5,16,32,2180,0
+rodinia-nw,7,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8416,6,16,32,2180,0
+rodinia-nw,8,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8480,7,16,32,2180,0
+rodinia-nw,9,kernel,"needle_cuda_shared_1(int *, int *, int, int, int, int)",8448,8,16,32,2180,0
+rodinia-nw,10,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8288,7,16,32,2180,0
+rodinia-nw,11,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8512,6,16,32,2180,0
+rodinia-nw,12,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8192,5,16,32,2180,0
+rodinia-nw,13,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8384,4,16,32,2180,0
+rodinia-nw,14,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8352,3,16,32,2180,0
+rodinia-nw,15,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8384,2,16,32,2180,0
+rodinia-nw,16,kernel,"needle_cuda_shared_2(int *, int *, int, int, int, int)",8512,1,16,32,2180,0
+rodinia-nw,17,copy,cudaMemcpy D2H,7936,0,0,0,0,66564
+rodinia-pathfinder,0,copy,cudaMemcpy H2D,2208,0,0,0,0,4000
+rodinia-pathfinder,1,copy,cudaMemcpy H2D,9248,0,0,0,0,76000
+rodinia-pathfinder,2,kernel,"dynproc_kernel(int, int *, int *, int *, int, int, int, int)",6208,5,256,16,2048,0
+rodinia-pathfinder,3,kernel,"dynproc_kernel(int, int *, int *, int *, int, int, int, int)",5984,5,256,16,2048,0
+rodinia-pathfinder,4,kernel,"dynproc_kernel(int, int *, int *, int *, int, int, int, int)",5952,5,256,16,2048,0
+rodinia-pathfinder,5,kernel,"dynproc_kernel(int, int *, int *, int *, int, int, int, int)",5312,5,256,16,2048,0
+rodinia-pathfinder,6,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+rodinia-hotspot,0,copy,cudaMemcpy H2D,3520,0,0,0,0,16384
+rodinia-hotspot,1,copy,cudaMemcpy H2D,2944,0,0,0,0,16384
+rodinia-hotspot,2,kernel,"calculate_temp(int, float *, float *, float *, int, int, int, int, float, float, float, float, float, float)",4448,36,256,32,3072,0
+rodinia-hotspot,3,copy,cudaMemcpy D2H,3552,0,0,0,0,16384
+rodinia-lud,0,copy,cudaMemcpy H2D,3520,0,0,0,0,16384
+rodinia-lud,1,kernel,"lud_diagonal(float *, int, int)",22272,1,16,32,1024,0
+rodinia-lud,2,kernel,"lud_perimeter(float *, int, int)",25312,3,32,32,3072,0
+rodinia-lud,3,kernel,"lud_internal(float *, int, int)",3552,9,256,30,2048,0
+rodinia-lud,4,kernel,"lud_diagonal(float *, int, int)",21152,1,16,32,1024,0
+rodinia-lud,5,kernel,"lud_perimeter(float *, int, int)",24864,2,32,32,3072,0
+rodinia-lud,6,kernel,"lud_internal(float *, int, int)",3360,4,256,30,2048,0
+rodinia-lud,7,kernel,"lud_diagonal(float *, int, int)",21313,1,16,32,1024,0
+rodinia-lud,8,kernel,"lud_perimeter(float *, int, int)",23968,1,32,32,3072,0
+rodinia-lud,9,kernel,"lud_internal(float *, int, int)",3200,1,256,30,2048,0
+rodinia-lud,10,kernel,"lud_diagonal(float *, int, int)",20704,1,16,32,1024,0
+rodinia-lud,11,copy,cudaMemcpy D2H,3520,0,0,0,0,16384
+rodinia-backprop,0,copy,cudaMemcpy H2D,3520,0,0,0,0,16388
+rodinia-backprop,1,copy,cudaMemcpy H2D,25985,0,0,0,0,278596
+rodinia-backprop,2,kernel,"bpnn_layerforward_CUDA(float *, float *, float *, float *, int, int)",5632,256,256,20,1088,0
+rodinia-backprop,3,copy,cudaMemcpy D2H,3712,0,0,0,0,16384
+rodinia-backprop,4,copy,cudaMemcpy H2D,1376,0,0,0,0,68
+rodinia-backprop,5,copy,cudaMemcpy H2D,25856,0,0,0,0,278596
+rodinia-backprop,6,copy,cudaMemcpy H2D,25952,0,0,0,0,278596
+rodinia-backprop,7,kernel,"bpnn_adjust_weights_cuda(float *, int, float *, int, float *, float *)",5472,256,256,27,0,0
+rodinia-backprop,8,copy,cudaMemcpy D2H,3552,0,0,0,0,16388
+rodinia-backprop,9,copy,cudaMemcpy D2H,24160,0,0,0,0,278596
+rodinia-srad,0,copy,cudaMemcpy H2D,3520,0,0,0,0,16384
+rodinia-srad,1,kernel,"srad_cuda_1(float *, float *, float *, float *, float *, float *, int, int, float)",5952,16,256,22,6144,0
+rodinia-srad,2,kernel,"srad_cuda_2(float *, float *, float *, float *, float *, float *, int, int, float, float)",5280,16,256,28,5120,0
+rodinia-srad,3,copy,cudaMemcpy D2H,3552,0,0,0,0,16384
+rodinia-srad,4,copy,cudaMemcpy H2D,3104,0,0,0,0,16384
+rodinia-srad,5,kernel,"srad_cuda_1(float *, float *, float *, float *, float *, float *, int, int, float)",5600,16,256,22,6144,0
+rodinia-srad,6,kernel,"srad_cuda_2(float *, float *, float *, float *, float *, float *, int, int, float, float)",5120,16,256,28,5120,0
+rodinia-srad,7,copy,cudaMemcpy D2H,3520,0,0,0,0,16384
+graphbig-bfs-topo-thread-centric,0,kernel,"initialize(unsigned int *, unsigned long)",4160,1,1000,16,0,0
+graphbig-bfs-topo-thread-centric,1,copy,cudaMemcpy H2D,1984,0,0,0,0,8008
+graphbig-bfs-topo-thread-centric,2,copy,cudaMemcpy H2D,22528,0,0,0,0,238320
+graphbig-bfs-topo-thread-centric,3,copy,cudaMemcpy H2D,1504,0,0,0,0,4
+graphbig-bfs-topo-thread-centric,4,copy,cudaMemcpy H2D,1344,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,5,kernel,"kernel(unsigned int *, cudaGraph, unsigned int, bool *)",16224,1,1000,19,0,0
+graphbig-bfs-topo-thread-centric,6,copy,cudaMemcpy D2H,2720,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,7,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,8,kernel,"kernel(unsigned int *, cudaGraph, unsigned int, bool *)",35616,1,1000,19,0,0
+graphbig-bfs-topo-thread-centric,9,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,10,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,11,kernel,"kernel(unsigned int *, cudaGraph, unsigned int, bool *)",45824,1,1000,19,0,0
+graphbig-bfs-topo-thread-centric,12,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,13,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,14,kernel,"kernel(unsigned int *, cudaGraph, unsigned int, bool *)",14112,1,1000,19,0,0
+graphbig-bfs-topo-thread-centric,15,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,16,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,17,kernel,"kernel(unsigned int *, cudaGraph, unsigned int, bool *)",2976,1,1000,19,0,0
+graphbig-bfs-topo-thread-centric,18,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-thread-centric,19,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+graphbig-bfs-topo-atomic,0,kernel,"initialize(unsigned int *, unsigned long)",3584,1,1000,16,0,0
+graphbig-bfs-topo-atomic,1,copy,cudaMemcpy H2D,1984,0,0,0,0,8008
+graphbig-bfs-topo-atomic,2,copy,cudaMemcpy H2D,22656,0,0,0,0,238320
+graphbig-bfs-topo-atomic,3,copy,cudaMemcpy H2D,1504,0,0,0,0,4
+graphbig-bfs-topo-atomic,4,copy,cudaMemcpy H2D,1344,0,0,0,0,1
+graphbig-bfs-topo-atomic,5,kernel,"kernel(unsigned int *, cudaGraph, bool *)",115648,1,1000,17,0,0
+graphbig-bfs-topo-atomic,6,copy,cudaMemcpy D2H,2752,0,0,0,0,1
+graphbig-bfs-topo-atomic,7,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-bfs-topo-atomic,8,kernel,"kernel(unsigned int *, cudaGraph, bool *)",53504,1,1000,17,0,0
+graphbig-bfs-topo-atomic,9,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-atomic,10,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-bfs-topo-atomic,11,kernel,"kernel(unsigned int *, cudaGraph, bool *)",43456,1,1000,17,0,0
+graphbig-bfs-topo-atomic,12,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-atomic,13,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-bfs-topo-atomic,14,kernel,"kernel(unsigned int *, cudaGraph, bool *)",43617,1,1000,17,0,0
+graphbig-bfs-topo-atomic,15,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-bfs-topo-atomic,16,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+graphbig-bfs-data-thread-centric,0,kernel,"initialize(unsigned int *, unsigned long)",3616,1,1000,16,0,0
+graphbig-bfs-data-thread-centric,1,copy,cudaMemcpy H2D,1376,0,0,0,0,4
+graphbig-bfs-data-thread-centric,2,copy,cudaMemcpy H2D,2080,0,0,0,0,4
+graphbig-bfs-data-thread-centric,3,copy,cudaMemcpy H2D,1344,0,0,0,0,4
+graphbig-bfs-data-thread-centric,4,copy,cudaMemcpy H2D,1760,0,0,0,0,8
+graphbig-bfs-data-thread-centric,5,copy,cudaMemcpy H2D,2016,0,0,0,0,8008
+graphbig-bfs-data-thread-centric,6,copy,cudaMemcpy H2D,23008,0,0,0,0,238320
+graphbig-bfs-data-thread-centric,7,copy,cudaMemcpy H2D,1504,0,0,0,0,4
+graphbig-bfs-data-thread-centric,8,kernel,"kernel(unsigned int *, cudaGraph, my_worklist, my_worklist)",30208,1,1,32,0,0
+graphbig-bfs-data-thread-centric,9,copy,cudaMemcpy D2H,2720,0,0,0,0,4
+graphbig-bfs-data-thread-centric,10,copy,cudaMemcpy H2D,1504,0,0,0,0,4
+graphbig-bfs-data-thread-centric,11,kernel,"kernel(unsigned int *, cudaGraph, my_worklist, my_worklist)",74912,1,68,32,0,0
+graphbig-bfs-data-thread-centric,12,copy,cudaMemcpy D2H,2016,0,0,0,0,4
+graphbig-bfs-data-thread-centric,13,copy,cudaMemcpy H2D,1408,0,0,0,0,4
+graphbig-bfs-data-thread-centric,14,kernel,"kernel(unsigned int *, cudaGraph, my_worklist, my_worklist)",60608,1,696,32,0,0
+graphbig-bfs-data-thread-centric,15,copy,cudaMemcpy D2H,2048,0,0,0,0,4
+graphbig-bfs-data-thread-centric,16,copy,cudaMemcpy H2D,1472,0,0,0,0,4
+graphbig-bfs-data-thread-centric,17,kernel,"kernel(unsigned int *, cudaGraph, my_worklist, my_worklist)",20608,1,277,32,0,0
+graphbig-bfs-data-thread-centric,18,copy,cudaMemcpy D2H,2016,0,0,0,0,4
+graphbig-bfs-data-thread-centric,19,copy,cudaMemcpy H2D,1408,0,0,0,0,4
+graphbig-bfs-data-thread-centric,20,kernel,"kernel(unsigned int *, cudaGraph, my_worklist, my_worklist)",3744,1,2,32,0,0
+graphbig-bfs-data-thread-centric,21,copy,cudaMemcpy D2H,2080,0,0,0,0,4
+graphbig-bfs-data-thread-centric,22,copy,cudaMemcpy H2D,1792,0,0,0,0,4
+graphbig-bfs-data-thread-centric,23,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+graphbig-sssp-topo-thread-centric,0,kernel,"initialize(unsigned int *, unsigned int *, bool *, unsigned long)",3904,1,1000,16,0,0
+graphbig-sssp-topo-thread-centric,1,copy,cudaMemcpy H2D,1952,0,0,0,0,8008
+graphbig-sssp-topo-thread-centric,2,copy,cudaMemcpy H2D,22497,0,0,0,0,238320
+graphbig-sssp-topo-thread-centric,3,copy,cudaMemcpy H2D,1504,0,0,0,0,4
+graphbig-sssp-topo-thread-centric,4,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,5,copy,cudaMemcpy H2D,12672,0,0,0,0,119160
+graphbig-sssp-topo-thread-centric,6,copy,cudaMemcpy H2D,1344,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,7,kernel,"kernel(unsigned int *, unsigned int *, unsigned int *, bool *, cudaGraph)",11488,1,1000,28,0,0
+graphbig-sssp-topo-thread-centric,8,kernel,"kernel2(unsigned int *, unsigned int *, bool *, cudaGraph, bool *)",3328,1,1000,16,0,0
+graphbig-sssp-topo-thread-centric,9,copy,cudaMemcpy D2H,2752,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,10,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,11,kernel,"kernel(unsigned int *, unsigned int *, unsigned int *, bool *, cudaGraph)",29696,1,1000,28,0,0
+graphbig-sssp-topo-thread-centric,12,kernel,"kernel2(unsigned int *, unsigned int *, bool *, cudaGraph, bool *)",3552,1,1000,16,0,0
+graphbig-sssp-topo-thread-centric,13,copy,cudaMemcpy D2H,1984,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,14,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,15,kernel,"kernel(unsigned int *, unsigned int *, unsigned int *, bool *, cudaGraph)",61824,1,1000,28,0,0
+graphbig-sssp-topo-thread-centric,16,kernel,"kernel2(unsigned int *, unsigned int *, bool *, cudaGraph, bool *)",3328,1,1000,16,0,0
+graphbig-sssp-topo-thread-centric,17,copy,cudaMemcpy D2H,1984,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,18,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,19,kernel,"kernel(unsigned int *, unsigned int *, unsigned int *, bool *, cudaGraph)",12160,1,1000,28,0,0
+graphbig-sssp-topo-thread-centric,20,kernel,"kernel2(unsigned int *, unsigned int *, bool *, cudaGraph, bool *)",3168,1,1000,16,0,0
+graphbig-sssp-topo-thread-centric,21,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,22,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,23,kernel,"kernel(unsigned int *, unsigned int *, unsigned int *, bool *, cudaGraph)",2976,1,1000,28,0,0
+graphbig-sssp-topo-thread-centric,24,kernel,"kernel2(unsigned int *, unsigned int *, bool *, cudaGraph, bool *)",2944,1,1000,16,0,0
+graphbig-sssp-topo-thread-centric,25,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-sssp-topo-thread-centric,26,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+graphbig-connected-comp,0,copy,cudaMemcpy H2D,2496,0,0,0,0,8008
+graphbig-connected-comp,1,copy,cudaMemcpy H2D,22592,0,0,0,0,238320
+graphbig-connected-comp,2,kernel,"initialize(unsigned long *, unsigned long *, bool *, unsigned long *, cudaGraph)",118433,1,1000,18,0,0
+graphbig-connected-comp,3,copy,cudaMemcpy H2D,1408,0,0,0,0,1
+graphbig-connected-comp,4,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",11296,15,1024,26,0,0
+graphbig-connected-comp,5,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",3136,1,1000,16,0,0
+graphbig-connected-comp,6,copy,cudaMemcpy D2H,2784,0,0,0,0,1
+graphbig-connected-comp,7,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",4160,1,1000,16,0,0
+graphbig-connected-comp,8,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",3008,1,1000,16,0,0
+graphbig-connected-comp,9,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+graphbig-connected-comp,10,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",7329,15,1024,26,0,0
+graphbig-connected-comp,11,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,12,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+graphbig-connected-comp,13,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2912,1,1000,16,0,0
+graphbig-connected-comp,14,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,15,copy,cudaMemcpy H2D,1376,0,0,0,0,1
+graphbig-connected-comp,16,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",7136,15,1024,26,0,0
+graphbig-connected-comp,17,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",3104,1,1000,16,0,0
+graphbig-connected-comp,18,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+graphbig-connected-comp,19,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2784,1,1000,16,0,0
+graphbig-connected-comp,20,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",3008,1,1000,16,0,0
+graphbig-connected-comp,21,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+graphbig-connected-comp,22,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",5696,15,1024,26,0,0
+graphbig-connected-comp,23,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",3008,1,1000,16,0,0
+graphbig-connected-comp,24,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-connected-comp,25,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2624,1,1000,16,0,0
+graphbig-connected-comp,26,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,27,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+graphbig-connected-comp,28,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",5120,15,1024,26,0,0
+graphbig-connected-comp,29,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2977,1,1000,16,0,0
+graphbig-connected-comp,30,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+graphbig-connected-comp,31,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2656,1,1000,16,0,0
+graphbig-connected-comp,32,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2976,1,1000,16,0,0
+graphbig-connected-comp,33,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+graphbig-connected-comp,34,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",5184,15,1024,26,0,0
+graphbig-connected-comp,35,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",3008,1,1000,16,0,0
+graphbig-connected-comp,36,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+graphbig-connected-comp,37,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2688,1,1000,16,0,0
+graphbig-connected-comp,38,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,39,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+graphbig-connected-comp,40,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",4864,15,1024,26,0,0
+graphbig-connected-comp,41,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2976,1,1000,16,0,0
+graphbig-connected-comp,42,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+graphbig-connected-comp,43,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2656,1,1000,16,0,0
+graphbig-connected-comp,44,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2976,1,1000,16,0,0
+graphbig-connected-comp,45,copy,cudaMemcpy H2D,1568,0,0,0,0,1
+graphbig-connected-comp,46,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",4608,15,1024,26,0,0
+graphbig-connected-comp,47,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2976,1,1000,16,0,0
+graphbig-connected-comp,48,copy,cudaMemcpy D2H,2080,0,0,0,0,1
+graphbig-connected-comp,49,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2592,1,1000,16,0,0
+graphbig-connected-comp,50,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,51,copy,cudaMemcpy H2D,1536,0,0,0,0,1
+graphbig-connected-comp,52,kernel,"kernel_hooking(unsigned long *, unsigned long *, bool *, unsigned long *, bool *, unsigned int, cudaGraph)",4256,15,1024,26,0,0
+graphbig-connected-comp,53,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,54,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-connected-comp,55,kernel,"kernel_pointer_jumping(unsigned long *, unsigned long *, unsigned int)",2560,1,1000,16,0,0
+graphbig-connected-comp,56,kernel,"kernel_update(unsigned long *, unsigned long *, unsigned int)",2944,1,1000,16,0,0
+graphbig-connected-comp,57,copy,cudaMemcpy D2H,2912,0,0,0,0,8000
+graphbig-kcore,0,copy,cudaMemcpy H2D,2528,0,0,0,0,8008
+graphbig-kcore,1,copy,cudaMemcpy H2D,22880,0,0,0,0,238320
+graphbig-kcore,2,copy,cudaMemcpy H2D,1344,0,0,0,0,4
+graphbig-kcore,3,copy,cudaMemcpy H2D,1344,0,0,0,0,1
+graphbig-kcore,4,kernel,"initialize(unsigned int *, bool *, bool *, cudaGraph)",3968,1,1000,16,0,0
+graphbig-kcore,5,copy,cudaMemcpy H2D,1344,0,0,0,0,1
+graphbig-kcore,6,kernel,"kernel(unsigned int *, bool *, bool *, cudaGraph)",3200,1,1000,22,0,0
+graphbig-kcore,7,kernel,"kernel2(unsigned int *, bool *, bool *, cudaGraph, unsigned int, unsigned int *, bool *)",3776,1,1000,16,0,0
+graphbig-kcore,8,copy,cudaMemcpy D2H,2720,0,0,0,0,1
+graphbig-kcore,9,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-kcore,10,kernel,"kernel(unsigned int *, bool *, bool *, cudaGraph)",4384,1,1000,22,0,0
+graphbig-kcore,11,kernel,"kernel2(unsigned int *, bool *, bool *, cudaGraph, unsigned int, unsigned int *, bool *)",3264,1,1000,16,0,0
+graphbig-kcore,12,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-kcore,13,copy,cudaMemcpy D2H,2016,0,0,0,0,4
+graphbig-kcore,14,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+graphbig-gc-topo-thread-centric,0,kernel,"initialize(unsigned int *, unsigned long)",3648,1,1000,16,0,0
+graphbig-gc-topo-thread-centric,1,copy,cudaMemcpy H2D,1984,0,0,0,0,8008
+graphbig-gc-topo-thread-centric,2,copy,cudaMemcpy H2D,22496,0,0,0,0,238320
+graphbig-gc-topo-thread-centric,3,copy,cudaMemcpy H2D,1696,0,0,0,0,4000
+graphbig-gc-topo-thread-centric,4,copy,cudaMemcpy H2D,1344,0,0,0,0,1
+graphbig-gc-topo-thread-centric,5,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",33152,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,6,copy,cudaMemcpy D2H,2688,0,0,0,0,1
+graphbig-gc-topo-thread-centric,7,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,8,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30112,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,9,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,10,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,11,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",34176,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,12,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,13,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,14,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30272,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,15,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,16,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,17,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",32512,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,18,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,19,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,20,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",35488,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,21,copy,cudaMemcpy D2H,2017,0,0,0,0,1
+graphbig-gc-topo-thread-centric,22,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,23,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27200,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,24,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,25,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,26,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",28096,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,27,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,28,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,29,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",32032,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,30,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,31,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,32,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27008,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,33,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,34,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,35,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",33216,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,36,copy,cudaMemcpy D2H,2272,0,0,0,0,1
+graphbig-gc-topo-thread-centric,37,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,38,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29664,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,39,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,40,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,41,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",35585,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,42,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,43,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,44,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29984,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,45,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,46,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,47,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24416,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,48,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,49,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,50,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",26689,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,51,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,52,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,53,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29728,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,54,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,55,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,56,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24992,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,57,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,58,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,59,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30113,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,60,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,61,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,62,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",32064,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,63,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,64,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,65,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29632,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,66,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,67,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,68,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30208,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,69,copy,cudaMemcpy D2H,2049,0,0,0,0,1
+graphbig-gc-topo-thread-centric,70,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,71,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30944,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,72,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,73,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,74,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",32320,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,75,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,76,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,77,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",33376,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,78,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,79,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,80,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",33408,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,81,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,82,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,83,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",28960,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,84,copy,cudaMemcpy D2H,2272,0,0,0,0,1
+graphbig-gc-topo-thread-centric,85,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,86,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29888,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,87,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,88,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,89,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30848,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,90,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,91,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,92,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",32160,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,93,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,94,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,95,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",31296,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,96,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,97,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,98,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",31072,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,99,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,100,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,101,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30432,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,102,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,103,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,104,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",31328,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,105,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,106,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,107,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30880,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,108,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,109,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,110,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",31296,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,111,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,112,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,113,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29632,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,114,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,115,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,116,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",32032,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,117,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,118,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,119,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",26240,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,120,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,121,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,122,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24576,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,123,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,124,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,125,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29601,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,126,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,127,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,128,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24192,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,129,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,130,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,131,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",31488,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,132,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,133,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,134,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",28641,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,135,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,136,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,137,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",26720,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,138,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,139,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,140,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",29856,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,141,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,142,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,143,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",23936,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,144,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,145,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,146,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27200,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,147,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,148,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,149,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27968,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,150,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,151,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,152,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25600,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,153,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,154,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,155,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30049,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,156,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,157,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,158,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25632,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,159,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,160,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,161,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25024,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,162,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,163,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,164,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27489,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,165,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,166,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,167,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24544,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,168,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,169,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,170,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25088,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,171,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,172,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,173,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",23136,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,174,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,175,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,176,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27232,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,177,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,178,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,179,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",28416,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,180,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,181,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,182,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",23712,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,183,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,184,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,185,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27681,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,186,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,187,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,188,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",23264,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,189,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,190,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,191,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",30208,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,192,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,193,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,194,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",28321,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,195,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,196,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,197,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",31296,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,198,copy,cudaMemcpy D2H,2048,0,0,0,0,1
+graphbig-gc-topo-thread-centric,199,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,200,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25536,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,201,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,202,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,203,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",19744,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,204,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,205,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,206,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25280,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,207,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,208,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,209,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24672,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,210,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,211,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,212,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",28096,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,213,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,214,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,215,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24256,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,216,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,217,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,218,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",27680,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,219,copy,cudaMemcpy D2H,2304,0,0,0,0,1
+graphbig-gc-topo-thread-centric,220,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,221,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",25248,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,222,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,223,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,224,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",22177,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,225,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,226,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,227,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",22336,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,228,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,229,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,230,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",15296,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,231,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,232,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,233,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",23488,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,234,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,235,copy,cudaMemcpy H2D,1504,0,0,0,0,1
+graphbig-gc-topo-thread-centric,236,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",26752,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,237,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,238,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,239,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",22848,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,240,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,241,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,242,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",22336,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,243,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,244,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,245,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",21313,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,246,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,247,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,248,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",24736,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,249,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,250,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,251,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",23904,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,252,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,253,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,254,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",22752,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,255,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,256,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,257,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",16768,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,258,copy,cudaMemcpy D2H,2016,0,0,0,0,1
+graphbig-gc-topo-thread-centric,259,copy,cudaMemcpy H2D,1472,0,0,0,0,1
+graphbig-gc-topo-thread-centric,260,kernel,"kernel(unsigned int *, unsigned int *, cudaGraph, unsigned int, bool *)",16032,1,1000,19,0,0
+graphbig-gc-topo-thread-centric,261,copy,cudaMemcpy D2H,2112,0,0,0,0,1
+graphbig-gc-topo-thread-centric,262,copy,cudaMemcpy D2H,2688,0,0,0,0,4000
+graphbig-degree-centr,0,kernel,"initialize(unsigned int *, unsigned long)",3616,1,1000,16,0,0
+graphbig-degree-centr,1,copy,cudaMemcpy H2D,2016,0,0,0,0,8008
+graphbig-degree-centr,2,copy,cudaMemcpy H2D,22784,0,0,0,0,238320
+graphbig-degree-centr,3,kernel,"kernel(unsigned int *, cudaGraph)",63072,1,1000,22,0,0
+graphbig-degree-centr,4,copy,cudaMemcpy D2H,2656,0,0,0,0,4000
+graphbig-triangle-count,0,kernel,"initialize(unsigned int *, unsigned long)",3680,1,1000,16,0,0
+graphbig-triangle-count,1,copy,cudaMemcpy H2D,1952,0,0,0,0,8008
+graphbig-triangle-count,2,copy,cudaMemcpy H2D,22816,0,0,0,0,238320
+graphbig-triangle-count,3,copy,cudaMemcpy H2D,1344,0,0,0,0,4
+graphbig-triangle-count,4,kernel,"kernel_step1(unsigned int *, cudaGraph)",1408328,1,1000,30,0,0
+graphbig-triangle-count,5,kernel,"kernel_step2(unsigned int *, cudaGraph)",3702164,1,1000,30,0,0
+graphbig-triangle-count,6,kernel,"kernel_step3(unsigned int *, cudaGraph, unsigned int *)",2688,1,1000,16,0,0
+graphbig-triangle-count,7,copy,cudaMemcpy D2H,2720,0,0,0,0,4
+graphbig-triangle-count,8,copy,cudaMemcpy D2H,2880,0,0,0,0,4000
+polybench-2dconv,0,copy,cudaMemcpy H2D,24640,0,0,0,0,262144
+polybench-2dconv,1,kernel,"convolution2D_kernel(int, int, float *, float *)",4128,256,256,24,0,0
+polybench-2dconv,2,copy,cudaMemcpy D2H,23648,0,0,0,0,262144
+polybench-2mm,0,copy,cudaMemcpy H2D,7232,0,0,0,0,65536
+polybench-2mm,1,copy,cudaMemcpy H2D,6624,0,0,0,0,65536
+polybench-2mm,2,copy,cudaMemcpy H2D,6720,0,0,0,0,65536
+polybench-2mm,3,copy,cudaMemcpy H2D,6720,0,0,0,0,65536
+polybench-2mm,4,copy,cudaMemcpy H2D,6656,0,0,0,0,65536
+polybench-2mm,5,kernel,"mm2_kernel1(int, int, int, int, float, float, float *, float *, float *)",48512,64,256,24,0,0
+polybench-2mm,6,kernel,"mm2_kernel2(int, int, int, int, float, float, float *, float *, float *)",46624,64,256,24,0,0
+polybench-2mm,7,copy,cudaMemcpy D2H,7456,0,0,0,0,65536
+polybench-3dconv,0,copy,cudaMemcpy H2D,14016,0,0,0,0,131072
+polybench-3dconv,1,copy,cudaMemcpy H2D,13760,0,0,0,0,131072
+polybench-3dconv,2,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3264,4,256,26,0,0
+polybench-3dconv,3,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3264,4,256,26,0,0
+polybench-3dconv,4,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,5,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,6,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3040,4,256,26,0,0
+polybench-3dconv,7,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,8,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,9,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,10,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,11,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,12,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3040,4,256,26,0,0
+polybench-3dconv,13,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,14,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,15,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,16,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,17,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,18,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,19,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,20,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,21,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,22,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,23,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,24,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,25,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,26,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,27,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,28,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3072,4,256,26,0,0
+polybench-3dconv,29,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3104,4,256,26,0,0
+polybench-3dconv,30,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3041,4,256,26,0,0
+polybench-3dconv,31,kernel,"convolution3D_kernel(int, int, int, float *, float *, int)",3136,4,256,26,0,0
+polybench-3dconv,32,copy,cudaMemcpy D2H,12704,0,0,0,0,131072
+polybench-3mm,0,copy,cudaMemcpy H2D,3520,0,0,0,0,16384
+polybench-3mm,1,copy,cudaMemcpy H2D,2976,0,0,0,0,16384
+polybench-3mm,2,copy,cudaMemcpy H2D,2944,0,0,0,0,16384
+polybench-3mm,3,copy,cudaMemcpy H2D,2944,0,0,0,0,16384
+polybench-3mm,4,copy,cudaMemcpy H2D,2912,0,0,0,0,16384
+polybench-3mm,5,copy,cudaMemcpy H2D,2912,0,0,0,0,16384
+polybench-3mm,6,copy,cudaMemcpy H2D,2912,0,0,0,0,16384
+polybench-3mm,7,kernel,"mm3_kernel1(int, int, int, int, int, float *, float *, float *)",24704,16,256,24,0,0
+polybench-3mm,8,kernel,"mm3_kernel2(int, int, int, int, int, float *, float *, float *)",24993,16,256,24,0,0
+polybench-3mm,9,kernel,"mm3_kernel3(int, int, int, int, int, float *, float *, float *)",22624,16,256,24,0,0
+polybench-3mm,10,copy,cudaMemcpy D2H,3648,0,0,0,0,16384
+polybench-atax,0,copy,cudaMemcpy H2D,88417,0,0,0,0,1048576
+polybench-atax,1,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-atax,2,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-atax,3,copy,cudaMemcpy H2D,1568,0,0,0,0,2048
+polybench-atax,4,kernel,"atax_kernel1(int, int, float *, float *, float *)",161153,16,256,22,0,0
+polybench-atax,5,kernel,"atax_kernel2(int, int, float *, float *, float *)",166177,16,256,22,0,0
+polybench-atax,6,copy,cudaMemcpy D2H,2656,0,0,0,0,2048
+polybench-bicg,0,copy,cudaMemcpy H2D,88545,0,0,0,0,1048576
+polybench-bicg,1,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-bicg,2,copy,cudaMemcpy H2D,1568,0,0,0,0,2048
+polybench-bicg,3,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-bicg,4,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-bicg,5,kernel,"bicg_kernel1(int, int, float *, float *, float *)",166817,2,256,22,0,0
+polybench-bicg,6,kernel,"bicg_kernel2(int, int, float *, float *, float *)",171105,2,256,22,0,0
+polybench-bicg,7,copy,cudaMemcpy D2H,2624,0,0,0,0,2048
+polybench-bicg,8,copy,cudaMemcpy D2H,2656,0,0,0,0,2048
+polybench-corr,0,copy,cudaMemcpy H2D,7233,0,0,0,0,65536
+polybench-corr,1,copy,cudaMemcpy H2D,6816,0,0,0,0,65536
+polybench-corr,2,copy,cudaMemcpy H2D,1408,0,0,0,0,512
+polybench-corr,3,copy,cudaMemcpy H2D,1440,0,0,0,0,512
+polybench-corr,4,kernel,"mean_kernel(int, int, float*, float*)",0,0,0,0,0,0
+polybench-corr,5,kernel,"std_kernel(int, int, float*, float*, float*)",0,0,0,0,0,0
+polybench-corr,6,kernel,"reduce_kernel(int, int, float *, float *, float *)",4064,64,256,16,0,0
+polybench-corr,7,kernel,"corr_kernel(int, int, float*, float*)",0,0,0,0,0,0
+polybench-corr,8,copy,cudaMemcpy H2D,1344,0,0,0,0,4
+polybench-corr,9,copy,cudaMemcpy D2H,7520,0,0,0,0,65536
+polybench-covar,0,copy,cudaMemcpy H2D,7232,0,0,0,0,65536
+polybench-covar,1,copy,cudaMemcpy H2D,6784,0,0,0,0,65536
+polybench-covar,2,copy,cudaMemcpy H2D,1408,0,0,0,0,512
+polybench-covar,3,kernel,"mean_kernel(int, int, float*, float*)",0,0,0,0,0,0
+polybench-covar,4,kernel,"reduce_kernel(int, int, float *, float *)",3136,16,256,16,0,0
+polybench-covar,5,kernel,"covar_kernel(int, int, float*, float*)",0,0,0,0,0,0
+polybench-covar,6,copy,cudaMemcpy D2H,7456,0,0,0,0,65536
+polybench-fdtd-2d,0,copy,cudaMemcpy H2D,1952,0,0,0,0,40
+polybench-fdtd-2d,1,copy,cudaMemcpy H2D,24417,0,0,0,0,262144
+polybench-fdtd-2d,2,copy,cudaMemcpy H2D,24064,0,0,0,0,262144
+polybench-fdtd-2d,3,copy,cudaMemcpy H2D,24161,0,0,0,0,262144
+polybench-fdtd-2d,4,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",4160,256,256,16,0,0
+polybench-fdtd-2d,5,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3936,256,256,16,0,0
+polybench-fdtd-2d,6,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4032,256,256,18,0,0
+polybench-fdtd-2d,7,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3936,256,256,16,0,0
+polybench-fdtd-2d,8,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3776,256,256,16,0,0
+polybench-fdtd-2d,9,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4096,256,256,18,0,0
+polybench-fdtd-2d,10,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3713,256,256,16,0,0
+polybench-fdtd-2d,11,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3776,256,256,16,0,0
+polybench-fdtd-2d,12,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4160,256,256,18,0,0
+polybench-fdtd-2d,13,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3808,256,256,16,0,0
+polybench-fdtd-2d,14,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3712,256,256,16,0,0
+polybench-fdtd-2d,15,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4160,256,256,18,0,0
+polybench-fdtd-2d,16,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3712,256,256,16,0,0
+polybench-fdtd-2d,17,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3744,256,256,16,0,0
+polybench-fdtd-2d,18,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4128,256,256,18,0,0
+polybench-fdtd-2d,19,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3840,256,256,16,0,0
+polybench-fdtd-2d,20,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3680,256,256,16,0,0
+polybench-fdtd-2d,21,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4192,256,256,18,0,0
+polybench-fdtd-2d,22,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3840,256,256,16,0,0
+polybench-fdtd-2d,23,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3745,256,256,16,0,0
+polybench-fdtd-2d,24,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4160,256,256,18,0,0
+polybench-fdtd-2d,25,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3808,256,256,16,0,0
+polybench-fdtd-2d,26,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3680,256,256,16,0,0
+polybench-fdtd-2d,27,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4128,256,256,18,0,0
+polybench-fdtd-2d,28,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3744,256,256,16,0,0
+polybench-fdtd-2d,29,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3776,256,256,16,0,0
+polybench-fdtd-2d,30,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4128,256,256,18,0,0
+polybench-fdtd-2d,31,kernel,"fdtd_step1_kernel(int, int, float *, float *, float *, float *, int)",3808,256,256,16,0,0
+polybench-fdtd-2d,32,kernel,"fdtd_step2_kernel(int, int, float *, float *, float *, int)",3680,256,256,16,0,0
+polybench-fdtd-2d,33,kernel,"fdtd_step3_kernel(int, int, float *, float *, float *, int)",4096,256,256,18,0,0
+polybench-fdtd-2d,34,copy,cudaMemcpy D2H,23489,0,0,0,0,262144
+polybench-gemm,0,copy,cudaMemcpy H2D,7168,0,0,0,0,65536
+polybench-gemm,1,copy,cudaMemcpy H2D,6624,0,0,0,0,65536
+polybench-gemm,2,copy,cudaMemcpy H2D,6720,0,0,0,0,65536
+polybench-gemm,3,kernel,"gemm_kernel(int, int, int, float, float, float *, float *, float *)",49152,64,256,24,0,0
+polybench-gemm,4,copy,cudaMemcpy D2H,7808,0,0,0,0,65536
+polybench-gesummv,0,copy,cudaMemcpy H2D,88704,0,0,0,0,1048576
+polybench-gesummv,1,copy,cudaMemcpy H2D,88096,0,0,0,0,1048576
+polybench-gesummv,2,copy,cudaMemcpy H2D,1504,0,0,0,0,2048
+polybench-gesummv,3,copy,cudaMemcpy H2D,1504,0,0,0,0,2048
+polybench-gesummv,4,copy,cudaMemcpy H2D,1504,0,0,0,0,2048
+polybench-gesummv,5,kernel,"gesummv_kernel(int, float, float, float *, float *, float *, float *, float *)",362466,2,256,24,0,0
+polybench-gesummv,6,copy,cudaMemcpy D2H,2656,0,0,0,0,2048
+polybench-gramschm,0,copy,cudaMemcpy H2D,7328,0,0,0,0,65536
+polybench-gramschm,1,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",16608,1,256,16,0,0
+polybench-gramschm,2,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3584,1,256,16,0,0
+polybench-gramschm,3,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",81249,1,256,24,0,0
+polybench-gramschm,4,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,5,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,6,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42496,1,256,24,0,0
+polybench-gramschm,7,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,8,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,9,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43072,1,256,24,0,0
+polybench-gramschm,10,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,11,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,12,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42528,1,256,24,0,0
+polybench-gramschm,13,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11041,1,256,16,0,0
+polybench-gramschm,14,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,15,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42400,1,256,24,0,0
+polybench-gramschm,16,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,17,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,18,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42464,1,256,24,0,0
+polybench-gramschm,19,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,20,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3264,1,256,16,0,0
+polybench-gramschm,21,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42720,1,256,24,0,0
+polybench-gramschm,22,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,23,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,24,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42112,1,256,24,0,0
+polybench-gramschm,25,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,26,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,27,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43200,1,256,24,0,0
+polybench-gramschm,28,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,29,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,30,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42848,1,256,24,0,0
+polybench-gramschm,31,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11009,1,256,16,0,0
+polybench-gramschm,32,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,33,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43168,1,256,24,0,0
+polybench-gramschm,34,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,35,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,36,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42176,1,256,24,0,0
+polybench-gramschm,37,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11041,1,256,16,0,0
+polybench-gramschm,38,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,39,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43072,1,256,24,0,0
+polybench-gramschm,40,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,41,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3488,1,256,16,0,0
+polybench-gramschm,42,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42688,1,256,24,0,0
+polybench-gramschm,43,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,44,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3168,1,256,16,0,0
+polybench-gramschm,45,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43104,1,256,24,0,0
+polybench-gramschm,46,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,47,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3648,1,256,16,0,0
+polybench-gramschm,48,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42560,1,256,24,0,0
+polybench-gramschm,49,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11041,1,256,16,0,0
+polybench-gramschm,50,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3072,1,256,16,0,0
+polybench-gramschm,51,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",81696,1,256,24,0,0
+polybench-gramschm,52,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,53,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3616,1,256,16,0,0
+polybench-gramschm,54,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42721,1,256,24,0,0
+polybench-gramschm,55,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,56,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,57,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43680,1,256,24,0,0
+polybench-gramschm,58,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,59,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,60,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42753,1,256,24,0,0
+polybench-gramschm,61,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,62,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3072,1,256,16,0,0
+polybench-gramschm,63,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42752,1,256,24,0,0
+polybench-gramschm,64,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,65,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,66,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41569,1,256,24,0,0
+polybench-gramschm,67,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,68,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3328,1,256,16,0,0
+polybench-gramschm,69,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42944,1,256,24,0,0
+polybench-gramschm,70,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,71,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,72,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42593,1,256,24,0,0
+polybench-gramschm,73,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,74,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,75,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43232,1,256,24,0,0
+polybench-gramschm,76,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,77,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3488,1,256,16,0,0
+polybench-gramschm,78,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42785,1,256,24,0,0
+polybench-gramschm,79,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,80,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,81,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42720,1,256,24,0,0
+polybench-gramschm,82,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,83,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,84,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42816,1,256,24,0,0
+polybench-gramschm,85,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,86,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3072,1,256,16,0,0
+polybench-gramschm,87,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",43392,1,256,24,0,0
+polybench-gramschm,88,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,89,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3552,1,256,16,0,0
+polybench-gramschm,90,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42816,1,256,24,0,0
+polybench-gramschm,91,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11009,1,256,16,0,0
+polybench-gramschm,92,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,93,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42848,1,256,24,0,0
+polybench-gramschm,94,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,95,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3744,1,256,16,0,0
+polybench-gramschm,96,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41888,1,256,24,0,0
+polybench-gramschm,97,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11009,1,256,16,0,0
+polybench-gramschm,98,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,99,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",81312,1,256,24,0,0
+polybench-gramschm,100,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,101,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3552,1,256,16,0,0
+polybench-gramschm,102,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41537,1,256,24,0,0
+polybench-gramschm,103,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,104,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,105,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42080,1,256,24,0,0
+polybench-gramschm,106,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,107,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,108,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41569,1,256,24,0,0
+polybench-gramschm,109,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,110,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,111,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42112,1,256,24,0,0
+polybench-gramschm,112,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10432,1,256,16,0,0
+polybench-gramschm,113,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,114,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41536,1,256,24,0,0
+polybench-gramschm,115,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,116,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3264,1,256,16,0,0
+polybench-gramschm,117,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42112,1,256,24,0,0
+polybench-gramschm,118,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,119,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,120,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41664,1,256,24,0,0
+polybench-gramschm,121,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11041,1,256,16,0,0
+polybench-gramschm,122,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,123,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42176,1,256,24,0,0
+polybench-gramschm,124,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,125,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3552,1,256,16,0,0
+polybench-gramschm,126,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41600,1,256,24,0,0
+polybench-gramschm,127,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10977,1,256,16,0,0
+polybench-gramschm,128,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,129,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42048,1,256,24,0,0
+polybench-gramschm,130,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,131,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3776,1,256,16,0,0
+polybench-gramschm,132,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41568,1,256,24,0,0
+polybench-gramschm,133,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,134,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,135,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42176,1,256,24,0,0
+polybench-gramschm,136,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,137,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,138,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41600,1,256,24,0,0
+polybench-gramschm,139,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,140,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3328,1,256,16,0,0
+polybench-gramschm,141,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42080,1,256,24,0,0
+polybench-gramschm,142,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,143,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,144,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41760,1,256,24,0,0
+polybench-gramschm,145,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,146,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3072,1,256,16,0,0
+polybench-gramschm,147,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",81120,1,256,24,0,0
+polybench-gramschm,148,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,149,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3552,1,256,16,0,0
+polybench-gramschm,150,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41761,1,256,24,0,0
+polybench-gramschm,151,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,152,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,153,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42208,1,256,24,0,0
+polybench-gramschm,154,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,155,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,156,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41728,1,256,24,0,0
+polybench-gramschm,157,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,158,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,159,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42208,1,256,24,0,0
+polybench-gramschm,160,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,161,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3584,1,256,16,0,0
+polybench-gramschm,162,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41792,1,256,24,0,0
+polybench-gramschm,163,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11009,1,256,16,0,0
+polybench-gramschm,164,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,165,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42176,1,256,24,0,0
+polybench-gramschm,166,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,167,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,168,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41728,1,256,24,0,0
+polybench-gramschm,169,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,170,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,171,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42336,1,256,24,0,0
+polybench-gramschm,172,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,173,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,174,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41792,1,256,24,0,0
+polybench-gramschm,175,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,176,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3201,1,256,16,0,0
+polybench-gramschm,177,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42336,1,256,24,0,0
+polybench-gramschm,178,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,179,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,180,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41888,1,256,24,0,0
+polybench-gramschm,181,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,182,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,183,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42336,1,256,24,0,0
+polybench-gramschm,184,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,185,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,186,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41824,1,256,24,0,0
+polybench-gramschm,187,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,188,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,189,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42337,1,256,24,0,0
+polybench-gramschm,190,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,191,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3808,1,256,16,0,0
+polybench-gramschm,192,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41600,1,256,24,0,0
+polybench-gramschm,193,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,194,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,195,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",80385,1,256,24,0,0
+polybench-gramschm,196,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,197,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3552,1,256,16,0,0
+polybench-gramschm,198,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41696,1,256,24,0,0
+polybench-gramschm,199,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,200,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,201,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42144,1,256,24,0,0
+polybench-gramschm,202,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,203,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,204,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41664,1,256,24,0,0
+polybench-gramschm,205,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,206,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,207,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42176,1,256,24,0,0
+polybench-gramschm,208,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,209,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,210,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41664,1,256,24,0,0
+polybench-gramschm,211,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,212,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,213,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42144,1,256,24,0,0
+polybench-gramschm,214,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,215,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,216,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41472,1,256,24,0,0
+polybench-gramschm,217,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,218,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,219,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42081,1,256,24,0,0
+polybench-gramschm,220,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,221,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,222,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41568,1,256,24,0,0
+polybench-gramschm,223,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,224,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,225,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42049,1,256,24,0,0
+polybench-gramschm,226,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,227,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,228,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41600,1,256,24,0,0
+polybench-gramschm,229,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,230,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3104,1,256,16,0,0
+polybench-gramschm,231,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42049,1,256,24,0,0
+polybench-gramschm,232,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,233,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3552,1,256,16,0,0
+polybench-gramschm,234,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41568,1,256,24,0,0
+polybench-gramschm,235,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,236,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,237,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",42049,1,256,24,0,0
+polybench-gramschm,238,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,239,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,240,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41376,1,256,24,0,0
+polybench-gramschm,241,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,242,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,243,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",79617,1,256,24,0,0
+polybench-gramschm,244,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,245,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3488,1,256,16,0,0
+polybench-gramschm,246,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41504,1,256,24,0,0
+polybench-gramschm,247,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,248,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,249,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41953,1,256,24,0,0
+polybench-gramschm,250,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,251,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,252,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41472,1,256,24,0,0
+polybench-gramschm,253,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,254,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3072,1,256,16,0,0
+polybench-gramschm,255,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41953,1,256,24,0,0
+polybench-gramschm,256,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,257,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3584,1,256,16,0,0
+polybench-gramschm,258,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41472,1,256,24,0,0
+polybench-gramschm,259,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,260,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,261,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41953,1,256,24,0,0
+polybench-gramschm,262,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,263,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,264,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41216,1,256,24,0,0
+polybench-gramschm,265,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,266,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,267,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41857,1,256,24,0,0
+polybench-gramschm,268,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,269,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3488,1,256,16,0,0
+polybench-gramschm,270,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41376,1,256,24,0,0
+polybench-gramschm,271,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,272,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3392,1,256,16,0,0
+polybench-gramschm,273,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41857,1,256,24,0,0
+polybench-gramschm,274,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,275,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,276,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41376,1,256,24,0,0
+polybench-gramschm,277,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,278,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,279,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41856,1,256,24,0,0
+polybench-gramschm,280,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10432,1,256,16,0,0
+polybench-gramschm,281,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3488,1,256,16,0,0
+polybench-gramschm,282,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41312,1,256,24,0,0
+polybench-gramschm,283,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,284,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,285,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41792,1,256,24,0,0
+polybench-gramschm,286,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,287,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3648,1,256,16,0,0
+polybench-gramschm,288,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41248,1,256,24,0,0
+polybench-gramschm,289,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,290,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,291,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",79297,1,256,24,0,0
+polybench-gramschm,292,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,293,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,294,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41280,1,256,24,0,0
+polybench-gramschm,295,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,296,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,297,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41793,1,256,24,0,0
+polybench-gramschm,298,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,299,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,300,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41344,1,256,24,0,0
+polybench-gramschm,301,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,302,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,303,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41825,1,256,24,0,0
+polybench-gramschm,304,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,305,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3488,1,256,16,0,0
+polybench-gramschm,306,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41312,1,256,24,0,0
+polybench-gramschm,307,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,308,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3168,1,256,16,0,0
+polybench-gramschm,309,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41792,1,256,24,0,0
+polybench-gramschm,310,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,311,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,312,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40928,1,256,24,0,0
+polybench-gramschm,313,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,314,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3040,1,256,16,0,0
+polybench-gramschm,315,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41504,1,256,24,0,0
+polybench-gramschm,316,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10529,1,256,16,0,0
+polybench-gramschm,317,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,318,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41056,1,256,24,0,0
+polybench-gramschm,319,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,320,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3168,1,256,16,0,0
+polybench-gramschm,321,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41504,1,256,24,0,0
+polybench-gramschm,322,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,323,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,324,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41056,1,256,24,0,0
+polybench-gramschm,325,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,326,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,327,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41504,1,256,24,0,0
+polybench-gramschm,328,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,329,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3553,1,256,16,0,0
+polybench-gramschm,330,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41056,1,256,24,0,0
+polybench-gramschm,331,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,332,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3232,1,256,16,0,0
+polybench-gramschm,333,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41568,1,256,24,0,0
+polybench-gramschm,334,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,335,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,336,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40640,1,256,24,0,0
+polybench-gramschm,337,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,338,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,339,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",79040,1,256,24,0,0
+polybench-gramschm,340,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10529,1,256,16,0,0
+polybench-gramschm,341,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3648,1,256,16,0,0
+polybench-gramschm,342,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40800,1,256,24,0,0
+polybench-gramschm,343,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,344,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,345,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41216,1,256,24,0,0
+polybench-gramschm,346,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,347,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,348,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40800,1,256,24,0,0
+polybench-gramschm,349,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,350,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,351,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41216,1,256,24,0,0
+polybench-gramschm,352,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,353,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,354,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40800,1,256,24,0,0
+polybench-gramschm,355,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,356,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,357,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41280,1,256,24,0,0
+polybench-gramschm,358,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,359,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3680,1,256,16,0,0
+polybench-gramschm,360,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40481,1,256,24,0,0
+polybench-gramschm,361,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,362,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3072,1,256,16,0,0
+polybench-gramschm,363,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41024,1,256,24,0,0
+polybench-gramschm,364,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,365,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,366,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40577,1,256,24,0,0
+polybench-gramschm,367,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10976,1,256,16,0,0
+polybench-gramschm,368,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,369,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41024,1,256,24,0,0
+polybench-gramschm,370,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10496,1,256,16,0,0
+polybench-gramschm,371,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3712,1,256,16,0,0
+polybench-gramschm,372,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40545,1,256,24,0,0
+polybench-gramschm,373,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11040,1,256,16,0,0
+polybench-gramschm,374,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3008,1,256,16,0,0
+polybench-gramschm,375,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41024,1,256,24,0,0
+polybench-gramschm,376,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10560,1,256,16,0,0
+polybench-gramschm,377,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3520,1,256,16,0,0
+polybench-gramschm,378,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",40545,1,256,24,0,0
+polybench-gramschm,379,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",11008,1,256,16,0,0
+polybench-gramschm,380,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3200,1,256,16,0,0
+polybench-gramschm,381,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",41024,1,256,24,0,0
+polybench-gramschm,382,kernel,"gramschmidt_kernel1(int, int, float *, float *, float *, int)",10528,1,256,16,0,0
+polybench-gramschm,383,kernel,"gramschmidt_kernel2(int, int, float *, float *, float *, int)",3648,1,256,16,0,0
+polybench-gramschm,384,kernel,"gramschmidt_kernel3(int, int, float *, float *, float *, int)",1920,1,256,24,0,0
+polybench-gramschm,385,copy,cudaMemcpy D2H,7264,0,0,0,0,65536
+polybench-jacobi1d,0,copy,cudaMemcpy H2D,2400,0,0,0,0,4096
+polybench-jacobi1d,1,copy,cudaMemcpy H2D,1696,0,0,0,0,4096
+polybench-jacobi1d,2,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",3488,4,256,16,0,0
+polybench-jacobi1d,3,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2880,4,256,16,0,0
+polybench-jacobi1d,4,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",3200,4,256,16,0,0
+polybench-jacobi1d,5,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2720,4,256,16,0,0
+polybench-jacobi1d,6,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",2976,4,256,16,0,0
+polybench-jacobi1d,7,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2752,4,256,16,0,0
+polybench-jacobi1d,8,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",3008,4,256,16,0,0
+polybench-jacobi1d,9,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2752,4,256,16,0,0
+polybench-jacobi1d,10,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",2944,4,256,16,0,0
+polybench-jacobi1d,11,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2752,4,256,16,0,0
+polybench-jacobi1d,12,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",3008,4,256,16,0,0
+polybench-jacobi1d,13,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2752,4,256,16,0,0
+polybench-jacobi1d,14,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",2976,4,256,16,0,0
+polybench-jacobi1d,15,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2720,4,256,16,0,0
+polybench-jacobi1d,16,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",2944,4,256,16,0,0
+polybench-jacobi1d,17,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2752,4,256,16,0,0
+polybench-jacobi1d,18,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",2976,4,256,16,0,0
+polybench-jacobi1d,19,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2752,4,256,16,0,0
+polybench-jacobi1d,20,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",2976,4,256,16,0,0
+polybench-jacobi1d,21,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",2720,4,256,16,0,0
+polybench-jacobi1d,22,copy,cudaMemcpy D2H,2688,0,0,0,0,4096
+polybench-jacobi1d,23,copy,cudaMemcpy D2H,2496,0,0,0,0,4096
+polybench-jacobi2d,0,copy,cudaMemcpy H2D,687012,0,0,0,0,4000000
+polybench-jacobi2d,1,copy,cudaMemcpy H2D,689220,0,0,0,0,4000000
+polybench-jacobi2d,2,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14592,4000,256,16,0,0
+polybench-jacobi2d,3,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12928,4000,256,16,0,0
+polybench-jacobi2d,4,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14240,4000,256,16,0,0
+polybench-jacobi2d,5,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12833,4000,256,16,0,0
+polybench-jacobi2d,6,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14112,4000,256,16,0,0
+polybench-jacobi2d,7,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12768,4000,256,16,0,0
+polybench-jacobi2d,8,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14304,4000,256,16,0,0
+polybench-jacobi2d,9,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12768,4000,256,16,0,0
+polybench-jacobi2d,10,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14144,4000,256,16,0,0
+polybench-jacobi2d,11,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12832,4000,256,16,0,0
+polybench-jacobi2d,12,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14048,4000,256,16,0,0
+polybench-jacobi2d,13,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12864,4000,256,16,0,0
+polybench-jacobi2d,14,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14176,4000,256,16,0,0
+polybench-jacobi2d,15,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12800,4000,256,16,0,0
+polybench-jacobi2d,16,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14112,4000,256,16,0,0
+polybench-jacobi2d,17,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12864,4000,256,16,0,0
+polybench-jacobi2d,18,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14112,4000,256,16,0,0
+polybench-jacobi2d,19,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12704,4000,256,16,0,0
+polybench-jacobi2d,20,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14113,4000,256,16,0,0
+polybench-jacobi2d,21,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12864,4000,256,16,0,0
+polybench-jacobi2d,22,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14080,4000,256,16,0,0
+polybench-jacobi2d,23,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12800,4000,256,16,0,0
+polybench-jacobi2d,24,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14208,4000,256,16,0,0
+polybench-jacobi2d,25,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12800,4000,256,16,0,0
+polybench-jacobi2d,26,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14176,4000,256,16,0,0
+polybench-jacobi2d,27,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12832,4000,256,16,0,0
+polybench-jacobi2d,28,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14176,4000,256,16,0,0
+polybench-jacobi2d,29,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12736,4000,256,16,0,0
+polybench-jacobi2d,30,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14176,4000,256,16,0,0
+polybench-jacobi2d,31,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12864,4000,256,16,0,0
+polybench-jacobi2d,32,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14144,4000,256,16,0,0
+polybench-jacobi2d,33,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12736,4000,256,16,0,0
+polybench-jacobi2d,34,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14176,4000,256,16,0,0
+polybench-jacobi2d,35,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12736,4000,256,16,0,0
+polybench-jacobi2d,36,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14272,4000,256,16,0,0
+polybench-jacobi2d,37,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12832,4000,256,16,0,0
+polybench-jacobi2d,38,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14144,4000,256,16,0,0
+polybench-jacobi2d,39,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12896,4000,256,16,0,0
+polybench-jacobi2d,40,kernel,"runJacobiCUDA_kernel1(int, float *, float *)",14112,4000,256,16,0,0
+polybench-jacobi2d,41,kernel,"runJacobiCUDA_kernel2(int, float *, float *)",12736,4000,256,16,0,0
+polybench-jacobi2d,42,copy,cudaMemcpy D2H,1135718,0,0,0,0,4000000
+polybench-jacobi2d,43,copy,cudaMemcpy D2H,984710,0,0,0,0,4000000
+polybench-lu,0,copy,cudaMemcpy H2D,7168,0,0,0,0,65536
+polybench-lu,1,kernel,"lu_kernel1(int, float *, int)",3552,1,256,16,0,0
+polybench-lu,2,kernel,"lu_kernel2(int, float *, int)",3584,64,256,16,0,0
+polybench-lu,3,kernel,"lu_kernel1(int, float *, int)",2976,1,256,16,0,0
+polybench-lu,4,kernel,"lu_kernel2(int, float *, int)",3200,64,256,16,0,0
+polybench-lu,5,kernel,"lu_kernel1(int, float *, int)",2976,1,256,16,0,0
+polybench-lu,6,kernel,"lu_kernel2(int, float *, int)",3200,64,256,16,0,0
+polybench-lu,7,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,8,kernel,"lu_kernel2(int, float *, int)",3232,64,256,16,0,0
+polybench-lu,9,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,10,kernel,"lu_kernel2(int, float *, int)",3168,64,256,16,0,0
+polybench-lu,11,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,12,kernel,"lu_kernel2(int, float *, int)",3168,64,256,16,0,0
+polybench-lu,13,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,14,kernel,"lu_kernel2(int, float *, int)",3232,64,256,16,0,0
+polybench-lu,15,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,16,kernel,"lu_kernel2(int, float *, int)",3232,60,256,16,0,0
+polybench-lu,17,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,18,kernel,"lu_kernel2(int, float *, int)",3200,60,256,16,0,0
+polybench-lu,19,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,20,kernel,"lu_kernel2(int, float *, int)",3168,60,256,16,0,0
+polybench-lu,21,kernel,"lu_kernel1(int, float *, int)",2913,1,256,16,0,0
+polybench-lu,22,kernel,"lu_kernel2(int, float *, int)",3232,60,256,16,0,0
+polybench-lu,23,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,24,kernel,"lu_kernel2(int, float *, int)",3168,60,256,16,0,0
+polybench-lu,25,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,26,kernel,"lu_kernel2(int, float *, int)",3168,60,256,16,0,0
+polybench-lu,27,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,28,kernel,"lu_kernel2(int, float *, int)",3200,60,256,16,0,0
+polybench-lu,29,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,30,kernel,"lu_kernel2(int, float *, int)",3200,60,256,16,0,0
+polybench-lu,31,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,32,kernel,"lu_kernel2(int, float *, int)",3200,56,256,16,0,0
+polybench-lu,33,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,34,kernel,"lu_kernel2(int, float *, int)",3136,56,256,16,0,0
+polybench-lu,35,kernel,"lu_kernel1(int, float *, int)",3008,1,256,16,0,0
+polybench-lu,36,kernel,"lu_kernel2(int, float *, int)",3200,56,256,16,0,0
+polybench-lu,37,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,38,kernel,"lu_kernel2(int, float *, int)",3200,56,256,16,0,0
+polybench-lu,39,kernel,"lu_kernel1(int, float *, int)",2784,1,256,16,0,0
+polybench-lu,40,kernel,"lu_kernel2(int, float *, int)",3200,56,256,16,0,0
+polybench-lu,41,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,42,kernel,"lu_kernel2(int, float *, int)",3168,56,256,16,0,0
+polybench-lu,43,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,44,kernel,"lu_kernel2(int, float *, int)",3136,56,256,16,0,0
+polybench-lu,45,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,46,kernel,"lu_kernel2(int, float *, int)",3168,56,256,16,0,0
+polybench-lu,47,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,48,kernel,"lu_kernel2(int, float *, int)",3104,52,256,16,0,0
+polybench-lu,49,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,50,kernel,"lu_kernel2(int, float *, int)",3168,52,256,16,0,0
+polybench-lu,51,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,52,kernel,"lu_kernel2(int, float *, int)",3136,52,256,16,0,0
+polybench-lu,53,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,54,kernel,"lu_kernel2(int, float *, int)",3136,52,256,16,0,0
+polybench-lu,55,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,56,kernel,"lu_kernel2(int, float *, int)",3168,52,256,16,0,0
+polybench-lu,57,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,58,kernel,"lu_kernel2(int, float *, int)",3168,52,256,16,0,0
+polybench-lu,59,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,60,kernel,"lu_kernel2(int, float *, int)",3136,52,256,16,0,0
+polybench-lu,61,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,62,kernel,"lu_kernel2(int, float *, int)",3168,52,256,16,0,0
+polybench-lu,63,kernel,"lu_kernel1(int, float *, int)",2784,1,256,16,0,0
+polybench-lu,64,kernel,"lu_kernel2(int, float *, int)",3008,36,256,16,0,0
+polybench-lu,65,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,66,kernel,"lu_kernel2(int, float *, int)",2976,36,256,16,0,0
+polybench-lu,67,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,68,kernel,"lu_kernel2(int, float *, int)",2976,36,256,16,0,0
+polybench-lu,69,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,70,kernel,"lu_kernel2(int, float *, int)",2976,36,256,16,0,0
+polybench-lu,71,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,72,kernel,"lu_kernel2(int, float *, int)",3008,36,256,16,0,0
+polybench-lu,73,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,74,kernel,"lu_kernel2(int, float *, int)",2976,36,256,16,0,0
+polybench-lu,75,kernel,"lu_kernel1(int, float *, int)",3008,1,256,16,0,0
+polybench-lu,76,kernel,"lu_kernel2(int, float *, int)",2944,36,256,16,0,0
+polybench-lu,77,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,78,kernel,"lu_kernel2(int, float *, int)",3008,36,256,16,0,0
+polybench-lu,79,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,80,kernel,"lu_kernel2(int, float *, int)",2976,33,256,16,0,0
+polybench-lu,81,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,82,kernel,"lu_kernel2(int, float *, int)",2912,33,256,16,0,0
+polybench-lu,83,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,84,kernel,"lu_kernel2(int, float *, int)",2912,33,256,16,0,0
+polybench-lu,85,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,86,kernel,"lu_kernel2(int, float *, int)",3008,33,256,16,0,0
+polybench-lu,87,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,88,kernel,"lu_kernel2(int, float *, int)",3008,33,256,16,0,0
+polybench-lu,89,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,90,kernel,"lu_kernel2(int, float *, int)",2912,33,256,16,0,0
+polybench-lu,91,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,92,kernel,"lu_kernel2(int, float *, int)",2912,33,256,16,0,0
+polybench-lu,93,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,94,kernel,"lu_kernel2(int, float *, int)",2976,33,256,16,0,0
+polybench-lu,95,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,96,kernel,"lu_kernel2(int, float *, int)",2976,30,256,16,0,0
+polybench-lu,97,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,98,kernel,"lu_kernel2(int, float *, int)",2912,30,256,16,0,0
+polybench-lu,99,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,100,kernel,"lu_kernel2(int, float *, int)",2976,30,256,16,0,0
+polybench-lu,101,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,102,kernel,"lu_kernel2(int, float *, int)",3008,30,256,16,0,0
+polybench-lu,103,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,104,kernel,"lu_kernel2(int, float *, int)",2976,30,256,16,0,0
+polybench-lu,105,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,106,kernel,"lu_kernel2(int, float *, int)",2976,30,256,16,0,0
+polybench-lu,107,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,108,kernel,"lu_kernel2(int, float *, int)",2944,30,256,16,0,0
+polybench-lu,109,kernel,"lu_kernel1(int, float *, int)",2784,1,256,16,0,0
+polybench-lu,110,kernel,"lu_kernel2(int, float *, int)",2976,30,256,16,0,0
+polybench-lu,111,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,112,kernel,"lu_kernel2(int, float *, int)",2944,27,256,16,0,0
+polybench-lu,113,kernel,"lu_kernel1(int, float *, int)",3008,1,256,16,0,0
+polybench-lu,114,kernel,"lu_kernel2(int, float *, int)",2816,27,256,16,0,0
+polybench-lu,115,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,116,kernel,"lu_kernel2(int, float *, int)",2848,27,256,16,0,0
+polybench-lu,117,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,118,kernel,"lu_kernel2(int, float *, int)",2976,27,256,16,0,0
+polybench-lu,119,kernel,"lu_kernel1(int, float *, int)",2688,1,256,16,0,0
+polybench-lu,120,kernel,"lu_kernel2(int, float *, int)",3008,27,256,16,0,0
+polybench-lu,121,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,122,kernel,"lu_kernel2(int, float *, int)",2784,27,256,16,0,0
+polybench-lu,123,kernel,"lu_kernel1(int, float *, int)",3008,1,256,16,0,0
+polybench-lu,124,kernel,"lu_kernel2(int, float *, int)",2784,27,256,16,0,0
+polybench-lu,125,kernel,"lu_kernel1(int, float *, int)",2688,1,256,16,0,0
+polybench-lu,126,kernel,"lu_kernel2(int, float *, int)",2944,27,256,16,0,0
+polybench-lu,127,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,128,kernel,"lu_kernel2(int, float *, int)",2400,16,256,16,0,0
+polybench-lu,129,kernel,"lu_kernel1(int, float *, int)",3104,1,256,16,0,0
+polybench-lu,130,kernel,"lu_kernel2(int, float *, int)",2368,16,256,16,0,0
+polybench-lu,131,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,132,kernel,"lu_kernel2(int, float *, int)",2368,16,256,16,0,0
+polybench-lu,133,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,134,kernel,"lu_kernel2(int, float *, int)",2400,16,256,16,0,0
+polybench-lu,135,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,136,kernel,"lu_kernel2(int, float *, int)",2368,16,256,16,0,0
+polybench-lu,137,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,138,kernel,"lu_kernel2(int, float *, int)",2400,16,256,16,0,0
+polybench-lu,139,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,140,kernel,"lu_kernel2(int, float *, int)",2400,16,256,16,0,0
+polybench-lu,141,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,142,kernel,"lu_kernel2(int, float *, int)",2368,16,256,16,0,0
+polybench-lu,143,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,144,kernel,"lu_kernel2(int, float *, int)",2400,14,256,16,0,0
+polybench-lu,145,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,146,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,147,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,148,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,149,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,150,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,151,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,152,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,153,kernel,"lu_kernel1(int, float *, int)",3040,1,256,16,0,0
+polybench-lu,154,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,155,kernel,"lu_kernel1(int, float *, int)",3072,1,256,16,0,0
+polybench-lu,156,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,157,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,158,kernel,"lu_kernel2(int, float *, int)",2368,14,256,16,0,0
+polybench-lu,159,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,160,kernel,"lu_kernel2(int, float *, int)",2208,12,256,16,0,0
+polybench-lu,161,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,162,kernel,"lu_kernel2(int, float *, int)",2240,12,256,16,0,0
+polybench-lu,163,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,164,kernel,"lu_kernel2(int, float *, int)",2208,12,256,16,0,0
+polybench-lu,165,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,166,kernel,"lu_kernel2(int, float *, int)",2208,12,256,16,0,0
+polybench-lu,167,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,168,kernel,"lu_kernel2(int, float *, int)",2208,12,256,16,0,0
+polybench-lu,169,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,170,kernel,"lu_kernel2(int, float *, int)",2208,12,256,16,0,0
+polybench-lu,171,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,172,kernel,"lu_kernel2(int, float *, int)",2240,12,256,16,0,0
+polybench-lu,173,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,174,kernel,"lu_kernel2(int, float *, int)",2208,12,256,16,0,0
+polybench-lu,175,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,176,kernel,"lu_kernel2(int, float *, int)",2240,10,256,16,0,0
+polybench-lu,177,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,178,kernel,"lu_kernel2(int, float *, int)",2176,10,256,16,0,0
+polybench-lu,179,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,180,kernel,"lu_kernel2(int, float *, int)",2208,10,256,16,0,0
+polybench-lu,181,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,182,kernel,"lu_kernel2(int, float *, int)",2208,10,256,16,0,0
+polybench-lu,183,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,184,kernel,"lu_kernel2(int, float *, int)",2240,10,256,16,0,0
+polybench-lu,185,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,186,kernel,"lu_kernel2(int, float *, int)",2208,10,256,16,0,0
+polybench-lu,187,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,188,kernel,"lu_kernel2(int, float *, int)",2240,10,256,16,0,0
+polybench-lu,189,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,190,kernel,"lu_kernel2(int, float *, int)",2208,10,256,16,0,0
+polybench-lu,191,kernel,"lu_kernel1(int, float *, int)",2688,1,256,16,0,0
+polybench-lu,192,kernel,"lu_kernel2(int, float *, int)",2336,4,256,16,0,0
+polybench-lu,193,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,194,kernel,"lu_kernel2(int, float *, int)",2368,4,256,16,0,0
+polybench-lu,195,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,196,kernel,"lu_kernel2(int, float *, int)",2368,4,256,16,0,0
+polybench-lu,197,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,198,kernel,"lu_kernel2(int, float *, int)",2336,4,256,16,0,0
+polybench-lu,199,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,200,kernel,"lu_kernel2(int, float *, int)",2336,4,256,16,0,0
+polybench-lu,201,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,202,kernel,"lu_kernel2(int, float *, int)",2304,4,256,16,0,0
+polybench-lu,203,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,204,kernel,"lu_kernel2(int, float *, int)",2336,4,256,16,0,0
+polybench-lu,205,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,206,kernel,"lu_kernel2(int, float *, int)",2336,4,256,16,0,0
+polybench-lu,207,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,208,kernel,"lu_kernel2(int, float *, int)",2368,3,256,16,0,0
+polybench-lu,209,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,210,kernel,"lu_kernel2(int, float *, int)",2304,3,256,16,0,0
+polybench-lu,211,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,212,kernel,"lu_kernel2(int, float *, int)",2304,3,256,16,0,0
+polybench-lu,213,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,214,kernel,"lu_kernel2(int, float *, int)",2336,3,256,16,0,0
+polybench-lu,215,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,216,kernel,"lu_kernel2(int, float *, int)",2304,3,256,16,0,0
+polybench-lu,217,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,218,kernel,"lu_kernel2(int, float *, int)",2336,3,256,16,0,0
+polybench-lu,219,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,220,kernel,"lu_kernel2(int, float *, int)",2336,3,256,16,0,0
+polybench-lu,221,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,222,kernel,"lu_kernel2(int, float *, int)",2336,3,256,16,0,0
+polybench-lu,223,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,224,kernel,"lu_kernel2(int, float *, int)",2176,2,256,16,0,0
+polybench-lu,225,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,226,kernel,"lu_kernel2(int, float *, int)",2144,2,256,16,0,0
+polybench-lu,227,kernel,"lu_kernel1(int, float *, int)",2881,1,256,16,0,0
+polybench-lu,228,kernel,"lu_kernel2(int, float *, int)",2176,2,256,16,0,0
+polybench-lu,229,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,230,kernel,"lu_kernel2(int, float *, int)",2208,2,256,16,0,0
+polybench-lu,231,kernel,"lu_kernel1(int, float *, int)",2720,1,256,16,0,0
+polybench-lu,232,kernel,"lu_kernel2(int, float *, int)",2144,2,256,16,0,0
+polybench-lu,233,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,234,kernel,"lu_kernel2(int, float *, int)",2144,2,256,16,0,0
+polybench-lu,235,kernel,"lu_kernel1(int, float *, int)",2848,1,256,16,0,0
+polybench-lu,236,kernel,"lu_kernel2(int, float *, int)",2208,2,256,16,0,0
+polybench-lu,237,kernel,"lu_kernel1(int, float *, int)",2688,1,256,16,0,0
+polybench-lu,238,kernel,"lu_kernel2(int, float *, int)",2208,2,256,16,0,0
+polybench-lu,239,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,240,kernel,"lu_kernel2(int, float *, int)",1696,1,256,16,0,0
+polybench-lu,241,kernel,"lu_kernel1(int, float *, int)",2913,1,256,16,0,0
+polybench-lu,242,kernel,"lu_kernel2(int, float *, int)",1696,1,256,16,0,0
+polybench-lu,243,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,244,kernel,"lu_kernel2(int, float *, int)",1728,1,256,16,0,0
+polybench-lu,245,kernel,"lu_kernel1(int, float *, int)",2784,1,256,16,0,0
+polybench-lu,246,kernel,"lu_kernel2(int, float *, int)",1728,1,256,16,0,0
+polybench-lu,247,kernel,"lu_kernel1(int, float *, int)",2752,1,256,16,0,0
+polybench-lu,248,kernel,"lu_kernel2(int, float *, int)",1664,1,256,16,0,0
+polybench-lu,249,kernel,"lu_kernel1(int, float *, int)",2880,1,256,16,0,0
+polybench-lu,250,kernel,"lu_kernel2(int, float *, int)",1696,1,256,16,0,0
+polybench-lu,251,kernel,"lu_kernel1(int, float *, int)",2912,1,256,16,0,0
+polybench-lu,252,kernel,"lu_kernel2(int, float *, int)",1664,1,256,16,0,0
+polybench-lu,253,kernel,"lu_kernel1(int, float *, int)",2688,1,256,16,0,0
+polybench-lu,254,kernel,"lu_kernel2(int, float *, int)",1696,1,256,16,0,0
+polybench-lu,255,kernel,"lu_kernel1(int, float*, int)",0,0,0,0,0,0
+polybench-lu,256,kernel,"lu_kernel2(int, float*, int)",0,0,0,0,0,0
+polybench-lu,257,copy,cudaMemcpy D2H,7296,0,0,0,0,65536
+polybench-mvt,0,copy,cudaMemcpy H2D,88544,0,0,0,0,1048576
+polybench-mvt,1,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-mvt,2,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-mvt,3,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-mvt,4,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-mvt,5,kernel,"mvt_kernel1(int, float *, float *, float *)",160257,16,256,22,0,0
+polybench-mvt,6,kernel,"mvt_kernel2(int, float *, float *, float *)",166209,16,256,22,0,0
+polybench-mvt,7,copy,cudaMemcpy D2H,2624,0,0,0,0,2048
+polybench-mvt,8,copy,cudaMemcpy D2H,2784,0,0,0,0,2048
+polybench-syr2k,0,copy,cudaMemcpy H2D,7168,0,0,0,0,65536
+polybench-syr2k,1,copy,cudaMemcpy H2D,6656,0,0,0,0,65536
+polybench-syr2k,2,copy,cudaMemcpy H2D,6688,0,0,0,0,65536
+polybench-syr2k,3,kernel,"syr2k_kernel(int, int, float, float, float *, float *, float *)",157601,64,256,32,0,0
+polybench-syr2k,4,copy,cudaMemcpy D2H,7456,0,0,0,0,65536
+polybench-syrk,0,copy,cudaMemcpy H2D,7232,0,0,0,0,65536
+polybench-syrk,1,copy,cudaMemcpy H2D,6624,0,0,0,0,65536
+polybench-syrk,2,kernel,"syrk_kernel(int, int, float, float, float *, float *)",83136,64,256,28,0,0
+polybench-syrk,3,copy,cudaMemcpy D2H,7456,0,0,0,0,65536
+polybench-gemver,0,copy,cudaMemcpy H2D,88832,0,0,0,0,1048576
+polybench-gemver,1,copy,cudaMemcpy H2D,1568,0,0,0,0,2048
+polybench-gemver,2,copy,cudaMemcpy H2D,1537,0,0,0,0,2048
+polybench-gemver,3,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-gemver,4,copy,cudaMemcpy H2D,1568,0,0,0,0,2048
+polybench-gemver,5,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-gemver,6,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-gemver,7,copy,cudaMemcpy H2D,1536,0,0,0,0,2048
+polybench-gemver,8,copy,cudaMemcpy H2D,1568,0,0,0,0,2048
+polybench-gemver,9,kernel,"gemver_kernel1(int, float, float, float *, float *, float *, float *, float *)",6112,1024,256,16,0,0
+polybench-gemver,10,kernel,"gemver_kernel2(int, float, float, float *, float *, float *, float *)",172321,2,256,22,0,0
+polybench-gemver,11,kernel,"gemver_kernel3(int, float, float, float *, float *, float *)",178721,2,256,22,0,0
+polybench-gemver,12,copy,cudaMemcpy D2H,2624,0,0,0,0,2048
+polybench-adi,0,copy,cudaMemcpy H2D,7200,0,0,0,0,65536
+polybench-adi,1,copy,cudaMemcpy H2D,6624,0,0,0,0,65536
+polybench-adi,2,copy,cudaMemcpy H2D,6624,0,0,0,0,65536
+polybench-adi,3,kernel,"adi_kernel1(int, float *, float *, float *)",179649,1,256,30,0,0
+polybench-adi,4,kernel,"adi_kernel2(int, float *, float *, float *)",3264,1,256,16,0,0
+polybench-adi,5,kernel,"adi_kernel3(int, float *, float *, float *)",91457,1,256,26,0,0
+polybench-adi,6,kernel,"adi_kernel4(int, float *, float *, float *, int)",2976,1,256,20,0,0
+polybench-adi,7,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,8,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,9,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,10,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,11,kernel,"adi_kernel4(int, float *, float *, float *, int)",3424,1,256,20,0,0
+polybench-adi,12,kernel,"adi_kernel4(int, float *, float *, float *, int)",2913,1,256,20,0,0
+polybench-adi,13,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,14,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,15,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,16,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,17,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,18,kernel,"adi_kernel4(int, float *, float *, float *, int)",2944,1,256,20,0,0
+polybench-adi,19,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,20,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,21,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,22,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,23,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,24,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,25,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,26,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,27,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,28,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,29,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,30,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,31,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,32,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,33,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,34,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,35,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,36,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,37,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,38,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,39,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,40,kernel,"adi_kernel4(int, float *, float *, float *, int)",2944,1,256,20,0,0
+polybench-adi,41,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,42,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,43,kernel,"adi_kernel4(int, float *, float *, float *, int)",3424,1,256,20,0,0
+polybench-adi,44,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,45,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,46,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,47,kernel,"adi_kernel4(int, float *, float *, float *, int)",3424,1,256,20,0,0
+polybench-adi,48,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,49,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,50,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,51,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,52,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,53,kernel,"adi_kernel4(int, float *, float *, float *, int)",3328,1,256,20,0,0
+polybench-adi,54,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,55,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,56,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,57,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,58,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,59,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,60,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,61,kernel,"adi_kernel4(int, float *, float *, float *, int)",3328,1,256,20,0,0
+polybench-adi,62,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,63,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,64,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,65,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,66,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,67,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,68,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,69,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,70,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,71,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,72,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,73,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,74,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,75,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,76,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,77,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,78,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,79,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,80,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,81,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,82,kernel,"adi_kernel4(int, float *, float *, float *, int)",2816,1,256,20,0,0
+polybench-adi,83,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,84,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,85,kernel,"adi_kernel4(int, float *, float *, float *, int)",3328,1,256,20,0,0
+polybench-adi,86,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,87,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,88,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,89,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,90,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,91,kernel,"adi_kernel4(int, float *, float *, float *, int)",3328,1,256,20,0,0
+polybench-adi,92,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,93,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,94,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,95,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,96,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,97,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,98,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,99,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,100,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,101,kernel,"adi_kernel4(int, float *, float *, float *, int)",3424,1,256,20,0,0
+polybench-adi,102,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,103,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,104,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,105,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,106,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,107,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,108,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,109,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,110,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,111,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,112,kernel,"adi_kernel4(int, float *, float *, float *, int)",2944,1,256,20,0,0
+polybench-adi,113,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,114,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,115,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,116,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,117,kernel,"adi_kernel4(int, float *, float *, float *, int)",3328,1,256,20,0,0
+polybench-adi,118,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,119,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,120,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,121,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,122,kernel,"adi_kernel4(int, float *, float *, float *, int)",2816,1,256,20,0,0
+polybench-adi,123,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,124,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,125,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,126,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,127,kernel,"adi_kernel4(int, float *, float *, float *, int)",3425,1,256,20,0,0
+polybench-adi,128,kernel,"adi_kernel4(int, float *, float *, float *, int)",2912,1,256,20,0,0
+polybench-adi,129,kernel,"adi_kernel4(int, float *, float *, float *, int)",3360,1,256,20,0,0
+polybench-adi,130,kernel,"adi_kernel4(int, float *, float *, float *, int)",2848,1,256,20,0,0
+polybench-adi,131,kernel,"adi_kernel4(int, float *, float *, float *, int)",3392,1,256,20,0,0
+polybench-adi,132,kernel,"adi_kernel4(int, float *, float *, float *, int)",2880,1,256,20,0,0
+polybench-adi,133,kernel,"adi_kernel5(int, float *, float *, float *)",2784,1,256,16,0,0
+polybench-adi,134,kernel,"adi_kernel6(int, float *, float *, float *, int)",2400,1,256,16,0,0
+polybench-adi,135,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,136,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,137,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,138,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,139,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,140,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,141,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,142,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,143,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,144,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,145,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,146,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,147,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,148,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,149,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,150,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,151,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,152,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,153,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,154,kernel,"adi_kernel6(int, float *, float *, float *, int)",2337,1,256,16,0,0
+polybench-adi,155,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,156,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,157,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,158,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,159,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,160,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,161,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,162,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,163,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,164,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,165,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,166,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,167,kernel,"adi_kernel6(int, float *, float *, float *, int)",2784,1,256,16,0,0
+polybench-adi,168,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,169,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,170,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,171,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,172,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,173,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,174,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,175,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,176,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,177,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,178,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,179,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,180,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,181,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,182,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,183,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,184,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,185,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,186,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,187,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,188,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,189,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,190,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,191,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,192,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,193,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,194,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,195,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,196,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,197,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,198,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,199,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,200,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,201,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,202,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,203,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,204,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,205,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,206,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,207,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,208,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,209,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,210,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,211,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,212,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,213,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,214,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,215,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,216,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,217,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,218,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,219,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,220,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,221,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,222,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,223,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,224,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,225,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,226,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,227,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,228,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,229,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,230,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,231,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,232,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,233,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,234,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,235,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,236,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,237,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,238,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,239,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,240,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,241,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,242,kernel,"adi_kernel6(int, float *, float *, float *, int)",2400,1,256,16,0,0
+polybench-adi,243,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,244,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,245,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,246,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,247,kernel,"adi_kernel6(int, float *, float *, float *, int)",2848,1,256,16,0,0
+polybench-adi,248,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,249,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,250,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,251,kernel,"adi_kernel6(int, float *, float *, float *, int)",2784,1,256,16,0,0
+polybench-adi,252,kernel,"adi_kernel6(int, float *, float *, float *, int)",2336,1,256,16,0,0
+polybench-adi,253,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,254,kernel,"adi_kernel6(int, float *, float *, float *, int)",2304,1,256,16,0,0
+polybench-adi,255,kernel,"adi_kernel6(int, float *, float *, float *, int)",2816,1,256,16,0,0
+polybench-adi,256,kernel,"adi_kernel6(int, float *, float *, float *, int)",2400,1,256,16,0,0
+polybench-adi,257,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,258,kernel,"adi_kernel6(int, float *, float *, float *, int)",2368,1,256,16,0,0
+polybench-adi,259,kernel,"adi_kernel6(int, float *, float *, float *, int)",2880,1,256,16,0,0
+polybench-adi,260,copy,cudaMemcpy D2H,7520,0,0,0,0,65536
+polybench-adi,261,copy,cudaMemcpy D2H,7552,0,0,0,0,65536
