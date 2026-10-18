@@ -280,8 +280,66 @@ def block_shape(op):
     return (t, max(1, op["regs"]) * t, op["smem"])
 
 
-def simulate(ops, nb, whole, spec, truth_spec, delay_ns, host_sync=False):
-    """Run the blocks under one policy: (makespan ns, rollbacks, ns of work rolled back)."""
+def _per_sm(shape):
+    t, regs, smem = shape
+    return max(1, min(GPU["blocks"], GPU["threads"] // max(1, t), GPU["regs"] // max(1, regs),
+                      GPU["smem"] // smem if smem else GPU["blocks"]))
+
+
+def block_durations(ops, nb, work):
+    """Per event, each block's duration (ns). A kernel with instruction counts per block (work: {event:
+    {block: warp instructions}}) gets durations in proportion to them, scaled so that the kernel alone, its
+    blocks issued in order to the free slots of the GPU, takes its profiled duration; otherwise every block
+    takes the duration divided by the number of waves."""
+    out = []
+    for e, o in enumerate(ops):
+        sh = block_shape(o)
+        if sh is None or o["dur_ns"] == 0 or sh == (0, 0, 0):
+            out.append(np.full(nb[e], int(o["dur_ns"]), dtype=np.int64))
+            continue
+        slots = _per_sm(sh) * GPU["sms"]
+        w = (work or {}).get(e)
+        if w:
+            weights = np.array([w.get(b, 0) for b in range(nb[e])], dtype=float)
+            missing = weights == 0
+            if missing.all():
+                w = None
+            else:
+                weights[missing] = np.median(weights[~missing])
+        if not w:
+            waves = math.ceil(nb[e] / slots)
+            out.append(np.full(nb[e], max(1, int(o["dur_ns"]) // max(1, waves)), dtype=np.int64))
+            continue
+        free = [0.0] * min(slots, nb[e])                               # the kernel alone: list scheduling
+        heapq.heapify(free)
+        span = 0.0
+        for x in weights:
+            t = heapq.heappop(free) + x
+            span = max(span, t)
+            heapq.heappush(free, t)
+        out.append(np.maximum(1, np.round(weights * (int(o["dur_ns"]) / span))).astype(np.int64))
+    return out
+
+
+def load_work(name, n_events):
+    """{event: {block: warp instructions}} from truth_work, if its run issued the block trace's operations."""
+    w = B.workdir(B.BENCH[name])
+    path = w / "truth_work" / "truth_block_work.csv"
+    if not path.exists():
+        return None
+    ops = list(csv.DictReader(open(w / "truth_work" / "truth_events.csv")))
+    ref = list(csv.DictReader(open(w / "truth_blocks" / "truth_events.csv")))
+    if [(r["kind"], r["name"]) for r in ops] != [(r["kind"], r["name"]) for r in ref] or len(ref) != n_events:
+        return None
+    out = {}
+    for r in csv.DictReader(open(path)):
+        out.setdefault(int(r["event"]), {})[int(r["block"])] = int(r["warp_instrs"])
+    return out
+
+
+def simulate(ops, nb, whole, spec, truth_spec, delay_ns, host_sync=False, dur=None):
+    """Run the blocks under one policy: (makespan ns, rollbacks, ns of work rolled back). dur: per event, each
+    block's duration (block_durations); by default equal within a kernel."""
     n = len(ops)
     whole = {e: set(whole.get(e, ())) for e in range(n)}
     if host_sync:
@@ -292,16 +350,8 @@ def simulate(ops, nb, whole, spec, truth_spec, delay_ns, host_sync=False):
             if o["name"] == "cudaMemcpy D2H":
                 last = j
     shape = [block_shape(o) for o in ops]
-    dur = []
-    for e, o in enumerate(ops):
-        if shape[e] is None or o["dur_ns"] == 0:
-            dur.append(int(o["dur_ns"]))
-            continue
-        t, regs, smem = shape[e]
-        per_sm = max(1, min(GPU["blocks"], GPU["threads"] // max(1, t), GPU["regs"] // max(1, regs),
-                            GPU["smem"] // smem if smem else GPU["blocks"]))
-        waves = math.ceil(nb[e] / (per_sm * GPU["sms"]))
-        dur.append(max(1, int(o["dur_ns"]) // max(1, waves)))
+    if dur is None:
+        dur = block_durations(ops, nb, None)
     free = np.array([[GPU["threads"], GPU["blocks"], GPU["regs"], GPU["smem"]]] * GPU["sms"], dtype=np.int64)
     busy = set()
     rem_whole = [len(whole[e]) for e in range(n)]
@@ -344,30 +394,33 @@ def simulate(ops, nb, whole, spec, truth_spec, delay_ns, host_sync=False):
         for e in sorted(ready):                                         # dispatch in program order
             blocks = ready[e]
             sh = shape[e]
-            keep = []
-            for b in blocks:
-                if sh is None:
-                    eng = ops[e]["name"].split()[-1]
-                    if eng in busy:
-                        keep.append(b)
-                        continue
-                    busy.add(eng)
-                    sm = -1
-                elif sh == (0, 0, 0):
-                    sm = -2
-                else:
-                    t, regs, smem = sh
-                    fit = np.flatnonzero((free[:, 0] >= t) & (free[:, 1] >= 1) & (free[:, 2] >= regs) &
-                                         (free[:, 3] >= smem))
-                    if not len(fit):
-                        keep.append(b)
-                        continue
-                    sm = int(fit[0])
-                    free[sm] -= (t, 1, regs, smem)
+            if sh is None:                                              # a copy: its engine, one at a time
+                eng = ops[e]["name"].split()[-1]
+                if eng in busy:
+                    continue
+                busy.add(eng)
+                take, sms = blocks[:1], [-1]
+            elif sh == (0, 0, 0):                                       # a launch that did not run
+                take, sms = blocks, [-2] * len(blocks)
+            else:                                                       # blocks fill free SMs in SM order
+                t, regs, smem = sh
+                cap = np.minimum(np.minimum(free[:, 0] // max(1, t), free[:, 1]),
+                                 np.minimum(free[:, 2] // max(1, regs),
+                                            free[:, 3] // smem if smem else free[:, 1]))
+                room = int(cap.sum())
+                if room == 0:
+                    continue
+                k = min(room, len(blocks))
+                sms = np.repeat(np.arange(len(cap)), cap)[:k]
+                used = np.bincount(sms, minlength=len(cap))
+                free -= used[:, None] * np.array([t, 1, regs, smem], dtype=np.int64)
+                take, sms = blocks[:k], sms.tolist()
+            for b, sm in zip(take, sms):
                 final = (e, b) in retry or truth_done(e, b)
-                heapq.heappush(running, (now + dur[e], e, b, sm, final))
-            if keep:
-                ready[e] = keep
+                heapq.heappush(running, (now + int(dur[e][b]), e, b, sm, final))
+            rest = blocks[len(take):]
+            if rest:
+                ready[e] = rest
             else:
                 del ready[e]
         nxt = []
@@ -390,7 +443,7 @@ def simulate(ops, nb, whole, spec, truth_spec, delay_ns, host_sync=False):
                 busy.discard(ops[e]["name"].split()[-1])
             if not final:                                               # it ran before a true predecessor ended
                 rollbacks += 1
-                wasted += dur[e]
+                wasted += int(dur[e][b])
                 retry.add((e, b))
                 waits = {(s, sb) for s, sb in truth_spec.get(e, {}).get(b, ()) if not done[s][sb]}
                 if waits:
@@ -440,6 +493,8 @@ def main():
     ap.add_argument("--only", default=None)
     ap.add_argument("--delay", type=float, default=None, help="scheduling delay in microseconds")
     ap.add_argument("--host-sync", action="store_true")
+    ap.add_argument("--equal", action="store_true", help="every block of a kernel takes equally long (no "
+                    "instruction counts)")
     args = ap.parse_args()
     names = args.only.split(",") if args.only else [
         n for n in B.BENCH if (B.workdir(B.BENCH[n]) / "truth_blocks" / "truth_block_access.csv").exists()
@@ -451,7 +506,7 @@ def main():
             t = [(r["kind"], r["name"]) for r in csv.DictReader(open(w / "truth_blocks" / "truth_events.csv"))]
             if a != t:
                 print(n, S.profile(n, truth_sub="truth_blocks", out_name="sim_ops_blocks.csv")[0], flush=True)
-    gaps = json.load(open(DATA / "sim_gaps.json")) if (DATA / "sim_gaps.json").exists() else {}
+    gaps = json.load(open(DATA / f"sim_gaps{B.SUFFIX}.json")) if (DATA / f"sim_gaps{B.SUFFIX}.json").exists() else {}
     allgaps = [x for g in gaps.values() for x in g]
     delay_ns = args.delay * 1000 if args.delay is not None else (statistics.median(allgaps) if allgaps else 10000)
     print(f"scheduling delay: {delay_ns / 1000:.1f} us", flush=True)
@@ -465,14 +520,17 @@ def main():
         if len(ops) != len(events):
             print(n, f"profile has {len(ops)} operations, block trace {len(events)}", flush=True)
             continue
+        work = None if args.equal else load_work(n, len(events))
+        dur = block_durations(ops, nb, work)
         base = None
         for policy in POLICIES:
             if policy not in pol:
                 continue
             whole, spec = pol[policy]
-            t, rb, wasted = simulate(ops, nb, whole, spec, truth_spec, delay_ns, args.host_sync)
+            t, rb, wasted = simulate(ops, nb, whole, spec, truth_spec, delay_ns, args.host_sync, dur)
             base = base or t
             rows.append({"name": n, "suite": B.BENCH[n]["suite"], "policy": policy, "ops": len(ops),
+                         "durations": "work" if work else "equal",
                          "blocks": sum(nb), "makespan_us": round(t / 1000, 2), "speedup": round(base / t, 4),
                          "rollbacks": rb, "rolled_back_us": round(wasted / 1000, 2),
                          "whole_preds": sum(len(v) for v in whole.values()),
@@ -481,13 +539,13 @@ def main():
             for policy in ("hybrid-block", "full"):
                 if policy in pol:
                     whole, spec = pol[policy]
-                    t, rb, _ = simulate(ops, nb, whole, spec, truth_spec, d * 1000, args.host_sync)
+                    t, rb, _ = simulate(ops, nb, whole, spec, truth_spec, d * 1000, args.host_sync, dur)
                     sweep.append({"name": n, "policy": policy, "delay_us": d, "makespan_us": round(t / 1000, 2),
                                   "speedup": round(base / t, 4), "rollbacks": rb})
         print(n, " ".join(f"{r['policy']}={r['speedup']:.2f}x/{r['rollbacks']}rb" for r in rows if r["name"] == n),
               flush=True)
-    suffix = "_hostsync" if args.host_sync else ""
-    for path, data in ((DATA / f"sim_blocks{suffix}.csv", rows), (DATA / f"sim_blocks_delay{suffix}.csv", sweep)):
+    suffix = ("_hostsync" if args.host_sync else "") + ("_equal" if args.equal else "")
+    for path, data in ((DATA / f"sim_blocks{B.SUFFIX}{suffix}.csv", rows), (DATA / f"sim_blocks_delay{B.SUFFIX}{suffix}.csv", sweep)):
         if data:
             with open(path, "w", newline="") as f:
                 wr = csv.DictWriter(f, list(data[0]))

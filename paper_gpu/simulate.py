@@ -134,8 +134,8 @@ def profile(name, tries=8, truth_sub="truth", out_name="sim_ops.csv"):
                               cwd=w, capture_output=True, text=True)
         if done.returncode or not (w / "nsys.sqlite").exists():
             return f"nsys failed: {(done.stderr.strip().splitlines() or ['?'])[-1][:100]}", []
-        ops, gaps = nsys_ops(w / "nsys.sqlite")
-        ops = _fits(ops, truth)
+        raw, gaps = nsys_ops(w / "nsys.sqlite")
+        ops = _fits(raw, truth)
         if ops is not None:
             with open(w / out_name, "w", newline="") as f:
                 wr = csv.DictWriter(f, ["index", "kind", "name", "dur_ns", "blocks", "threads", "regs", "smem",
@@ -144,7 +144,7 @@ def profile(name, tries=8, truth_sub="truth", out_name="sim_ops.csv"):
                 for i, o in enumerate(ops):
                     wr.writerow({"index": i, **{c: o[c] for c in wr.fieldnames if c != "index"}})
             return f"ok (try {k + 1})", gaps
-    return f"no run matched the trace ({len(ops)} operations, traced {len(truth)})", gaps
+    return f"no run matched the trace ({len(raw)} operations, traced {len(truth)})", gaps
 
 
 # ---------------------------------------------------------------- dependences per policy
@@ -303,8 +303,8 @@ def load_ops(name):
     path = B.workdir(B.BENCH[name]) / "sim_ops.csv"
     if path.exists():
         rows = list(csv.DictReader(open(path)))
-    elif (DATA / "sim_ops.csv").exists():
-        rows = [r for r in csv.DictReader(open(DATA / "sim_ops.csv")) if r["name_of"] == name]
+    elif (DATA / f"sim_ops{B.SUFFIX}.csv").exists():
+        rows = [r for r in csv.DictReader(open(DATA / f"sim_ops{B.SUFFIX}.csv")) if r["name_of"] == name]
     else:
         return None
     if not rows:
@@ -321,7 +321,7 @@ def save_ops(names):
         if path.exists():
             rows += [{"name_of": n, **r} for r in csv.DictReader(open(path))]
     if rows:
-        with open(DATA / "sim_ops.csv", "w", newline="") as f:
+        with open(DATA / f"sim_ops{B.SUFFIX}.csv", "w", newline="") as f:
             wr = csv.DictWriter(f, list(rows[0]))
             wr.writeheader()
             wr.writerows(rows)
@@ -337,7 +337,7 @@ def main():
     names = args.only.split(",") if args.only else [n for n in B.BENCH
                                                      if (B.workdir(B.BENCH[n]) / "truth" / "truth_events.csv").exists()
                                                      and (B.workdir(B.BENCH[n]) / "hybrid" / f"{n}_events.csv").exists()]
-    gaps_path = DATA / "sim_gaps.json"
+    gaps_path = DATA / f"sim_gaps{B.SUFFIX}.json"
     gaps = json.load(open(gaps_path)) if gaps_path.exists() else {}
     if args.profile:
         for n in names:
@@ -376,7 +376,7 @@ def main():
         print(n, " ".join(f"{r['policy']}={r['speedup']:.2f}x/{r['rollbacks']}rb" for r in rows if r["name"] == n),
               flush=True)
     suffix = "_hostsync" if args.host_sync else ""
-    for path, data in ((DATA / f"sim{suffix}.csv", rows), (DATA / f"sim_delay{suffix}.csv", sweep)):
+    for path, data in ((DATA / f"sim{B.SUFFIX}{suffix}.csv", rows), (DATA / f"sim_delay{B.SUFFIX}{suffix}.csv", sweep)):
         with open(path, "w", newline="") as f:
             wr = csv.DictWriter(f, list(data[0]))
             wr.writeheader()

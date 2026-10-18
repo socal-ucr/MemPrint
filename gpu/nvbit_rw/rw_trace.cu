@@ -12,6 +12,11 @@
  *
  * KDEPS_VERBOSE=1 names every driver call on stderr (to find calls the tool does not handle).
  *
+ * KDEPS_WORK=1 instead counts the warp-level instructions each block of each launch executes (as NVBit's
+ * instr_count_bb, into a per-block slot of a device buffer) and writes dir/truth_block_work.csv (event, block,
+ * warp_instrs): how the work of a kernel divides among its blocks. (Timing blocks with clock64 under NVBit
+ * measures mostly the instrumentation: an empty block takes 6,000 to 37,000 cycles.)
+ *
  * KDEPS_BLOCKS=1 also writes dir/truth_block_access.csv (event, alloc, block, unit_lo, unit_hi, bits): per
  * kernel launch, the units each block (blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z)) read
  * and wrote.
@@ -25,6 +30,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <tuple>
@@ -52,10 +58,15 @@ struct CTXstate {
 
 #include "tool_func/flush_channel.c"
 
+#define WORK_CAPACITY (1ull << 22)  /* blocks per launch whose instructions are counted */
+static unsigned long long *work_slots = nullptr;  /* device: one counter per block (count_block) */
+static std::vector<unsigned long long> work_host;
+
 struct Event {
     std::string kind, name, grid, block;
     std::unordered_map<uint64_t, uint8_t> units;  /* global unit number (address / unit) -> bits */
     std::unordered_map<uint64_t, std::unordered_map<uint32_t, uint8_t>> blocks;  /* unit -> block -> bits */
+    std::map<uint32_t, unsigned long long> work;  /* KDEPS_WORK: block -> warp-level instructions */
 };
 
 static pthread_mutex_t mutex;          /* tool state below, shared with the receiver threads */
@@ -72,6 +83,7 @@ static uint64_t unit = 4;
 static std::string out_dir = ".";
 static bool verbose = false;           /* KDEPS_VERBOSE: name every driver call on stderr */
 static bool per_block = false;         /* KDEPS_BLOCKS: also keep which block made each access */
+static bool timing = false;            /* KDEPS_WORK: only count each block's instructions */
 
 static Event &new_event(const std::string &kind, const std::string &name) {
     events.push_back(Event());
@@ -92,6 +104,7 @@ void nvbit_at_init() {
     if (getenv("KDEPS_UNIT")) unit = strtoull(getenv("KDEPS_UNIT"), 0, 10);
     verbose = getenv("KDEPS_VERBOSE") && atoi(getenv("KDEPS_VERBOSE"));
     per_block = getenv("KDEPS_BLOCKS") && atoi(getenv("KDEPS_BLOCKS"));
+    timing = getenv("KDEPS_WORK") && atoi(getenv("KDEPS_WORK"));
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
@@ -103,6 +116,25 @@ static void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
     CTXstate *ctx_state = ctx_state_map[ctx];
     std::vector<CUfunction> related = nvbit_get_related_functions(ctx, func);
     related.push_back(func);
+    if (timing) {  /* a count at the head of every basic block, of the kernel and the functions it calls */
+        for (auto f : related) {
+            if (!already_instrumented.insert(f).second) continue;
+            const CFG_t &cfg = nvbit_get_CFG(ctx, f);
+            std::vector<std::pair<Instr *, int>> heads;
+            if (cfg.is_degenerate) {
+                for (auto instr : nvbit_get_instrs(ctx, f)) heads.push_back(std::make_pair(instr, 1));
+            } else {
+                for (auto bb : cfg.bbs) heads.push_back(std::make_pair(bb->instrs[0], (int)bb->instrs.size()));
+            }
+            for (auto &h : heads) {
+                nvbit_insert_call(h.first, "count_block", IPOINT_BEFORE);
+                nvbit_add_call_arg_const_val32(h.first, h.second);
+                nvbit_add_call_arg_const_val64(h.first, (uint64_t)work_slots);
+                nvbit_add_call_arg_const_val64(h.first, WORK_CAPACITY);
+            }
+        }
+        return;
+    }
     for (auto f : related) {
         if (!already_instrumented.insert(f).second) continue;
         for (auto instr : nvbit_get_instrs(ctx, f)) {
@@ -176,6 +208,8 @@ static void *recv_thread_fun(void *args) {
 void nvbit_at_ctx_init(CUcontext ctx) {
     pthread_mutex_lock(&mutex);
     CTXstate *ctx_state = new CTXstate;
+    ctx_state->recv_state = RecvState::FINISHED;  /* no receiver until nvbit_tool_init (the first launch) */
+    ctx_state->channel_dev = nullptr;
     ctx_state_map[ctx] = ctx_state;
     nvbit_load_tool_module(ctx, (const void *)flush_channel_bin, &ctx_state->tool_module);
     nvbit_find_function_by_name(ctx, ctx_state->tool_module, "flush_channel", &ctx_state->flush_channel_func);
@@ -196,6 +230,10 @@ void nvbit_tool_init(CUcontext ctx) {
     CTXstate *ctx_state = ctx_state_map[ctx];
     ctx_state->recv_state = RecvState::WORKING;
     cudaMallocManaged(&ctx_state->channel_dev, sizeof(ChannelDev));
+    if (timing && !work_slots) {
+        cudaMalloc(&work_slots, WORK_CAPACITY * sizeof(unsigned long long));
+        cudaMemset(work_slots, 0, WORK_CAPACITY * sizeof(unsigned long long));
+    }
     ctx_state->channel_host.init((int)ctx_state_map.size() - 1, CHANNEL_SIZE, ctx_state->channel_dev,
                                  recv_thread_fun, ctx);
     nvbit_set_tool_pthread(ctx_state->channel_host.get_thread());
@@ -271,6 +309,16 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid, cons
             nvbit_enable_instrumented(ctx, f, true);  /* after nvbit_set_at_launch, as in mem_trace */
         } else {
             flush_channel(ctx);  /* its records reach the receiver, which files them by event */
+            if (timing && work_slots) {  /* the launch's counts, then clear the slots for the next */
+                uint64_t nb = std::min((uint64_t)g[0] * g[1] * g[2], (uint64_t)WORK_CAPACITY);
+                work_host.resize(nb);
+                cudaMemcpy(work_host.data(), work_slots, nb * sizeof(unsigned long long), cudaMemcpyDeviceToHost);
+                cudaMemset(work_slots, 0, nb * sizeof(unsigned long long));
+                pthread_mutex_lock(&mutex);
+                for (uint64_t b = 0; b < nb; b++)
+                    if (work_host[b]) events[launch_event].work[(uint32_t)b] = work_host[b];
+                pthread_mutex_unlock(&mutex);
+            }
         }
         break;
     }
@@ -389,6 +437,14 @@ static void write_outputs() {
                                 (unsigned long long)hi, bits);
     }
     fclose(f);
+    if (timing) {
+        path = out_dir + "/truth_block_work.csv";
+        f = fopen(path.c_str(), "w");
+        fprintf(f, "event,block,warp_instrs\n");
+        for (size_t i = 0; i < events.size(); i++)
+            for (auto &kv : events[i].work) fprintf(f, "%zu,%u,%llu\n", i, kv.first, kv.second);
+        fclose(f);
+    }
     if (per_block) {
         path = out_dir + "/truth_block_access.csv";
         f = fopen(path.c_str(), "w");
@@ -435,11 +491,13 @@ void nvbit_at_ctx_term(CUcontext ctx) {
     skip_callback_flag = true;
     CTXstate *ctx_state = ctx_state_map[ctx];
     pthread_mutex_unlock(&mutex);
-    flush_channel(ctx);
-    ctx_state->recv_state = RecvState::STOP;
-    while (ctx_state->recv_state != RecvState::FINISHED) usleep(1000);
-    ctx_state->channel_host.destroy(false);
-    cudaFree(ctx_state->channel_dev);
+    if (ctx_state->channel_dev) {  /* a program that exits before its first launch never started a receiver */
+        flush_channel(ctx);
+        ctx_state->recv_state = RecvState::STOP;
+        while (ctx_state->recv_state != RecvState::FINISHED) usleep(1000);
+        ctx_state->channel_host.destroy(false);
+        cudaFree(ctx_state->channel_dev);
+    }
     pthread_mutex_lock(&mutex);
     write_outputs();
     skip_callback_flag = false;

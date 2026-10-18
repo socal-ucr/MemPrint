@@ -13,3 +13,4 @@ typedef struct {
     uint32_t size;         /* bytes per lane */
     uint32_t cta;          /* the block: blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z) */
 } mem_access_t;
+

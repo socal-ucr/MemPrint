@@ -11,6 +11,11 @@ from Rodinia, GraphBIG and PolyBench-GPU, against traced runs on the GPU.
 Sources are workloads/src/{gpu-rodinia,graphBIG,polybenchGpu} (scripts/setup.sh), copied to the work
 directory and patched there where CUDA 13 no longer has an API they use; inputs are generated small enough for
 the tracer and the interpreters. Needs nvcc on PATH.
+
+PAPER_GPU_SIZE=large selects larger inputs (LARGE below; GraphBIG on a generated graph of 8,192 vertices), with
+the work directory paper_gpu/data/bench_large and paper_gpu/data/benchmarks_large.csv. There --gpu traces with
+the block references kept (KDEPS_BLOCKS: truth_blocks is truth) and also counts each block's instructions
+(KDEPS_WORK: truth_work); the small inputs get the latter with --work.
 """
 
 import argparse
@@ -22,6 +27,7 @@ import re
 import shutil
 import signal
 import statistics
+import struct
 import subprocess
 import sys
 import time
@@ -34,11 +40,15 @@ sys.path.insert(0, str(ROOT / "analysis"))
 from memprint.static import kdeps, kdeps_score as ks  # noqa: E402
 
 SRC = ROOT / "workloads" / "src"
-WORK = ROOT / "paper_gpu" / "data" / "bench"
+SIZE = os.environ.get("PAPER_GPU_SIZE", "small")
+LARGE = SIZE == "large"
+SUFFIX = "_large" if LARGE else ""
+WORK = ROOT / "paper_gpu" / "data" / f"bench{SUFFIX}"
 TOOL = ROOT / "gpu" / "nvbit_rw" / "rw_trace.so"
 PY = sys.executable
 SCHEDULES = "lockstep,blocks,reverse,random"
 COMPAT = ["cudaThreadSynchronize=cudaDeviceSynchronize"]   # removed in CUDA 12; same meaning
+TRACE_TIMEOUT = 3600  # seconds a run under the NVBit tool may take
 COPIES = ("cudaMemcpy H2D", "cudaMemcpy D2H", "cudaMemcpy D2D", "cudaMemset")
 
 
@@ -55,6 +65,37 @@ def rodinia_graph(path, n=4096, seed=7):
     path.write_text("\n".join(lines) + "\n")
 
 
+def graphbig_graph(out, n=8192, m=8, seed=11):
+    """A GraphBIG dataset of n vertices by preferential attachment, m edges per new vertex (a skewed degree
+    distribution like the social network's), both directions of every edge as in the small one: vertex.CSR and
+    edge.CSR (uint64 offsets and targets, which the GPU benchmarks load) and the CSV files they came from."""
+    if (out / "edge.CSR").exists():
+        return
+    out.mkdir(parents=True, exist_ok=True)
+    random.seed(seed)
+    ends, edges = list(range(m)), set()
+    for v in range(m, n):
+        for u in {random.choice(ends) for _ in range(m)}:
+            edges.add((u, v))
+            ends += [u, v]
+    with open(out / "vertex.csv", "w") as f:
+        f.write("id|firstName|lastName|gender|birthday|creationDate|locationIP|browserUsed\n")
+        f.writelines(f"{v}|a|b|female|1980-01-01|2010-01-01T00:00:00Z|0.0.0.0|Firefox\n" for v in range(n))
+    with open(out / "edge.csv", "w") as f:
+        f.write("Person.id|Person.id\n")
+        f.writelines(f"{a}|{b}\n{b}|{a}\n" for a, b in sorted(edges))
+    adj = [[] for _ in range(n)]
+    for a, b in edges:
+        adj[a].append(b)
+        adj[b].append(a)
+    offsets = [0]
+    for lst in adj:
+        lst.sort()
+        offsets.append(offsets[-1] + len(lst))
+    (out / "vertex.CSR").write_bytes(struct.pack(f"<{n + 1}Q", *offsets))
+    (out / "edge.CSR").write_bytes(struct.pack(f"<{offsets[-1]}Q", *(v for lst in adj for v in lst)))
+
+
 def hotspot_files(work, n=64):
     random.seed(3)
     (work / "temp.txt").write_text("".join(f"{320 + random.random() * 20:.6f}\n" for _ in range(n * n)))
@@ -67,21 +108,24 @@ def rodinia():
     r = SRC / "gpu-rodinia" / "cuda"
     out = [
         dict(name="rodinia-bfs", dir=r / "bfs", sources=["bfs.cu"], argv=["{work}/graph.txt"],
-             prepare=lambda w: rodinia_graph(w / "graph.txt")),
-        dict(name="rodinia-gaussian", dir=r / "gaussian", sources=["gaussian.cu"], argv=["-s", "64", "-q"],
+             prepare=lambda w: rodinia_graph(w / "graph.txt", n=65536 if LARGE else 4096)),
+        dict(name="rodinia-gaussian", dir=r / "gaussian", sources=["gaussian.cu"],
+             argv=["-s", "160" if LARGE else "64", "-q"],
              patches=[("gaussian.cu", r"(printf\(.*clockRate.*\);)", r"/* \1 */"),
                       ("gaussian.cu", r"(printf\(.*deviceOverlap.*\);)", r"/* \1 */")]),
-        dict(name="rodinia-nw", dir=r / "nw", sources=["needle.cu"], argv=["128", "10"]),
-        dict(name="rodinia-pathfinder", dir=r / "pathfinder", sources=["pathfinder.cu"], argv=["1000", "20", "5"]),
+        dict(name="rodinia-nw", dir=r / "nw", sources=["needle.cu"], argv=["1024" if LARGE else "128", "10"]),
+        dict(name="rodinia-pathfinder", dir=r / "pathfinder", sources=["pathfinder.cu"],
+             argv=["100000", "100", "20"] if LARGE else ["1000", "20", "5"]),
         dict(name="rodinia-hotspot", dir=r / "hotspot", sources=["hotspot.cu"],
-             argv=["64", "2", "2", "{work}/temp.txt", "{work}/power.txt", "{work}/hotspot.out"],
-             prepare=hotspot_files),
+             argv=["512" if LARGE else "64", "2", "2", "{work}/temp.txt", "{work}/power.txt", "{work}/hotspot.out"],
+             prepare=lambda w: hotspot_files(w, 512 if LARGE else 64)),
         dict(name="rodinia-lud", dir=r / "lud", sources=["cuda/lud.cu", "cuda/lud_kernel.cu", "common/common.c"],
-             includes=["common"], argv=["-s", "64"]),
+             includes=["common"], argv=["-s", "256" if LARGE else "64"]),
         dict(name="rodinia-backprop", dir=r / "backprop",
-             sources=["backprop.c", "facetrain.c", "imagenet.c", "backprop_cuda.cu"], argv=["4096"]),
+             sources=["backprop.c", "facetrain.c", "imagenet.c", "backprop_cuda.cu"],
+             argv=["65536" if LARGE else "4096"]),
         dict(name="rodinia-srad", dir=r / "srad" / "srad_v2", sources=["srad.cu"],
-             argv=["64", "64", "0", "15", "0", "15", "0.5", "2"]),
+             argv=["512" if LARGE else "64", "512" if LARGE else "64", "0", "15", "0", "15", "0.5", "2"]),
     ]
     for b in out:
         b["suite"] = "Rodinia"
@@ -91,6 +135,9 @@ def rodinia():
 def graphbig():
     g = SRC / "graphBIG" / "gpu_bench"
     data = SRC / "graphBIG" / "dataset" / "small"
+    if LARGE:
+        data = WORK / "graphbig-dataset"
+        graphbig_graph(data)
     progs = [("gpu_BFS", "bfs_topo_thread_centric", True), ("gpu_BFS", "bfs_topo_atomic", True),
              ("gpu_BFS", "bfs_data_thread_centric", True), ("gpu_SSSP", "sssp_topo_thread_centric", True),
              ("gpu_ConnectedComp", "connected_comp", False), ("gpu_kCore", "kcore", False),
@@ -107,12 +154,25 @@ def graphbig():
 
 def polybench():
     p = SRC / "polybenchGpu" / "CUDA"
+    if LARGE:
+        return polybench_sizes({
+            "2DCONV": "NI=1024 NJ=1024", "2MM": "NI=256 NJ=256 NK=256 NL=256", "3DCONV": "NI=128 NJ=128 NK=128",
+            "3MM": "NI=128 NJ=128 NK=128 NL=128 NM=128", "ATAX": "NX=4096 NY=4096", "BICG": "NX=4096 NY=4096",
+            "CORR": "M=512 N=512", "COVAR": "M=512 N=512", "FDTD-2D": "TMAX=10 NX=384 NY=384",
+            "GEMM": "NI=512 NJ=512 NK=512", "GESUMMV": "N=4096", "GRAMSCHM": "NI=256 NJ=256",
+            "JACOBI1D": "TSTEPS=10 N=65536", "JACOBI2D": "TSTEPS=5 N=128", "LU": "N=256", "MVT": "N=4096",
+            "SYR2K": "NI=512 NJ=512", "SYRK": "NI=512 NJ=512", "GEMVER": "N=1024", "ADI": "TSTEPS=1 N=256"})
     sizes = {"2DCONV": "NI=256 NJ=256", "2MM": "NI=128 NJ=128 NK=128 NL=128", "3DCONV": "NI=32 NJ=32 NK=32",
              "3MM": "NI=64 NJ=64 NK=64 NL=64 NM=64", "ATAX": "NX=512 NY=512", "BICG": "NX=512 NY=512",
              "CORR": "M=128 N=128", "COVAR": "M=128 N=128", "FDTD-2D": "TMAX=10 NX=256 NY=256",
              "GEMM": "NI=128 NJ=128 NK=128", "GESUMMV": "N=512", "GRAMSCHM": "NI=128 NJ=128",
              "JACOBI1D": "TSTEPS=10 N=1024", "JACOBI2D": "TSTEPS=5 N=128", "LU": "N=128", "MVT": "N=512",
              "SYR2K": "NI=128 NJ=128", "SYRK": "NI=128 NJ=128", "GEMVER": "N=512", "ADI": "TSTEPS=1 N=128"}
+    return polybench_sizes(sizes)
+
+
+def polybench_sizes(sizes):
+    p = SRC / "polybenchGpu" / "CUDA"
     out = []
     for d, s in sizes.items():
         cu = sorted(x.name for x in (p / d).glob("*.cu"))
@@ -126,7 +186,8 @@ def polybench():
     return out
 
 
-BENCH = {b["name"]: b for b in rodinia() + graphbig() + polybench()}
+BENCH = {b["name"]: b for b in rodinia() + graphbig() + polybench()
+         if not (LARGE and b["name"] == "graphbig-betweenness")}   # ten times the next; timed out when small
 
 
 # ---------------------------------------------------------------- one benchmark
@@ -199,11 +260,44 @@ def gpu(b):
     truth = w / "truth"
     truth.mkdir(exist_ok=True)
     env = dict(os.environ, LD_PRELOAD=str(TOOL), KDEPS_OUT=str(truth), NOBANNER="1")
-    t, done = wall([str(exe), *argv(b, w)], w, env)
+    if LARGE:                                                          # the block references too (simulate_blocks)
+        env["KDEPS_BLOCKS"] = "1"
+        if not (w / "truth_blocks").exists():
+            (w / "truth_blocks").symlink_to("truth")
+    try:
+        t, done = wall([str(exe), *argv(b, w)], w, env, TRACE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        res["gpu_status"] = "trace timed out"
+        return res
     (w / "traced.log").write_text(done.stdout + done.stderr)
     res["nvbit_s"] = round(t, 3)
     res["gpu_status"] = "ok" if (truth / "truth_events.csv").exists() else "trace failed"
+    if LARGE and res["gpu_status"] == "ok":
+        res.update(work(b))
     return res
+
+
+def _ops(path):
+    with open(path) as f:
+        return [(r["kind"], r["name"]) for r in csv.DictReader(f)]
+
+
+def work(b, tries=8):
+    """Count each block's instructions (KDEPS_WORK) into truth_work, in a run that issues the operations of the
+    block trace (truth_blocks)."""
+    w = workdir(b)
+    out = w / "truth_work"
+    out.mkdir(exist_ok=True)
+    want = _ops(w / "truth_blocks" / "truth_events.csv")
+    env = dict(os.environ, LD_PRELOAD=str(TOOL), KDEPS_OUT=str(out), NOBANNER="1", KDEPS_WORK="1")
+    for k in range(tries):
+        try:
+            t, done = wall([str(w / "native"), *argv(b, w)], w, env, TRACE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return {"work_status": "timed out"}
+        if (out / "truth_events.csv").exists() and _ops(out / "truth_events.csv") == want:
+            return {"work_s": round(t, 3), "work_status": f"ok (try {k + 1})"}
+    return {"work_status": "no run matched the block trace"}
 
 
 def interp(b, which, timeout):
@@ -276,6 +370,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gpu", action="store_true")
     ap.add_argument("--interp", action="store_true")
+    ap.add_argument("--work", action="store_true", help="count each block's instructions (truth_work)")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--only", default=None)
     ap.add_argument("--timeout", type=int, default=3600)
@@ -283,7 +378,7 @@ def main():
     args = ap.parse_args()
     names = args.only.split(",") if args.only else list(BENCH)
     WORK.mkdir(parents=True, exist_ok=True)
-    summary = ROOT / "paper_gpu" / "data" / "benchmarks.csv"
+    summary = ROOT / "paper_gpu" / "data" / f"benchmarks{SUFFIX}.csv"
     rows = {}
     if summary.exists():
         rows = {r["name"]: r for r in csv.DictReader(open(summary))}
@@ -304,6 +399,12 @@ def main():
         for n in names:
             r = gpu(BENCH[n])
             print(r, flush=True)
+            rows[n].update(r)
+            save()
+    if args.work:
+        for n in names:
+            r = work(BENCH[n])
+            print(n, r, flush=True)
             rows[n].update(r)
             save()
     if args.interp:

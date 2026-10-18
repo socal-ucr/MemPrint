@@ -25,3 +25,12 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred, int flags, int 
         channel_dev->push(&ma, sizeof(mem_access_t));
     }
 }
+
+extern "C" __device__ __noinline__ void count_block(int num_instrs, uint64_t slots, uint64_t capacity) {
+    /* KDEPS_WORK: the warp-level instructions each block executes (instr_count_bb: once per warp and basic
+     * block, by its first active lane) */
+    const int active_mask = __ballot_sync(__activemask(), 1);
+    if (get_laneid() != __ffs(active_mask) - 1) return;
+    uint64_t cta = blockIdx.x + gridDim.x * (blockIdx.y + (uint64_t)gridDim.y * blockIdx.z);
+    if (cta < capacity) atomicAdd((unsigned long long *)slots + cta, (unsigned long long)num_instrs);
+}
