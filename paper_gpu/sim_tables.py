@@ -135,6 +135,45 @@ def cost_table():
     write("block_cost.tex", head + "\n".join(lines) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
+DEDUP = (("small", "block_overhead_nodedup.csv", "block_overhead.csv"),
+         ("large", "block_overhead_nodedup_large.csv", "block_overhead_large.csv"))
+
+
+def dedup_table():
+    """Block recording before and after deduplicating references as they come: the lockstep run with --blocks
+    against without, and the programs that needed the most memory before."""
+    runs = [(k, load(a), load(b)) for k, a, b in DEDUP]
+    lines = []
+
+    def row(label, fn):
+        cells = [label]
+        for _, before, after in runs:
+            for d in (before, after):
+                cells.append(fn(d) if d is not None else "--")
+        lines.append(" & ".join(cells) + r" \\")
+
+    r = lambda d: d.blocks_s / d.ops_s  # noqa: E731
+    m = lambda d: d.blocks_rss_mb / d.ops_rss_mb  # noqa: E731
+    row("Interpreter time, median ratio", lambda d: f"{r(d).median():.2f}")
+    row("\\quad largest", lambda d: f"{r(d).max():.1f}")
+    row("Peak memory, median ratio", lambda d: f"{m(d).median():.2f}")
+    row("\\quad largest", lambda d: f"{m(d).max():.1f}")
+    row("\\quad most of any program (GB)", lambda d: f"{d.blocks_rss_mb.max() / 1024:.1f}")
+    lines.append(r"\midrule")
+    before = runs[-1][1].set_index("name")
+    after = runs[-1][2].set_index("name")
+    for n in before.blocks_rss_mb.sort_values(ascending=False).index[:5]:
+        cells = [r"\quad\texttt{" + n.split("-", 1)[1] + "} (GB)", "", ""]
+        cells += [f"{before.loc[n, 'blocks_rss_mb'] / 1024:.1f}", f"{after.loc[n, 'blocks_rss_mb'] / 1024:.1f}"]
+        lines.append(" & ".join(cells) + r" \\")
+    head = (r"\begin{tabular}{lrrrr}" "\n" r"\toprule" "\n"
+            r" & \multicolumn{2}{c}{Small inputs} & \multicolumn{2}{c}{Large inputs} \\" "\n"
+            r"\cmidrule(lr){2-3} \cmidrule(lr){4-5}" "\n"
+            r" & Kept & Merged & Kept & Merged \\" "\n" r"\midrule" "\n")
+    lines.insert(6, r"\multicolumn{5}{l}{Peak memory with block references, the most memory-hungry programs:} \\")
+    write("block_dedup.tex", head + "\n".join(lines) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+
+
 def write(name, body):
     with open(os.path.join(OUT, name), "w") as f:
         f.write(body)
@@ -208,6 +247,18 @@ def numbers():
         n[f"Cost{K}OpDeps"] = f"{int(d.op_deps.sum()):,}".replace(",", "{,}")
         n[f"Cost{K}BlockDeps"] = f"{d.block_deps.sum() / 1e6:.1f}"
         n[f"Cost{K}OutMB"] = f"{d.blocks_out_mb.sum():.0f}"
+    for k, a, b in DEDUP:
+        before, after = load(a), load(b)
+        if before is None or after is None:
+            continue
+        K = "Small" if k == "small" else "Large"
+        for lab, d in (("Kept", before), ("Merged", after)):
+            n[f"Dedup{K}{lab}MaxGB"] = f"{d.blocks_rss_mb.max() / 1024:.1f}"
+            n[f"Dedup{K}{lab}MemMax"] = f"{(d.blocks_rss_mb / d.ops_rss_mb).max():.1f}"
+            n[f"Dedup{K}{lab}TimeMed"] = f"{(d.blocks_s / d.ops_s).median():.2f}"
+            n[f"Dedup{K}{lab}TimeMax"] = f"{(d.blocks_s / d.ops_s).max():.1f}"
+        worst = before.set_index("name").blocks_rss_mb.idxmax()
+        n[f"Dedup{K}WorstName"] = worst.split("-", 1)[1]
     sw = load("sim_delay.csv")
     if sw is not None:
         for policy, macro in (("full", "Fu"), ("hybrid", "Hy")):
@@ -226,6 +277,7 @@ def main():
     summary_table()
     block_table()
     cost_table()
+    dedup_table()
 
 
 if __name__ == "__main__":

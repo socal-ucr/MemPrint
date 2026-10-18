@@ -1,0 +1,20 @@
+\begin{tabular}{lrrrr}
+\toprule
+ & \multicolumn{2}{c}{Small inputs} & \multicolumn{2}{c}{Large inputs} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+ & Kept & Merged & Kept & Merged \\
+\midrule
+Interpreter time, median ratio & 1.12 & 1.19 & 1.39 & 1.57 \\
+\quad largest & 2.3 & 2.5 & 5.7 & 4.4 \\
+Peak memory, median ratio & 1.03 & 1.05 & 1.20 & 1.16 \\
+\quad largest & 3.8 & 3.5 & 67.7 & 3.8 \\
+\quad most of any program (GB) & 1.5 & 1.4 & 40.5 & 3.7 \\
+\midrule
+\multicolumn{5}{l}{Peak memory with block references, the most memory-hungry programs:} \\
+\quad\texttt{syr2k} (GB) &  &  & 40.5 & 2.3 \\
+\quad\texttt{syrk} (GB) &  &  & 31.1 & 2.0 \\
+\quad\texttt{mvt} (GB) &  &  & 31.1 & 2.9 \\
+\quad\texttt{atax} (GB) &  &  & 25.0 & 2.9 \\
+\quad\texttt{gemm} (GB) &  &  & 23.8 & 1.9 \\
+\bottomrule
+\end{tabular}

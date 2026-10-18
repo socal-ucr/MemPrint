@@ -979,15 +979,42 @@ on the same built program, and timed the refinement to blocks from the four orde
 Recording blocks makes the interpreter \numCostSmallTimeMed{} times as slow in the median on the small inputs and
 \numCostLargeTimeMed{} on the large ones, and at most \numCostLargeTimeMax{} times (\code{\numCostLargeTimeMaxName{}}).
 The time goes into turning every reference into the blocks and units it touches; PolyBench's matrix kernels make
-a reference per thread in every iteration of their inner loop. The interpreter keeps a kernel's block references
-as a set of (block, unit) pairs, merging what it has collected into the set whenever it exceeds four million
-pairs, so the peak memory grows little (median \numCostLargeMemMed{} times on the large inputs, at most
-\numCostLargeMemMax{} times in \code{\numCostLargeMemMaxName{}}). Keeping every reference until the kernel ended
-instead had needed up to 40~GB, in \code{syr2k}. Refining to blocks afterwards takes \numCostSmallRefineShare{} and
+a reference per thread in every iteration of their inner loop. The peak memory grows little (median
+\numCostLargeMemMed{} times on the large inputs, at most \numCostLargeMemMax{} times in
+\code{\numCostLargeMemMaxName{}}), because the interpreter merges a kernel's block references as they come. Refining to blocks afterwards takes \numCostSmallRefineShare{} and
 \numCostLargeRefineShare{} of the four-order run in the median and at most \numCostLargeRefineShareMax{}. What the
 interpreter hands on grows most: \numCostLargeOpDeps{} dependences between operations on the large inputs become
 \numCostLargeBlockDeps{} million between blocks, which a scheduler would have to keep and check; the simulator does
 not charge for that.
+
+\paragraph{Merging block references as they come.} Our first implementation kept every reference a kernel
+made, with the blocks of the threads that made it and the bytes it touched, and turned them into (block, unit)
+pairs when the kernel ended. A matrix kernel such as \code{syr2k} makes a reference per thread in each iteration
+of its inner loop, almost all of them to pairs it has seen before, so on the large inputs the lockstep run needed
+up to \numDedupLargeKeptMaxGB{}~GB, \numDedupLargeKeptMemMax{} times as much as without block references. The
+interpreter now turns each reference into its pairs at once and buffers them per object; when the buffer exceeds
+four million pairs, it merges them into a sorted set of distinct pairs with their bits. The merge must keep one
+rule that depends on order: a read of a unit the same block already wrote for certain is not a read of an earlier
+operation's value (\secref{sec:events}). It does, by dropping a read only if the block's first certain write of
+the unit came in an earlier reference, or in an earlier merge. The pairs are identical to the first
+implementation's on all eight programs we compared, also when merging every thousand pairs, so the dependences and
+the simulation do not change. \tabref{tab:block-dedup} compares the two: merging bounds the memory by the distinct
+pairs, and the most any program needs falls from \numDedupLargeKeptMaxGB{} to \numDedupLargeMergedMaxGB{}~GB. The
+time does not fall (median \numDedupLargeKeptTimeMed{} and \numDedupLargeMergedTimeMed{} times the run without
+block references, largest \numDedupLargeKeptTimeMax{} and \numDedupLargeMergedTimeMax{}): it goes into turning every
+reference into pairs, which both do, and merging adds sorting. The two were measured on different days, eight
+programs at a time, so differences of a few tenths are within the noise. Skipping a reference that touches the
+same pairs as the previous one from the same statement would cut the time further; we have not done so.
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/block_dedup}
+\caption{Block references kept until the kernel ends against merged as they come: the lockstep run with block
+references against the run without them, and the peak memory of the five programs that needed the most before.}
+\label{tab:block-dedup}
+\end{table}
 
 \begin{table}[tbp]
 \centering
