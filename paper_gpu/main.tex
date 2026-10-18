@@ -938,12 +938,40 @@ of the same buffers: the 30 launches of PolyBench's \code{3dconv} on the small i
 the output, which gives \numSimSmallConvHy{} with the interpreter's dependences and \numSimSmallConvBuf{} with
 either oracle, and in \code{lu} the hybrid interpreter gets \numSimLargeLuHy{} between operations and
 \numSimLargeLuHyBlk{} between blocks on the large input, against \numSimLargeLuBuf{} for the oracles.
-Dependences between blocks help where a kernel's blocks depend on only some blocks of the kernel before, as in
-\code{lu} and \code{fdtd-2d} (\numSimLargeFdtdHy{} between operations, \numSimLargeFdtdHyBlk{} between blocks),
-and they help only because blocks take different times: with every block of a kernel taking equally long, all
-blocks of a kernel start and end together, and refining to blocks gains almost nothing. Most benchmarks gain
+Most benchmarks gain
 little under any policy, because their operations form a chain of true dependences or their kernels fill the GPU,
 and the larger inputs gain less than the small ones for the second reason.
+
+\paragraph{Blocks against operations.} \tabref{tab:sim-blocks} compares, for the hybrid interpreter,
+dependences between blocks with dependences between whole operations, on the programs where the two differ. Over
+all benchmarks, refining to blocks adds \numSimSmallBlkGain{} to the geometric-mean speedup on the small inputs
+and \numSimLargeBlkGain{} on the large ones; for the traced dependences it adds \numSimSmallTrBlkGain{} and
+\numSimLargeTrBlkGain{}. The gain is concentrated in few programs, \numSimSmallBlkProgs{} on the small inputs and
+\numSimLargeBlkProgs{} on the large ones, and there it is large, up to \numSimSmallBlkMax{}. In \code{fdtd-2d},
+each of the three kernels of a time step reads a row or column of the field the kernel before wrote, next to its
+own, so a block can start as soon as the few blocks it reads from have ended. In \code{lu}, every step launches
+the update kernel over the whole matrix, but only the blocks below and to the right of the pivot do any work, each
+reading only its own part of the pivot row and column; the other blocks touch nothing and need not wait at all,
+and a working block waits only for the blocks that wrote the parts it reads. Everywhere else, a kernel's blocks
+depend on all blocks of the kernel before, or the operations form a chain that blocks cannot shorten. Refining to
+blocks pays only because blocks take different times. With every block of a kernel taking equally long, all blocks
+of a kernel start and end together, and refining gains \numSimSmallEqBlkGain{} and \numSimLargeEqBlkGain{}; it can
+even lose, as in \code{\numSimLargeEqWorstName{}} on the large input (\numSimLargeEqWorst{} slower), where blocks of
+later kernels that may start early take SMs that blocks on the longest path then wait for. Where the traced
+dependences gain from blocks and the hybrid interpreter does not (\code{bfs-topo-atomic}, \code{bfs-topo-thread-centric},
+\code{srad}), the kernels' blocks reference different units under different orders, or reference memory past the
+end of a buffer, and the interpreter keeps the dependence between whole operations.
+
+\begin{table*}[tbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/sim_blocks}
+\caption{Speedup over issuing in order on the simulated A30 with the hybrid interpreter's dependences between
+whole operations and between blocks, the gain of the second over the first, and the traced dependences between
+blocks, for the programs where refining to blocks changes the speedup by more than half a percent.}
+\label{tab:sim-blocks}
+\end{table*}
 
 The whole-program interpreter shows what missed dependences cost: on the small inputs it makes
 \numSimSmallFuSlower{} programs slower than issuing in order, \code{\numSimSmallFuWorstName{}} down to

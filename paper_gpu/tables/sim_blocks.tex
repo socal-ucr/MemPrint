@@ -1,0 +1,17 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Small inputs} & \multicolumn{4}{c}{Large inputs} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+Program & \shortstack{Opera-\\tions} & Blocks & Gain & \shortstack{Traced,\\blocks} & \shortstack{Opera-\\tions} & Blocks & Gain & \shortstack{Traced,\\blocks} \\
+\midrule
+\texttt{fdtd-2d} & 1.00 & 1.19 & +18.0\% & 1.19 & 1.07 & 1.17 & +8.9\% & 1.17 \\
+\texttt{lu} & 1.82 & 2.06 & +13.2\% & 2.06 & 1.78 & 2.01 & +13.2\% & 2.01 \\
+\texttt{bfs-topo-atomic} & 1.01 & 1.01 & +0.0\% & 1.04 & 1.00 & 1.00 & +0.0\% & 1.14 \\
+\texttt{srad} & 1.00 & 1.00 & +0.0\% & 1.00 & 1.00 & 1.00 & +0.0\% & 1.03 \\
+\texttt{bfs-topo-thread-centric} & 1.05 & 1.05 & +0.0\% & 1.05 & 1.02 & 1.02 & +0.0\% & 1.05 \\
+\texttt{pathfinder} & 1.00 & 1.00 & +0.0\% & 1.00 & 1.00 & 1.01 & +0.7\% & 1.01 \\
+\texttt{bfs} & 1.37 & 1.37 & +0.0\% & 1.37 & 1.18 & 1.18 & +0.6\% & 1.18 \\
+\midrule
+Geometric mean, all 37 & 1.138 & 1.147 & +0.8\% & 1.148 & 1.061 & 1.068 & +0.6\% & 1.073 \\
+\bottomrule
+\end{tabular}

@@ -51,6 +51,51 @@ def summary_table():
     write("sim_summary.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
+def _gains(name):
+    d = load(name)
+    if d is None:
+        return None
+    p = d.pivot(index="name", columns="policy", values="speedup")
+    return p
+
+
+def block_table():
+    """Programs where refining to blocks changes the speedup by more than half a percent, in either input size:
+    the hybrid interpreter between operations and between blocks, and the traced dependences between blocks."""
+    runs = [(k, _gains(f)) for k, f in RUNS]
+    names = set()
+    for _, p in runs:
+        if p is not None:
+            gain = (p["hybrid-block"] / p["hybrid"] - 1).abs() > 0.005
+            tgain = (p["truth-block"] / p["truth"] - 1).abs() > 0.005
+            names |= set(p.index[gain | tgain])
+    rows = []
+    order = sorted(names, key=lambda n: -max(p.loc[n, "truth-block"] / p.loc[n, "truth"] for _, p in runs
+                                             if p is not None and n in p.index))
+    for n in order:
+        cells = [r"\texttt{" + n.split("-", 1)[1] + "}"]
+        for _, p in runs:
+            if p is None or n not in p.index:
+                cells += ["--"] * 4
+                continue
+            r = p.loc[n]
+            cells += [f"{r.hybrid:.2f}", f"{r['hybrid-block']:.2f}", f"{100 * (r['hybrid-block'] / r.hybrid - 1):+.1f}\\%",
+                      f"{r['truth-block']:.2f}"]
+        rows.append(" & ".join(cells) + r" \\")
+    for label, col in (("Geometric mean, all 37", None),):
+        cells = [label]
+        for _, p in runs:
+            cells += [f"{geo(p.hybrid):.3f}", f"{geo(p['hybrid-block']):.3f}",
+                      f"{100 * (geo(p['hybrid-block']) / geo(p.hybrid) - 1):+.1f}\\%", f"{geo(p['truth-block']):.3f}"]
+        rows.append(r"\midrule" "\n" + " & ".join(cells) + r" \\")
+    head = (r"\begin{tabular}{lrrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & \multicolumn{4}{c}{Small inputs} & \multicolumn{4}{c}{Large inputs} \\" "\n"
+            r"\cmidrule(lr){2-5} \cmidrule(lr){6-9}" "\n"
+            r"Program & \shortstack{Opera-\\tions} & Blocks & Gain & \shortstack{Traced,\\blocks} & "
+            r"\shortstack{Opera-\\tions} & Blocks & Gain & \shortstack{Traced,\\blocks} \\" "\n" r"\midrule" "\n")
+    write("sim_blocks.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+
+
 def write(name, body):
     with open(os.path.join(OUT, name), "w") as f:
         f.write(body)
@@ -91,6 +136,20 @@ def numbers():
             worst = rb.sort_values("speedup").iloc[0]
             n[f"Sim{K}FuWorst"] = f"{worst.speedup:.2f}"
             n[f"Sim{K}FuWorstName"] = worst["name"].split("-", 1)[1]
+    for k, f in (("Small", "sim_blocks"), ("Large", "sim_blocks_large")):
+        p, q = _gains(f + ".csv"), _gains(f + "_equal.csv")
+        if p is None:
+            continue
+        n[f"Sim{K}BlkGain".replace(K, k)] = f"{100 * (geo(p['hybrid-block']) / geo(p.hybrid) - 1):.1f}\\%"
+        n[f"Sim{k}TrBlkGain"] = f"{100 * (geo(p['truth-block']) / geo(p.truth) - 1):.1f}\\%"
+        n[f"Sim{k}BlkProgs"] = int(((p["hybrid-block"] / p.hybrid - 1) > 0.005).sum())
+        n[f"Sim{k}BlkMax"] = f"{100 * (p['hybrid-block'] / p.hybrid - 1).max():.0f}\\%"
+        if q is not None:
+            n[f"Sim{k}EqHyBlk"] = f"{geo(q['hybrid-block']):.3f}"
+            n[f"Sim{k}EqBlkGain"] = f"{100 * (geo(q['hybrid-block']) / geo(q.hybrid) - 1):.1f}\\%"
+            worst = (q["hybrid-block"] / q.hybrid - 1)
+            n[f"Sim{k}EqWorst"] = f"{-100 * worst.min():.1f}\\%"
+            n[f"Sim{k}EqWorstName"] = worst.idxmin().split("-", 1)[1]
     sw = load("sim_delay.csv")
     if sw is not None:
         for policy, macro in (("full", "Fu"), ("hybrid", "Hy")):
@@ -107,6 +166,7 @@ def numbers():
 
 def main():
     summary_table()
+    block_table()
 
 
 if __name__ == "__main__":
