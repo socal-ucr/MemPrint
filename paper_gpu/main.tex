@@ -953,7 +953,13 @@ the hybrid interpreter's stays at \numSimDelayHyNone{}. Where the hybrid interpr
 the cause is the possible dependences of kernels whose result depends on thread order: in \code{bfs-topo-atomic}
 on the large input it gets \numSimLargeAtomicHyBlk{} against \numSimLargeAtomicTrBlk{} for the traced
 dependences between blocks, because which blocks write which levels depends on the order, so no dependence of
-these kernels is refined to blocks.
+these kernels is refined to blocks. The traced run's advantage is the outcome of its own races: we traced the
+program eight more times, and the dependences between blocks that hold in all of the first three runs give only
+1.01, close to the hybrid interpreter's. A checker that must be right for every order cannot do better than the
+union over all orders, so most of this gap is not one it can close. In \code{bfs-topo-thread-centric} (1.02
+against 1.05) the union over nine runs still gives 1.05: its threads all write the same level into a vertex they
+find unvisited, so a reader needs only one of the possible writers to have ended, which the interpreter does not
+exploit.
 
 \clearpage
 \section{Related work}

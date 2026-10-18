@@ -189,8 +189,21 @@ def block_policies(name):
     return events, nb, out, truth_spec
 
 
-def hybrid_block(name, w, truth_events, nb_truth):
-    """The hybrid interpreter's dependences, refined to blocks where safe (module docstring)."""
+def _union_acc(a, b):
+    out = dict(a)
+    for k, (bb, uu, vv) in b.items():
+        if k in out:
+            x = out[k]
+            out[k] = (np.concatenate([x[0], bb]), np.concatenate([x[1], uu]), np.concatenate([x[2], vv]))
+        else:
+            out[k] = (bb, uu, vv)
+    return out
+
+
+def hybrid_block(name, w, truth_events, nb_truth, mode="safe"):
+    """The hybrid interpreter's dependences, refined to blocks where safe (module docstring). mode="union"
+    (an experiment, not safe): refine every dependence between events every schedule issued, on the union of
+    what each block referenced under the four schedules, whether certain or not."""
     hdir = w / "hybrid"
     runs = [interp_blocks(hdir, name, s) for s in SCHEDULES]
     if any(r is None for r in runs):
@@ -203,20 +216,30 @@ def hybrid_block(name, w, truth_events, nb_truth):
     stable = {}
     for i, e in enumerate(base_events):
         stable[i] = e["kind"] != "kernel" or base_acc.get(i, {}) is not None
+    union = {i: v for i, v in base_acc.items() if v is not None}
     for events, acc in runs[1:]:
         mp = align_ends([(e["kind"], e["name"]) for e in events], sig)    # their index -> base index
         back = {v: k for k, v in mp.items()}
         for i, e in enumerate(base_events):
-            if e["kind"] != "kernel" or not stable[i]:
+            if e["kind"] != "kernel":
                 continue
             j = back.get(i)
             other = acc.get(j, {}) if j is not None else None
+            if mode == "union":
+                if other is None or i not in union:
+                    stable[i] = False
+                    union.pop(i, None)
+                else:
+                    union[i] = _union_acc(union[i], other)
+                continue
+            if not stable[i]:
+                continue
             stable[i] = other is not None and _same_acc(base_acc.get(i, {}), other)
     certain = {}
     for (s, d, _, _), (must, may, _) in iedges.items():
         certain[(s, d)] = certain.get((s, d), True) and must > 0 and may == 0
     # copies and memsets of the interpreter's run, as block 0 (its access file is the lockstep run's)
-    acc = {i: v for i, v in base_acc.items() if v is not None}
+    acc = union if mode == "union" else {i: v for i, v in base_acc.items() if v is not None}
     path = hdir / f"{name}_access.csv"
     if path.exists():
         for i, d in _ranges(path, False).items():
@@ -227,8 +250,8 @@ def hybrid_block(name, w, truth_events, nb_truth):
     want = {}                                                          # the refinable pairs, interpreter numbering
     for s, d in kernel_pairs:
         si, di = m.get(s), m.get(d)
-        if s < d and si is not None and di is not None and certain.get((si, di), False) and stable.get(si) \
-                and stable.get(di):
+        if s < d and si is not None and di is not None and (mode == "union" or certain.get((si, di), False)) \
+                and stable.get(si) and stable.get(di):
             want.setdefault(di, set()).add(si)
     nb_i = [nb_truth[inv[i]] if i in inv else 1 for i in range(len(base_events))]
     pred_spec = fold(len(base_events), acc, want,
