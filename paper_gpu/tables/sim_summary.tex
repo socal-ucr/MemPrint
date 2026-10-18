@@ -1,0 +1,18 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Small inputs} & \multicolumn{5}{c}{Large inputs} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Dependences & All & Rod. & GB & Poly & Rollb. & All & Rod. & GB & Poly & Rollb. \\
+\midrule
+In issue order & 1.000 & 1.00 & 1.00 & 1.00 & 0 & 1.000 & 1.00 & 1.00 & 1.00 & 0 \\
+Same buffer & 1.061 & 1.05 & 1.09 & 1.05 & 0 & 1.037 & 1.02 & 1.06 & 1.03 & 0 \\
+Same buffer, one writes & 1.093 & 1.06 & 1.10 & 1.11 & 0 & 1.050 & 1.02 & 1.07 & 1.05 & 0 \\
+\midrule
+Whole-program interpreter & 0.972 & 0.97 & 0.62 & 1.19 & 985 & -- & -- & -- & -- & -- \\
+Hybrid interpreter & 1.138 & 1.06 & 1.09 & 1.19 & 0 & 1.061 & 1.02 & 1.07 & 1.07 & 0 \\
+Traced dependences & 1.139 & 1.06 & 1.10 & 1.19 & 0 & 1.062 & 1.02 & 1.07 & 1.07 & 0 \\
+\midrule
+Hybrid interpreter, blocks & 1.147 & 1.06 & 1.09 & 1.21 & 0 & 1.068 & 1.03 & 1.07 & 1.08 & 0 \\
+Traced dependences, blocks & 1.148 & 1.06 & 1.10 & 1.21 & 0 & 1.073 & 1.03 & 1.09 & 1.08 & 0 \\
+\bottomrule
+\end{tabular}

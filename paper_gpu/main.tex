@@ -121,6 +121,11 @@ and a scoring method that compares two runs even when they issue a different num
 \item We evaluate both interpreters on \numPrograms{} test programs and on \numBenchTotal{} unmodified benchmarks on
 an NVIDIA A30. The hybrid interpreter misses no dependence and reports no wrong certain dependence on the
 \numBenchHyDone{} benchmarks it completes (\secref{sec:eval}).
+\item We simulate the benchmarks on a model of the A30 that runs operations, and their thread blocks, as soon as
+their dependences allow. With the hybrid interpreter's dependences refined to blocks, they run \numSimSmallHyBlk{}
+times as fast as in issue order on the small inputs and \numSimLargeHyBlk{} on larger ones, within a fraction of a
+percent of the traced dependences and ahead of an oracle that orders operations sharing a buffer
+(\numSimSmallBuf{} and \numSimLargeBuf{}), without a single rollback (\secref{sec:eval-sim}).
 \end{itemize}
 
 \section{Background and terms}
@@ -860,6 +865,96 @@ its operations, kind, buffer and distance in operations.}
 \label{tab:patterns}
 \end{table}
 
+\subsection{What the dependences are worth on a GPU}
+\label{sec:eval-sim}
+
+A dependence the tool misses forces a rollback, and one it reports that does not occur only forces an order the
+program did not need. To see what this means for running time, we simulated the benchmarks on a model of the
+A30 under several ways of deciding which operations may overlap.
+
+\paragraph{The simulated GPU.} The simulator issues a program's operations in program order to a GPU with 56
+streaming multiprocessors (SMs), each with room for 2{,}048 threads, 32 blocks, 65{,}536 registers and 164~KB of
+shared memory, and one copy engine per direction. A kernel is split into its thread blocks, and a block starts on
+an SM with room for its threads, registers and shared memory as soon as everything it depends on has ended. An
+operation that waits for a dependence starts the moment the dependence ends: since the dependences are known in
+advance, the delay of issuing it is hidden, also when every operation simply waits for the one before it. Kernel
+durations, grid and block sizes, registers and shared memory come from a run under Nsight Systems whose
+operations are the traced run's. A block's duration is in proportion to the warp instructions it executed, which
+the NVBit tool counts per block (counting is unaffected by the slowdown of instrumentation, unlike timing blocks
+under it, which measured mostly the instrumentation), scaled so that each kernel alone takes its measured
+duration. Blocks of one kernel therefore take different times, as the work of a graph kernel is spread unevenly
+over its blocks. Kernels sharing the GPU are not slowed down by each other. If an operation, or a block, starts
+before one it truly depends on has ended, it runs for nothing, is rolled back, and is issued again once that one
+has ended, after the scheduling delay that we measured between a device-to-host copy and the next operation,
+\numSimDelayUs{}~\textmu s.
+
+\paragraph{Dependences between blocks.} The NVBit tool also records which block made each access, and the
+hybrid interpreter which block made each reference, under each of its four thread orders. A dependence between
+two operations becomes dependences between their blocks: block $b$ of the later operation depends on block $a$ of
+the earlier one if one writes a unit the other references and no operation in between hid the unit. The
+interpreter refines a dependence it reports to blocks only where this is safe for other thread orders: the
+dependence is certain, neither operation referenced an object it could not place, each kernel's blocks referenced
+the same units under all four orders, and a write hides a unit from later operations only if every order makes it
+(\secref{sec:schedules}). Every other dependence makes every block of the later operation wait for the whole earlier
+operation. On the benchmarks, \numSimSmallRefined{} of the hybrid interpreter's dependences between operations were
+refined.
+
+\paragraph{The policies.} We compare issuing every operation after the previous one (in issue order), two
+oracles that know which buffers each operation accesses and order two operations if they access a common buffer,
+or a common buffer that one of them writes, the dependences of the two interpreters, and the traced run's own
+dependences, which no dependence checker can improve on; the last two also at the level of blocks. We ran the
+benchmarks with the inputs of \secref{sec:eval-bench} and with larger ones (Rodinia's \code{bfs} on 65{,}536
+vertices, \code{gaussian} of size 160, PolyBench's \code{2dconv} on $1024^2$ and \code{gemm} on $512^2$, GraphBIG
+on a generated graph of 8{,}192 vertices and 130{,}388 edges with a skewed degree distribution, and so on),
+traced, profiled and run through the hybrid interpreter as before. On the larger inputs, too, the hybrid
+interpreter reports every dependence of every traced run and no certain dependence that did not occur.
+
+\begin{table*}[tbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/sim_summary}
+\caption{Speedup over issuing every operation after the previous one on the simulated A30, geometric mean over the
+benchmarks (all 37, and per suite), and the number of operations or blocks rolled back. The whole-program
+interpreter was not run on the larger inputs.}
+\label{tab:sim-summary}
+\end{table*}
+
+\begin{figure*}[tbp]
+\centering
+\includegraphics[width=\linewidth]{figures/sim_speedup}
+\caption{Speedup over issuing in order, per benchmark that gains under some policy, on the simulated A30.}
+\label{fig:sim-speedup}
+\end{figure*}
+
+\paragraph{Results.} \tabref{tab:sim-summary} and \figref{fig:sim-speedup} show the results. \textit{The hybrid
+interpreter's dependences come within a fraction of a percent of the traced dependences, and never cause a
+rollback.} Between operations, they give a speedup of \numSimSmallHy{} on the small inputs and \numSimLargeHy{} on
+the large ones, against \numSimSmallTr{} and \numSimLargeTr{} for the traced dependences, and refined to blocks
+\numSimSmallHyBlk{} and \numSimLargeHyBlk{}, against \numSimSmallTrBlk{} and \numSimLargeTrBlk{}. The oracle that
+orders operations sharing a buffer gets \numSimSmallBuf{} and \numSimLargeBuf{}, and with the writes taken into
+account \numSimSmallBufRw{} and \numSimLargeBufRw{}. The gains are largest where operations touch different parts
+of the same buffers: the 30 launches of PolyBench's \code{3dconv} on the small input each write their own plane of
+the output, which gives \numSimSmallConvHy{} with the interpreter's dependences and \numSimSmallConvBuf{} with
+either oracle, and in \code{lu} the hybrid interpreter gets \numSimLargeLuHy{} between operations and
+\numSimLargeLuHyBlk{} between blocks on the large input, against \numSimLargeLuBuf{} for the oracles.
+Dependences between blocks help where a kernel's blocks depend on only some blocks of the kernel before, as in
+\code{lu} and \code{fdtd-2d} (\numSimLargeFdtdHy{} between operations, \numSimLargeFdtdHyBlk{} between blocks),
+and they help only because blocks take different times: with every block of a kernel taking equally long, all
+blocks of a kernel start and end together, and refining to blocks gains almost nothing. Most benchmarks gain
+little under any policy, because their operations form a chain of true dependences or their kernels fill the GPU,
+and the larger inputs gain less than the small ones for the second reason.
+
+The whole-program interpreter shows what missed dependences cost: on the small inputs it makes
+\numSimSmallFuSlower{} programs slower than issuing in order, \code{\numSimSmallFuWorstName{}} down to
+\numSimSmallFuWorst{}, with \numSimSmallFuRb{} rollbacks in all. Its geometric-mean speedup between operations
+falls from \numSimDelayFuNone{} with no scheduling delay to \numSimDelayFuMax{} with a delay of 200~\textmu s, while
+the hybrid interpreter's stays at \numSimDelayHyNone{}. Where the hybrid interpreter trails the traced dependences,
+the cause is the possible dependences of kernels whose result depends on thread order: in \code{bfs-topo-atomic}
+on the large input it gets \numSimLargeAtomicHyBlk{} against \numSimLargeAtomicTrBlk{} for the traced
+dependences between blocks, because which blocks write which levels depends on the order, so no dependence of
+these kernels is refined to blocks.
+
 \clearpage
 \section{Related work}
 \label{sec:related}
@@ -924,6 +1019,11 @@ warps (\secref{sec:eval-overhead}).
 A limitation of the evaluation is that every program was traced once on one GPU, with inputs small enough for the
 tracer, which means that the scores are for those runs and inputs.
 
+A limitation of the simulation is that it models the GPU coarsely, which means that its speedups are estimates:
+kernels sharing the GPU do not slow each other down, a block's duration is its kernel's measured duration divided
+in proportion to instruction counts rather than measured, all operations are assumed known before the program
+starts, and restoring the data a rolled-back operation overwrote is not charged.
+
 \section{Conclusion}
 \label{sec:conclusion}
 
@@ -934,7 +1034,8 @@ the kernels, splitting threads by the buffer their pointers name makes accesses 
 running several legal thread orders, with an over-approximation of what other orders could do, keeps every
 dependence a GPU run has among the reported ones. Running the host code natively removes the need to understand
 it. On \numBenchHyDone{} unmodified benchmarks, the hybrid interpreter missed no dependence and reported no wrong
-certain dependence. The next steps are to reduce the possible dependences reported for kernels whose result depends
+certain dependence, and on a simulated GPU its dependences let the benchmarks run nearly as fast as the
+traced dependences do. The next steps are to reduce the possible dependences reported for kernels whose result depends
 on thread order, and to reduce the cost for programs with very many launches.
 
 \bibliographystyle{plain}

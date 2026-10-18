@@ -9,6 +9,7 @@ import re
 import pandas as pd
 
 import bench_tables  # noqa: E402  (paper_gpu/bench_tables.py)
+import sim_tables  # noqa: E402  (paper_gpu/sim_tables.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
@@ -252,6 +253,7 @@ def numbers():
         raise SystemExit("data/overhead.csv is missing (paper_gpu/overhead.py)")
     if os.path.exists(os.path.join(DATA, "benchmarks.csv")):
         n.update(bench_tables.numbers())
+    n.update(sim_tables.numbers())
     body = "".join(f"\\newcommand{{\\num{k}}}{{{v}}}\n" for k, v in n.items())
     with open(os.path.join(HERE, "numbers.tex"), "w") as f:
         f.write(body)
@@ -261,6 +263,7 @@ def numbers():
 def main():
     os.makedirs(OUT, exist_ok=True)
     bench_tables.main()
+    sim_tables.main()
     programs_table()
     accuracy_table()
     datadep_table()

@@ -124,6 +124,38 @@ def fig_overhead(out):
     save(fig, out, "overhead")
 
 
+def fig_sim(out):
+    """Speedup over issuing in order, per benchmark, on the simulated GPU (simulate_blocks.py), small and large
+    inputs."""
+    policies = (("buffer", "Same buffer", MUTED), ("buffer-rw", "Same buffer, one writes", "#9a9893"),
+                ("hybrid", "Hybrid interpreter", PAL[0]), ("hybrid-block", "Hybrid interpreter, blocks", PAL[1]),
+                ("truth-block", "Traced dependences, blocks", INK))
+    runs = [(k, os.path.join(DATA, f)) for k, f in (("Small inputs", "sim_blocks.csv"),
+                                                    ("Large inputs", "sim_blocks_large.csv")) if
+            os.path.exists(os.path.join(DATA, f))]
+    fig, axes = plt.subplots(len(runs), 1, figsize=(6.8, 2.8 * len(runs)), squeeze=False)
+    for ax, (title, path) in zip(axes[:, 0], runs):
+        d = pd.read_csv(path)
+        p = d.pivot(index="name", columns="policy", values="speedup")
+        p = p[(p[[q for q, _, _ in policies if q in p]].max(axis=1) > 1.005)]   # programs that gain at all
+        order = p["truth-block"].sort_values(ascending=False).index
+        x = np.arange(len(order))
+        w = 0.8 / len(policies)
+        for i, (q, label, color) in enumerate(policies):
+            if q in p:
+                ax.bar(x + (i - (len(policies) - 1) / 2) * w, p.loc[order, q] - 1, w, bottom=1, color=color,
+                       label=label, linewidth=0)
+        ax.set_xticks(x, [n.split("-", 1)[1] for n in order], rotation=60, ha="right")
+        ax.set_ylabel("Speedup")
+        ax.set_title(f"{title}: the {len(order)} of {len(d.name.unique())} programs that gain")
+        ax.axhline(1, color=MUTED, linewidth=0.6)
+        ax.grid(axis="x", visible=False)
+    h, lab = axes[0, 0].get_legend_handles_labels()
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.legend(h, lab, loc="upper center", ncol=5, bbox_to_anchor=(0.5, 1.0))
+    save(fig, out, "sim_speedup")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(HERE, "figures"))
@@ -133,6 +165,7 @@ def main():
     fig_cc_scores(args.out)
     if os.path.exists(os.path.join(DATA, "overhead.csv")):
         fig_overhead(args.out)
+    fig_sim(args.out)
 
 
 if __name__ == "__main__":
