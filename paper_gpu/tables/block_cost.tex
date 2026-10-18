@@ -2,17 +2,17 @@
 \toprule
  & Small inputs & Large inputs \\
 \midrule
-Interpreter time, operations (s, total) & 235 & 1,351 \\
-Interpreter time, blocks (s, total) & 298 & 2,406 \\
-\quad ratio, median / geometric mean & 1.12 / 1.11 & 1.39 / 1.56 \\
-\quad ratio, largest & 2.3 (\texttt{jacobi2d}) & 5.7 (\texttt{corr}) \\
-Peak memory ratio, median & 1.03 & 1.20 \\
-\quad largest & 3.8 (\texttt{jacobi2d}) & 67.7 (\texttt{syr2k}) \\
-\quad most memory, operations / blocks (GB) & 1.3 / 1.5 & 2.7 / 40.5 \\
+Interpreter time, operations (s, total) & 233 & 1,180 \\
+Interpreter time, blocks (s, total) & 304 & 2,300 \\
+\quad ratio, median / geometric mean & 1.19 / 1.20 & 1.57 / 1.60 \\
+\quad ratio, largest & 2.5 (\texttt{jacobi2d}) & 4.4 (\texttt{corr}) \\
+Peak memory ratio, median & 1.05 & 1.16 \\
+\quad largest & 3.5 (\texttt{jacobi2d}) & 3.8 (\texttt{syr2k}) \\
+\quad most memory, operations / blocks (GB) & 1.3 / 1.4 & 2.7 / 3.7 \\
 Output, operations / blocks (MB, total) & 1.1 / 147 & 1.6 / 528 \\
 \midrule
-Refining to blocks (s, total) & 57 & 277 \\
-\quad share of the four-order run, median / largest & 0.6\% / 11\% & 0.9\% / 10\% \\
+Refining to blocks (s, total) & 56 & 277 \\
+\quad share of the four-order run, median / largest & 0.5\% / 11\% & 0.9\% / 10\% \\
 Dependences between operations & 9,358 & 12,870 \\
 Dependences between blocks & 1,052,793 & 3,022,319 \\
 \quad and between whole operations & 254 & 412 \\

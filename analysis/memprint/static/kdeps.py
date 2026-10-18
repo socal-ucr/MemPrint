@@ -83,49 +83,11 @@ class Tracker:
         self.blocks = {}
 
     def _block_rows(self, ev):
-        u = self.unit
-        per = {}
-        for blk, off, size, bits, obj in ev.block_marks:
-            self._object(obj)
-            n = max(obj.nbytes + u - 1, u) // u
-            if off is None:
-                b, units = np.repeat(blk, n), np.tile(np.arange(n, dtype=np.int64), len(blk))
-            else:
-                first = np.asarray(off, dtype=np.int64) // u
-                last = (np.asarray(off, dtype=np.int64) + max(int(size), 1) - 1) // u
-                span = int(np.max(last - first)) + 1 if len(first) else 1
-                if span == 1:
-                    b, units = blk, first
-                else:
-                    units = (first[:, None] + np.arange(span)).ravel()
-                    keep = units <= np.repeat(last, span)
-                    b, units = np.repeat(blk, span)[keep], units[keep]
-            ok = (units >= 0) & (units < n)
-            per.setdefault(obj, (n, []))[1].append((b[ok], units[ok], int(bits)))
         out = {}
-        for obj, (n, recs) in per.items():
-            written = np.empty(0, dtype=np.int64)                      # (block, unit) keys certainly written
-            keys, vals = [], []
-            for b, units, bits in recs:
-                k = b * n + units
-                if bits & (R | RM | RD) and written.size:              # a block reading what it wrote itself
-                    own = np.isin(k, written)
-                    if own.any():
-                        rest = bits & ~(R | RM | RD)
-                        if rest:
-                            keys.append(k[own])
-                            vals.append(np.full(int(own.sum()), rest, dtype=np.uint8))
-                        k = k[~own]
-                keys.append(k)
-                vals.append(np.full(len(k), bits, dtype=np.uint8))
-                if bits & W:
-                    written = np.union1d(written, k)
-            k = np.concatenate(keys) if keys else np.empty(0, dtype=np.int64)
-            v = np.concatenate(vals) if vals else np.empty(0, dtype=np.uint8)
-            uk, inv = np.unique(k, return_inverse=True)
-            bv = np.zeros(len(uk), dtype=np.uint8)
-            np.bitwise_or.at(bv, inv, v)
-            out[self.objects[obj]["name"]] = ((uk // n).astype(np.int32), (uk % n).astype(np.int32), bv)
+        for obj, refs in ev.block_marks.items():                       # interp_cuda.BlockRefs
+            self._object(obj)
+            b, u, bits = refs.rows()
+            out[self.objects[obj]["name"]] = (b, u, bits)
         return out
 
     def keep_access(self):

@@ -554,6 +554,7 @@ def main(argv=None):
     if args.blocks:
         it.tracker.keep_blocks()
         it.record_blocks = True
+        it.block_unit = it.tracker.unit
     if args.dump:
         it.tracker.keep_touch()                                        # merged with the other schedules' runs
     if args.racy is not None:

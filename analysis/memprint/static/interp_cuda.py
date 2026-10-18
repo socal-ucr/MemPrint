@@ -87,8 +87,7 @@ class Event:
         self.unknown = 0  # bits of references to an unknown object
         self.data_control = False  # issued under host control that depends on memory contents
         self.note = ""
-        self.block_marks = None  # a kernel's references per block (CudaInterpreter.record_blocks): a list of
-                                 # (blocks, byte offsets or None for the whole object, size, bits, Obj)
+        self.block_marks = None  # a kernel's references per block (CudaInterpreter.record_blocks): Obj -> BlockRefs
         self.block_unknown = False  # a reference whose object is unknown: which block made it is not kept
 
     def _arr(self, obj, hi):
@@ -118,6 +117,58 @@ class Event:
 
     def mark_all(self, obj, bits):
         self.all[obj] = self.all.get(obj, 0) | bits
+
+
+class BlockRefs:
+    """Which block referenced which unit of one object in one kernel launch, with the reference bits, kept
+    compact as references come: they are buffered as keys (block * units + unit) and merged into one sorted set
+    whenever the buffer grows past LIMIT. As in Event.mark, a read of a unit the same block already wrote for
+    certain, in an earlier reference, is not a read."""
+
+    LIMIT = 1 << 22
+    READS = R | RM | RD
+
+    def __init__(self, units):
+        self.units = units
+        self.keys = np.empty(0, dtype=np.int64)                        # merged: sorted unique keys and their bits
+        self.bits = np.empty(0, dtype=np.uint8)
+        self.written = np.empty(0, dtype=np.int64)                     # keys certainly written so far
+        self.buf, self.size = [], 0
+
+    def add(self, keys, bits):
+        if len(keys):
+            self.buf.append((keys, int(bits)))
+            self.size += len(keys)
+            if self.size > self.LIMIT:
+                self.compact()
+
+    def compact(self):
+        if not self.buf:
+            return
+        k = np.concatenate([x for x, _ in self.buf])
+        v = np.concatenate([np.full(len(x), b, dtype=np.uint8) for x, b in self.buf])
+        order = np.concatenate([np.full(len(x), i, dtype=np.int64) for i, (x, _) in enumerate(self.buf)])
+        self.buf, self.size = [], 0
+        uk, inv = np.unique(k, return_inverse=True)
+        first_w = np.full(len(uk), np.iinfo(np.int64).max, dtype=np.int64)
+        w = (v & W) != 0
+        np.minimum.at(first_w, inv[w], order[w])                       # the first certain write of each key
+        own = np.isin(k, self.written) | (first_w[inv] < order)        # read after the block's own write
+        v = np.where(own, v & np.uint8(~self.READS & 0xFF), v)
+        bu = np.zeros(len(uk), dtype=np.uint8)
+        np.bitwise_or.at(bu, inv, v)
+        keep = bu != 0
+        self.written = np.union1d(self.written, uk[first_w < np.iinfo(np.int64).max])
+        allk = np.concatenate([self.keys, uk[keep]])
+        allv = np.concatenate([self.bits, bu[keep]])
+        self.keys, inv2 = np.unique(allk, return_inverse=True)
+        self.bits = np.zeros(len(self.keys), dtype=np.uint8)
+        np.bitwise_or.at(self.bits, inv2, allv)
+
+    def rows(self):
+        """(blocks, units, bits) of every key."""
+        self.compact()
+        return (self.keys // self.units).astype(np.int32), (self.keys % self.units).astype(np.int32), self.bits
 
 
 def _exposed(cur, bits):
@@ -455,6 +506,7 @@ class CudaInterpreter(CppInterpreter):
         self.oob = {}  # source location (object) -> references past the end of a device buffer
         self.racy_seen = set()  # kernels with a launch that read and wrote one unit (another order may differ)
         self.record_blocks = False  # also keep which block made each reference (Event.block_marks)
+        self.block_unit = 4  # bytes per unit of the block references (the Tracker's unit)
         self._b0, self._nb = 0, 1  # the first block of the threads being run, and how many blocks they are
         self.racy = None  # in a schedule other than lockstep: the kernels to reorder (None: all), as racy_seen
         self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
@@ -630,7 +682,27 @@ class CudaInterpreter(CppInterpreter):
                 blk, off = np.repeat(blocks, len(offs)), np.tile(offs, len(blocks))
             else:
                 blk = blocks
-        ev.block_marks.append((np.asarray(blk, dtype=np.int64), off, size, bits, obj))
+        u = self.block_unit
+        n = max(obj.nbytes + u - 1, u) // u
+        blk = np.asarray(blk, dtype=np.int64)
+        if off is None:                                                # every unit of the object
+            keys = (blk[:, None] * n + np.arange(n, dtype=np.int64)).ravel()
+        else:
+            off = np.asarray(off, dtype=np.int64)
+            first, last = off // u, (off + max(int(size), 1) - 1) // u
+            span = int(np.max(last - first)) + 1 if len(first) else 1
+            if span == 1:
+                bb, units = blk, first
+            else:
+                units = (first[:, None] + np.arange(span)).ravel()
+                ok = units <= np.repeat(last, span)
+                bb, units = np.repeat(blk, span)[ok], units[ok]
+            ok = (units >= 0) & (units < n)
+            keys = bb[ok] * n + units[ok]
+        refs = ev.block_marks.get(obj)
+        if refs is None:
+            refs = ev.block_marks[obj] = BlockRefs(n)
+        refs.add(keys, bits)
 
     def lvalue(self, c):
         s = ca.strip(c)
@@ -1274,7 +1346,7 @@ class CudaInterpreter(CppInterpreter):
         if bsz <= 0 or nblocks <= 0:
             return
         if self.record_blocks and ev.block_marks is None:
-            ev.block_marks = []
+            ev.block_marks = {}
         reorder = self.schedule != "lockstep" and (self.racy is None or fdef.spelling in self.racy)
         per = max(1, THREADS_PER_BATCH // bsz) if not reorder else 1   # a kernel no launch of which read and
                                                                        # wrote one unit gives the same in any order
