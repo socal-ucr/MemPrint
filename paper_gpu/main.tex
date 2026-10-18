@@ -973,6 +973,31 @@ blocks, for the programs where refining to blocks changes the speedup by more th
 \label{tab:sim-blocks}
 \end{table*}
 
+\paragraph{What blocks cost.} \tabref{tab:block-cost} compares the cost of the two kinds of dependence for the
+hybrid interpreter. We ran it in lockstep without and with recording which block made each reference, back to back
+on the same built program, and timed the refinement to blocks from the four orders' references separately.
+Recording blocks makes the interpreter \numCostSmallTimeMed{} times as slow in the median on the small inputs and
+\numCostLargeTimeMed{} on the large ones, and at most \numCostLargeTimeMax{} times (\code{\numCostLargeTimeMaxName{}}).
+The peak memory grows little in most programs (median \numCostLargeMemMed{} times on the large inputs) but up to
+\numCostLargeMemMax{} times in \code{\numCostLargeMemMaxName{}}, \numCostLargeMemMaxGB{}~GB: the interpreter keeps
+every reference of a kernel with its block until the kernel ends, and PolyBench's matrix kernels make a reference per
+thread in every iteration of their inner loop. Refining to blocks afterwards takes \numCostSmallRefineShare{} and
+\numCostLargeRefineShare{} of the four-order run in the median and at most \numCostLargeRefineShareMax{}. What the
+interpreter hands on grows most: \numCostLargeOpDeps{} dependences between operations on the large inputs become
+\numCostLargeBlockDeps{} million between blocks, which a scheduler would have to keep and check; the simulator does
+not charge for that.
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/block_cost}
+\caption{The hybrid interpreter with dependences between operations and between blocks: the lockstep run without
+and with recording which block made each reference (on the same built program), the refinement to blocks from the
+four orders' references, and the dependences each gives, over the 37 benchmarks.}
+\label{tab:block-cost}
+\end{table}
+
 The whole-program interpreter shows what missed dependences cost: on the small inputs it makes
 \numSimSmallFuSlower{} programs slower than issuing in order, \code{\numSimSmallFuWorstName{}} down to
 \numSimSmallFuWorst{}, with \numSimSmallFuRb{} rollbacks in all. Its geometric-mean speedup between operations

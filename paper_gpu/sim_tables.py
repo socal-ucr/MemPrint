@@ -96,6 +96,45 @@ def block_table():
     write("sim_blocks.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
+COST = (("small", "block_overhead.csv"), ("large", "block_overhead_large.csv"))
+
+
+def cost_table():
+    """What dependences between blocks cost over dependences between operations (block_overhead.py)."""
+    frames = [(k, load(f)) for k, f in COST]
+    lines = []
+
+    def row(label, fn):
+        cells = [label]
+        for _, d in frames:
+            cells.append(fn(d) if d is not None else "--")
+        lines.append(" & ".join(cells) + r" \\")
+
+    short = lambda n: r"\texttt{" + n.split("-", 1)[1] + "}"  # noqa: E731
+    row("Interpreter time, operations (s, total)", lambda d: f"{d.ops_s.sum():,.0f}")
+    row("Interpreter time, blocks (s, total)", lambda d: f"{d.blocks_s.sum():,.0f}")
+    row("\\quad ratio, median / geometric mean", lambda d: f"{(d.blocks_s / d.ops_s).median():.2f} / "
+        f"{geo(d.blocks_s / d.ops_s):.2f}")
+    row("\\quad ratio, largest", lambda d: f"{(d.blocks_s / d.ops_s).max():.1f} "
+        f"({short(d.loc[(d.blocks_s / d.ops_s).idxmax(), 'name'])})")
+    row("Peak memory ratio, median", lambda d: f"{(d.blocks_rss_mb / d.ops_rss_mb).median():.2f}")
+    row("\\quad largest", lambda d: f"{(d.blocks_rss_mb / d.ops_rss_mb).max():.1f} "
+        f"({short(d.loc[(d.blocks_rss_mb / d.ops_rss_mb).idxmax(), 'name'])})")
+    row("\\quad most memory, operations / blocks (GB)", lambda d: f"{d.ops_rss_mb.max() / 1024:.1f} / "
+        f"{d.blocks_rss_mb.max() / 1024:.1f}")
+    row("Output, operations / blocks (MB, total)", lambda d: f"{d.ops_out_mb.sum():.1f} / {d.blocks_out_mb.sum():.0f}")
+    lines.append(r"\midrule")
+    row("Refining to blocks (s, total)", lambda d: f"{d.refine_s.sum():.0f}")
+    row("\\quad share of the four-order run, median / largest",
+        lambda d: f"{100 * (d.refine_s / d.hybrid_all_s).median():.1f}\\% / "
+        f"{100 * (d.refine_s / d.hybrid_all_s).max():.0f}\\%")
+    row("Dependences between operations", lambda d: f"{int(d.op_deps.sum()):,}")
+    row("Dependences between blocks", lambda d: f"{int(d.block_deps.sum()):,}")
+    row("\\quad and between whole operations", lambda d: f"{int(d.whole_deps.sum()):,}")
+    head = (r"\begin{tabular}{lrr}" "\n" r"\toprule" "\n" r" & Small inputs & Large inputs \\" "\n" r"\midrule" "\n")
+    write("block_cost.tex", head + "\n".join(lines) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+
+
 def write(name, body):
     with open(os.path.join(OUT, name), "w") as f:
         f.write(body)
@@ -150,6 +189,25 @@ def numbers():
             worst = (q["hybrid-block"] / q.hybrid - 1)
             n[f"Sim{k}EqWorst"] = f"{-100 * worst.min():.1f}\\%"
             n[f"Sim{k}EqWorstName"] = worst.idxmin().split("-", 1)[1]
+    for k, f in COST:
+        d = load(f)
+        if d is None:
+            continue
+        K = "Small" if k == "small" else "Large"
+        r, m = d.blocks_s / d.ops_s, d.blocks_rss_mb / d.ops_rss_mb
+        n[f"Cost{K}TimeMed"] = f"{r.median():.2f}"
+        n[f"Cost{K}TimeGeo"] = f"{geo(r):.2f}"
+        n[f"Cost{K}TimeMax"] = f"{r.max():.1f}"
+        n[f"Cost{K}TimeMaxName"] = d.loc[r.idxmax(), "name"].split("-", 1)[1]
+        n[f"Cost{K}MemMed"] = f"{m.median():.2f}"
+        n[f"Cost{K}MemMax"] = f"{m.max():.0f}"
+        n[f"Cost{K}MemMaxName"] = d.loc[m.idxmax(), "name"].split("-", 1)[1]
+        n[f"Cost{K}MemMaxGB"] = f"{d.blocks_rss_mb.max() / 1024:.0f}"
+        n[f"Cost{K}RefineShare"] = f"{100 * (d.refine_s / d.hybrid_all_s).median():.1f}\\%"
+        n[f"Cost{K}RefineShareMax"] = f"{100 * (d.refine_s / d.hybrid_all_s).max():.0f}\\%"
+        n[f"Cost{K}OpDeps"] = f"{int(d.op_deps.sum()):,}".replace(",", "{,}")
+        n[f"Cost{K}BlockDeps"] = f"{d.block_deps.sum() / 1e6:.1f}"
+        n[f"Cost{K}OutMB"] = f"{d.blocks_out_mb.sum():.0f}"
     sw = load("sim_delay.csv")
     if sw is not None:
         for policy, macro in (("full", "Fu"), ("hybrid", "Hy")):
@@ -167,6 +225,7 @@ def numbers():
 def main():
     summary_table()
     block_table()
+    cost_table()
 
 
 if __name__ == "__main__":
