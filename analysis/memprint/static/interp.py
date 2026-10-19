@@ -633,6 +633,33 @@ FREE = {"free", "polybench_free_data"}
 ATOI = {"atoi", "atol", "atoll", "strtol", "strtoul", "strtoll", "strtoull", "stoi", "stol", "stoll", "stoul",
         "stoull"}
 RANDOM = {"rand": 2 ** 31 - 1, "random": 2 ** 31 - 1, "lrand48": 2 ** 31 - 1}  # name -> largest value
+
+
+class _GlibcRandom:
+    """glibc's random() and rand() (TYPE_3: an additive feedback generator over 31 words, seeded as srandom
+    does), so that a program's own pseudo-random input is the one it computes natively."""
+
+    def __init__(self, seed):
+        seed = seed & 0xFFFFFFFF or 1
+        r = [0] * 344
+        r[0] = seed if seed < 2 ** 31 else seed - 2 ** 32
+        for i in range(1, 31):
+            hi, lo = divmod(r[i - 1], 127773)
+            if r[i - 1] < 0:                                           # C division truncates toward zero
+                hi, lo = -((-r[i - 1]) // 127773), -((-r[i - 1]) % 127773)
+            word = 16807 * lo - 2836 * hi
+            r[i] = word + 2147483647 if word < 0 else word
+        for i in range(31, 34):
+            r[i] = r[i - 31]
+        for i in range(34, 344):
+            r[i] = (r[i - 31] + r[i - 3]) & 0xFFFFFFFF
+        self.r = r[-34:]
+
+    def next(self):
+        v = (self.r[-31] + self.r[-3]) & 0xFFFFFFFF
+        self.r.append(v)
+        del self.r[0]
+        return v >> 1
 # Inside glibc 2.28, rand() makes about 27 references per call (Pin, a loop of 10^6 calls at -O0):
 # about 24 to some 120 bytes of hot state (lock, the random_data fields, its call frame) and 3 to
 # the 31-word additive table. Measured after csr_pr / csr_bfs had been scored without it.
@@ -687,6 +714,7 @@ class Interpreter:
         return {"loc": _source_loc(cursor), "context": [c for c in context if c][:depth]}
 
     REALS = False  # track floating-point scalars (Real)
+    EXACT_RAND = False  # rand() / random(): glibc's own sequence instead of draws from its distribution
     COPY_VALUES = False  # memcpy / memset carry the contents they copy or set (Obj.copy_from, Obj.fill)
     SYMBOLIC = True  # count affine innermost loops symbolically (Aff, Obj.add_range) instead of point by point
 
@@ -967,6 +995,11 @@ class Interpreter:
             self._declare_global(decl)
             return self.frames[0].vars[k]
         return None
+
+    def _sequential_body(self, body):
+        """Whether a counted loop must run one iteration at a time for another reason than values it carries
+        (subclasses: library objects modelled one at a time)."""
+        return False
 
     def _rodata(self, value):
         if value not in self.rodata_slots:
@@ -1497,9 +1530,17 @@ class Interpreter:
         if name in FREE and args and isinstance(args[0], Ptr) and isinstance(args[0].obj, Obj):
             self.heap_events.append(("free", args[0].obj))
             return UNK
+        if name in ("srand", "srandom") and args and self.EXACT_RAND:   # glibc's generator, seeded
+            seed = _as_int(args[0])
+            self._glibc = _GlibcRandom(int(seed) if seed is not UNK and not np.ndim(seed) else 1)
+            return UNK
         if name in RANDOM:                                             # input drawn from its distribution
             self._libc_random()
-            draws = self.rng.integers(0, RANDOM[name] + 1, self.L, dtype=np.int64)
+            if self.EXACT_RAND and name in ("rand", "random"):         # or glibc's own sequence (EXACT_RAND)
+                g = self.__dict__.setdefault("_glibc", _GlibcRandom(1))
+                draws = np.array([g.next() for _ in range(self.L)], dtype=np.int64)
+            else:
+                draws = self.rng.integers(0, RANDOM[name] + 1, self.L, dtype=np.int64)
             return int(draws[0]) if self.L == 1 else draws
         if name in ("memset", "memcpy", "memmove") and len(args) == 3:
             n = _as_int(args[2])
@@ -1638,7 +1679,7 @@ class Interpreter:
             return self._loop_general(None, cond, inc, body)
         trips = np.broadcast_to(np.maximum(trips, 0), (self.L,)).astype(np.int64)
         if self.sequential_depth == 0 and int(trips.sum()) <= SEQUENTIAL_LIMIT and \
-                (_memory_carried(body) or _address_carried(body)):
+                (_memory_carried(body) or _address_carried(body) or self._sequential_body(body)):
             self.sequential_depth += 1                                 # iterations depend on each other
             try:
                 return self._loop_general(None, cond, inc, body)

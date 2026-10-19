@@ -53,6 +53,8 @@ ALLOCS = {"cudaMalloc": "device", "cudaMallocManaged": "managed", "cudaMallocHos
 FREES = {"cudaFree", "cudaFreeHost"}
 COPIES = {"cudaMemcpy", "cudaMemcpyAsync"}
 SETS = {"cudaMemset", "cudaMemsetAsync"}
+DEVICE = {"warpSize": 32, "maxThreadsPerBlock": 1024, "multiProcessorCount": 56, "major": 8, "minor": 0,
+          "sharedMemPerBlock": 49152}  # cudaGetDeviceProperties: an NVIDIA A30
 SYMBOL_COPIES = {"cudaMemcpyToSymbol", "cudaMemcpyFromSymbol"}
 HOST_COPIES = {"memcpy", "memmove"}
 ATOMICS = {"atomicAdd", "atomicSub", "atomicExch", "atomicMin", "atomicMax", "atomicCAS", "atomicAnd", "atomicOr",
@@ -128,10 +130,14 @@ class BlockRefs:
     certain, in an earlier reference, is not a read."""
 
     LIMIT = 1 << 22
+    DENSE = 1 << 28  # (blocks x units) up to which the references are kept in a dense array instead
     READS = R | RM | RD
 
-    def __init__(self, units):
+    def __init__(self, units, blocks=0):
         self.units = units
+        self.dense = None                                              # per key: bits, and whether written
+        if 0 < blocks * units <= self.DENSE:
+            self.dense = (np.zeros(blocks * units, dtype=np.uint8), np.zeros(blocks * units, dtype=bool))
         self.keys = np.empty(0, dtype=np.int64)                        # merged: sorted unique keys and their bits
         self.bits = np.empty(0, dtype=np.uint8)
         self.written = np.empty(0, dtype=np.int64)                     # keys certainly written so far
@@ -141,7 +147,18 @@ class BlockRefs:
     def add(self, keys, bits):
         if bits & (W | WM) and not bits & UV:
             self.uniform = False
+        if len(keys) and self.dense is not None and int(keys.max()) < len(self.dense[0]):
+            acc, written = self.dense                                  # applied at once, in order
+            v = np.uint8(bits)
+            if bits & self.READS:
+                v = np.where(written[keys], np.uint8(bits & ~self.READS & 0xFF), v)
+            acc[keys] |= v
+            if bits & W:
+                written[keys] = True
+            return
         if len(keys):
+            if self.dense is not None:                                 # beyond the launch's blocks: sorted sets
+                self._undense()
             self.buf.append((keys, int(bits)))
             self.size += len(keys)
             if self.size > self.LIMIT:
@@ -170,8 +187,17 @@ class BlockRefs:
         self.bits = np.zeros(len(self.keys), dtype=np.uint8)
         np.bitwise_or.at(self.bits, inv2, allv)
 
+    def _undense(self):
+        acc, written = self.dense
+        self.dense = None
+        idx = np.flatnonzero(acc)
+        self.keys, self.bits = idx.astype(np.int64), acc[idx]
+        self.written = np.flatnonzero(written).astype(np.int64)
+
     def rows(self):
         """(blocks, units, bits) of every key."""
+        if self.dense is not None:
+            self._undense()
         self.compact()
         return (self.keys // self.units).astype(np.int32), (self.keys % self.units).astype(np.int32), self.bits
 
@@ -535,6 +561,7 @@ class _Diverge(Exception):
 
 class CudaInterpreter(CppInterpreter):
     COPY_VALUES = True
+    EXACT_RAND = True  # the program's pseudo-random input decides what its kernels touch
 
     def __init__(self, tu, seed=0, stubs=None, opt=3, host_events=True):
         self.kernel = None  # the Event of the launch being run
@@ -558,7 +585,6 @@ class CudaInterpreter(CppInterpreter):
         self.device_layout = []  # (device address, end, Obj) of live device buffers, by address (hybrid, real GPU
                                  # allocations): where a reference past the end of a buffer lands
         self._b0, self._nb = 0, 1  # the first block of the threads being run, and how many blocks they are
-        self._block_last = {}  # (statement, object, bits) -> its last reference's blocks and offsets (_note_blocks)
         self.racy = None  # in a schedule other than lockstep: the kernels to reorder (None: all), as racy_seen
         self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
         self._stmt_marks = []  # per statement being run in a kernel block: (effects, batch weights) at its start
@@ -670,7 +696,6 @@ class CudaInterpreter(CppInterpreter):
         if self.uncertain_depth:
             bits <<= 2
         cur = getattr(loc, "cursor", None)
-        self._note_site = _site_key(cur) if cur is not None else None
         if cur is not None:
             indirect, guarded = self.facts.site(cur)
             if indirect or guarded or getattr(self, "_guarded_depth", 0):
@@ -751,13 +776,6 @@ class CudaInterpreter(CppInterpreter):
             return
         blk = self.frames[0].vars.get(BLOCK_KEY, [None, 0])[1]
         blk = self._b0 + (np.asarray(blk, dtype=np.int64) if np.ndim(blk) else int(blk))
-        site = (getattr(self, "_note_site", None), id(obj), int(bits), int(size), keep is None)
-        last = self._block_last.get(site)                              # the same statement, object, blocks and
-        if last is not None and np.array_equal(last[0], blk) and (    # offsets as its last reference: nothing new
-                (off is None and last[1] is None) or (off is not None and last[1] is not None and
-                                                      np.array_equal(last[1], off))):
-            return
-        self._block_last[site] = (np.copy(blk) if np.ndim(blk) else blk, None if off is None else np.copy(off))
         if off is not None and np.ndim(off) and np.ndim(blk) and np.size(off) == np.size(blk):
             blk = np.asarray(blk).ravel()
             off = np.asarray(off, dtype=np.int64).ravel()
@@ -795,7 +813,7 @@ class CudaInterpreter(CppInterpreter):
             keys = bb[ok] * n + units[ok]
         refs = ev.block_marks.get(obj)
         if refs is None:
-            refs = ev.block_marks[obj] = BlockRefs(n)
+            refs = ev.block_marks[obj] = BlockRefs(n, int(np.prod(ev.grid)) if ev.grid else 0)
         refs.add(keys, bits)
 
     def lvalue(self, c):
@@ -1068,6 +1086,21 @@ class CudaInterpreter(CppInterpreter):
                 self.run_subset(np.array([p]), lambda: self._runtime(name, c))  # a time: an object or event each
             return 0
         args_c = list(c.get_arguments())
+        if name in ("cudaGetDeviceProperties", "cudaGetDevice", "cudaGetDeviceCount") and args_c:
+            p = self.eval(args_c[0])                                   # the GPU the analysis is for (DEVICE)
+            for a in args_c[1:]:
+                self.eval(a)
+            if isinstance(p, Ptr) and isinstance(p.obj, Obj) and p.off is not UNK and not np.ndim(p.off):
+                if name == "cudaGetDeviceProperties":
+                    t = args_c[0].type.get_canonical().get_pointee() if ca.is_pointer(args_c[0].type) else None
+                    t = t.get_canonical() if t is not None else None
+                    for field, value in DEVICE.items():
+                        off = t.get_offset(field) if t is not None else -1
+                        if off is not None and off >= 0:
+                            p.obj.store(int(p.off) + off // 8, value, 4)
+                else:
+                    p.obj.store(int(p.off), 0 if name == "cudaGetDevice" else 1, 4)
+            return 0
         if name in ALLOCS:
             p = self.eval(args_c[0])
             n = _as_int(self.eval(args_c[1])) if len(args_c) > 1 else UNK
@@ -1440,7 +1473,6 @@ class CudaInterpreter(CppInterpreter):
         if bsz <= 0 or nblocks <= 0:
             return
         reorder = self.schedule != "lockstep" and (self.racy is None or fdef.spelling in self.racy)
-        self._block_last = {}
         if self.record_blocks and ev.block_marks is None:
             if self.schedule == "lockstep" or reorder:
                 ev.block_marks = {}

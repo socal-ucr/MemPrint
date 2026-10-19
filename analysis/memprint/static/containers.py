@@ -207,6 +207,10 @@ class Containers:
             self._vset(Ptr(vec.obj, int(vec_offs[p0])), 1, Ptr(arena, start + need * esize), pts=pts)
         loc = Loc(arena, _SCALAR(slots) if self.L > 1 else int(slots[0]), esize)
         self.access(loc, write=True)
+        if et is not None and not ca.is_pointer(et) and et.get_canonical().kind == ca.ci.TypeKind.RECORD:
+            if isinstance(value, Ptr) and self.L == 1 and value.obj is not UNK:   # an object: copied (a string
+                self._copy_object(Ptr(arena, int(slots[0])), value, esize)        # keeps its text, textlib)
+            return UNK
         if isinstance(value, Ptr) or (et is not None and ca.is_pointer(et)):
             self._ptr_store(loc, value if isinstance(value, Ptr) else Ptr(UNK, UNK))
         elif value is not UNK:

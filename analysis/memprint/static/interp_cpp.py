@@ -33,6 +33,7 @@ import numpy as np
 
 from . import clangast as ca
 from .clangast import K
+from .textlib import TextLibrary, is_fpos, is_ifstream, is_map, is_map_iter, is_string  # noqa: E402
 from .interp import (FREE, SENTINEL, UNK, Frame, Interpreter, Loc, Obj, Ptr, Real, _as_int, _is_unk, _key, _SCALAR, _real)
 from .containers import Containers, element_type
 from .skeleton import sort_refs
@@ -291,7 +292,7 @@ QUIET = ("operator<<", "printf", "puts", "putchar", "endl", "flush", "perror", "
          "exit", "abort", "assert", "gettimeofday", "clock_gettime", "clock", "time", "srand")   # srand: rand() is
                                                                     # drawn from its distribution (interp.RANDOM)
 
-class CppInterpreter(Containers, Interpreter):
+class CppInterpreter(TextLibrary, Containers, Interpreter):
     REALS = True
     SYMBOLIC = False  # -O3 counting needs every batch point (per-point load cache)
     LOAD_CACHE = "point"  # "point": per-point load cache with parent batches; "batch": one record per batch
@@ -1177,8 +1178,12 @@ class CppInterpreter(Containers, Interpreter):
         if k in self.frames[0].vars:
             return self.frames[0].vars[k]
         if decl.kind == K.VAR_DECL and decl.semantic_parent is not None and \
-                decl.semantic_parent.kind in (K.TRANSLATION_UNIT, K.NAMESPACE, K.CLASS_DECL, K.STRUCT_DECL):
+                decl.semantic_parent.kind in (K.TRANSLATION_UNIT, K.NAMESPACE, K.CLASS_DECL, K.STRUCT_DECL,
+                                              K.LINKAGE_SPEC, K.UNEXPOSED_DECL):
             self._declare_global(decl)
+            lib = self.__dict__.get("_lib_globals", {})
+            if decl.spelling in lib:                                   # set by a modelled call (getopt)
+                self._put_global(self.frames[0].vars[k], lib[decl.spelling])
             return self.frames[0].vars[k]
         return None
 
@@ -1564,6 +1569,15 @@ class CppInterpreter(Containers, Interpreter):
             from .containers import element_type
             et = element_type(t)
             self._vinit(dest, 0, (ca.type_size(et.get_canonical()) if et is not None else None) or 8, et=et)
+            return
+        if is_string(name):                                            # textlib: empty, fresh
+            self.str_put(dest, "")
+            return
+        if is_map(name):
+            self._handle_put(dest, 2, {"keys": [], "vals": {}, "vt": None})
+            return
+        if is_ifstream(name):
+            self.file_construct(dest, [])
             return
         if name.startswith("std::"):
             return
@@ -2159,8 +2173,64 @@ class CppInterpreter(Containers, Interpreter):
 
     # ------------------------------------------------------------ the standard library
 
+    def _sequential_body(self, body):
+        """A loop that makes or uses strings, maps or input streams (textlib, modelled for one point at a time)."""
+        memo = self.__dict__.setdefault("_seq_body_memo", {})
+        k = (str(body.extent.start.file), body.extent.start.offset, body.extent.end.offset)
+        if k not in memo:
+            found = False
+            for n in body.walk_preorder():
+                if n.kind in (K.CALL_EXPR, K.CXX_FUNCTIONAL_CAST_EXPR):
+                    t = n.type
+                    ref = n.referenced
+                    parent = ref.semantic_parent.type if ref is not None and ref.semantic_parent is not None else None
+                    if any(x is not None and (is_string(x) or is_map(x) or is_ifstream(x)) for x in (t, parent)):
+                        found = True
+                        break
+            memo[k] = found
+        return memo[k]
+
+    def _text_library(self, name, ptype, obj, args_c, c, sret):
+        """Strings, maps and input file streams (textlib), or None."""
+        if obj is not None and is_string(ptype):
+            return self.string_method(name, obj, args_c, c, sret)
+        if obj is not None and is_map(ptype):
+            return self.map_method(name, obj, args_c, self._parent_type(ptype, c), c, sret)
+        if name in ("operator==", "operator!=") and (is_map_iter(ptype) or
+                                                     (args_c and is_map_iter(_referee(args_c[0].type)))):
+            if obj is not None and len(args_c) == 1:
+                a = obj                                                # a member operator: (this, other)
+                b = self.eval(args_c[0])
+                if isinstance(a, Ptr) and isinstance(b, Ptr) and isinstance(a.obj, Obj) and isinstance(b.obj, Obj):
+                    x, y = (int(np.ravel(p.obj.load(int(p.off), 8))[0]) for p in (a, b))
+                    return int(x == y) if name == "operator==" else int(x != y)
+                return UNK
+            return self.map_iter_compare(name, args_c)
+        if obj is None and name in ("operator==", "operator!=", "operator<", "operator>", "operator<=",
+                                    "operator>=", "operator+") and len(args_c) == 2 and \
+                any(is_string(_referee(a.type)) for a in args_c):
+            return self.string_operator(name, args_c, c, sret)
+        if obj is not None and ptype.replace("std::__cxx11::", "std::").startswith(
+                ("std::basic_ifstream<char", "std::basic_istream<char", "std::basic_ios<char",
+                 "std::basic_fstream<char")):
+            return self.file_method(name, obj, args_c, c, sret)
+        if obj is not None and is_fpos(ptype) and name.startswith("operator"):
+            return self.fpos_value(obj)
+        return None
+
+    def _parent_type(self, spelling, c):
+        ref = c.referenced
+        return ref.semantic_parent.type if ref is not None and ref.semantic_parent is not None else None
+
     def _library_construct(self, call, dest, args_c):
         name = call.type.get_canonical().spelling
+        if is_string(name):                                            # textlib
+            return self.string_construct(dest, args_c)
+        if is_ifstream(name):
+            return self.file_construct(dest, args_c)
+        if is_map(name) and not args_c:
+            self._handle_put(dest, 2, {"keys": [], "vals": {}, "vt": None})
+            return dest
         if name.startswith("std::vector<"):
             return self._vector_construct(dest, args_c, call.type)
         if name.startswith("std::pair<"):
@@ -2210,6 +2280,9 @@ class CppInterpreter(Containers, Interpreter):
             self._forget_loads()
         name = ref.spelling
         ptype = ref.semantic_parent.type.get_canonical().spelling if ref.semantic_parent is not None else ""
+        r = self._text_library(name, ptype, obj, args_c, c, sret)
+        if r is not None:
+            return r
         if ptype.startswith("std::vector<") and obj is not None:
             r = self._vector_method(name, obj, args_c, ref.semantic_parent.type, c.type)
             if _vec_iter(c.type):                                      # begin, end: an iterator object
@@ -2287,6 +2360,108 @@ class CppInterpreter(Containers, Interpreter):
             self._ptr_store(Loc(arr, 8 * i, 8), Ptr(sobj, 0))
         self._ptr_store(Loc(arr, 8 * len(self.argv), 8), Ptr(self.null, 0))
         return Ptr(arr, 0)
+
+    def _getopt(self, name, args_c):
+        """getopt / getopt_long over the program's command line: the option character (or a long option's val),
+        -1 at the end; optarg and optind are set in the program's globals."""
+        vals = [self.eval(x) for x in args_c]
+        argv_p, opts = vals[1], self._text(vals[2]) or ""
+        st = self.__dict__.setdefault("_getopt_state", {"optind": 1, "next": 0})
+        argv = list(self.argv)
+
+        def arg_ptr(i, k=0):                                           # a pointer into argv[i], offset k
+            if isinstance(argv_p, Ptr) and isinstance(argv_p.obj, Obj) and argv_p.off is not UNK:
+                p = self._ptr_load(Loc(argv_p.obj, int(argv_p.off) + 8 * i, 8))
+                if isinstance(p, Ptr) and p.obj is not UNK:
+                    return Ptr(p.obj, p.off + k)
+            return Ptr(UNK, UNK)
+
+        def finish(ret, optarg=None):
+            self._set_global("optind", st["optind"])
+            if optarg is not None:
+                self._set_global("optarg", optarg)
+            return ret
+
+        i = st["optind"]
+        if st["next"] == 0:
+            if i >= len(argv) or not argv[i].startswith("-") or argv[i] == "-":
+                return finish(-1)
+            if argv[i] == "--":
+                st["optind"] += 1
+                return finish(-1)
+            if argv[i].startswith("--") and name != "getopt" and len(vals) >= 4:
+                body = argv[i][2:]
+                key, _, inline = body.partition("=")
+                st["optind"] += 1
+                for has_arg, val, lname in self._long_options(vals[3]):
+                    if lname == key:
+                        if has_arg and not inline and has_arg == 1 and st["optind"] < len(argv):
+                            st["optind"] += 1
+                            return finish(val, arg_ptr(st["optind"] - 1))
+                        if inline:
+                            return finish(val, arg_ptr(i, 2 + len(key) + 1))
+                        return finish(val)
+                return finish(ord("?"))
+            st["next"] = 1
+        word = argv[i]
+        ch = word[st["next"]]
+        st["next"] += 1
+        spec = opts.lstrip(":+-")
+        pos = spec.find(ch)
+        takes = pos >= 0 and pos + 1 < len(spec) and spec[pos + 1] == ":"
+        if pos < 0 or ch == ":":
+            if st["next"] >= len(word):
+                st["optind"], st["next"] = i + 1, 0
+            return finish(ord("?"))
+        if takes:
+            if st["next"] < len(word):                                 # -sVALUE
+                optarg = arg_ptr(i, st["next"])
+                st["optind"], st["next"] = i + 1, 0
+                return finish(ord(ch), optarg)
+            st["optind"], st["next"] = i + 2, 0                        # -s VALUE
+            if i + 1 >= len(argv):
+                return finish(ord(":") if opts.startswith(":") else ord("?"))
+            return finish(ord(ch), arg_ptr(i + 1))
+        if st["next"] >= len(word):
+            st["optind"], st["next"] = i + 1, 0
+        return finish(ord(ch))
+
+    def _long_options(self, arr):
+        """The entries of a struct option array: (has_arg, val, name), to the terminating null name."""
+        out = []
+        if not (isinstance(arr, Ptr) and isinstance(arr.obj, Obj) and arr.off is not UNK):
+            return out
+        off = int(arr.off)
+        while off + 32 <= arr.obj.nbytes:
+            nm = self._ptr_load(Loc(arr.obj, off, 8))
+            text = self._text(nm)
+            if text is None:
+                text = getattr(nm.obj, "text", None) if isinstance(nm, Ptr) else None
+            if not text:
+                break
+            has_arg, val = _as_int(arr.obj.load(off + 8, 4)), _as_int(arr.obj.load(off + 24, 4))
+            out.append((has_arg if has_arg is not UNK else 1, val, text.split("\0")[0]))
+            off += 32
+        return out
+
+    def _set_global(self, name, value):
+        """Store into the program's global variable of that name (optarg, optind), declared now or when the program
+        first refers to it."""
+        self.__dict__.setdefault("_lib_globals", {})[name] = value
+        for k, entry in self.frames[0].vars.items():
+            if isinstance(k, tuple) and k and k[0] == name and isinstance(entry, list) and len(entry) == 2:
+                self._put_global(entry, value)
+                return
+
+    def _put_global(self, entry, value):
+        slot = entry[0]
+        if isinstance(slot, Loc) and isinstance(slot.obj, Obj) and slot.off is not UNK:
+            if isinstance(value, Ptr):
+                self._ptr_store(Loc(slot.obj, slot.off, 8), value)
+            else:
+                slot.obj.store(slot.off, value, slot.size or 4)
+        if not isinstance(entry[1], InMemory):
+            entry[1] = value
 
     @staticmethod
     def _text(v):
@@ -2461,6 +2636,18 @@ class CppInterpreter(Containers, Interpreter):
             return Interpreter._library(self, name, args_c)
         if name in FREE:
             return Interpreter._library(self, name, args_c)
+        if name == "bzero" and len(args_c) == 2:                       # memset(p, 0, n)
+            ptr, n = self.eval(args_c[0]), _as_int(self.eval(args_c[1]))
+            args = [ptr, 0, n]
+            if self.COPY_VALUES:
+                self._move_values("memset", args, n)
+            if isinstance(ptr, Ptr) and isinstance(ptr.obj, Obj) and np.ndim(ptr.off) == 0 and ptr.off is not UNK \
+                    and n is not UNK and np.ndim(n) == 0:
+                for off in range(int(ptr.off), int(ptr.off) + int(n), 8):
+                    self.access(Loc(ptr.obj, off, 8), write=True)
+            return UNK
+        if name in ("getopt", "getopt_long", "getopt_long_only") and len(args_c) >= 3:
+            return self._getopt(name, args_c)
         if not any(w in name for w in QUIET):                          # a library call not modelled: its result
             un = self.__dict__.setdefault("unmodelled", {})            # and effects are unknown
             un[name] = un.get(name, 0) + 1

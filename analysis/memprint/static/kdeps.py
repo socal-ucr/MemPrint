@@ -677,10 +677,21 @@ def write(out_dir, name, tracker):
     return ev_path, edge_path, rows
 
 
-def unity(sources, out):
-    """Several sources compiled as one translation unit (a file that includes them all)."""
+C_HEADERS = ("stdio.h", "stdlib.h", "string.h", "math.h", "unistd.h", "fcntl.h", "sys/types.h", "sys/stat.h")
+
+
+def unity(sources, out, c_headers=()):
+    """Several sources compiled as one translation unit (a file that includes them all). c_headers: the C sources
+    among them rewritten by kr2cpp, included with C linkage after the C library's headers (C calls library
+    functions it does not declare)."""
     with open(out, "w") as f:
+        if c_headers:
+            f.write("".join(f"#include <{h}>\n" for h in C_HEADERS))
+        converted = set(c_headers) if isinstance(c_headers, (set, list, tuple)) else set()
         for s in sources:
+            if s in converted:                                         # C: C linkage, as the CUDA files declare it
+                f.write(f'extern "C" {{\n#include "{os.path.abspath(s)}"\n}}\n')
+                continue
             f.write(f'#include "{os.path.abspath(s)}"\n')
     return out
 
@@ -709,7 +720,13 @@ def main(argv=None):
 
     sources = args.source.split(",")
     os.makedirs(args.out_dir, exist_ok=True)                       # the unity file goes there
-    source = sources[0] if len(sources) == 1 else unity(sources, os.path.join(args.out_dir, "unity.cu"))
+    from .kr2cpp import convert_files                                  # old C rewritten as C++, line for line
+    converted = convert_files(sources, os.path.join(args.out_dir, "kr2cpp"))
+    if converted:
+        args.includes = list(args.includes) + sorted({os.path.dirname(os.path.abspath(p)) for p in converted})
+        sources = [converted.get(p, p) for p in sources]
+    source = sources[0] if len(sources) == 1 and not converted else \
+        unity(sources, os.path.join(args.out_dir, "unity.cu"), c_headers=set(converted.values()))
     name = args.name or os.path.splitext(os.path.basename(sources[0]))[0]
     os.makedirs(args.out_dir, exist_ok=True)
     start = time.time()
