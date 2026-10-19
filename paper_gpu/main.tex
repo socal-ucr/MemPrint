@@ -342,9 +342,14 @@ A record has two further marks. The first says whether the access is only possib
 interpreter could not compute the access exactly. An address it could not compute covers the whole object it
 points into, and an access under a branch whose condition is unknown is recorded but marked as possible. An access
 through a pointer whose object is unknown is recorded as a possible access to every device buffer, and so is an
-access past the end (or before the start) of a device buffer. On the GPU such an access reaches whatever memory lies
-there, often the next buffer, which the interpreter cannot know; it reports where the access happens, because it is
-usually a bug in the program. The second mark says whether the access is data-dependent (\secref{sec:background}).
+access past the end (or before the start) of a device buffer, unless the interpreter knows where the GPU puts the
+buffers. On the GPU such an access reaches whatever memory lies there, often the next buffer. The hybrid interpreter
+can learn this: its stand-in runtime also allocates every buffer on the GPU through the driver, without running
+anything there, and the allocator gives it the address the program's own allocation would get, since it places
+buffers the same way for the same sequence of allocations and frees (in the traced runs, 220 of 240 consecutive
+allocations lie exactly where the previous one, rounded up to 512 bytes, ends). An access past the end of a buffer
+is then an access to the buffer that lies at that address, or to none. Either way the interpreter reports where
+the access happens, because it is usually a bug in the program. The second mark says whether the access is data-dependent (\secref{sec:background}).
 The interpreter decides this from the source code before the program runs, by marking every value that is loaded
 from memory, or computed from such a value, or assigned under a condition that is, and repeating until nothing
 changes. An access whose address or whose enclosing conditions use a marked value is data-dependent, and so is every
@@ -708,8 +713,9 @@ reports \numBenchHyCertTP{} as certain and \numBenchHyPossYes{} as possible. On 
 is exact: every dependence certain, every unit count equal to the GPU's, nothing reported that did not occur. The
 \numBenchHyPossNo{} possible dependences that the traced run did not have come from four programs. In \code{srad},
 two kernels read one row past the end of their input arrays (\code{srad\_kernel.cu} lines 45, 46, 55 and 200), which
-on the GPU reaches the next buffer; the interpreter reports the out-of-bounds reads and makes them possible accesses
-to every buffer. In GraphBIG's \code{bfs-topo-atomic}, \code{bfs-data-thread-centric} and \code{connected-comp},
+on the GPU reaches the next buffer; the interpreter reports the out-of-bounds reads and resolves them through the
+GPU's placement of the buffers (\secref{sec:events}), which leaves one possible dependence that did not occur,
+against four when they were possible accesses to every buffer. In GraphBIG's \code{bfs-topo-atomic}, \code{bfs-data-thread-centric} and \code{connected-comp},
 threads lower values in place or claim worklist slots with atomics, so the number of rounds or the units touched
 depend on thread order, and the over-approximation of \secref{sec:schedules} adds every dependence another order
 could produce. In \code{bfs-topo-atomic}, every round reads every level and lowers some with \code{atomicMin}, and
@@ -746,7 +752,8 @@ machine.
 \caption{Every benchmark. Ops is the number of operations in the traced run, GPU deps its dependences. Per
 interpreter: certain dependences (all of which the traced run has), possible dependences the run has (Poss.\ yes) and
 does not have (Poss.\ no), the run's dependences not reported (FN), and the interpreter's run time in seconds under
-four thread orders.}
+four thread orders (the hybrid interpreter's with block references recorded and the three orders after lockstep
+run at the same time).}
 \label{tab:benchmarks}
 \end{table*}
 
@@ -895,7 +902,13 @@ the earlier one if one writes a unit the other references and no operation in be
 interpreter refines a dependence it reports to blocks only where this is safe for other thread orders: the
 dependence is certain, neither operation referenced an object it could not place, each kernel's blocks referenced
 the same units under all four orders, and a write hides a unit from later operations only if every order makes it
-(\secref{sec:schedules}). Every other dependence makes every block of the later operation wait for the whole earlier
+(\secref{sec:schedules}). One exception is allowed for the units of a kernel whose blocks differ between orders
+only in which of them write. If every write to an object in the launch stores a value that is the same for every
+thread (the interpreter marks the stores whose value is made of literals and the kernel's scalar parameters only,
+such as \code{level[v] = curr + 1} or \code{*changed = true}), the unit ends the launch with that value whichever
+writer ran last. A later read then waits only for one block that read the unit under every order and wrote it in
+lockstep, which either wrote the value or found it written, and a later write for every block that wrote it under
+any order. Every other dependence makes every block of the later operation wait for the whole earlier
 operation. On the benchmarks, \numSimSmallRefined{} of the hybrid interpreter's dependences between operations were
 refined.
 
@@ -958,9 +971,9 @@ blocks pays only because blocks take different times. With every block of a kern
 of a kernel start and end together, and refining gains \numSimSmallEqBlkGain{} and \numSimLargeEqBlkGain{}; it can
 even lose, as in \code{\numSimLargeEqWorstName{}} on the large input (\numSimLargeEqWorst{} slower), where blocks of
 later kernels that may start early take SMs that blocks on the longest path then wait for. Where the traced
-dependences gain from blocks and the hybrid interpreter does not (\code{bfs-topo-atomic}, \code{bfs-topo-thread-centric},
-\code{srad}), the kernels' blocks reference different units under different orders, or reference memory past the
-end of a buffer, and the interpreter keeps the dependence between whole operations.
+dependences gain from blocks more than the hybrid interpreter's (\code{bfs-topo-atomic}, \code{bfs-topo-thread-centric}),
+the kernels' blocks reference different units under different orders, beyond what same-value writes explain, and
+the interpreter keeps the dependence between whole operations, or must wait for every block that may write.
 
 \begin{table*}[tbp]
 \centering
@@ -981,11 +994,20 @@ Recording blocks makes the interpreter \numCostSmallTimeMed{} times as slow in t
 The time goes into turning every reference into the blocks and units it touches; PolyBench's matrix kernels make
 a reference per thread in every iteration of their inner loop. The peak memory grows little (median
 \numCostLargeMemMed{} times on the large inputs, at most \numCostLargeMemMax{} times in
-\code{\numCostLargeMemMaxName{}}), because the interpreter merges a kernel's block references as they come. Refining to blocks afterwards takes \numCostSmallRefineShare{} and
+\code{\numCostLargeMemMaxName{}}), because the interpreter merges a kernel's block references as they come. In the four-order run the interpreter records blocks in the
+other orders only for the kernels they reorder, since the others run as in lockstep there, so recording costs less
+there: \numCostSmallOrdersMed{} and \numCostLargeOrdersMed{} times the four-order run without it in the median, at
+most \numCostLargeOrdersMax{}. The three orders after lockstep are independent and run at the same time, which
+makes the four-order run \numCostSmallParallel{} and \numCostLargeParallel{} times as fast as running them one after
+another. Refining to blocks afterwards takes \numCostSmallRefineShare{} and
 \numCostLargeRefineShare{} of the four-order run in the median and at most \numCostLargeRefineShareMax{}. What the
 interpreter hands on grows most: \numCostLargeOpDeps{} dependences between operations on the large inputs become
 \numCostLargeBlockDeps{} million between blocks, which a scheduler would have to keep and check; the simulator does
-not charge for that.
+not charge for that. Most of them follow a few shapes: every block on one block of the earlier operation, or block
+$b$ on blocks $b-1$ to $b+1$. Stored per pair of operations as ranges of source blocks, with runs of consecutive
+blocks whose ranges shift by a constant step kept as one record, they take \numCostSmallCompact{} and
+\numCostLargeCompact{} times fewer integers than as pairs, from 1.4 times for the triangular kernels of \code{lu}
+to 26 times for \code{gemm} on the small inputs.
 
 \paragraph{Merging block references as they come.} Our first implementation kept every reference a kernel
 made, with the blocks of the threads that made it and the bytes it touched, and turned them into (block, unit)
@@ -1004,7 +1026,9 @@ time does not fall (median \numDedupLargeKeptTimeMed{} and \numDedupLargeMergedT
 block references, largest \numDedupLargeKeptTimeMax{} and \numDedupLargeMergedTimeMax{}): it goes into turning every
 reference into pairs, which both do, and merging adds sorting. The two were measured on different days, eight
 programs at a time, so differences of a few tenths are within the noise. Skipping a reference that touches the
-same pairs as the previous one from the same statement would cut the time further; we have not done so.
+same blocks and bytes as the previous one from the same statement does not cut it either (the merged columns
+include it): such repeats are rare, because the bytes a statement touches change from one iteration of the
+inner loop to the next, and comparing costs about what it saves.
 
 \begin{table}[tbp]
 \centering
@@ -1038,10 +1062,14 @@ dependences between blocks, because which blocks write which levels depends on t
 these kernels is refined to blocks. The traced run's advantage is the outcome of its own races: we traced the
 program eight more times, and the dependences between blocks that hold in all of the first three runs give only
 1.01, close to the hybrid interpreter's. A checker that must be right for every order cannot do better than the
-union over all orders, so most of this gap is not one it can close. In \code{bfs-topo-thread-centric} (1.02
-against 1.05) the union over nine runs still gives 1.05: its threads all write the same level into a vertex they
-find unvisited, so a reader needs only one of the possible writers to have ended, which the interpreter does not
-exploit.
+union over all orders, so most of this gap is not one it can close. In \code{bfs-topo-thread-centric}
+(\numSimLargeTopoHyBlk{} against \numSimLargeTopoTrBlk{}) the union over nine runs still gives 1.05: its threads all
+write the same level into a vertex they find unvisited, so a reader needs only one of the possible writers to have
+ended. With the rule for same-value writes the interpreter refines every dependence of this program to blocks; what
+remains is the flag \code{changed}, which every block that may find an unvisited vertex may set, so each of them
+must wait for the copy that clears it. In \code{srad}, resolving the reads past the end of its arrays through the
+GPU's placement of the buffers lets the interpreter refine its dependences to blocks, and it reaches the traced
+dependences (\numSimLargeSradHyBlk{}).
 
 \clearpage
 \section{Related work}

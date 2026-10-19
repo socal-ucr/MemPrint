@@ -53,14 +53,14 @@ rodinia-srad,Rodinia,buffer,8,equal,4100,414.79,1.0,0,0.0,28,0
 rodinia-srad,Rodinia,buffer-rw,8,equal,4100,414.79,1.0,0,0.0,23,0
 rodinia-srad,Rodinia,hybrid,8,equal,4100,414.79,1.0,0,0.0,12,0
 rodinia-srad,Rodinia,truth,8,equal,4100,414.79,1.0,0,0.0,12,0
-rodinia-srad,Rodinia,hybrid-block,8,equal,4100,414.79,1.0,0,0.0,11,1
+rodinia-srad,Rodinia,hybrid-block,8,equal,4100,402.68,1.0301,0,0.0,1,20575
 rodinia-srad,Rodinia,truth-block,8,equal,4100,402.68,1.0301,0,0.0,0,21665
 graphbig-bfs-topo-thread-centric,GraphBIG,sequential,20,equal,62,502.24,1.0,0,0.0,19,0
 graphbig-bfs-topo-thread-centric,GraphBIG,buffer,20,equal,62,493.86,1.017,0,0.0,123,0
 graphbig-bfs-topo-thread-centric,GraphBIG,buffer-rw,20,equal,62,491.36,1.0221,0,0.0,112,0
 graphbig-bfs-topo-thread-centric,GraphBIG,hybrid,20,equal,62,491.36,1.0221,0,0.0,52,0
 graphbig-bfs-topo-thread-centric,GraphBIG,truth,20,equal,62,491.36,1.0221,0,0.0,52,0
-graphbig-bfs-topo-thread-centric,GraphBIG,hybrid-block,20,equal,62,491.36,1.0221,0,0.0,33,44
+graphbig-bfs-topo-thread-centric,GraphBIG,hybrid-block,20,equal,62,491.36,1.0221,0,0.0,0,860
 graphbig-bfs-topo-thread-centric,GraphBIG,truth-block,20,equal,62,491.36,1.0221,0,0.0,0,804
 graphbig-bfs-topo-atomic,GraphBIG,sequential,17,equal,52,1141.16,1.0,0,0.0,16,0
 graphbig-bfs-topo-atomic,GraphBIG,buffer,17,equal,52,1132.68,1.0075,0,0.0,81,0
@@ -88,7 +88,7 @@ graphbig-connected-comp,GraphBIG,buffer,76,equal,1091,465.38,1.277,0,0.0,1778,0
 graphbig-connected-comp,GraphBIG,buffer-rw,76,equal,1091,465.38,1.277,0,0.0,1676,0
 graphbig-connected-comp,GraphBIG,hybrid,76,equal,1091,466.69,1.2734,0,0.0,290,0
 graphbig-connected-comp,GraphBIG,truth,76,equal,1091,465.38,1.277,0,0.0,263,0
-graphbig-connected-comp,GraphBIG,hybrid-block,76,equal,1091,466.69,1.2734,0,0.0,272,109
+graphbig-connected-comp,GraphBIG,hybrid-block,76,equal,1091,466.69,1.2734,0,0.0,259,477
 graphbig-connected-comp,GraphBIG,truth-block,76,equal,1091,465.38,1.277,0,0.0,0,16861
 graphbig-kcore,GraphBIG,sequential,11,equal,32,120.16,1.0,0,0.0,10,0
 graphbig-kcore,GraphBIG,buffer,11,equal,32,103.07,1.1658,0,0.0,9,0
@@ -221,8 +221,8 @@ polybench-lu,PolyBench-GPU,buffer,514,equal,24387,1217.74,1.2414,0,0.0,73536,0
 polybench-lu,PolyBench-GPU,buffer-rw,514,equal,24387,1217.74,1.2414,0,0.0,73536,0
 polybench-lu,PolyBench-GPU,hybrid,514,equal,24387,850.63,1.7772,0,0.0,1276,0
 polybench-lu,PolyBench-GPU,truth,514,equal,24387,850.63,1.7772,0,0.0,1276,0
-polybench-lu,PolyBench-GPU,hybrid-block,514,equal,24387,857.99,1.7619,0,0.0,0,40840
-polybench-lu,PolyBench-GPU,truth-block,514,equal,24387,857.99,1.7619,0,0.0,0,40840
+polybench-lu,PolyBench-GPU,hybrid-block,514,equal,24387,854.85,1.7684,0,0.0,0,40840
+polybench-lu,PolyBench-GPU,truth-block,514,equal,24387,854.85,1.7684,0,0.0,0,40840
 polybench-mvt,PolyBench-GPU,sequential,9,equal,263,20256.79,1.0,0,0.0,8,0
 polybench-mvt,PolyBench-GPU,buffer,9,equal,263,20250.11,1.0003,0,0.0,11,0
 polybench-mvt,PolyBench-GPU,buffer-rw,9,equal,263,17697.26,1.1446,0,0.0,10,0

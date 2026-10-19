@@ -124,6 +124,13 @@ def cost_table():
         f"{d.blocks_rss_mb.max() / 1024:.1f}")
     row("Output, operations / blocks (MB, total)", lambda d: f"{d.ops_out_mb.sum():.1f} / {d.blocks_out_mb.sum():.0f}")
     lines.append(r"\midrule")
+    if all(d is not None and "orders_ops_s" in d for _, d in frames):
+        row("Four orders, operations (s, total)", lambda d: f"{d.orders_ops_s.sum():,.0f}")
+        row("Four orders, blocks (s, total)", lambda d: f"{d.orders_blocks_s.sum():,.0f}")
+        row("\\quad ratio, median / largest", lambda d: f"{(d.orders_blocks_s / d.orders_ops_s).median():.2f} / "
+            f"{(d.orders_blocks_s / d.orders_ops_s).max():.1f}")
+        row("\\quad orders one after another (s, total)", lambda d: f"{d.orders_blocks_serial_s.sum():,.0f}")
+        lines.append(r"\midrule")
     row("Refining to blocks (s, total)", lambda d: f"{d.refine_s.sum():.0f}")
     row("\\quad share of the four-order run, median / largest",
         lambda d: f"{100 * (d.refine_s / d.hybrid_all_s).median():.1f}\\% / "
@@ -131,6 +138,8 @@ def cost_table():
     row("Dependences between operations", lambda d: f"{int(d.op_deps.sum()):,}")
     row("Dependences between blocks", lambda d: f"{int(d.block_deps.sum()):,}")
     row("\\quad and between whole operations", lambda d: f"{int(d.whole_deps.sum()):,}")
+    if all(d is not None and "block_ints" in d for _, d in frames):
+        row("\\quad stored as ranges and runs (integers)", lambda d: f"{int(d.block_ints.sum()):,}")
     head = (r"\begin{tabular}{lrr}" "\n" r"\toprule" "\n" r" & Small inputs & Large inputs \\" "\n" r"\midrule" "\n")
     write("block_cost.tex", head + "\n".join(lines) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
@@ -247,6 +256,12 @@ def numbers():
         n[f"Cost{K}OpDeps"] = f"{int(d.op_deps.sum()):,}".replace(",", "{,}")
         n[f"Cost{K}BlockDeps"] = f"{d.block_deps.sum() / 1e6:.1f}"
         n[f"Cost{K}OutMB"] = f"{d.blocks_out_mb.sum():.0f}"
+        if "orders_ops_s" in d:
+            n[f"Cost{K}OrdersMed"] = f"{(d.orders_blocks_s / d.orders_ops_s).median():.2f}"
+            n[f"Cost{K}OrdersMax"] = f"{(d.orders_blocks_s / d.orders_ops_s).max():.1f}"
+            n[f"Cost{K}Parallel"] = f"{d.orders_blocks_serial_s.sum() / d.orders_blocks_s.sum():.1f}"
+        if "block_ints" in d:
+            n[f"Cost{K}Compact"] = f"{2 * d.block_deps.sum() / d.block_ints.sum():.1f}"
     for k, a, b in DEDUP:
         before, after = load(a), load(b)
         if before is None or after is None:

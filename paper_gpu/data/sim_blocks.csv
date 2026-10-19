@@ -61,7 +61,7 @@ rodinia-srad,Rodinia,buffer-rw,8,work,68,35.65,1.0,0,0.0,23,0
 rodinia-srad,Rodinia,hybrid,8,work,68,35.65,1.0,0,0.0,12,0
 rodinia-srad,Rodinia,full,8,work,68,35.65,1.0,0,0.0,12,0
 rodinia-srad,Rodinia,truth,8,work,68,35.65,1.0,0,0.0,12,0
-rodinia-srad,Rodinia,hybrid-block,8,work,68,35.65,1.0,0,0.0,11,1
+rodinia-srad,Rodinia,hybrid-block,8,work,68,35.65,1.0,0,0.0,1,331
 rodinia-srad,Rodinia,truth-block,8,work,68,35.65,1.0,0,0.0,0,357
 graphbig-bfs-topo-thread-centric,GraphBIG,sequential,20,work,20,165.66,1.0,0,0.0,19,0
 graphbig-bfs-topo-thread-centric,GraphBIG,buffer,20,work,20,158.02,1.0484,0,0.0,123,0
@@ -205,8 +205,8 @@ polybench-fdtd-2d,PolyBench-GPU,buffer-rw,35,work,7685,214.25,1.0046,0,0.0,426,0
 polybench-fdtd-2d,PolyBench-GPU,hybrid,35,work,7685,214.25,1.0046,0,0.0,110,0
 polybench-fdtd-2d,PolyBench-GPU,full,35,work,7685,214.25,1.0046,0,0.0,110,0
 polybench-fdtd-2d,PolyBench-GPU,truth,35,work,7685,214.25,1.0046,0,0.0,110,0
-polybench-fdtd-2d,PolyBench-GPU,hybrid-block,35,work,7685,181.6,1.1852,0,0.0,0,28247
-polybench-fdtd-2d,PolyBench-GPU,truth-block,35,work,7685,181.6,1.1852,0,0.0,0,28247
+polybench-fdtd-2d,PolyBench-GPU,hybrid-block,35,work,7685,181.63,1.185,0,0.0,0,28247
+polybench-fdtd-2d,PolyBench-GPU,truth-block,35,work,7685,181.63,1.185,0,0.0,0,28247
 polybench-gemm,PolyBench-GPU,sequential,5,work,68,77.47,1.0,0,0.0,4,0
 polybench-gemm,PolyBench-GPU,buffer,5,work,68,77.47,1.0,0,0.0,5,0
 polybench-gemm,PolyBench-GPU,buffer-rw,5,work,68,77.47,1.0,0,0.0,5,0

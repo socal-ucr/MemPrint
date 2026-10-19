@@ -13,8 +13,8 @@ rodinia-gaussian,Rodinia,buffer-rw,132,equal,16197,423.84,1.01,0,0.0,8382,0
 rodinia-gaussian,Rodinia,hybrid,132,equal,16197,423.84,1.01,0,0.0,445,0
 rodinia-gaussian,Rodinia,full,132,equal,16197,423.84,1.01,0,0.0,445,0
 rodinia-gaussian,Rodinia,truth,132,equal,16197,423.84,1.01,0,0.0,445,0
-rodinia-gaussian,Rodinia,hybrid-block,132,equal,16197,427.33,1.0018,0,0.0,0,43770
-rodinia-gaussian,Rodinia,truth-block,132,equal,16197,427.33,1.0018,0,0.0,0,38465
+rodinia-gaussian,Rodinia,hybrid-block,132,equal,16197,427.27,1.0019,0,0.0,0,43770
+rodinia-gaussian,Rodinia,truth-block,132,equal,16197,427.27,1.0019,0,0.0,0,38465
 rodinia-nw,Rodinia,sequential,18,equal,67,152.13,1.0,0,0.0,17,0
 rodinia-nw,Rodinia,buffer,18,equal,67,152.13,1.0,0,0.0,151,0
 rodinia-nw,Rodinia,buffer-rw,18,equal,67,152.13,1.0,0,0.0,151,0
@@ -61,7 +61,7 @@ rodinia-srad,Rodinia,buffer-rw,8,equal,68,35.65,1.0,0,0.0,23,0
 rodinia-srad,Rodinia,hybrid,8,equal,68,35.65,1.0,0,0.0,12,0
 rodinia-srad,Rodinia,full,8,equal,68,35.65,1.0,0,0.0,12,0
 rodinia-srad,Rodinia,truth,8,equal,68,35.65,1.0,0,0.0,12,0
-rodinia-srad,Rodinia,hybrid-block,8,equal,68,35.65,1.0,0,0.0,11,1
+rodinia-srad,Rodinia,hybrid-block,8,equal,68,35.65,1.0,0,0.0,1,331
 rodinia-srad,Rodinia,truth-block,8,equal,68,35.65,1.0,0,0.0,0,357
 graphbig-bfs-topo-thread-centric,GraphBIG,sequential,20,equal,20,165.66,1.0,0,0.0,19,0
 graphbig-bfs-topo-thread-centric,GraphBIG,buffer,20,equal,20,158.02,1.0484,0,0.0,123,0
