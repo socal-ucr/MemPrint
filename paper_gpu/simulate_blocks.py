@@ -103,15 +103,20 @@ def interp_blocks(hdir, name, schedule):
     alloc = {r["name"]: int(r["alloc"]) for r in csv.DictReader(open(sub / f"{name}_objects.csv")) if r["alloc"]}
     z = np.load(path)
     acc = {int(e): None for e in z["unknown"]}
+    for e in (z["same"] if "same" in z.files else ()):
+        acc[int(e)] = "same"                                           # run as in lockstep there
+    uniform = {}
     for k in z.files:
         if not k.endswith("/block"):
             continue
         e, obj, _ = k.split("/")
-        if obj not in alloc or acc.get(int(e), {}) is None:
+        if obj not in alloc or acc.get(int(e), {}) is None or acc.get(int(e)) == "same":
             continue
         acc.setdefault(int(e), {})[alloc[obj]] = (z[k].astype(np.int64), z[f"{e}/{obj}/unit"].astype(np.int64),
                                                   z[f"{e}/{obj}/bits"])
-    return events, acc
+        if f"{e}/{obj}/uniform" in z.files and int(z[f"{e}/{obj}/uniform"]):
+            uniform.setdefault(int(e), set()).add(alloc[obj])
+    return events, acc, uniform
 
 
 # ---------------------------------------------------------------- folding blocks into dependences
@@ -120,12 +125,15 @@ def _incidence(b, u, nblocks, nunits):
     return sp.csr_matrix((np.ones(len(b), dtype=np.int32), (b, u)), shape=(nblocks, nunits))
 
 
-def fold(n_events, acc, pairs, kills, nb):
+def fold(n_events, acc, pairs, kills, nb, raw_writers=None):
     """Dependences between blocks: {dst event: {dst block: {(src event, src block)}}}, for the pairs of
     operations that depend on each other (pairs: {dst: {src}}). acc: per event {alloc: (blocks, units, bits)},
     bits R/W or RM/WM (possible); kills(event, bits): whether a certain write hides the unit's earlier
     writers and readers from later events. Block sb of s and block db of d depend on each other if one
-    writes a unit the other references and no event between them hid the unit."""
+    writes a unit the other references and no event between them hid the unit. raw_writers: {event: {alloc:
+    (blocks, units)}}: for a read of such a unit, the blocks of that event a reader must wait for, in place of
+    all its writers (same-value writes, hybrid_block)."""
+    raw_writers = raw_writers or {}
     lastkill = {}                                                      # alloc -> per unit, the last event
     edges = {}                                                         # that hid it
     width = {}
@@ -149,12 +157,17 @@ def fold(n_events, acc, pairs, kills, nb):
                 s_w = live & ((sv & (W | WM)) != 0)
                 s_r = live & ((sv & (R | RM)) != 0)
                 d_w = (dv & (W | WM)) != 0
-                d_any = d_w | ((dv & (R | RM)) != 0)
+                d_r = (dv & (R | RM)) != 0
+                raw_b, raw_u = sb[s_w], su[s_w]                        # whom a read waits for
+                if a in raw_writers.get(s, {}):
+                    rb, ru = raw_writers[s][a]
+                    keep = lastkill[a][ru] <= s
+                    raw_b, raw_u = rb[keep], ru[keep]
                 got = None
-                for xs, xd in ((s_w, d_any), (s_r, d_w)):
-                    if not xs.any() or not xd.any():
+                for (xb, xu), xd in (((raw_b, raw_u), d_r), ((sb[s_w], su[s_w]), d_w), ((sb[s_r], su[s_r]), d_w)):
+                    if not len(xb) or not xd.any():
                         continue
-                    m = _incidence(sb[xs], su[xs], nb[s], n) @ _incidence(db[xd], du[xd], nb[d], n).T
+                    m = _incidence(xb, xu, nb[s], n) @ _incidence(db[xd], du[xd], nb[d], n).T
                     got = m if got is None else got + m
                 if got is not None:
                     got = got.tocoo()
@@ -201,9 +214,15 @@ def _union_acc(a, b):
 
 
 def hybrid_block(name, w, truth_events, nb_truth, mode="safe"):
-    """The hybrid interpreter's dependences, refined to blocks where safe (module docstring). mode="union"
-    (an experiment, not safe): refine every dependence between events every schedule issued, on the union of
-    what each block referenced under the four schedules, whether certain or not."""
+    """The hybrid interpreter's dependences, refined to blocks where safe (module docstring).
+
+    A kernel launch is refined if its blocks referenced the same units under all four schedules, or if they
+    differ only in writes to objects all of whose writes in the launch stored a value that is the same for every
+    thread (UV: a level, a flag): the units such a launch writes end it with that value whichever writer ran last,
+    so a later read waits only for one block that read the unit in every schedule and wrote it in lockstep
+    (it either wrote the value or found it written), and a later write for every block that wrote it in any
+    schedule. mode="union" (an experiment, not safe): refine every dependence between events every schedule
+    issued, on the union of what each block referenced under the four schedules, whether certain or not."""
     hdir = w / "hybrid"
     runs = [interp_blocks(hdir, name, s) for s in SCHEDULES]
     if any(r is None for r in runs):
@@ -211,35 +230,56 @@ def hybrid_block(name, w, truth_events, nb_truth, mode="safe"):
     ie, iedges = ks.interp_edges(hdir, name)
     m = ks.truth_map(ie, truth_events)
     inv = {v: k for k, v in m.items()}                                  # interpreter index -> run index
-    base_events, base_acc = runs[0]
+    base_events, base_acc, base_uniform = runs[0]
     sig = [(e["kind"], e["name"]) for e in base_events]
-    stable = {}
-    for i, e in enumerate(base_events):
-        stable[i] = e["kind"] != "kernel" or base_acc.get(i, {}) is not None
-    union = {i: v for i, v in base_acc.items() if v is not None}
-    for events, acc in runs[1:]:
+    others = {}                                                        # base index -> [its refs in each other run]
+    for events, acc, uniform in runs[1:]:
         mp = align_ends([(e["kind"], e["name"]) for e in events], sig)    # their index -> base index
         back = {v: k for k, v in mp.items()}
         for i, e in enumerate(base_events):
             if e["kind"] != "kernel":
                 continue
             j = back.get(i)
-            other = acc.get(j, {}) if j is not None else None
-            if mode == "union":
-                if other is None or i not in union:
-                    stable[i] = False
-                    union.pop(i, None)
-                else:
-                    union[i] = _union_acc(union[i], other)
-                continue
-            if not stable[i]:
-                continue
-            stable[i] = other is not None and _same_acc(base_acc.get(i, {}), other)
+            ref = acc.get(j, {}) if j is not None else None
+            if ref == "same":
+                ref = base_acc.get(i, {})
+            others.setdefault(i, []).append((ref, uniform.get(j, set()) if j is not None else set()))
+    stable, union, raw_writers = {}, {}, {}
+    for i, e in enumerate(base_events):
+        if e["kind"] != "kernel":
+            stable[i] = True
+            continue
+        mine = base_acc.get(i, {})
+        refs = others.get(i, [])
+        if mine is None or any(r is None for r, _ in refs):
+            stable[i] = False
+            continue
+        if mode == "union":
+            u = mine
+            for r, _ in refs:
+                u = _union_acc(u, r)
+            stable[i], union[i] = True, u
+            continue
+        if all(_same_acc(mine, r) for r, _ in refs):
+            stable[i] = True
+            continue
+        same_value = set(base_uniform.get(i, set()))                   # objects written only with same values,
+        for _, uni in refs:                                            # in every schedule
+            same_value &= uni
+        ok = all(_same_acc(mine, r, writes_of=same_value) for r, _ in refs)
+        stable[i] = ok
+        if ok:
+            u = mine
+            for r, _ in refs:
+                u = _union_acc(u, r)
+            union[i] = u
+            raw_writers[i] = {a: _designated(mine, [r for r, _ in refs], a) for a in same_value if a in mine}
     certain = {}
     for (s, d, _, _), (must, may, _) in iedges.items():
         certain[(s, d)] = certain.get((s, d), True) and must > 0 and may == 0
     # copies and memsets of the interpreter's run, as block 0 (its access file is the lockstep run's)
-    acc = union if mode == "union" else {i: v for i, v in base_acc.items() if v is not None}
+    acc = {i: v for i, v in base_acc.items() if v is not None and v != "same"}
+    acc.update(union)
     path = hdir / f"{name}_access.csv"
     if path.exists():
         for i, d in _ranges(path, False).items():
@@ -255,7 +295,7 @@ def hybrid_block(name, w, truth_events, nb_truth, mode="safe"):
             want.setdefault(di, set()).add(si)
     nb_i = [nb_truth[inv[i]] if i in inv else 1 for i in range(len(base_events))]
     pred_spec = fold(len(base_events), acc, want,
-                     lambda d, bits: base_events[d]["kind"] != "kernel" or bool(bits & WX), nb_i)
+                     lambda d, bits: base_events[d]["kind"] != "kernel" or bool(bits & WX), nb_i, raw_writers)
     whole = {e: set() for e in range(n)}
     spec = {}
     for s, d in kernel_pairs:
@@ -277,11 +317,43 @@ def hybrid_block(name, w, truth_events, nb_truth, mode="safe"):
     return whole, spec
 
 
-def _same_acc(a, b):
+def _designated(mine, refs, a):
+    """For each unit of object a the launch wrote in some schedule, the one block a later read waits for: the
+    lowest block that wrote it in lockstep (mine) and read it there (and, the reads being the same, in every
+    schedule); units without such a block keep all their writers. (blocks, units)."""
+    b, u, v = mine[a][:3]
+    rd = (v & (R | RM)) != 0
+    wr = (v & (W | WM)) != 0
+    both = rd & wr
+    designated = {}
+    for x, y in zip(u[both].tolist(), b[both].tolist()):
+        if x not in designated or y < designated[x]:
+            designated[x] = y
+    writers = {}                                                       # every writer in any schedule
+    for r in [mine] + refs:
+        if a not in r:
+            continue
+        bb, uu, vv = r[a][:3]
+        w = (vv & (W | WM)) != 0
+        for x, y in zip(uu[w].tolist(), bb[w].tolist()):
+            writers.setdefault(x, set()).add(y)
+    out_b, out_u = [], []
+    for x, ys in writers.items():
+        for y in ([designated[x]] if x in designated else sorted(ys)):
+            out_b.append(y)
+            out_u.append(x)
+    return np.array(out_b, dtype=np.int64), np.array(out_u, dtype=np.int64)
+
+
+def _same_acc(a, b, writes_of=()):
+    """Whether two runs' references of a launch are the same; for the objects in writes_of, only the reads."""
     if a.keys() != b.keys():
         return False
     for k in a:
         x, y = a[k], b[k]
+        if k in writes_of:
+            rx, ry = (x[2] & (R | RM)) != 0, (y[2] & (R | RM)) != 0
+            x, y = (x[0][rx], x[1][rx], x[2][rx] & (R | RM)), (y[0][ry], y[1][ry], y[2][ry] & (R | RM))
         if len(x[0]) != len(y[0]):
             return False
         ox, oy = np.lexsort((x[0], x[1])), np.lexsort((y[0], y[1]))
@@ -289,6 +361,56 @@ def _same_acc(a, b):
                 and np.array_equal(x[2][ox] & (R | W | RM | WM), y[2][oy] & (R | W | RM | WM))):
             return False
     return True
+
+
+# ---------------------------------------------------------------- storing them compactly
+
+def compact(spec):
+    """Dependences between blocks ({dst event: {dst block: {(src event, src block)}}}) stored compactly: per pair
+    of events, each dst block's source blocks as ranges, and runs of consecutive dst blocks whose ranges are the
+    same shifted by a constant step per block (block b on blocks b-1 to b+1; every block on one block) as one
+    record (first dst block, last, step, ranges), or as plain (dst, src) pairs where those take less. Returns
+    (records, integers stored, pairs)."""
+    records = ints = pairs = 0
+
+    def close(run):
+        nonlocal records, ints
+        if run is None:
+            return
+        cost = 3 + 2 * len(run[2])
+        if cost < 2 * run[3]:
+            records += 1
+            ints += cost
+        else:
+            records += run[3]
+            ints += 2 * run[3]
+
+    for d, per in spec.items():
+        by_src = {}
+        for db, srcs in per.items():
+            for s_, sb in srcs:
+                by_src.setdefault(s_, {}).setdefault(db, []).append(sb)
+        for s_, rows in by_src.items():
+            run = None                                                 # (last db, step, ranges, pairs in run)
+            for db in sorted(rows):
+                bs = sorted(set(rows[db]))
+                pairs += len(bs)
+                rng, lo = [], bs[0]
+                for x, y in zip(bs, bs[1:] + [None]):
+                    if y != x + 1:
+                        rng.append((lo, x))
+                        lo = y
+                rng = tuple(rng)
+                if run is not None and db == run[0] + 1 and len(rng) == len(run[2]):
+                    step = rng[0][0] - run[2][0][0]
+                    if (run[1] is None or step == run[1]) and \
+                            all(a0 - b0 == step and a1 - b1 == step for (a0, a1), (b0, b1) in zip(rng, run[2])):
+                        run = (db, step, rng, run[3] + len(bs))
+                        continue
+                close(run)
+                run = (db, None, rng, len(bs))
+            close(run)
+    return records, ints, pairs
 
 
 # ---------------------------------------------------------------- the GPU, block by block

@@ -418,10 +418,21 @@ class HybridInterpreter(ic.CudaInterpreter):
         self.objects.append(obj)
         self.live.append((ptr, ptr + nbytes, obj))
         self.live.sort(key=lambda e: e[0])
+        dev = self.shim.kdeps_device_address(ctypes.c_void_p(ptr)) if getattr(self, "shim", None) else 0
+        if dev:                                                        # KDEPS_DEVICE_LAYOUT: where the GPU puts it
+            obj.dev_addr = int(dev)
+            self.device_layout.append((obj.dev_addr, obj.dev_addr + nbytes, obj))
+            self.device_layout.sort(key=lambda e: e[0])
         self.tracker.register(obj)
 
+    def layout_complete(self):
+        return bool(self.device_layout) and len(self.device_layout) == sum(
+            1 for e in self.live if e[2].kind in ("device", "managed"))
+
     def on_free(self, ptr):
+        gone = {id(e[2]) for e in self.live if e[0] == ptr}
         self.live = [e for e in self.live if e[0] != ptr]
+        self.device_layout = [e for e in self.device_layout if id(e[2]) not in gone]
 
     def _range(self, ptr, n):
         idx, ok = self._find_alloc(np.array([ptr]))
@@ -523,6 +534,11 @@ def main(argv=None):
     ap.add_argument("-I", dest="includes", action="append", default=[])
     ap.add_argument("--unit", type=int, default=4)
     ap.add_argument("--access", action="store_true")
+    ap.add_argument("--serial-orders", action="store_true",
+                    help="with --schedules, run the schedules after lockstep one after another, not at the same time")
+    ap.add_argument("--device-layout", action="store_true",
+                    help="also allocate every buffer on the GPU (nothing runs there), so that a reference past the end of "
+                    "a buffer reaches the buffer that lies there on the GPU (KDEPS_DEVICE_LAYOUT)")
     ap.add_argument("--blocks", action="store_true", help="also write NAME_blocks.npz: which block of each kernel "
                     "referenced which unit (per schedule, in OUT_DIR/schedule_*/ with --schedules)")
     ap.add_argument("--schedule", default="lockstep", choices=ic.SCHEDULES)
@@ -551,6 +567,8 @@ def main(argv=None):
     for e in errors[:20]:
         print("parse error:", e, file=sys.stderr)
     it = HybridInterpreter(tu, seed=args.seed, unit=args.unit, keep_access=args.access, schedule=args.schedule)
+    if args.device_layout:
+        os.environ["KDEPS_DEVICE_LAYOUT"] = "1"                        # read by the stand-in runtime's first cudaMalloc
     if args.blocks:
         it.tracker.keep_blocks()
         it.record_blocks = True
@@ -588,7 +606,11 @@ def main(argv=None):
               f"{it.launches} launches, {unknown} unknown stores, {len(it.failures)} failures, "
               f"{time.time() - start:.1f} s", flush=True)
         print(f"  {ev_path}\n  {edge_path}", flush=True)
-        if it.oob:
+        if it.oob and it.layout_complete():
+            print(f"  {len(it.oob)} places reference past the end of a device buffer: "
+                  f"{getattr(it, 'oob_landed', 0)} references land in another buffer where the GPU allocator puts "
+                  f"them, {getattr(it, 'oob_nowhere', 0)} in no buffer", flush=True)
+        elif it.oob:
             print(f"  {len(it.oob)} places reference past the end of a device buffer (possible references to every "
                   f"buffer): " + ", ".join(f"{k} x{v}" for k, v in sorted(it.oob.items(), key=lambda kv: -kv[1])[:5]),
                   flush=True)
@@ -610,6 +632,8 @@ def main(argv=None):
         ALLOC(guarded(it.on_alloc)), FREE(guarded(it.on_free)), COPY(guarded(it.on_copy)), SET(guarded(it.on_set)),
         FIN(guarded(finish)))
     shim.kdeps_set_callbacks(*callbacks)
+    shim.kdeps_device_address.restype = ctypes.c_ulonglong
+    shim.kdeps_device_address.argtypes = [ctypes.c_void_p]
     shim.kdeps_last_site.restype = ctypes.c_size_t
     shim.kdeps_last_site.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
     it.shim = shim
@@ -662,18 +686,28 @@ def _several(args, argv):
     trackers, failures, counts, racy, oob = [], 0, [], None, {}
     order = args.schedules.split(",")
     order = [s for s in order if s == "lockstep"] + [s for s in order if s != "lockstep"]   # lockstep first
-    for schedule in order:
+    pkg = os.path.abspath(os.path.join(HERE, "..", ".."))               # the program runs where we were started
+    env = dict(os.environ, PYTHONPATH=pkg + os.pathsep + os.environ.get("PYTHONPATH", ""))
+
+    def launch(schedule):
         sub = os.path.join(args.out_dir, f"schedule_{schedule}")
-        dump = os.path.join(sub, "run.pkl")
         os.makedirs(sub, exist_ok=True)
+        dump = os.path.join(sub, "run.pkl")
         cmd = [sys.executable, "-m", "memprint.static.hybrid", rest[0], sub, *opts, "--so", so,
                "--schedule", schedule, "--dump", dump, *(["--racy", ",".join(racy)] if racy is not None else []),
                *prog_argv]
-        pkg = os.path.abspath(os.path.join(HERE, "..", ".."))           # the program runs where we were started
-        env = dict(os.environ, PYTHONPATH=pkg + os.pathsep + os.environ.get("PYTHONPATH", ""))
-        done = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        logs = (open(os.path.join(sub, "run.out"), "w+"), open(os.path.join(sub, "run.err"), "w+"))
+        return schedule, sub, dump, subprocess.Popen(cmd, stdout=logs[0], stderr=logs[1], text=True, env=env), logs
+
+    def collect(job):
+        nonlocal failures, racy
+        schedule, sub, dump, proc, logs = job
+        proc.wait()
+        out, err = [(f.seek(0), f.read(), f.close())[1] for f in logs]
+        for f in ("run.out", "run.err"):
+            os.remove(os.path.join(sub, f))
         if not os.path.exists(dump):
-            raise SystemExit(f"{name}: the run under schedule {schedule} failed:\n{done.stdout}{done.stderr}")
+            raise SystemExit(f"{name}: the run under schedule {schedule} failed:\n{out}{err}")
         with open(dump, "rb") as f:
             d = pickle.load(f)
         os.remove(dump)                                    # large (every event's units); merged below
@@ -690,8 +724,21 @@ def _several(args, argv):
         for k, v in d.get("oob", {}).items():
             oob[k] = max(oob.get(k, 0), v)
         if d["failures"]:                                  # the run's own report of what failed
-            print(f"{name}: schedule {schedule}: {d['failures']} failures:\n{done.stderr[-3000:]}", file=sys.stderr)
+            print(f"{name}: schedule {schedule}: {d['failures']} failures:\n{err[-3000:]}", file=sys.stderr)
         counts.append(f"{schedule} {len(t.events)}")
+
+    # lockstep first (it finds the kernels the other schedules reorder), then the others at the same time
+    first = [s for s in order if s == "lockstep"]
+    for schedule in first:
+        collect(launch(schedule))
+    if args.serial_orders:
+        for schedule in order:
+            if schedule not in first:
+                collect(launch(schedule))
+    else:
+        jobs = [launch(schedule) for schedule in order if schedule not in first]
+        for job in jobs:
+            collect(job)
     matched = merge_schedules(trackers)
     ev_path, edge_path, rows = write(args.out_dir, name, trackers[0])
     if oob:

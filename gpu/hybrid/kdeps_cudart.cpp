@@ -165,11 +165,61 @@ extern "C" cudaError_t CUDARTAPI __cudaLaunchKernel_ptsz(cudaKernel_t kernel, di
 
 /* ------------------------------------------------------------------ memory */
 
+/* KDEPS_DEVICE_LAYOUT=1: also allocate each buffer on the GPU through the driver (nothing runs there), so that
+ * its device address is the one the program's own allocation would get: the allocator places buffers the same
+ * way for the same sequence of allocations and frees. A reference past the end of a buffer then reaches what
+ * lies there on the GPU (kdeps_device_address). */
+typedef int (*cu_init_t)(unsigned);
+typedef int (*cu_dev_get_t)(int *, int);
+typedef int (*cu_ctx_retain_t)(void **, int);
+typedef int (*cu_ctx_set_t)(void *);
+typedef int (*cu_alloc_t)(unsigned long long *, size_t);
+typedef int (*cu_alloc_managed_t)(unsigned long long *, size_t, unsigned);
+typedef int (*cu_free_t)(unsigned long long);
+static int layout_state = -1;  /* -1 not tried, 0 off, 1 on */
+static cu_alloc_t cu_alloc;
+static cu_alloc_managed_t cu_alloc_managed;
+static cu_free_t cu_free;
+static std::map<const char *, unsigned long long> device_address;
+
+static bool layout_on() {
+    if (layout_state >= 0) return layout_state == 1;
+    layout_state = 0;
+    const char *e = getenv("KDEPS_DEVICE_LAYOUT");
+    if (!e || !atoi(e)) return false;
+    void *cuda = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!cuda) return false;
+    cu_init_t init = (cu_init_t)dlsym(cuda, "cuInit");
+    cu_dev_get_t dev_get = (cu_dev_get_t)dlsym(cuda, "cuDeviceGet");
+    cu_ctx_retain_t retain = (cu_ctx_retain_t)dlsym(cuda, "cuDevicePrimaryCtxRetain");
+    cu_ctx_set_t set = (cu_ctx_set_t)dlsym(cuda, "cuCtxSetCurrent");
+    cu_alloc = (cu_alloc_t)dlsym(cuda, "cuMemAlloc_v2");
+    cu_alloc_managed = (cu_alloc_managed_t)dlsym(cuda, "cuMemAllocManaged");
+    cu_free = (cu_free_t)dlsym(cuda, "cuMemFree_v2");
+    int dev = 0;
+    void *ctx = nullptr;
+    if (!init || !dev_get || !retain || !set || !cu_alloc || !cu_free || init(0) || dev_get(&dev, 0) ||
+        retain(&ctx, dev) || set(ctx))
+        return false;
+    layout_state = 1;
+    return true;
+}
+
+extern "C" unsigned long long kdeps_device_address(void *p) {
+    auto it = device_address.find((const char *)p);
+    return it == device_address.end() ? 0 : it->second;
+}
+
 static cudaError_t device_alloc(void **ptr, size_t size, int kind) {
     void *p = calloc(size ? size : 1, 1);   /* zeroed, so that a run does not depend on malloc's garbage */
     if (!p) return cudaErrorMemoryAllocation;
     allocs[(const char *)p] = size;
     *ptr = p;
+    if (layout_on()) {
+        unsigned long long d = 0;
+        int rc = kind && cu_alloc_managed ? cu_alloc_managed(&d, size ? size : 1, 1) : cu_alloc(&d, size ? size : 1);
+        if (rc == 0) device_address[(const char *)p] = d;
+    }
     if (alloc_cb) alloc_cb(p, size, kind);
     return cudaSuccess;
 }
@@ -184,6 +234,11 @@ cudaError_t CUDARTAPI cudaFree(void *devPtr) {
     if (!devPtr) return cudaSuccess;
     if (free_cb) free_cb(devPtr);
     allocs.erase((const char *)devPtr);
+    auto d = device_address.find((const char *)devPtr);
+    if (d != device_address.end()) {
+        cu_free(d->second);
+        device_address.erase(d);
+    }
     free(devPtr);
     return cudaSuccess;
 }

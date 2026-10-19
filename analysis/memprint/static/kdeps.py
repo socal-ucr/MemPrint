@@ -87,7 +87,7 @@ class Tracker:
         for obj, refs in ev.block_marks.items():                       # interp_cuda.BlockRefs
             self._object(obj)
             b, u, bits = refs.rows()
-            out[self.objects[obj]["name"]] = (b, u, bits)
+            out[self.objects[obj]["name"]] = (b, u, bits, refs.uniform)
         return out
 
     def keep_access(self):
@@ -141,7 +141,8 @@ class Tracker:
 
     def add(self, ev):
         if self.blocks is not None and ev.kind == "kernel":
-            self.blocks[ev.index] = None if ev.block_unknown or ev.block_marks is None else self._block_rows(ev)
+            self.blocks[ev.index] = "same" if ev.block_same else \
+                None if ev.block_unknown or ev.block_marks is None else self._block_rows(ev)
             ev.block_marks = None
         self.events.append({"index": ev.index, "kind": ev.kind, "name": ev.name, "site": ev.site,
                             "grid": "x".join(map(str, ev.grid)) if ev.grid else "",
@@ -594,10 +595,14 @@ def reduce_edges(pairs):
 def write(out_dir, name, tracker):
     os.makedirs(out_dir, exist_ok=True)
     if tracker.blocks is not None:                                     # NAME_blocks.npz: per kernel event and
-        arrays = {"unknown": np.array([e for e, v in tracker.blocks.items() if v is None], dtype=np.int64)}
+        arrays = {"unknown": np.array([e for e, v in tracker.blocks.items() if v is None], dtype=np.int64),
+                  "same": np.array([e for e, v in tracker.blocks.items() if v == "same"], dtype=np.int64)}
         for e, objs in tracker.blocks.items():                         # object, which block referenced which
-            for obj, (b, u, bits) in (objs or {}).items():             # unit, with the event's bits
+            if objs == "same":                                         # (same: as in the lockstep run)
+                continue
+            for obj, (b, u, bits, uniform) in (objs or {}).items():    # unit, with the event's bits, and whether
                 arrays[f"{e}/{obj}/block"], arrays[f"{e}/{obj}/unit"], arrays[f"{e}/{obj}/bits"] = b, u, bits
+                arrays[f"{e}/{obj}/uniform"] = np.array(int(uniform))   # every write stored a same-value (UV)
         np.savez_compressed(os.path.join(out_dir, f"{name}_blocks.npz"), **arrays)
     ev_path = os.path.join(out_dir, f"{name}_events.csv")
     with open(ev_path, "w", newline="") as f:

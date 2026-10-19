@@ -314,7 +314,8 @@ def interp(b, which, timeout):
     if which == "full":
         cmd.append("--no-host")
     else:
-        cmd.append("--blocks")                                         # per-block references (simulate_blocks.py)
+        cmd += ["--blocks", "--device-layout"]                        # per-block references (simulate_blocks.py);
+                                                                       # out-of-bounds references where the GPU puts them
     cmd += ["--argv", b["name"], *argv(b, w)]
     env = dict(os.environ, PYTHONPATH=str(ROOT / "analysis"))       # run in the work directory: files the
     if b.get("flags"):                                                 # program writes stay there

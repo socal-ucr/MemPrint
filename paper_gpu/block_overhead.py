@@ -55,6 +55,33 @@ def interp(name):
     return res
 
 
+def orders(name):
+    """The four-schedule run (as benchmarks.py runs it) without per-block recording, with it, and with it and the
+    schedules after lockstep run one after another: {orders_ops,orders_blocks,orders_blocks_serial}_s."""
+    b = B.BENCH[name]
+    w = B.workdir(b)
+    sd = B.source_dir(b, w) if not b.get("patches") else w / "src" / b.get("copy_as", ".")
+    res = {}
+    tmp = Path(tempfile.mkdtemp(prefix=f"blkord-{name}-"))
+    try:
+        for k, extra in (("orders_ops", ["--device-layout"]), ("orders_blocks", ["--blocks", "--device-layout"]),
+                         ("orders_blocks_serial", ["--blocks", "--device-layout", "--serial-orders"])):
+            cmd = [B.PY, "-m", "memprint.static.hybrid", ",".join(str(sd / s) for s in b["sources"]), str(tmp / k),
+                   "--name", name, "--so", str(w / "hybrid" / f"{name}.so"), "--schedules", B.SCHEDULES,
+                   *[x for d in B.COMPAT + b.get("defines", []) for x in ("-D", d)],
+                   *[x for i in b.get("includes", []) for x in ("-I", str(sd / i))], *extra,
+                   "--argv", name, *B.argv(b, w)]
+            env = dict(os.environ, PYTHONPATH=str(B.ROOT / "analysis"))
+            t = time.time()
+            subprocess.run(cmd, cwd=w, env=env, capture_output=True, text=True, timeout=8 * 3600)
+            res[f"{k}_s"] = round(time.time() - t, 2)
+            shutil.rmtree(tmp / k, ignore_errors=True)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print(name, res, flush=True)
+    return res
+
+
 def post(name):
     """Refining the four schedules' dependences to blocks: its time and the dependences either way."""
     w = B.workdir(B.BENCH[name])
@@ -63,7 +90,9 @@ def post(name):
     pairs = S._predicted(w / "hybrid", name, ev)
     t = time.time()
     whole, spec = SB.hybrid_block(name, w, ev, nb)
-    return {"refine_s": round(time.time() - t, 2), "op_deps": len(pairs),
+    refine = time.time() - t
+    records, ints, _ = SB.compact(spec)
+    return {"refine_s": round(refine, 2), "op_deps": len(pairs), "block_records": records, "block_ints": ints,
             "block_deps": sum(len(x) for per in spec.values() for x in per.values()),
             "whole_deps": sum(len(v) for v in whole.values()), "blocks": sum(nb)}
 
@@ -79,6 +108,8 @@ def main():
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--only", default=None)
     ap.add_argument("--post-only", action="store_true", help="keep the interpreter columns of the existing file")
+    ap.add_argument("--orders", action="store_true", help="also time the four-schedule run three ways (orders())")
+    ap.add_argument("--orders-jobs", type=int, default=4)
     args = ap.parse_args()
     names = args.only.split(",") if args.only else [
         n for n in B.BENCH if (B.workdir(B.BENCH[n]) / "hybrid" / "schedule_lockstep" / f"{n}_blocks.npz").exists()
@@ -92,6 +123,12 @@ def main():
             rows = list(pool.map(run, names))
     for r in rows:                                                     # one at a time: timed alone
         r.update(post(r["name"]))
+    if args.orders:
+        with ProcessPoolExecutor(args.orders_jobs) as pool:
+            for r, o in zip(rows, pool.map(orders, [r["name"] for r in rows])):
+                r.update(o)
+    elif args.post_only:
+        pass
     hyb = {r["name"]: r for r in csv.DictReader(open(DATA / f"benchmarks{B.SUFFIX}.csv"))}
     for r in rows:
         r["hybrid_all_s"] = hyb.get(r["name"], {}).get("hybrid_s", "")

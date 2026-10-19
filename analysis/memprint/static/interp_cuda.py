@@ -71,6 +71,7 @@ DEVICE_KINDS = {"device", "managed", "device-global"}
 
 R, W, RM, WM, RD, WD = 1, 2, 4, 8, 16, 32
 WX = 64  # with W: a write every legal schedule makes (its address and conditions read no memory; OrderFacts)
+UV = 128  # a write of a value that is the same for every thread of the launch (UniformStores)
 RET_KEY = ("__cuda", "returned")  # per point: has the thread returned from the current function
 BLOCK_KEY = ("__cuda", "block")  # per point: its block's index within the threads being run
 
@@ -89,6 +90,7 @@ class Event:
         self.note = ""
         self.block_marks = None  # a kernel's references per block (CudaInterpreter.record_blocks): Obj -> BlockRefs
         self.block_unknown = False  # a reference whose object is unknown: which block made it is not kept
+        self.block_same = False  # in a schedule other than lockstep, a kernel run as in lockstep: not recorded
 
     def _arr(self, obj, hi):
         arr = self.bits.get(obj)
@@ -134,8 +136,11 @@ class BlockRefs:
         self.bits = np.empty(0, dtype=np.uint8)
         self.written = np.empty(0, dtype=np.int64)                     # keys certainly written so far
         self.buf, self.size = [], 0
+        self.uniform = True                                            # every write a same-value write (UV)
 
     def add(self, keys, bits):
+        if bits & (W | WM) and not bits & UV:
+            self.uniform = False
         if len(keys):
             self.buf.append((keys, int(bits)))
             self.size += len(keys)
@@ -468,6 +473,48 @@ class DataFacts:
         return any(self.value(x) for x in kids if x.kind.is_expression())
 
 
+class UniformStores:
+    """The store sites of each kernel whose value is the same for every thread of a launch: a plain assignment to
+    memory of an expression of literals and the kernel's own scalar parameters only (no thread or block index, no
+    memory, no local variable). Such a unit ends a launch with that value whichever of its writers ran last."""
+
+    def __init__(self, functions):
+        self.sites = set()
+        for f in functions.values():
+            if _system(f) or not any(k.kind == K.CUDAGLOBAL_ATTR for k in f.get_children()):
+                continue
+            params = {_key(p) for p in f.get_children() if p.kind == K.PARM_DECL and not ca.is_pointer(p.type)
+                      and not ca.is_array(p.type)}
+            body = _body(f)
+            if body is None:
+                continue
+            for n in body.walk_preorder():
+                if n.kind == K.BINARY_OPERATOR and ca.binary_op(n) == "=":
+                    kids = ca.children(n)
+                    lhs = ca.strip(kids[0])
+                    if lhs.kind in (K.ARRAY_SUBSCRIPT_EXPR, K.MEMBER_REF_EXPR) or \
+                            (lhs.kind == K.UNARY_OPERATOR and ca.unary_op(lhs) == "*"):
+                        if self._uniform(kids[1], params):
+                            self.sites.add(_site_key(lhs))
+
+    def _uniform(self, n, params):
+        n = ca.strip(n)
+        k = n.kind
+        if k in (K.INTEGER_LITERAL, K.FLOATING_LITERAL, K.CHARACTER_LITERAL, K.CXX_BOOL_LITERAL_EXPR):
+            return True
+        if k == K.DECL_REF_EXPR:
+            d = n.referenced
+            return d is not None and (_key(d) in params or d.kind == K.ENUM_CONSTANT_DECL)
+        if k in (K.BINARY_OPERATOR, K.UNARY_OPERATOR, K.CSTYLE_CAST_EXPR, K.PAREN_EXPR, K.UNEXPOSED_EXPR,
+                 K.CXX_STATIC_CAST_EXPR, K.CXX_FUNCTIONAL_CAST_EXPR):
+            if k == K.UNARY_OPERATOR and ca.unary_op(n) in ("*", "&", "++", "--", "post++", "post--", "pre++",
+                                                             "pre--"):
+                return False
+            kids = ca.children(n)
+            return bool(kids) and all(self._uniform(x, params) for x in kids)
+        return False
+
+
 class OrderFacts(DataFacts):
     """Which references a launch makes in every legal schedule, given its arguments: DataFacts within the
     kernel, where whether the host issues the launch at all does not count (the launch's own event says so),
@@ -501,13 +548,17 @@ class CudaInterpreter(CppInterpreter):
         self._gpu_work_memo = {}
         self.facts = DataFacts(self.functions)
         self.order_facts = OrderFacts(self.functions)
+        self.uniform_stores = UniformStores(self.functions)
         self.schedule = "lockstep"  # all threads statement by statement; or one block after another, in order,
                                     # in reverse, or in a random order (rng): other legal schedules
         self.oob = {}  # source location (object) -> references past the end of a device buffer
         self.racy_seen = set()  # kernels with a launch that read and wrote one unit (another order may differ)
         self.record_blocks = False  # also keep which block made each reference (Event.block_marks)
         self.block_unit = 4  # bytes per unit of the block references (the Tracker's unit)
+        self.device_layout = []  # (device address, end, Obj) of live device buffers, by address (hybrid, real GPU
+                                 # allocations): where a reference past the end of a buffer lands
         self._b0, self._nb = 0, 1  # the first block of the threads being run, and how many blocks they are
+        self._block_last = {}  # (statement, object, bits) -> its last reference's blocks and offsets (_note_blocks)
         self.racy = None  # in a schedule other than lockstep: the kernels to reorder (None: all), as racy_seen
         self.effects = 0  # stores so far: a statement can be run again for a subset only if it made none
         self._stmt_marks = []  # per statement being run in a kernel block: (effects, batch weights) at its start
@@ -619,6 +670,7 @@ class CudaInterpreter(CppInterpreter):
         if self.uncertain_depth:
             bits <<= 2
         cur = getattr(loc, "cursor", None)
+        self._note_site = _site_key(cur) if cur is not None else None
         if cur is not None:
             indirect, guarded = self.facts.site(cur)
             if indirect or guarded or getattr(self, "_guarded_depth", 0):
@@ -628,6 +680,8 @@ class CudaInterpreter(CppInterpreter):
         if write and not self.uncertain_depth and cur is not None and self.kernel is not None and \
                 self.kernel.name not in self.order_facts.config_derived and not any(self.order_facts.site(cur)):
             bits |= WX
+        if write and cur is not None and self.kernel is not None and _site_key(cur) in self.uniform_stores.sites:
+            bits |= UV
         if not isinstance(obj, Obj):
             ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
             ev.block_unknown = True
@@ -643,11 +697,13 @@ class CudaInterpreter(CppInterpreter):
             out = (offs < 0) | (offs + (loc.size or 8) > obj.nbytes)
             if out.any():                                              # past the end of its buffer: on the GPU
                 site = f"{_loc_text(cur)} ({obj.name})" if cur is not None else obj.name   # it reaches whatever
-                self.oob[site] = self.oob.get(site, 0) + int(np.count_nonzero(out))    # lies there: any buffer
-                ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
-                ev.block_unknown = True
+                self.oob[site] = self.oob.get(site, 0) + int(np.count_nonzero(out))    # lies there
                 ev.note = (ev.note + "; " if ev.note else "") + "out of bounds" if "out of bounds" not in ev.note \
                     else ev.note
+                rest = self._note_beyond(ev, obj, offs, out, loc.size or 8, bits)
+                if rest:                                               # nothing known there: any buffer
+                    ev.unknown |= (bits & (RD | WD)) | (WM if write else RM)
+                    ev.block_unknown = True
                 if out.all():
                     return
                 self._note_blocks(ev, obj, off, loc.size or 8, bits, keep=~out if offs.ndim else None)
@@ -657,6 +713,37 @@ class CudaInterpreter(CppInterpreter):
         self._note_blocks(ev, obj, off, loc.size or 8, bits)
         ev.mark(obj, off, loc.size or 8, bits)
 
+    def _note_beyond(self, ev, obj, offs, out, size, bits):
+        """References past the end (or before the start) of a device buffer, at the device addresses the GPU's
+        allocator gives the buffers (device_layout, from the hybrid interpreter's real allocations): those that
+        land inside another buffer are references to it. Returns whether any landed nowhere known."""
+        dev = getattr(obj, "dev_addr", None)
+        if not dev or not self.device_layout or not self.layout_complete():
+            return True
+        addr = int(dev) + offs
+        done = np.zeros(np.shape(out), dtype=bool)
+        for lo, hi, other in self.device_layout:
+            if other is obj:
+                continue
+            hit = out & (addr >= lo) & (addr + size <= hi)
+            if not np.any(hit):
+                continue
+            if np.ndim(offs):
+                self._note_blocks(ev, other, addr - lo, size, bits, keep=hit)
+                ev.mark(other, (addr - lo)[hit], size, bits)
+            else:
+                self._note_blocks(ev, other, int(addr - lo), size, bits)
+                ev.mark(other, int(addr - lo), size, bits)
+            done |= hit
+        self.oob_landed = getattr(self, "oob_landed", 0) + int(np.count_nonzero(done))
+        self.oob_nowhere = getattr(self, "oob_nowhere", 0) + int(np.count_nonzero(out & ~done))
+        return False                                                   # the rest lands in no buffer of the program
+
+    def layout_complete(self):
+        """Whether every live device buffer has its device address (device_layout): only then does an address
+        outside all of them reach none of the program's buffers."""
+        return False
+
     def _note_blocks(self, ev, obj, off, size, bits, keep=None):
         """Keep which blocks made a reference (record_blocks): the block of each thread taking part, from the
         per-thread block index of the threads being run; every block being run if the shapes do not pair up."""
@@ -664,6 +751,13 @@ class CudaInterpreter(CppInterpreter):
             return
         blk = self.frames[0].vars.get(BLOCK_KEY, [None, 0])[1]
         blk = self._b0 + (np.asarray(blk, dtype=np.int64) if np.ndim(blk) else int(blk))
+        site = (getattr(self, "_note_site", None), id(obj), int(bits), int(size), keep is None)
+        last = self._block_last.get(site)                              # the same statement, object, blocks and
+        if last is not None and np.array_equal(last[0], blk) and (    # offsets as its last reference: nothing new
+                (off is None and last[1] is None) or (off is not None and last[1] is not None and
+                                                      np.array_equal(last[1], off))):
+            return
+        self._block_last[site] = (np.copy(blk) if np.ndim(blk) else blk, None if off is None else np.copy(off))
         if off is not None and np.ndim(off) and np.ndim(blk) and np.size(off) == np.size(blk):
             blk = np.asarray(blk).ravel()
             off = np.asarray(off, dtype=np.int64).ravel()
@@ -1345,9 +1439,13 @@ class CudaInterpreter(CppInterpreter):
         ev.threads = bsz * nblocks
         if bsz <= 0 or nblocks <= 0:
             return
-        if self.record_blocks and ev.block_marks is None:
-            ev.block_marks = {}
         reorder = self.schedule != "lockstep" and (self.racy is None or fdef.spelling in self.racy)
+        self._block_last = {}
+        if self.record_blocks and ev.block_marks is None:
+            if self.schedule == "lockstep" or reorder:
+                ev.block_marks = {}
+            else:                                                      # run as in lockstep: its references are the
+                ev.block_same = True                                   # lockstep run's, which keeps them
         per = max(1, THREADS_PER_BATCH // bsz) if not reorder else 1   # a kernel no launch of which read and
                                                                        # wrote one unit gives the same in any order
         saved = (self.frames, self.w, self.loop_flags, self.kernel, self.shared, self.dyn_shared)
