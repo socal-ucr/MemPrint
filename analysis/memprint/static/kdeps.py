@@ -386,6 +386,44 @@ def _conflicts(a, b, between=()):
     return out
 
 
+def _stop_flag(base, trackers, a, p, post, phase_t):
+    """A loop the host repeats until a flag the device sets stays as it reset it: (the phase that writes the flag,
+    {object: the flag's unit}), or (None, {}). Each round's one device-to-host copy reads a single unit, which only
+    the host-to-device copies and one kernel phase between them and that copy ever write, and in every run that
+    phase wrote it in every round but the last. A round after which the host goes on then changed the flag, so that
+    phase wrote it: it hides the flag from the rounds after a round that is not the last."""
+    nothing = (None, {})
+    names = [base.events[a + ph]["name"] for ph in range(p)]
+    kinds = [base.events[a + ph]["kind"] for ph in range(p)]
+    d2h = [ph for ph in range(p) if kinds[ph] == "copy" and names[ph].endswith("D2H")]
+    if len(d2h) != 1:
+        return nothing
+    reads = [(n, np.flatnonzero(r)) for n, (r, w) in phase_t[d2h[0]].items() if r.any()]
+    if len(reads) != 1 or len(reads[0][1]) != 1:
+        return nothing
+    obj, unit = reads[0][0], int(reads[0][1][0])
+    writers = [ph for ph in range(p) if obj in phase_t[ph] and unit < len(phase_t[ph][obj][1]) and
+               phase_t[ph][obj][1][unit]]
+    kernels = [ph for ph in writers if kinds[ph] == "kernel"]
+    resets = [ph for ph in writers if kinds[ph] != "kernel"]
+    if len(kernels) != 1 or any(not (kinds[ph] == "copy" and names[ph].endswith("H2D")) for ph in resets) or \
+            not resets or not all(r < kernels[0] < d2h[0] for r in resets):
+        return nothing
+    writer = kernels[0]
+    for t in trackers:
+        rounds = list(range(a + writer, len(t.events) - post, p))
+        for i in rounds[:-1]:                                          # every round but the run's last
+            entry = (t.touch.get(i) or {}).get(obj)
+            if entry is None:
+                return nothing
+            w = _unpack(entry)[1]
+            if unit >= len(w) or not w[unit]:
+                return nothing
+    mask = np.zeros(unit + 1, dtype=bool)
+    mask[unit] = True
+    return writer, {obj: mask}
+
+
 def _find_loop(sig, a, b):
     """(start, end, period) of the repeating run of signatures that contains [a, b) (b > a), or None."""
     n = len(sig)
@@ -448,6 +486,8 @@ def _union_dependences(base, trackers, maps):
                    for ph in range(p)]
         kill = [_kills([t.touch.get(i) for t in trackers for i in range(a + ph, len(t.events) - post, p)])
                 for ph in range(p)]                                    # what each phase overwrites every round
+        writer, flag = _stop_flag(base, trackers, a, p, post, phase_t)  # a round that is not the last wrote
+        cond = [flag if ph == writer else {} for ph in range(p)]          # the flag its last copy reads
         rows = []
 
         def tiers(src, dst, near, far, labels):
@@ -465,20 +505,22 @@ def _union_dependences(base, trackers, maps):
                 if ps < pd:                                            # within a round
                     rows += [(("p", ps), ("p", pd), "0", k, o, u)
                              for k, o, u in _conflicts(phase_t[ps], phase_t[pd], kill[ps + 1: pd])]
-                rows += [(("p", ps), ("p", pd), dl, k, o, u)          # to the next round ("1") or any later ("+")
-                         for dl, k, o, u in tiers(phase_t[ps], phase_t[pd], kill[ps + 1:] + kill[:pd], kill,
-                                                  ("+", "1"))]
+                rows += [(("p", ps), ("p", pd), dl, k, o, u)          # to the next round ("1") or any later ("+");
+                         for dl, k, o, u in tiers(phase_t[ps], phase_t[pd],  # round r is not the last, nor (farther)
+                                                  kill[ps + 1:] + kill[:pd] + cond[ps + 1:],   # is round r + 1
+                                                  kill + cond, ("+", "1"))]
         for i in range(a):
             for pd in range(p):                                        # to every round ("") or the first ("first")
                 rows += [(("e", i), ("p", pd), dl, k, o, u)
-                         for dl, k, o, u in tiers(pre_t[i], phase_t[pd], kill[:pd], kill, ("", "first"))]
+                         for dl, k, o, u in tiers(pre_t[i], phase_t[pd], kill[:pd], kill + cond, ("", "first"))]
             for q in range(1, post + 1):                               # past every round ("") or none ("none")
                 rows += [(("e", i), ("q", q), dl, k, o, u)
                          for dl, k, o, u in tiers(pre_t[i], post_t[q - 1], (), kill, ("", "none"))]
         for ps in range(p):
             for q in range(1, post + 1):                               # from every round ("") or the last ("last")
                 rows += [(("p", ps), ("q", q), dl, k, o, u)
-                         for dl, k, o, u in tiers(phase_t[ps], post_t[q - 1], kill[ps + 1:], kill, ("", "last"))]
+                         for dl, k, o, u in tiers(phase_t[ps], post_t[q - 1], kill[ps + 1:],
+                                                  kill + cond[ps + 1:], ("", "last"))]
         base.loop = {"start": a, "period": p, "post": post,
                      "phases": [{"kind": base.events[a + ph]["kind"], "name": base.events[a + ph]["name"]}
                                 for ph in range(p)],

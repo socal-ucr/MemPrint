@@ -274,6 +274,7 @@ def numbers():
             n[f"Dedup{K}{lab}TimeMax"] = f"{(d.blocks_s / d.ops_s).max():.1f}"
         worst = before.set_index("name").blocks_rss_mb.idxmax()
         n[f"Dedup{K}WorstName"] = worst.split("-", 1)[1]
+    n.update(transfer_numbers())
     sw = load("sim_delay.csv")
     if sw is not None:
         for policy, macro in (("full", "Fu"), ("hybrid", "Hy")):
@@ -293,8 +294,55 @@ def main():
     block_table()
     cost_table()
     dedup_table()
+    transfer_table()
 
 
 if __name__ == "__main__":
     main()
     print(numbers())
+
+
+# ---------------------------------------------------------------- dependences before the input is known
+
+def transfer_table():
+    """Patterns learned on one input applied to the other (transfer.py), against the policies of simulate.py."""
+    d = load("transfer.csv")
+    if d is None:
+        return
+    rows = []
+    for train, target, f in (("small", "large", "sim_large.csv"), ("large", "small", "sim.csv")):
+        t = d[d.train == train].set_index("name")
+        s = load(f)
+        p = s.pivot(index="name", columns="policy", values="speedup").loc[t.index] if s is not None else None
+        cells = [f"{train.capitalize()} $\\rightarrow$ {target}", f"{int((t.missed == 0).sum())} / {len(t)}",
+                 f"{int(t.missed.sum()):,}", f"{int(t.extra.sum()):,}", f"{int(t.patterns_rollbacks.sum())}",
+                 f"{geo(t.patterns_speedup):.3f}"]
+        cells += [f"{geo(p[c]):.3f}" for c in ("buffer-rw", "hybrid")] if p is not None else ["--", "--"]
+        cells.append(f"{geo(t.truth_speedup):.3f}")
+        rows.append(" & ".join(cells) + r" \\")
+    head = ("\\begin{tabular}{lrrrrrrrr}\n\\toprule\n"
+            " & & & & & \\multicolumn{4}{c}{Speedup} \\\\\n\\cmidrule(lr){6-9}\n"
+            "Learned $\\rightarrow$ applied & \\shortstack{No missed\\\\dependence} & Missed & Extra & Rollb. & "
+            "Patterns & \\shortstack{Same buffer,\\\\one writes} & \\shortstack{Hybrid on\\\\the input} & Traced \\\\\n"
+            "\\midrule\n")
+    write("transfer.tex", head + "\n".join(rows) + "\n\\bottomrule\n\\end{tabular}\n")
+
+
+def transfer_numbers():
+    d = load("transfer.csv")
+    n = {}
+    if d is None:
+        return n
+    for train, K in (("small", "SmallLarge"), ("large", "LargeSmall")):
+        t = d[d.train == train]
+        n[f"Tr{K}NoMiss"] = int((t.missed == 0).sum())
+        n[f"Tr{K}Rb"] = int(t.patterns_rollbacks.sum())
+        n[f"Tr{K}Speedup"] = f"{geo(t.patterns_speedup):.3f}"
+        n[f"Tr{K}Uncovered"] = int((t.uncovered_ops > 0).sum())
+        sim = load("sim_large.csv" if train == "small" else "sim.csv")
+        if sim is not None:
+            p = sim.pivot(index="name", columns="policy", values="speedup").loc[t.set_index("name").index]
+            n[f"Tr{K}BufRw"] = f"{geo(p['buffer-rw']):.3f}"
+            n[f"Tr{K}Hy"] = f"{geo(p.hybrid):.3f}"
+    n["TrPrograms"] = d.name.nunique()
+    return n

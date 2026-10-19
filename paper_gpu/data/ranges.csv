@@ -1,6 +1,6 @@
 program,sets,exact_sets,static_units,traced_units,unit_precision,unit_recall
 bfs,108,108,51390,51390,1.0,1.0
-cc,171,140,317166,304034,0.9304,0.9706
+cc,171,134,317166,293059,0.8975,0.9713
 chain,8,8,8000,8000,1.0,1.0
 fileidx,8,8,7346,7346,1.0,1.0
 histogram,17,17,6330,6330,1.0,1.0

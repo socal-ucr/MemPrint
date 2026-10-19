@@ -1,6 +1,6 @@
 program,events,exact_pairs,exact_needed,interval_pairs,interval_needed,allocation_pairs,allocation_needed
 bfs,49,916,48,916,48,916,48
-cc,73,2139,72,2139,72,2139,72
+cc,70,1958,69,1958,69,1958,69
 chain,5,5,4,5,4,5,4
 fileidx,5,5,4,5,4,5,4
 histogram,10,13,9,13,9,13,9

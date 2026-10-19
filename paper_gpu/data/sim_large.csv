@@ -47,7 +47,7 @@ graphbig-bfs-topo-thread-centric,GraphBIG,truth,20,491.36,1.0221,0,0.0,0,52
 graphbig-bfs-topo-atomic,GraphBIG,sequential,17,1141.16,1.0,0,0.0,29,16
 graphbig-bfs-topo-atomic,GraphBIG,buffer,17,1132.68,1.0075,0,0.0,0,81
 graphbig-bfs-topo-atomic,GraphBIG,buffer-rw,17,1127.91,1.0117,0,0.0,0,74
-graphbig-bfs-topo-atomic,GraphBIG,hybrid,17,1138.18,1.0026,0,0.0,0,52
+graphbig-bfs-topo-atomic,GraphBIG,hybrid,17,1138.18,1.0026,0,0.0,0,48
 graphbig-bfs-topo-atomic,GraphBIG,truth,17,1127.91,1.0117,0,0.0,0,38
 graphbig-bfs-data-thread-centric,GraphBIG,sequential,24,672.39,1.0,0,0.0,47,23
 graphbig-bfs-data-thread-centric,GraphBIG,buffer,24,661.54,1.0164,0,0.0,0,144
@@ -62,7 +62,7 @@ graphbig-sssp-topo-thread-centric,GraphBIG,truth,27,449.6,1.0561,0,0.0,0,82
 graphbig-connected-comp,GraphBIG,sequential,76,594.31,1.0,0,0.0,227,75
 graphbig-connected-comp,GraphBIG,buffer,76,465.38,1.277,0,0.0,0,1778
 graphbig-connected-comp,GraphBIG,buffer-rw,76,465.38,1.277,0,0.0,0,1676
-graphbig-connected-comp,GraphBIG,hybrid,76,466.69,1.2734,0,0.0,0,290
+graphbig-connected-comp,GraphBIG,hybrid,76,466.69,1.2734,0,0.0,0,279
 graphbig-connected-comp,GraphBIG,truth,76,465.38,1.277,0,0.0,0,263
 graphbig-kcore,GraphBIG,sequential,11,120.16,1.0,0,0.0,7,10
 graphbig-kcore,GraphBIG,buffer,11,103.07,1.1658,0,0.0,0,9

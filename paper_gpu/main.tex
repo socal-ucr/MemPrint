@@ -521,6 +521,16 @@ Conversely, a dependence of an operation in the rounds through a buffer whose un
 differently in different rounds or runs is reported as possible, not certain, even when every run had it: another
 order could touch other units.
 
+\paragraph{The stop flag.} Most of these loops repeat until a flag stays as the host reset it: each round copies a
+cleared flag to the GPU, launches the kernel, which sets the flag when it changes anything, and copies the flag
+back. Which round is the last depends on the order, but every round before it changed the flag, or the host would
+have stopped. When each round copies back a single unit that only the reset copies and one kernel between them
+ever write, and that kernel wrote it in every round but the last in every run, the interpreter treats that write
+as one every order makes, for dependences that reach past the end of a round into a later one: a round that is
+followed by another is not the last. The reset copy of one round then no longer depends on the reset copy of the
+round before, and the dependences that only the last round has (the copy back reading the cleared flag) stay
+possible.
+
 \subsection{What the interpreters cannot know}
 \label{sec:unknown}
 
@@ -855,11 +865,49 @@ exact bytes are therefore a property of the input. We then describe each depende
 of its two operations, its kind, its buffer, and how many operations apart they are, for example ``\code{expand}
 then \code{commit} one operation later, RAW through \code{updating}''. All 24 patterns of the needed dependences are
 the same for the three graphs. The structure of the dependences is therefore a property of the program, and only
-the number of rounds and the units are a property of the input. A tool that must decide before the input is known
-could use the patterns, and refine them with the interpreter once the input is available. We have not built such
-a tool. Run without the input, the interpreter today stops after one round of the search, because the loop's exit
-condition comes from the GPU and is unknown, and it reports \numNoInputPatterns{} of the \numNoInputPatternsOf{}
-patterns that connect operations at most six apart, nearly all of them as possible.
+the number of rounds and the units are a property of the input. Run without the input, the interpreter stops
+after one round of the search, because the loop's exit condition comes from the GPU and is unknown, and it reports
+\numNoInputPatterns{} of the \numNoInputPatternsOf{} patterns that connect operations at most six apart, nearly all
+of them as possible.
+
+\paragraph{Patterns learned on another input.} A tool that must decide before the input is known can learn the
+patterns on one input and apply them to the operations the program issues on another. We split a program's
+operations into segments, single operations or loops (a sequence of operations repeated at least twice), and place
+each operation by its segment, its position in the loop and its round. A dependence the hybrid interpreter reports
+on the learning input becomes a pattern between two places: between rounds of one loop, the distance in rounds;
+from a loop to a later segment, the round counted from the loop's end; into a loop, the round from its start. A
+set of rounds or distances that runs without a gap up to the end of the learning input's loop is taken to go on in
+a longer loop. An operation the learned structure does not account for, because the other input issues another
+sequence, waits for everything before it, and so does a launch whose counterpart ran no thread on the learning
+input (PolyBench's \code{corr} and \code{covar} launch kernels with an invalid configuration on the small input,
+so nothing is learned about them there). We learned on each of the two input sets of \secref{sec:eval-sim} and
+applied the patterns to the other, and scored and simulated the result against the traced run like the other
+policies (\tabref{tab:transfer}).
+
+\begin{table*}[tbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/transfer}
+\caption{The hybrid interpreter's dependences on one input set turned into patterns and applied to the other, over
+the \numTrPrograms{} benchmarks: programs with no missed dependence, the traced run's dependences missed, the
+predicted dependences the run does not have, the rollbacks on the simulated A30, and the geometric-mean speedup
+over issuing in order, against the oracle that orders operations sharing a buffer one of them writes, the hybrid
+interpreter run on the input itself, and the traced dependences.}
+\label{tab:transfer}
+\end{table*}
+
+The patterns predict every dependence of \numTrSmallLargeNoMiss{} of the 37 programs learned on the small inputs
+and applied to the large ones, and of \numTrLargeSmallNoMiss{} the other way round; most of the missed dependences
+are ordered anyway through others, and there is \numTrLargeSmallRb{} rollback in all, in GraphBIG's
+\code{triangle-count}. They do not, however, beat the oracle that knows which buffers each operation writes: the
+speedups are \numTrSmallLargeSpeedup{} and \numTrLargeSmallSpeedup{}, against \numTrSmallLargeBufRw{} and
+\numTrLargeSmallBufRw{} for the oracle and \numTrSmallLargeHy{} and \numTrLargeSmallHy{} for the hybrid interpreter
+run on the input. Where the dependences of a loop depend on its round
+and not only on the distance between rounds, as in \code{lu}, whose rounds touch a shrinking part of the matrix,
+the patterns either miss dependences or, generalized, order nearly everything; where the other input issues
+another sequence of operations, as in \code{kcore}, they fall back to issue order. Patterns are a safe start
+before the input is known, and the interpreter, once the input is known, is what finds the parallelism.
 
 \begin{table}[tbp]
 \centering

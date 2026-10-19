@@ -313,6 +313,15 @@ def load_ops(name):
              "regs": int(r["regs"]), "smem": int(r["smem"])} for r in rows]
 
 
+def load_ops_dir(w, name):
+    """The profiled operations in a work directory (sim_ops.csv), or None."""
+    path = Path(w) / "sim_ops.csv"
+    if not path.exists():
+        return None
+    return [{**r, "dur_ns": int(r["dur_ns"]), "blocks": int(r["blocks"]), "threads": int(r["threads"]),
+             "regs": int(r["regs"]), "smem": int(r["smem"])} for r in csv.DictReader(open(path))]
+
+
 def save_ops(names):
     """All benchmarks' profiled operations in one file (data/sim_ops.csv), to simulate without a GPU."""
     rows = []

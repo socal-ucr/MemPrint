@@ -1,0 +1,10 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & & & & & \multicolumn{4}{c}{Speedup} \\
+\cmidrule(lr){6-9}
+Learned $\rightarrow$ applied & \shortstack{No missed\\dependence} & Missed & Extra & Rollb. & Patterns & \shortstack{Same buffer,\\one writes} & \shortstack{Hybrid on\\the input} & Traced \\
+\midrule
+Small $\rightarrow$ large & 35 / 37 & 241 & 85,346 & 0 & 1.037 & 1.048 & 1.059 & 1.060 \\
+Large $\rightarrow$ small & 28 / 37 & 78 & 24,672 & 1 & 1.092 & 1.093 & 1.138 & 1.139 \\
+\bottomrule
+\end{tabular}
