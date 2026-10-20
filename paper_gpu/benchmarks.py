@@ -16,6 +16,9 @@ PAPER_GPU_SIZE=large selects larger inputs (LARGE below; GraphBIG on a generated
 the work directory paper_gpu/data/bench_large and paper_gpu/data/benchmarks_large.csv. There --gpu traces with
 the block references kept (KDEPS_BLOCKS: truth_blocks is truth) and also counts each block's instructions
 (KDEPS_WORK: truth_work); the small inputs get the latter with --work.
+
+PAPER_GPU_SCRATCH=DIR puts what --interp writes for a benchmark (per schedule, hundreds of MB for betweenness) in
+DIR/bench*/NAME/WHICH instead, with a symbolic link to it where it would be, so the rest reads it as before.
 """
 
 import argparse
@@ -44,6 +47,7 @@ SIZE = os.environ.get("PAPER_GPU_SIZE", "small")
 LARGE = SIZE == "large"
 SUFFIX = "_large" if LARGE else ""
 WORK = ROOT / "paper_gpu" / "data" / f"bench{SUFFIX}"
+SCRATCH = os.environ.get("PAPER_GPU_SCRATCH")
 TOOL = ROOT / "gpu" / "nvbit_rw" / "rw_trace.so"
 PY = sys.executable
 SCHEDULES = "lockstep,blocks,reverse,random"
@@ -305,6 +309,15 @@ def interp(b, which, timeout):
     w = workdir(b)
     sd = source_dir(b, w) if not b.get("patches") else w / "src" / b.get("copy_as", ".")
     out = w / which
+    if SCRATCH:                                                        # the output elsewhere, linked from here
+        real = Path(SCRATCH) / WORK.name / b["name"] / which
+        shutil.rmtree(real, ignore_errors=True)
+        real.mkdir(parents=True)
+        if out.is_symlink() or out.is_file():
+            out.unlink()
+        elif out.exists():
+            shutil.rmtree(out)
+        out.symlink_to(real)
     srcs = ",".join(str(sd / s) for s in b["sources"])
     dflags = [x for d in COMPAT + b.get("defines", []) for x in ("-D", d)]
     iflags = [x for i in b.get("includes", []) for x in ("-I", str(sd / i))]
@@ -391,10 +404,12 @@ def main():
         cols = []
         for r in rows.values():
             cols += [k for k in r if k not in cols]
-        with open(summary, "w", newline="") as f:
+        tmp = f"{summary}.tmp"                                         # a failed write leaves the old summary
+        with open(tmp, "w", newline="") as f:
             wr = csv.DictWriter(f, cols)
             wr.writeheader()
             wr.writerows(rows[n] for n in BENCH if n in rows)
+        os.replace(tmp, summary)
 
     if args.gpu:
         for n in names:

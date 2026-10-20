@@ -714,7 +714,9 @@ enough for the tracer. The sources were not changed, except where CUDA 13 no lon
 \code{gaussian} that print removed device properties are commented out, and PolyBench's problem sizes are set in its
 headers. Rodinia's \code{kmeans} is left out because it uses texture references, which CUDA 13 removed. Each program
 was traced once with NVBit, at \numBenchNvbitLo{} to \numBenchNvbitHi{} times its run time, and each interpreter ran
-it under the four thread orders, 12 interpreter runs at a time, with a limit of two hours per run.
+it under the four thread orders, 12 interpreter runs at a time, with a limit of two hours per run. GraphBIG's
+\code{betweenness}, which did not finish in two hours, we ran again alone in the hybrid interpreter, with a limit of
+ten hours.
 
 \begin{table}[tbp]
 \centering
@@ -723,8 +725,8 @@ it under the four thread orders, 12 interpreter runs at a time, with a limit of 
 \input{tables/bench_summary}
 \caption{The interpreters against one traced run of each benchmark, summed per suite: the GPU's dependences, the
 interpreter's certain and possible dependences split by whether the run has them, and the run's dependences the
-interpreter does not report (false negatives). GraphBIG's \code{betweenness} timed out in both interpreters and is
-not included.}
+interpreter does not report (false negatives). GraphBIG's \code{betweenness} timed out in the whole-program
+interpreter and is not included in its rows.}
 \label{tab:bench-summary}
 \end{table}
 
@@ -762,7 +764,8 @@ ran a different matrix size; and GraphBIG's \code{gc-topo-thread-centric} colour
 programs whose host code calls \code{sscanf} or \code{atof}, but their results are exact.
 
 GraphBIG's \code{betweenness}, whose traced run has 165{,}863 dependences, ten times more than any other program,
-did not finish in two hours in either interpreter. The other programs took \numBenchHyTimeLo{} to
+did not finish in two hours in the whole-program interpreter. Run alone, the hybrid interpreter took
+\numBenchHyAloneHours{} hours on it, and its result is exact. The other programs took \numBenchHyTimeLo{} to
 \numBenchHyTimeHi{} seconds in the hybrid interpreter (median \numBenchHyTimeMedian{}), with 12 runs sharing the
 machine.
 
@@ -1188,7 +1191,8 @@ it a possible access to every buffer.
 
 A limitation of the cost is that the interpreters simulate every GPU thread on one CPU core in Python, which means
 that their run time grows with the number of threads, and that GraphBIG's \code{betweenness}, ten times larger than
-any other benchmark, did not finish in two hours. The whole-program interpreter's run time also grows with
+any other benchmark, took \numBenchHyAloneHours{} hours in the hybrid interpreter and did not finish in two hours in
+the whole-program interpreter. The whole-program interpreter's run time also grows with
 sequential host loops, and the extra thread orders
 multiply the cost of either interpreter by up to \numHyOrdersHi{} for programs whose reordered kernels have many
 warps (\secref{sec:eval-overhead}).

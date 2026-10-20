@@ -10,6 +10,7 @@ DATA = os.path.join(HERE, "data")
 OUT = os.path.join(HERE, "tables")
 SUITES = ["Rodinia", "GraphBIG", "PolyBench-GPU"]
 INTERPRETERS = (("hybrid", "Hybrid"), ("full", "Whole program"))
+ALONE = "graphbig-betweenness"   # the hybrid interpreter's run of it: alone, with a ten-hour limit
 
 
 def tt(name):
@@ -100,9 +101,12 @@ def numbers():
             n[f"Bench{k}{label}"] = f"{int(g[f'{w}_{c}'].sum()):,}".replace(",", "{,}")
         n[f"Bench{k}Exact"] = int(((g[f"{w}_fn"] == 0) & (g[f"{w}_pyes"] == 0) & (g[f"{w}_pno"] == 0)).sum())
         n[f"Bench{k}NoFN"] = int((g[f"{w}_fn"] == 0).sum())
-        n[f"Bench{k}TimeLo"] = f"{g[f'{w}_s'].min():.0f}"
-        n[f"Bench{k}TimeHi"] = f"{g[f'{w}_s'].max():.0f}"
-        n[f"Bench{k}TimeMedian"] = f"{g[f'{w}_s'].median():.0f}"
+        t = g[g.name != ALONE][f"{w}_s"]                               # the runs that shared the machine
+        n[f"Bench{k}TimeLo"] = f"{t.min():.0f}"
+        n[f"Bench{k}TimeHi"] = f"{t.max():.0f}"
+        n[f"Bench{k}TimeMedian"] = f"{t.median():.0f}"
+    alone = d[(d.name == ALONE) & d.hybrid_done]
+    n["BenchHyAloneHours"] = f"{alone.hybrid_s.iloc[0] / 3600:.1f}" if len(alone) else "--"
     return n
 
 
