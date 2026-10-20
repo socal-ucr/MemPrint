@@ -63,9 +63,8 @@ bytes each operation touched on an NVIDIA A30, recorded with an NVBit tool. On \
 from Rodinia, GraphBIG and PolyBench-GPU, the hybrid interpreter reports none of the GPU's \numBenchHyTruth{}
 dependences wrongly and misses none: \numBenchHyCertTP{} are reported as certain and \numBenchHyPossYes{} as possible,
 and it reports \numBenchHyPossNo{} possible dependences that the traced run did not have, all in programs whose
-behaviour depends on thread order or that read past the end of a buffer. The whole-program interpreter is exact on
-the \numBenchFuNoFN{} programs whose host code it can run, and misses dependences where it cannot, such as host code
-that reads its input through C++ streams; it reports this. The cost is \numBenchHyTimeLo{} to
+behaviour depends on thread order or that read past the end of a buffer. The whole-program interpreter, with models
+of the C and C++ library calls the benchmarks make, does the same on all \numBenchFuDone{} programs. The cost is \numBenchHyTimeLo{} to
 \numBenchHyTimeHi{} seconds per program (median \numBenchHyTimeMedian{}) for the hybrid interpreter under four
 thread orders.
 \end{abstract}
@@ -274,13 +273,26 @@ runs short counted loops as one step over all iterations (\secref{sec:kernels}),
 allocation, copy or fill inside such a loop is carried out once per iteration, because each iteration creates a
 different buffer or a different operation.
 
+\paragraph{The library the host code calls.} Host code reads its options and its input through the C and C++
+libraries, and the interpreter must know what those calls compute, or it computes a different execution. It models
+the parts the benchmarks use. A \code{std::string}, a \code{std::map} or a \code{std::ifstream} keeps a small handle
+in its own memory, which names its text, its contents or its file and position, so that copying the object copies
+the handle; \code{find}, \code{substr}, \code{operator[]}, \code{seekg}, \code{tellg}, \code{read} and the other
+calls work on what the handle names, and a loop that uses such objects runs one iteration at a time. Options read
+with \code{getopt\_long} come from the program's command line, \code{rand} and \code{random} return the sequence
+glibc's generator produces after the program's \code{srand}, so that pseudo-random input is the program's own, and
+\code{cudaGetDeviceProperties} describes the A30. Old C that does not parse as C++ (definitions in the style of K\&R,
+implicit \code{int}, \code{new} as a variable name, functions called before they are declared) is rewritten line for
+line before parsing, for the interpreter only. Calls the interpreter does not model are counted, and it warns that
+the values computed from them are unknown.
+
 \subsection{Running the host program natively: the hybrid interpreter}
 \label{sec:hybrid}
 
-The whole-program interpreter must understand every line of the host code. Real host code reads its input with C++
-streams and strings, uses library containers, or is written in old C dialects, and where the interpreter does not
-model what the code does it computes a wrong execution: in our benchmarks, a graph read through
-\code{std::ifstream} came out empty. The hybrid interpreter avoids interpreting the host code at all.
+The whole-program interpreter must understand every line of the host code, and the models of
+\secref{sec:host} cover only what our benchmarks call: other programs use other libraries, and before those models
+the whole-program interpreter read the graphs of GraphBIG through \code{std::ifstream} as empty. The hybrid
+interpreter avoids interpreting the host code at all.
 
 The program is compiled by \code{nvcc} as a shared library, with its \code{main()}, against a stand-in for the CUDA
 runtime instead of CUDA's own. In the stand-in runtime, device memory is ordinary host memory: \code{cudaMalloc}
@@ -537,8 +549,8 @@ possible.
 Both interpreters need the program's input, because the bytes an irregular kernel touches are a function of it. In
 a kernel they do not model floating-point values stored in memory or a pointer loaded in a statement after a store,
 and accesses that depend on such values are recorded as possible. The whole-program interpreter also does not model
-every library function the host code calls (for example \code{drand48}, C++ file streams and strings); the
-\code{maybe} test program checks the first case. When the host code calls such functions, the values the program
+every library function a host program could call (for example \code{drand48}, whose values it does not compute);
+the \code{maybe} test program checks this case. When the host code calls such functions, the values the program
 computes from them are unknown or wrong, and the operations it issues may be too. The interpreter counts these calls
 and its parse errors and warns that the result is unreliable, but it cannot recover the operations it did not see;
 the hybrid interpreter, which runs the host code natively, is the remedy. A kernel whose result depends on thread
@@ -740,14 +752,14 @@ operations, more than any of the interpreter's orders, and against every one of 
 no dependence and reported no certain dependence that did not occur, with 40 to 103 possible dependences that did
 not occur. The same holds for eight more runs each of \code{bfs-topo-atomic} and \code{bfs-data-thread-centric}.
 
-The whole-program interpreter is exact on the \numBenchFuNoFN{} programs whose host code it can run: six of the
-Rodinia programs and all of PolyBench. It misses \numBenchFuFN{} dependences, all in the 11 programs whose host code
-it cannot run. GraphBIG reads its graph through the openG library, with \code{std::ifstream}, \code{getline} and
-\code{std::string}, which the interpreter does not model, so the graph comes out empty. Rodinia's \code{backprop}
-uses K\&R-style function definitions, which do not parse as C++. Rodinia's \code{lud} reads its options with
-\code{getopt\_long}, which the interpreter does not model, so it runs a different matrix size. The interpreter warns
-on all 11, and on three programs where its result is nevertheless exact. It reports no certain dependence the GPU
-does not have, here as on the test programs.
+The whole-program interpreter, too, misses no dependence and reports no certain dependence the GPU does not have,
+on all \numBenchFuDone{} programs, with the models of the library calls of \secref{sec:host}. Before them it missed
+8{,}779 dependences, all in 11 programs whose host code it could not run: GraphBIG reads its graph through the openG
+library with \code{std::ifstream} and \code{std::string}, so the graph came out empty; Rodinia's \code{backprop} is
+written in K\&R C, which does not parse as C++; Rodinia's \code{lud} reads its options with \code{getopt\_long}, so it
+ran a different matrix size; and GraphBIG's \code{gc-topo-thread-centric} colours vertices in an order drawn with
+\code{rand}, so it computed other colours until \code{rand} returned glibc's own sequence. It still warns on three
+programs whose host code calls \code{sscanf} or \code{atof}, but their results are exact.
 
 GraphBIG's \code{betweenness}, whose traced run has 165{,}863 dependences, ten times more than any other program,
 did not finish in two hours in either interpreter. The other programs took \numBenchHyTimeLo{} to
@@ -1099,11 +1111,11 @@ four orders' references, and the dependences each gives, over the 37 benchmarks.
 \label{tab:block-cost}
 \end{table}
 
-The whole-program interpreter shows what missed dependences cost: on the small inputs it makes
-\numSimSmallFuSlower{} programs slower than issuing in order, \code{\numSimSmallFuWorstName{}} down to
-\numSimSmallFuWorst{}, with \numSimSmallFuRb{} rollbacks in all. Its geometric-mean speedup between operations
-falls from \numSimDelayFuNone{} with no scheduling delay to \numSimDelayFuMax{} with a delay of 200~\textmu s, while
-the hybrid interpreter's stays at \numSimDelayHyNone{}. Where the hybrid interpreter trails the traced dependences,
+The whole-program interpreter now gives the hybrid interpreter's speedups (\numSimSmallFu{} and \numSimLargeFu{}). Its
+earlier version, which missed dependences in 11 programs (\secref{sec:eval-bench}), showed what missed dependences
+cost: on the small inputs it made 11 programs slower than issuing in order, \code{connected-comp} down to 0.37,
+with 985 blocks rolled back, and its geometric-mean speedup between operations fell from 1.11 with no scheduling
+delay to 0.60 with a delay of 200~\textmu s, while the hybrid interpreter's stayed at \numSimDelayHyNone{}. Where the hybrid interpreter trails the traced dependences,
 the cause is the possible dependences of kernels whose result depends on thread order: in \code{bfs-topo-atomic}
 on the large input it gets \numSimLargeAtomicHyBlk{} against \numSimLargeAtomicTrBlk{} for the traced
 dependences between blocks, because which blocks write which levels depends on the order, so no dependence of
@@ -1159,9 +1171,10 @@ regular; the interpreters could supply them for irregular kernels when the input
 A limitation of the interpreters is that they need the program's input, which means that their results are for
 that input only (\secref{sec:eval-input}). A tool that schedules from them must run them on the input it will use.
 
-A limitation of the whole-program interpreter is that it must understand all of the host code, which means that
-programs whose host code uses C++ streams, option parsers or old C dialects come out with operations missing
-(\secref{sec:eval-bench}). It warns when this happens; the hybrid interpreter does not have this limitation.
+A limitation of the whole-program interpreter is that it must understand all of the host code, which means that a
+program whose host code calls library functions it does not model can come out with operations missing; we modelled
+what our benchmarks call (\secref{sec:host}), and other programs will call more. It warns when this happens; the
+hybrid interpreter does not have this limitation.
 
 A limitation of the over-approximation for thread order is that it reports every dependence another order could
 produce, which means that kernels whose result depends on thread order come out with many possible dependences that a

@@ -3,45 +3,45 @@
  & & & & \multicolumn{5}{c|}{Hybrid} & \multicolumn{5}{c}{Whole program} \\
 Suite & Program & Ops & \shortstack{GPU\\deps} & Cert. & \shortstack{Poss.\\yes} & \shortstack{Poss.\\no} & FN & s & Cert. & \shortstack{Poss.\\yes} & \shortstack{Poss.\\no} & FN & s \\
 \midrule
-Rodinia & \texttt{bfs} & 59 & 609 & 609 & 0 & 0 & 0 & 44 & 609 & 0 & 0 & 0 & 218 \\
-Rodinia & \texttt{gaussian} & 132 & 696 & 696 & 0 & 0 & 0 & 64 & 696 & 0 & 0 & 0 & 147 \\
-Rodinia & \texttt{nw} & 18 & 81 & 81 & 0 & 0 & 0 & 20 & 81 & 0 & 0 & 0 & 24 \\
-Rodinia & \texttt{pathfinder} & 7 & 15 & 15 & 0 & 0 & 0 & 13 & 15 & 0 & 0 & 0 & 5 \\
-Rodinia & \texttt{hotspot} & 4 & 3 & 3 & 0 & 0 & 0 & 12 & 3 & 0 & 0 & 0 & 9 \\
-Rodinia & \texttt{lud} & 12 & 37 & 37 & 0 & 0 & 0 & 14 & 0 & 15 & 16 & 22 & 5 \\
-Rodinia & \texttt{backprop} & 10 & 15 & 15 & 0 & 0 & 0 & 23 & 0 & 0 & 0 & 15 & 3 \\
+Rodinia & \texttt{bfs} & 59 & 609 & 609 & 0 & 0 & 0 & 44 & 609 & 0 & 0 & 0 & 169 \\
+Rodinia & \texttt{gaussian} & 132 & 696 & 696 & 0 & 0 & 0 & 64 & 696 & 0 & 0 & 0 & 111 \\
+Rodinia & \texttt{nw} & 18 & 81 & 81 & 0 & 0 & 0 & 20 & 81 & 0 & 0 & 0 & 17 \\
+Rodinia & \texttt{pathfinder} & 7 & 15 & 15 & 0 & 0 & 0 & 13 & 15 & 0 & 0 & 0 & 4 \\
+Rodinia & \texttt{hotspot} & 4 & 3 & 3 & 0 & 0 & 0 & 12 & 3 & 0 & 0 & 0 & 6 \\
+Rodinia & \texttt{lud} & 12 & 37 & 37 & 0 & 0 & 0 & 14 & 37 & 0 & 0 & 0 & 5 \\
+Rodinia & \texttt{backprop} & 10 & 15 & 15 & 0 & 0 & 0 & 23 & 15 & 0 & 0 & 0 & 27 \\
 Rodinia & \texttt{srad} & 8 & 33 & 32 & 1 & 1 & 0 & 17 & 32 & 1 & 4 & 0 & 7 \\
 \midrule
-GraphBIG & \texttt{bfs-topo-thread-centric} & 20 & 64 & 64 & 0 & 0 & 0 & 31 & 0 & 6 & 7 & 58 & 9 \\
-GraphBIG & \texttt{bfs-topo-atomic} & 17 & 44 & 9 & 35 & 48 & 0 & 12 & 0 & 6 & 7 & 38 & 7 \\
-GraphBIG & \texttt{bfs-data-thread-centric} & 24 & 80 & 80 & 0 & 14 & 0 & 70 & 1 & 11 & 10 & 68 & 22 \\
-GraphBIG & \texttt{sssp-topo-thread-centric} & 27 & 153 & 153 & 0 & 0 & 0 & 18 & 0 & 19 & 47 & 134 & 8 \\
-GraphBIG & \texttt{connected-comp} & 58 & 267 & 59 & 208 & 57 & 0 & 64 & 0 & 17 & 196 & 250 & 7 \\
-GraphBIG & \texttt{kcore} & 15 & 32 & 32 & 0 & 0 & 0 & 14 & 0 & 11 & 68 & 21 & 8 \\
-GraphBIG & \texttt{gc-topo-thread-centric} & 263 & 8,167 & 8,167 & 0 & 0 & 0 & 341 & 0 & 4 & 8 & 8,163 & 7 \\
-GraphBIG & \texttt{degree-centr} & 5 & 6 & 6 & 0 & 0 & 0 & 14 & 0 & 2 & 1 & 4 & 7 \\
-GraphBIG & \texttt{triangle-count} & 9 & 16 & 16 & 0 & 0 & 0 & 386 & 0 & 10 & 47 & 6 & 9 \\
+GraphBIG & \texttt{bfs-topo-thread-centric} & 20 & 64 & 64 & 0 & 0 & 0 & 31 & 64 & 0 & 0 & 0 & 41 \\
+GraphBIG & \texttt{bfs-topo-atomic} & 17 & 44 & 9 & 35 & 48 & 0 & 12 & 9 & 35 & 48 & 0 & 10 \\
+GraphBIG & \texttt{bfs-data-thread-centric} & 24 & 80 & 80 & 0 & 14 & 0 & 70 & 80 & 0 & 14 & 0 & 95 \\
+GraphBIG & \texttt{sssp-topo-thread-centric} & 27 & 153 & 153 & 0 & 0 & 0 & 18 & 137 & 16 & 49 & 0 & 12 \\
+GraphBIG & \texttt{connected-comp} & 58 & 267 & 59 & 208 & 57 & 0 & 64 & 59 & 208 & 57 & 0 & 140 \\
+GraphBIG & \texttt{kcore} & 15 & 32 & 32 & 0 & 0 & 0 & 14 & 32 & 0 & 0 & 0 & 8 \\
+GraphBIG & \texttt{gc-topo-thread-centric} & 263 & 8,167 & 8,167 & 0 & 0 & 0 & 341 & 8,167 & 0 & 0 & 0 & 653 \\
+GraphBIG & \texttt{degree-centr} & 5 & 6 & 6 & 0 & 0 & 0 & 14 & 6 & 0 & 0 & 0 & 6 \\
+GraphBIG & \texttt{triangle-count} & 9 & 16 & 16 & 0 & 0 & 0 & 386 & 16 & 0 & 0 & 0 & 789 \\
 GraphBIG & \texttt{betweenness} & -- & -- & \multicolumn{5}{c}{timeout} & \multicolumn{5}{c}{timeout} \\
 \midrule
-PolyBench & \texttt{2dconv} & 3 & 2 & 2 & 0 & 0 & 0 & 9 & 2 & 0 & 0 & 0 & 17 \\
-PolyBench & \texttt{2mm} & 8 & 8 & 8 & 0 & 0 & 0 & 21 & 8 & 0 & 0 & 0 & 42 \\
-PolyBench & \texttt{3dconv} & 33 & 91 & 91 & 0 & 0 & 0 & 12 & 91 & 0 & 0 & 0 & 15 \\
-PolyBench & \texttt{3mm} & 11 & 10 & 10 & 0 & 0 & 0 & 10 & 10 & 0 & 0 & 0 & 19 \\
-PolyBench & \texttt{atax} & 7 & 7 & 7 & 0 & 0 & 0 & 16 & 7 & 0 & 0 & 0 & 24 \\
-PolyBench & \texttt{bicg} & 9 & 8 & 8 & 0 & 0 & 0 & 10 & 8 & 0 & 0 & 0 & 19 \\
-PolyBench & \texttt{corr} & 10 & 7 & 7 & 0 & 0 & 0 & 13 & 7 & 0 & 0 & 0 & 25 \\
-PolyBench & \texttt{covar} & 7 & 4 & 4 & 0 & 0 & 0 & 10 & 4 & 0 & 0 & 0 & 17 \\
-PolyBench & \texttt{fdtd-2d} & 35 & 178 & 178 & 0 & 0 & 0 & 350 & 178 & 0 & 0 & 0 & 931 \\
-PolyBench & \texttt{gemm} & 5 & 5 & 5 & 0 & 0 & 0 & 17 & 5 & 0 & 0 & 0 & 31 \\
-PolyBench & \texttt{gesummv} & 7 & 8 & 8 & 0 & 0 & 0 & 10 & 8 & 0 & 0 & 0 & 20 \\
-PolyBench & \texttt{gramschm} & 386 & 893 & 893 & 0 & 0 & 0 & 33 & 893 & 0 & 0 & 0 & 54 \\
-PolyBench & \texttt{jacobi1d} & 24 & 72 & 72 & 0 & 0 & 0 & 9 & 72 & 0 & 0 & 0 & 17 \\
-PolyBench & \texttt{jacobi2d} & 44 & 142 & 142 & 0 & 0 & 0 & 164 & 142 & 0 & 0 & 0 & 259 \\
-PolyBench & \texttt{lu} & 258 & 761 & 761 & 0 & 0 & 0 & 113 & 761 & 0 & 0 & 0 & 317 \\
-PolyBench & \texttt{mvt} & 9 & 10 & 10 & 0 & 0 & 0 & 16 & 10 & 0 & 0 & 0 & 26 \\
-PolyBench & \texttt{syr2k} & 5 & 5 & 5 & 0 & 0 & 0 & 22 & 5 & 0 & 0 & 0 & 41 \\
-PolyBench & \texttt{syrk} & 4 & 4 & 4 & 0 & 0 & 0 & 18 & 4 & 0 & 0 & 0 & 39 \\
-PolyBench & \texttt{gemver} & 13 & 16 & 16 & 0 & 0 & 0 & 64 & 16 & 0 & 0 & 0 & 145 \\
-PolyBench & \texttt{adi} & 262 & 3,443 & 3,443 & 0 & 0 & 0 & 31 & 3,443 & 0 & 0 & 0 & 50 \\
+PolyBench & \texttt{2dconv} & 3 & 2 & 2 & 0 & 0 & 0 & 9 & 2 & 0 & 0 & 0 & 13 \\
+PolyBench & \texttt{2mm} & 8 & 8 & 8 & 0 & 0 & 0 & 21 & 8 & 0 & 0 & 0 & 32 \\
+PolyBench & \texttt{3dconv} & 33 & 91 & 91 & 0 & 0 & 0 & 12 & 91 & 0 & 0 & 0 & 16 \\
+PolyBench & \texttt{3mm} & 11 & 10 & 10 & 0 & 0 & 0 & 10 & 10 & 0 & 0 & 0 & 15 \\
+PolyBench & \texttt{atax} & 7 & 7 & 7 & 0 & 0 & 0 & 16 & 7 & 0 & 0 & 0 & 20 \\
+PolyBench & \texttt{bicg} & 9 & 8 & 8 & 0 & 0 & 0 & 10 & 8 & 0 & 0 & 0 & 16 \\
+PolyBench & \texttt{corr} & 10 & 7 & 7 & 0 & 0 & 0 & 13 & 7 & 0 & 0 & 0 & 20 \\
+PolyBench & \texttt{covar} & 7 & 4 & 4 & 0 & 0 & 0 & 10 & 4 & 0 & 0 & 0 & 14 \\
+PolyBench & \texttt{fdtd-2d} & 35 & 178 & 178 & 0 & 0 & 0 & 350 & 178 & 0 & 0 & 0 & 779 \\
+PolyBench & \texttt{gemm} & 5 & 5 & 5 & 0 & 0 & 0 & 17 & 5 & 0 & 0 & 0 & 27 \\
+PolyBench & \texttt{gesummv} & 7 & 8 & 8 & 0 & 0 & 0 & 10 & 8 & 0 & 0 & 0 & 15 \\
+PolyBench & \texttt{gramschm} & 386 & 893 & 893 & 0 & 0 & 0 & 33 & 893 & 0 & 0 & 0 & 41 \\
+PolyBench & \texttt{jacobi1d} & 24 & 72 & 72 & 0 & 0 & 0 & 9 & 72 & 0 & 0 & 0 & 14 \\
+PolyBench & \texttt{jacobi2d} & 44 & 142 & 142 & 0 & 0 & 0 & 164 & 142 & 0 & 0 & 0 & 191 \\
+PolyBench & \texttt{lu} & 258 & 761 & 761 & 0 & 0 & 0 & 113 & 761 & 0 & 0 & 0 & 242 \\
+PolyBench & \texttt{mvt} & 9 & 10 & 10 & 0 & 0 & 0 & 16 & 10 & 0 & 0 & 0 & 20 \\
+PolyBench & \texttt{syr2k} & 5 & 5 & 5 & 0 & 0 & 0 & 22 & 5 & 0 & 0 & 0 & 31 \\
+PolyBench & \texttt{syrk} & 4 & 4 & 4 & 0 & 0 & 0 & 18 & 4 & 0 & 0 & 0 & 27 \\
+PolyBench & \texttt{gemver} & 13 & 16 & 16 & 0 & 0 & 0 & 64 & 16 & 0 & 0 & 0 & 107 \\
+PolyBench & \texttt{adi} & 262 & 3,443 & 3,443 & 0 & 0 & 0 & 31 & 3,443 & 0 & 0 & 0 & 38 \\
 \bottomrule
 \end{tabular}
