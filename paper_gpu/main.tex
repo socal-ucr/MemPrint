@@ -118,8 +118,8 @@ over any number of rounds (\secref{sec:schedules}).
 and a scoring method that compares two runs even when they issue a different number of operations
 (\secref{sec:truth}).
 \item We evaluate both interpreters on \numPrograms{} test programs and on \numBenchTotal{} unmodified benchmarks on
-an NVIDIA A30. The hybrid interpreter misses no dependence and reports no wrong certain dependence on the
-\numBenchHyDone{} benchmarks it completes (\secref{sec:eval}).
+an NVIDIA A30. The hybrid interpreter misses no dependence and reports no wrong certain dependence on
+all \numBenchHyDone{} benchmarks (\secref{sec:eval}).
 \item We simulate the benchmarks on a model of the A30 that runs operations, and their thread blocks, as soon as
 their dependences allow. With the hybrid interpreter's dependences refined to blocks, they run \numSimSmallHyBlk{}
 times as fast as in issue order on the small inputs and \numSimLargeHyBlk{} on larger ones, within a fraction of a
@@ -732,7 +732,7 @@ interpreter and is not included in its rows.}
 
 \tabref{tab:bench-summary} sums the results per suite and \tabref{tab:benchmarks} lists every program.
 \textit{The hybrid interpreter misses none of the GPU's dependences and reports no certain dependence that the GPU
-does not have}, on the \numBenchHyDone{} programs it completes. Of the \numBenchHyTruth{} dependences on the GPU it
+does not have}, on all \numBenchHyDone{} programs. Of the \numBenchHyTruth{} dependences on the GPU it
 reports \numBenchHyCertTP{} as certain and \numBenchHyPossYes{} as possible. On \numBenchHyExact{} programs its result
 is exact: every dependence certain, every unit count equal to the GPU's, nothing reported that did not occur. The
 \numBenchHyPossNo{} possible dependences that the traced run did not have come from four programs. In \code{srad},
