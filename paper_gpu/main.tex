@@ -1071,7 +1071,8 @@ not charge for that. Most of them follow a few shapes: every block on one block 
 $b$ on blocks $b-1$ to $b+1$. Stored per pair of operations as ranges of source blocks, with runs of consecutive
 blocks whose ranges shift by a constant step kept as one record, they take \numCostSmallCompact{} and
 \numCostLargeCompact{} times fewer integers than as pairs, from 1.4 times for the triangular kernels of \code{lu}
-to 26 times for \code{gemm} on the small inputs.
+to 26 times for \code{gemm} on the small inputs. On the small inputs, \code{betweenness}, whose kernels each launch one
+block, has nothing to merge and takes almost half of the integers; without it they are 9.3 times fewer.
 
 \paragraph{Merging block references as they come.} Our first implementation kept every reference a kernel
 made, with the blocks of the threads that made it and the bytes it touched, and turned them into (block, unit)
@@ -1111,7 +1112,9 @@ references against the run without them, and the peak memory of the five program
 \input{tables/block_cost}
 \caption{The hybrid interpreter with dependences between operations and between blocks: the lockstep run without
 and with recording which block made each reference (on the same built program), the refinement to blocks from the
-four orders' references, and the dependences each gives, over the 37 benchmarks.}
+four orders' references, and the dependences each gives, over the \numSimSmallPrograms{} and
+\numSimLargePrograms{} benchmarks. GraphBIG's \code{betweenness} was measured alone, the others eight at a time, and
+the four-order rows leave it out.}
 \label{tab:block-cost}
 \end{table}
 

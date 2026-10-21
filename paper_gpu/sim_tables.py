@@ -148,10 +148,17 @@ DEDUP = (("small", "block_overhead_nodedup.csv", "block_overhead.csv"),
          ("large", "block_overhead_nodedup_large.csv", "block_overhead_large.csv"))
 
 
+def _same_programs(before, after):
+    """The two runs of the merging study over the programs both have (betweenness was measured only after)."""
+    if before is None or after is None:
+        return before, after
+    return before, after[after.name.isin(before.name)].reset_index(drop=True)
+
+
 def dedup_table():
     """Block recording before and after deduplicating references as they come: the lockstep run with --blocks
     against without, and the programs that needed the most memory before."""
-    runs = [(k, load(a), load(b)) for k, a, b in DEDUP]
+    runs = [(k, *_same_programs(load(a), load(b))) for k, a, b in DEDUP]
     lines = []
 
     def row(label, fn):
@@ -263,7 +270,7 @@ def numbers():
         if "block_ints" in d:
             n[f"Cost{K}Compact"] = f"{2 * d.block_deps.sum() / d.block_ints.sum():.1f}"
     for k, a, b in DEDUP:
-        before, after = load(a), load(b)
+        before, after = _same_programs(load(a), load(b))
         if before is None or after is None:
             continue
         K = "Small" if k == "small" else "Large"
