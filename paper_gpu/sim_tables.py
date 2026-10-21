@@ -82,7 +82,7 @@ def block_table():
             cells += [f"{r.hybrid:.2f}", f"{r['hybrid-block']:.2f}", f"{100 * (r['hybrid-block'] / r.hybrid - 1):+.1f}\\%",
                       f"{r['truth-block']:.2f}"]
         rows.append(" & ".join(cells) + r" \\")
-    for label, col in (("Geometric mean, all 37", None),):
+    for label, col in (("Geometric mean, all", None),):
         cells = [label]
         for _, p in runs:
             cells += [f"{geo(p.hybrid):.3f}", f"{geo(p['hybrid-block']):.3f}",
@@ -207,7 +207,7 @@ def numbers():
         n[f"Sim{K}Blocks"] = f"{int(d[d.policy == 'sequential'].blocks.sum()):,}".replace(",", "{,}")
         hb = d[d.policy == "hybrid-block"].set_index("name")
         h = d[d.policy == "hybrid"].set_index("name")
-        n[f"Sim{K}Refined"] = f"{100 * (1 - hb.whole_preds.sum() / h.whole_preds.sum()):.0f}\\%"
+        n[f"Sim{K}Refined"] = f"{100 * (1 - hb.whole_preds.sum() / h.whole_preds.sum()):.1f}\\%"
         for prog, macro in (("polybench-lu", "Lu"), ("polybench-fdtd-2d", "Fdtd"), ("polybench-3dconv", "Conv"),
                             ("graphbig-bfs-topo-atomic", "Atomic"), ("graphbig-bfs-topo-thread-centric", "Topo"),
                             ("rodinia-srad", "Srad")):

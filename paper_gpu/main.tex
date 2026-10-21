@@ -991,8 +991,9 @@ interpreter reports every dependence of every traced run and no certain dependen
 \setlength{\tabcolsep}{4pt}
 \input{tables/sim_summary}
 \caption{Speedup over issuing every operation after the previous one on the simulated A30, geometric mean over the
-benchmarks (all 37, and per suite), and the number of operations or blocks rolled back. The whole-program
-interpreter was not run on the larger inputs.}
+benchmarks (all \numSimSmallPrograms{} on the small inputs and \numSimLargePrograms{} on the larger ones, and per
+suite), and the number of operations or blocks rolled back. The whole-program interpreter's mean on the small inputs
+leaves out \code{betweenness}, which it did not finish.}
 \label{tab:sim-summary}
 \end{table*}
 
@@ -1114,7 +1115,8 @@ four orders' references, and the dependences each gives, over the 37 benchmarks.
 \label{tab:block-cost}
 \end{table}
 
-The whole-program interpreter now gives the hybrid interpreter's speedups (\numSimSmallFu{} and \numSimLargeFu{}). Its
+The whole-program interpreter now gives the hybrid interpreter's speedup on every program it completes (geometric
+mean \numSimSmallFu{} on the small inputs without \code{betweenness}, and \numSimLargeFu{} on the larger ones). Its
 earlier version, which missed dependences in 11 programs (\secref{sec:eval-bench}), showed what missed dependences
 cost: on the small inputs it made 11 programs slower than issuing in order, \code{connected-comp} down to 0.37,
 with 985 blocks rolled back, and its geometric-mean speedup between operations fell from 1.11 with no scheduling

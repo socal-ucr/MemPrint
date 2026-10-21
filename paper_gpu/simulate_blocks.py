@@ -35,6 +35,7 @@ import json
 import math
 import statistics
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -92,6 +93,13 @@ def truth_blocks(w):
     return events, acc
 
 
+def _load_npz(path):
+    """Every array of an .npz file, by name. np.load's NpzFile looks each name up in a list, which takes hours
+    on betweenness's 200,000 arrays."""
+    with zipfile.ZipFile(path) as zf:
+        return {n[:-4]: np.lib.format.read_array(zf.open(n)) for n in zf.namelist() if n.endswith(".npy")}
+
+
 def interp_blocks(hdir, name, schedule):
     """One schedule's run of the hybrid interpreter: (events, {event: {alloc: (blocks, units, bits)} or None})
     for its kernels (None: a reference to an unknown object), from schedule_*/NAME_blocks.npz."""
@@ -101,12 +109,12 @@ def interp_blocks(hdir, name, schedule):
         return None
     events = list(csv.DictReader(open(sub / f"{name}_events.csv")))
     alloc = {r["name"]: int(r["alloc"]) for r in csv.DictReader(open(sub / f"{name}_objects.csv")) if r["alloc"]}
-    z = np.load(path)
+    z = _load_npz(path)
     acc = {int(e): None for e in z["unknown"]}
-    for e in (z["same"] if "same" in z.files else ()):
+    for e in z.get("same", ()):
         acc[int(e)] = "same"                                           # run as in lockstep there
     uniform = {}
-    for k in z.files:
+    for k in z:
         if not k.endswith("/block"):
             continue
         e, obj, _ = k.split("/")
@@ -114,7 +122,7 @@ def interp_blocks(hdir, name, schedule):
             continue
         acc.setdefault(int(e), {})[alloc[obj]] = (z[k].astype(np.int64), z[f"{e}/{obj}/unit"].astype(np.int64),
                                                   z[f"{e}/{obj}/bits"])
-        if f"{e}/{obj}/uniform" in z.files and int(z[f"{e}/{obj}/uniform"]):
+        if f"{e}/{obj}/uniform" in z and int(z[f"{e}/{obj}/uniform"]):
             uniform.setdefault(int(e), set()).add(alloc[obj])
     return events, acc, uniform
 

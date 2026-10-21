@@ -135,6 +135,13 @@ graphbig-triangle-count,GraphBIG,full,9,work,9,5143.55,1.001,0,0.0,11,0
 graphbig-triangle-count,GraphBIG,truth,9,work,9,5143.55,1.001,0,0.0,11,0
 graphbig-triangle-count,GraphBIG,hybrid-block,9,work,9,5143.55,1.001,0,0.0,0,11
 graphbig-triangle-count,GraphBIG,truth-block,9,work,9,5143.55,1.001,0,0.0,0,11
+graphbig-betweenness,GraphBIG,sequential,21220,work,21220,297383.02,1.0,0,0.0,21219,0
+graphbig-betweenness,GraphBIG,buffer,21220,work,21220,291736.0,1.0194,0,0.0,153767099,0
+graphbig-betweenness,GraphBIG,buffer-rw,21220,work,21220,287529.15,1.0343,0,0.0,135434563,0
+graphbig-betweenness,GraphBIG,hybrid,21220,work,21220,285139.22,1.0429,0,0.0,97832,0
+graphbig-betweenness,GraphBIG,truth,21220,work,21220,285139.22,1.0429,0,0.0,97832,0
+graphbig-betweenness,GraphBIG,hybrid-block,21220,work,21220,285139.22,1.0429,0,0.0,0,97832
+graphbig-betweenness,GraphBIG,truth-block,21220,work,21220,285139.22,1.0429,0,0.0,0,97832
 polybench-2dconv,PolyBench-GPU,sequential,3,work,258,52.42,1.0,0,0.0,2,0
 polybench-2dconv,PolyBench-GPU,buffer,3,work,258,52.42,1.0,0,0.0,2,0
 polybench-2dconv,PolyBench-GPU,buffer-rw,3,work,258,52.42,1.0,0,0.0,2,0

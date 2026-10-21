@@ -101,6 +101,11 @@ graphbig-triangle-count,GraphBIG,buffer-rw,9,5143.55,1.001,0,0.0,0,14
 graphbig-triangle-count,GraphBIG,hybrid,9,5143.55,1.001,0,0.0,0,11
 graphbig-triangle-count,GraphBIG,full,9,5143.55,1.001,0,0.0,0,11
 graphbig-triangle-count,GraphBIG,truth,9,5143.55,1.001,0,0.0,0,11
+graphbig-betweenness,GraphBIG,sequential,21220,297383.02,1.0,0,0.0,81614,21219
+graphbig-betweenness,GraphBIG,buffer,21220,291736.0,1.0194,0,0.0,0,153767099
+graphbig-betweenness,GraphBIG,buffer-rw,21220,287529.15,1.0343,0,0.0,0,135434563
+graphbig-betweenness,GraphBIG,hybrid,21220,285139.22,1.0429,0,0.0,0,97832
+graphbig-betweenness,GraphBIG,truth,21220,285139.22,1.0429,0,0.0,0,97832
 polybench-2dconv,PolyBench-GPU,sequential,3,52.42,1.0,0,0.0,0,2
 polybench-2dconv,PolyBench-GPU,buffer,3,52.42,1.0,0,0.0,0,2
 polybench-2dconv,PolyBench-GPU,buffer-rw,3,52.42,1.0,0,0.0,0,2

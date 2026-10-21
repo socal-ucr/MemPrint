@@ -237,6 +237,13 @@ graphbig-triangle-count,hybrid-block,100,5143.55,1.001,0
 graphbig-triangle-count,full,100,5143.55,1.001,0
 graphbig-triangle-count,hybrid-block,200,5143.55,1.001,0
 graphbig-triangle-count,full,200,5143.55,1.001,0
+graphbig-betweenness,hybrid-block,0,285139.22,1.0429,0
+graphbig-betweenness,hybrid-block,5,285139.22,1.0429,0
+graphbig-betweenness,hybrid-block,10,285139.22,1.0429,0
+graphbig-betweenness,hybrid-block,20,285139.22,1.0429,0
+graphbig-betweenness,hybrid-block,50,285139.22,1.0429,0
+graphbig-betweenness,hybrid-block,100,285139.22,1.0429,0
+graphbig-betweenness,hybrid-block,200,285139.22,1.0429,0
 polybench-2dconv,hybrid-block,0,52.42,1.0,0
 polybench-2dconv,full,0,52.42,1.0,0
 polybench-2dconv,hybrid-block,5,52.42,1.0,0
