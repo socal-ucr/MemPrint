@@ -69,4 +69,44 @@ e.elastic = True
 d, s = Sim(c, [job(1, np.full(K, 50.0), np.full(K, 50.0), base=300), e]).run()
 check("elastic growth killed when memory is taken", s["kills"] >= 1, f"kills {s['kills']}")
 
+# Pond: the predicted untouched memory goes to the pool even with local memory free; a correct prediction
+# costs nothing, an overprediction is slowed down until the QoS monitor moves it to local memory.
+c = Cluster(nodes=1, cores=8, local=100, pool=100, beta=0.5)
+pj = job(0, np.full(K, 40.0), np.full(K, 80.0))
+pj.local_cap = 40.0
+d, s = Sim(c, [pj]).run()
+check("Pond: untouched part in the pool, no slowdown", d.runtime.iloc[0] == 100 and s["pool_share"] == 0,
+      f"runtime {d.runtime.iloc[0]}")
+sim = Sim(c, [pj])
+p = sim.plan(pj, 0, 0)
+check("Pond: pool holds request - local cap", np.allclose(p["pool"], 40.0) and np.allclose(p["local"], 40.0))
+over = lambda: job(0, np.full(K, 60.0), np.full(K, 80.0))
+pj = over()
+pj.local_cap = 40.0
+d, s = Sim(c, [pj]).run()
+slow = d.runtime.iloc[0]
+pj = over()
+pj.local_cap, pj.qos_delay = 40.0, 10
+d, s = Sim(c, [pj]).run()
+check("Pond: overprediction slows, QoS mitigation recovers", slow > d.runtime.iloc[0] > 100 and s["kills"] == 0,
+      f"runtime {slow} without, {d.runtime.iloc[0]} with mitigation")
+
+# Dynamic provisioning: the request for the first interval, then each interval's largest footprint; a resize
+# that does not fit fails the job, which restarts from the beginning.
+c = Cluster(nodes=1, cores=8, local=100, pool=0)
+dj = job(0, np.where(half, 20.0, 60.0), np.full(K, 90.0))
+dj.interval = 10
+sim = Sim(c, [dj])
+d, s = sim.run()
+check("dynamic: resized to the coming interval", s["restarts"] == 0 and d.end.iloc[0] == 100
+      and sim.local[0, :10].max() == 90 and sim.local[0, 10:50].max() == 20 and sim.local[0, 50:100].max() == 60,
+      f"local {sim.local[0, [0, 20, 70]].tolist()}")
+dj = job(0, np.where(half, 20.0, 60.0), np.full(K, 90.0))
+dj.interval = 10
+other = job(1, np.full(K, 50.0), np.full(K, 50.0), base=100, arrival=20)   # takes the memory freed at t=10
+d, s = Sim(c, [dj, other]).run()
+st = d.set_index("id")
+check("dynamic: growth that does not fit fails and restarts", s["restarts"] == 1 and st.start[1] == 20
+      and st.start[0] >= 120, f"restarts {s['restarts']}, starts {st.start.to_dict()}")
+
 sys.exit(failed)

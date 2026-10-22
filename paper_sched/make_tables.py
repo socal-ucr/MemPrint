@@ -82,6 +82,8 @@ def grid_table(data, out, load=0.8, pattern="grid_all*.csv", name=None):
     if "error" in g:
         g = g[g.error.isna()]
     g["margin"] = g.margin.astype(str)
+    if "restarts" in g:   # dynamic provisioning's failed resizes, counted with the OOM kills
+        g["kills"] = g.kills + g.restarts.fillna(0)
     from make_figures import select
     g = select(g, "cal")
     g = g[g.load == load]

@@ -24,12 +24,14 @@ ORDER = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2, "S": 0, "W": 1, "A": 2, "small": 0
 LLM = ("llama2c", "llamacpp")
 EXCLUDE = {("npb-mg", "A"), ("llamacpp", "360m-n64")}   # the splitter ran out of memory: no truth
 EXACT = {"exact", "exact-coarse", "exact-peak"}
+NO_MARGIN = EXACT | {"pond", "zacarias"}   # run once: they do not use a margin
+LEARNED = {"ml-peak", "pond"}
 CALIBRATED = {"memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "memprint-static", "massif",
               "massif-pages", "massif-i", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak",
               *(f"memprint-{n}" for n in oracles.CLOCK_PAGES), *oracles.HYBRID}
 ORACLES = ["exact", "exact-coarse", "exact-peak", "memprint-static", "memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "massif",
            "massif-pages", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak", "request", "ml-peak",
-           "reactive"]
+           "reactive", "pond", "zacarias"]
 
 
 def rank(s):
@@ -69,6 +71,7 @@ class Setup:
         cm5 = real.cm5_ratios(f"{traces}/LANL-CM5-1994-4.1-cln.swf.gz")
         self.cm5_train, self.cm5_test = ml.split_users(cm5)
         self.model = ml.PeakModel(self.cm5_train)
+        self.pond_model = ml.PeakModel(self.cm5_train, quantile=0.98)   # Pond's TP = 98%
         self.trace_path = f"{traces}/METACENTRUM-2013-3.swf.gz"
         self.n = n
         self.kind = kind
@@ -119,7 +122,11 @@ class Setup:
         return float(np.quantile([m for p, m in req.items() if p != prog], q))
 
     def oracle(self, name):
-        return ml.oracle(self.model) if name == "ml-peak" else oracles.REAL[name]
+        if name == "ml-peak":
+            return ml.oracle(self.model)
+        if name == "pond":
+            return ml.pond(self.pond_model)
+        return oracles.REAL[name]
 
 
 _setup = None
@@ -156,7 +163,7 @@ def _one(task):
 def _run_one(task):
     scenario, load, seed, margin, name = task
     jobs = _setup.stream(scenario, load, seed)
-    if name != "ml-peak" and not oracles.available(jobs, name):
+    if name not in LEARNED and not oracles.available(jobs, name):
         return None
     f = _setup.oracle(name)
     if margin in ("cal", "cal100"):
@@ -179,8 +186,8 @@ def run(corpus, traces, out, scenarios=("rss", "bytes"), loads=(0.5, 0.7, 0.9, 1
         margins=(0.0, 0.1, 0.3), names=ORACLES, n=3000, cluster=None, procs=24, kind="synthetic", programs=None):
     cluster = cluster or Cluster()
     tasks = list(product(scenarios, loads, seeds, margins, names))
-    # exact and exact-peak do not use a margin
-    tasks = [t for t in tasks if not (t[4] in EXACT and t[3] != margins[0])]
+    # the exact oracles, Pond and dynamic provisioning do not use a margin
+    tasks = [t for t in tasks if not (t[4] in NO_MARGIN and t[3] != margins[0])]
     rows = []
     with Pool(procs, _init, (corpus, traces, n, cluster, kind, programs)) as p, open(out + ".jsonl", "a") as log:
         for r in p.imap_unordered(_one, tasks, chunksize=1):

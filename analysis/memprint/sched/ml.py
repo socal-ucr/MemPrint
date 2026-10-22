@@ -1,4 +1,4 @@
-"""The ML-peak oracle (Pond-style): predict what fraction of its request a job will use from what the scheduler
+"""The ML-peak oracle (after Pond's model) and the Pond oracle: predict what fraction of its request a job will use from what the scheduler
 knows at submission (request, cores, requested time, user, executable), with a quantile model so that it
 rarely under-predicts.
 
@@ -10,6 +10,8 @@ from the held-out users, whose u sets the job's real peak and whose features the
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
+
+from .model import K
 
 FEATURES = ["log_req", "procs", "log_req_time", "user_median", "exe_median"]
 
@@ -42,6 +44,30 @@ class PeakModel:
 
     def predict(self, d):
         return np.clip(self.m.predict(features(d, self.history)), 0.01, 1.0)
+
+
+def pond(model, qos_delay=5):
+    """Pond (Li et al., ASPLOS 2023): the job keeps its whole request, so it is never OOM-killed, but only
+    request - UM of it is local, where UM is the predicted untouched memory, rounded down to whole GB and placed
+    in the pool (Pond's zNUMA node). `model` is a quantile model of u = peak/request; Pond's label is the
+    lifetime minimum of untouched memory, 1 - u, and its quantile sets the target rate of overpredictions (2%
+    at TP = 98%). The QoS monitor moves the pool part to local memory `qos_delay` minutes after the job first
+    touches it. Pond's latency-insensitivity model (all-pool VMs, from 200 PMU counters) has no counterpart in
+    the job streams and is left out. The margin is not used."""
+    def u(j):
+        if "pond_u" not in j.info:
+            j.info["pond_u"] = float(model.predict(pd.DataFrame([j.info["cm5"]]))[0])
+        return j.info["pond_u"]
+
+    def f(j, m):
+        return np.full(K, float(j.info["request"]))
+
+    def attrs(j, m):
+        req = float(j.info["request"])
+        return dict(local_cap=req - np.floor(req * (1 - u(j))), qos_delay=qos_delay)
+
+    f.attrs = attrs
+    return f
 
 
 def oracle(model):

@@ -33,6 +33,15 @@ class Job:
     shape: str = ""
     reservation: np.ndarray = None  # set by an oracle, GB (K samples)
     elastic: bool = False     # growth past the reservation is granted from free memory (reactive provisioning)
+    # Pond (Li et al., ASPLOS 2023): at most local_cap GB of the reservation is local, the rest (the predicted
+    # untouched memory) is pool; qos_delay minutes after the job first spills into the pool, its QoS monitor
+    # moves the pool part to local memory where the node has room (None: no mitigation)
+    local_cap: float = None
+    qos_delay: int = None
+    # dynamic provisioning (Zacarias et al., SC-W 2023): the reservation (the request) holds for the first
+    # `interval` minutes, then is resized every interval to the largest footprint of the coming interval; each
+    # resize is committed only when it happens, and a job whose growth does not fit is failed and restarted
+    interval: int = 0
 
 
 def at_slots(curve, slots):

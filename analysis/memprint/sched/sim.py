@@ -9,6 +9,11 @@ The runtime depends on the placement and the placement on the runtime: a job run
 f is the share of its actual resident GB-minutes that lie above its local reservation, so the two are solved
 together by fixed-point iteration. If at some slot the actual footprint exceeds the reservation, the job is
 OOM-killed there, its work is lost, and it is requeued at the head with its reservation x 1.5.
+
+Two baselines change this. A Pond job (local_cap) keeps part of its reservation in the pool even where local
+memory is free, and its QoS monitor (qos_delay) moves that part to local memory after the job spills into it.
+A dynamic-provisioning job (interval) commits only its first interval at the start and each resize when it
+happens; a resize that does not fit fails the job, which restarts from the beginning.
 """
 
 import heapq
@@ -56,10 +61,18 @@ class Sim:
             r, a = self._at(job, "r", T), self._at(job, "a", T)
             if np.any(self.cores[node, s:s + T] + job.cores > c.cores):
                 return None
-            local = np.minimum(r, np.maximum(c.local - self.local[node, s:s + T], 0))
+            if job.interval:
+                r = self._resizes(job, r, a)
+            win = min(T, job.interval) if job.interval else T   # what must fit now
+            free = np.maximum(c.local - self.local[node, s:s + T], 0)
+            local = np.minimum(r, free)
+            if job.local_cap is not None:
+                local = np.minimum(local, job.local_cap)
             pool = r - local
-            if np.any(pool > c.pool - self.pool[s:s + T] + EPS):
+            if np.any(pool[:win] > c.pool - self.pool[s:s + win] + EPS):
                 return None
+            if job.qos_delay is not None:
+                local, pool = self._mitigate(job, a, r, local, free)
             if job.elastic:
                 local, pool, r, kill = self._grant(node, s, T, a, r, local, pool)
             else:
@@ -71,7 +84,35 @@ class Sim:
             if T2 == T or it == 7:   # unconverged after 8 rounds: keep the last placement, computed for T
                 break
             T = T2
-        return dict(node=node, s=s, T=T, local=local, pool=pool, r=r, a=a, kill=kill, remote=f)
+        p = dict(node=node, s=s, T=T, local=local, pool=pool, r=r, a=a, kill=kill, remote=f)
+        if job.interval:
+            # only the first interval is committed now; the resizes are committed at their ticks (run)
+            p["resizes"] = r
+            p["local"], p["pool"], p["r"] = (np.where(np.arange(T) < win, v, 0.0) for v in (local, pool, r))
+        return p
+
+    @staticmethod
+    def _resizes(job, r, a):
+        """Dynamic provisioning's reservation on T slots: the request for the first interval, then each
+        interval the largest footprint of that interval (the trace's next-interval maximum, as in Zacarias et
+        al.'s simulator)."""
+        L, out = job.interval, a.copy()
+        for i in range(L, len(a), L):
+            out[i:i + L] = a[i:i + L].max()
+        out[:L] = r[:L]
+        return out
+
+    @staticmethod
+    def _mitigate(job, a, r, local, free):
+        """Pond's QoS monitor: `qos_delay` slots after the job first touches its pool memory, the pool part
+        moves to the node's free local memory (a reconfiguration to all-local, where there is room)."""
+        spill = np.flatnonzero(a > local + EPS)
+        if not len(spill):
+            return local, r - local
+        k = spill[0] + job.qos_delay
+        local = local.copy()
+        local[k:] = np.minimum(r[k:], free[k:])
+        return local, r - local
 
     def _grant(self, node, s, T, a, r, local, pool):
         """An elastic job's growth past its reservation, granted from the node's free local memory, then the
@@ -108,14 +149,17 @@ class Sim:
             return None
         T = job.base
         self._ensure(s + T)
-        r = self._at(job, "r", T)
+        win = min(T, job.interval) if job.interval else T   # a dynamic job's resizes are checked when they happen
+        r = self._at(job, "r", T)[:win]
         ok = (self.cores[:, s:s + T] + job.cores <= c.cores).all(axis=1)
         if not ok.any():
             return None
-        free = np.maximum(c.local - self.local[:, s:s + T], 0)
+        free = np.maximum(c.local - self.local[:, s:s + win], 0)
         local = np.minimum(r, free)
+        if job.local_cap is not None:
+            local = np.minimum(local, job.local_cap)
         pool = r - local
-        ok &= (pool <= c.pool - self.pool[s:s + T] + EPS).all(axis=1)
+        ok &= (pool <= c.pool - self.pool[s:s + win] + EPS).all(axis=1)
         if not ok.any():
             return None
         nodes = np.flatnonzero(ok)
@@ -134,19 +178,48 @@ class Sim:
 
     def run(self):
         c, jobs = self.c, self.jobs
-        queue, ends, done, rejected = [], [], {}, []
-        stats = dict(kills=0, wasted_core_min=0.0, reserved=0.0, resident=0.0, remote=0.0)
+        queue, ends, ticks, done, rejected = [], [], [], {}, []
+        stats = dict(kills=0, restarts=0, wasted_core_min=0.0, reserved=0.0, resident=0.0, remote=0.0)
         nxt = 0
+
+        def account(p, t, n):
+            used = slice(0, n)
+            stats["reserved"] += p["r"][used].sum()
+            stats["resident"] += p["a"][used].sum()
+            self.resident[t:t + n] += p["a"][used]
+            stats["remote"] += np.maximum(p["a"][used] - p["local"][used], 0).sum()
 
         def start(job, p, t):
             self._commit(job, p, +1)
             end = t + (p["T"] if p["kill"] is None else p["kill"])
             heapq.heappush(ends, (end, job.id, job, p))
-            used = slice(0, end - t)
-            stats["reserved"] += p["r"][used].sum()
-            stats["resident"] += p["a"][used].sum()
-            self.resident[t:end] += p["a"][used]
-            stats["remote"] += np.maximum(p["a"][used] - p["local"][used], 0).sum()
+            if job.interval:   # accounted when it ends, once its resizes are known
+                if job.interval < p["T"]:
+                    heapq.heappush(ticks, (t + job.interval, job.id, job, p))
+                return
+            account(p, t, end - t)
+
+        def resize(job, p, t):
+            """A dynamic job's resize at slot t: local first, then the pool. If the pool cannot take the rest,
+            the job fails and restarts from the beginning with the same request (Zacarias et al.'s F/R)."""
+            n, k0 = p["node"], t - p["s"]
+            k1 = min(k0 + job.interval, p["T"])
+            need = p["resizes"][k0:k1]
+            local = np.minimum(need, np.maximum(c.local - self.local[n, t:t + k1 - k0], 0))
+            pool = need - local
+            if np.any(pool > c.pool - self.pool[t:t + k1 - k0] + EPS):
+                self.cores[n, t:p["s"] + p["T"]] -= job.cores
+                p["dead"] = True
+                stats["restarts"] += 1
+                stats["wasted_core_min"] += job.cores * k0
+                account(p, p["s"], k0)
+                return job
+            p["local"][k0:k1], p["pool"][k0:k1], p["r"][k0:k1] = local, pool, need
+            self.local[n, t:t + k1 - k0] += local
+            self.pool[t:t + k1 - k0] += pool
+            if k1 < p["T"]:
+                heapq.heappush(ticks, (t + job.interval, job.id, job, p))
+            return None
 
         def earliest(job, t):
             for s in sorted({e for e, *_ in ends if e > t}):
@@ -178,13 +251,18 @@ class Sim:
                 return
 
         while nxt < len(jobs) or ends or queue:
-            t = min(jobs[nxt].arrival if nxt < len(jobs) else math.inf, ends[0][0] if ends else math.inf)
+            t = min(jobs[nxt].arrival if nxt < len(jobs) else math.inf, ends[0][0] if ends else math.inf,
+                    ticks[0][0] if ticks else math.inf)
             if t == math.inf:
                 rejected.extend(queue)
                 break
             killed = []
             while ends and ends[0][0] == t:
                 _, _, job, p = heapq.heappop(ends)
+                if p.get("dead"):
+                    continue
+                if job.interval:
+                    account(p, p["s"], p["T"])
                 if p["kill"] is not None:
                     self._commit(job, p, -1, frm=p["kill"])
                     stats["kills"] += 1
@@ -195,6 +273,10 @@ class Sim:
                     done[job.id] = dict(id=job.id, shape=job.shape, arrival=job.arrival, start=p["s"], end=t,
                                         base=job.base, runtime=p["T"], cores=job.cores, remote=p["remote"],
                                         node=p["node"])
+            while ticks and ticks[0][0] == t:
+                _, _, job, p = heapq.heappop(ticks)
+                if not p.get("dead") and resize(job, p, t) is not None:
+                    killed.append(job)
             queue[:0] = killed
             while nxt < len(jobs) and jobs[nxt].arrival == t:
                 queue.append(jobs[nxt])
@@ -218,7 +300,7 @@ def summarize(d, stats, c, rejected):
         throughput=len(d) / (span / 60),
         response=d.response.mean(), response_p95=d.response.quantile(0.95), wait=(d.start - d.arrival).mean(),
         bsld=d.bsld.mean(), stretch=(d.runtime / d.base).mean(),
-        kills=stats["kills"], wasted_core_h=stats["wasted_core_min"] / 60,
+        kills=stats["kills"], restarts=stats["restarts"], wasted_core_h=stats["wasted_core_min"] / 60,
         reserved_util=stats["reserved"] / capacity, resident_util=stats["resident"] / capacity,
         pool_share=stats["remote"] / max(stats["resident"], EPS), makespan_h=span / 60,
     )

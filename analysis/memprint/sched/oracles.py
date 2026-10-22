@@ -74,6 +74,18 @@ def reactive(j, m, interval=5):
 reactive.elastic = True
 
 
+def zacarias(j, m, interval=5):
+    """Dynamic provisioning as Zacarias et al. (SC-W 2023) simulate it: the request is the initial allocation;
+    every `interval` minutes the allocation is resized to the largest footprint of the coming interval (their
+    simulator reads it from the usage trace), with no headroom, local memory first. Unlike `reactive`, a resize
+    is committed only when it happens, so other jobs may take the memory, and a resize that does not fit fails
+    the job and restarts it (F/R). The margin is not used."""
+    return np.full(K, float(j.info["request"]))
+
+
+zacarias.attrs = lambda j, m, interval=5: dict(interval=interval)
+
+
 CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",
                "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec",
                # on the native wall clock, through the native run's memory references over time (nativerefs)
@@ -95,6 +107,7 @@ HYBRID = {"memprint-W5nat-rss": "W5nat", "memprint-Pnat-rss": "Pnat"}
 
 REAL = {
     "reactive": reactive,
+    "zacarias": zacarias,
     "exact": lambda j, m: curve(j.resident),
     "exact-peak": lambda j, m: peak(j.resident),
     "exact-coarse": lambda j, m: curve(j.resident, windows=20, widen=1),   # exact, at the measured curves' resolution
@@ -131,4 +144,6 @@ def assign(jobs, oracle, margin=0.3, table=None):
     for j in jobs:
         j.reservation = np.asarray(f(j, margin), float)
         j.elastic = getattr(f, "elastic", False)
+        for k, v in (f.attrs(j, margin) if hasattr(f, "attrs") else {}).items():
+            setattr(j, k, v)   # what the simulator needs beyond the curve (Pond's local cap, a resize interval)
     return jobs

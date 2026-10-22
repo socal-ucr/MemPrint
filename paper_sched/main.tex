@@ -114,11 +114,13 @@ the timing of accesses to pooled memory for one run, in cycle detail or from a t
 job scheduler. The BSC Slurm simulator extended by Zacarias et al.\ schedules real job traces on a
 disaggregated system~\cite{Zacarias2021Throughput}, but it represents a job's memory as one peak, and its study
 of accuracy multiplies that peak by a synthetic overestimate~\cite{Zacarias2021Accurate}. Their dynamic
-provisioning study resizes allocations from usage traces every five minutes~\cite{Zacarias2023Dynamic}, which
-is a reactive monitor rather than knowledge available before the job starts. Boezennec et al.\ study the
+provisioning study resizes each job's allocation every five minutes to its use, read from usage traces, and
+fails and restarts a job whose growth does not fit~\cite{Zacarias2023Dynamic}. That is a monitor that acts
+while the job runs, not knowledge available before it starts, and we evaluate it as a baseline. Boezennec et al.\ study the
 allocation of disaggregated memory to jobs with piecewise-constant memory phases~\cite{Boezennec2024}, CFM
 schedules jobs against per-job slowdown curves measured offline~\cite{Amaro2020CFM}, and Pond predicts the
-untouched memory of virtual machines with a gradient-boosted model~\cite{Li2023Pond}. KS+ predicts the memory of
+untouched memory of virtual machines with a gradient-boosted model, places it in a CXL pool and corrects
+overpredictions with a QoS monitor~\cite{Li2023Pond}. We evaluate it as a baseline as well. KS+ predicts the memory of
 workflow tasks over time and reduces wasted GB-seconds by 51\% against peak-only prediction~\cite{KSplus2024},
 but it has no cluster scheduler or memory pool.
 
@@ -184,11 +186,12 @@ actually resident memory as shares of all memory. To leave out the warm-up and t
 every metric is taken over the jobs that arrive between the 10th and the 90th percentile of arrival times,
 and the memory shares are averaged over that period.
 
-\paragraph{Validation of the simulator.} Ten unit tests (\texttt{tests/sched/test\_sim.py}) check that two jobs
+\paragraph{Validation of the simulator.} Fifteen unit tests (\texttt{tests/sched/test\_sim.py}) check that two jobs
 with non-overlapping peaks share a node under their curves but run one after the other under their peaks, that
 an under-reservation is killed where the footprint passes it and requeued, that backfilling never delays the
-head of the queue, that a fully remote job runs $1 + \beta$ times as long, and that elastic growth is granted
-only from free memory. On the synthetic stream of the earlier prototype (3{,}000 jobs, five footprint shapes,
+head of the queue, that a fully remote job runs $1 + \beta$ times as long, that elastic growth is granted
+only from free memory, that Pond's untouched part goes to the pool and its QoS monitor shortens an
+overpredicted job's stretch, and that a dynamic resize that no longer fits restarts the job. On the synthetic stream of the earlier prototype (3{,}000 jobs, five footprint shapes,
 a 60\,GB median heap) the simulator reproduces the prototype's ordering at saturation: the exact curve sustains
 101 jobs per hour, the exact peak 16\% fewer, a Massif-style curve 37\% fewer and a DHAT-style peak 57\% fewer.
 
@@ -258,6 +261,8 @@ RSS peak & peak & peak RSS of an earlier run of the same input \\
 User request & peak & the job's memory request \\
 ML peak & peak & request $\times$ a 0.95-quantile gradient-boosted prediction of $u$ \\
 Reactive resizing & curve & request for 5 minutes, then the last 5 minutes' largest use $+$ headroom \\
+Pond & peak & the request, its predicted untouched part in the pool; QoS monitor \\
+Dynamic provisioning & curve & request, then each 5 minutes the coming 5 minutes' largest use \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -265,8 +270,26 @@ Reactive resizing & curve & request for 5 minutes, then the last 5 minutes' larg
 The ML oracle follows Pond~\cite{Li2023Pond}. It predicts $u$ from the request, the core count, the requested
 time and the user's and the executable's median $u$ in their history, with a gradient-boosted model at the
 0.95 quantile, trained on half of the CM5 users. The jobs it predicts take their $u$ from the other half of the
-users. The reactive oracle follows the dynamic provisioning of Zacarias et al.~\cite{Zacarias2023Dynamic}. The
-scheduler is shown its future resizes when it admits the job, which favours this baseline.
+users. The reactive oracle is a simplified form of the dynamic provisioning of Zacarias et al.~\cite{Zacarias2023Dynamic}
+that sees only the past. The scheduler is shown its future resizes when it admits the job, which favours this
+baseline.
+
+Two further baselines follow the two published systems as closely as the simulator allows. The \term{Pond}
+oracle~\cite{Li2023Pond} reserves the job's whole request, so it never causes an OOM kill, but it keeps only
+the request minus the predicted untouched memory in local DRAM. The rest, rounded down to whole GB, is placed
+in the pool, as Pond's zero-core NUMA node does for a virtual machine, even when local memory is free. The
+untouched share is predicted by the same gradient-boosted model as the ML oracle, at the 0.98 quantile,
+which corresponds to Pond's target of 98\% of jobs within their performance margin. A job that touches more than
+it was given locally runs on the pool. Five minutes after it first does so, Pond's QoS monitor moves its pool
+part to local memory, where the node has room. Pond's second model, which places latency-insensitive virtual
+machines entirely in the pool, needs hardware performance counters that the job streams do not have, and is
+left out. The \term{dynamic provisioning} oracle follows the Slurm policy of Zacarias et
+al.~\cite{Zacarias2023Dynamic}. A job starts with its request. Every five minutes, its allocation is resized to the
+largest use of the coming five minutes, which their simulator reads from the usage trace. The resize takes
+local memory first and the pool next, with no headroom. Unlike the reactive oracle, a resize is committed only
+when it happens, so another job may take the memory first. A resize that does not fit then fails the job,
+which restarts from the beginning (their fail/restart policy), and we count it with the OOM kills. Its runtime
+stretch is fixed when it is admitted, from the placement it would get then. Neither oracle uses a margin.
 
 Every estimate needs a margin, because an estimate below the truth causes OOM kills. A curve oracle's margin is
 headroom added as a share of its own peak, since a curve on another clock can be low where the truth is not,
@@ -422,7 +445,8 @@ load 0.8 with calibrated 90\% margins, and \figref{fig:load} gives the response 
 \begin{table}[t]
 \centering
 \caption{Every oracle at offered load 0.8, calibrated 90\% margins (10\% for the request, ML and reactive
-oracles, which have no profile to calibrate), mean of three seeds. Resp.\ is the mean response time, BSLD the
+oracles, which have no profile to calibrate; none for Pond and dynamic provisioning, whose Kills column counts
+failed resizes), mean of three seeds. Resp.\ is the mean response time, BSLD the
 mean bounded slowdown, Kills the OOM kills per stream of 3{,}000 jobs, Res.\ and Used the memory reserved and
 actually resident as a share of all memory.}
 \label{tab:load08}
@@ -488,6 +512,23 @@ margin, which accepts those kills, they give 1{,}158 and 1{,}154 minutes. The ML
 little on the request it scales, because its 0.95-quantile prediction of $u$ covers only 76\% of jobs from unseen
 users. Reactive resizing (580 minutes) is the best oracle that needs no profile, although it is shown its future
 resizes when the job is admitted.
+
+\paragraph{Pond and dynamic provisioning.} Dynamic provisioning gives 457 minutes under the bytes-touched truth,
+between \memprint{} windowed at 5\% (389) and the exact peak (448), and 395 minutes under the RSS truth, where it
+beats every oracle but the exact curve, the exact peak included (423). It pays with 307 and 265 failed resizes
+per stream, each a restart from the beginning. Two things make it this good, and both come from its simulation
+rather than from what a running system could know. Each resize is the largest use of the coming five minutes,
+read from the truth, so between resizes it is an exact curve at a five-minute resolution, with no margin and on
+the wall clock. And a job's first five minutes, at its full request, are a small share of runs with a median of
+30 minutes. The reactive oracle, which resizes to the past five minutes instead, gives 580 and 612 minutes.
+Dynamic provisioning therefore bounds what a runtime monitor can reach; \memprint{}'s curve under the
+bytes-touched truth gets there before the job starts and without restarts.
+Pond gives 2{,}519 minutes, worse than the request (2{,}208), and causes no kills. It reserves the whole request,
+so it cannot pack more jobs than the request does, and the share it places in the pool must fit in the pool
+even when the node's local memory is free. With a pool of 4\,TB instead of 1\,TB, Pond and the request give
+302 and 307 minutes (one seed, mean over all jobs). Its model predicts 8\% of the request as untouched against 38\% in truth, at the 0.98
+quantile, and still overpredicts for 11\% of the jobs, because they come from users the model has not seen.
+Pond saves local DRAM, not total memory, which is the resource the job streams contend for.
 
 \begin{table}[t]
 \centering
@@ -569,7 +610,7 @@ four.}
 \begin{table}[t]
 \centering
 \caption{The LLM stream at offered load 0.8, calibrated 90\% margins (10\% for the request, ML and reactive
-oracles), mean of three seeds; columns as in \tabref{tab:load08}.}
+oracles, none for Pond and dynamic provisioning), mean of three seeds; columns as in \tabref{tab:load08}.}
 \label{tab:llm}
 \resizebox{\textwidth}{!}{\input{tables/grid_llm_08.tex}}
 \end{table}
@@ -585,7 +626,8 @@ curve gives 180 minutes, the exact peak 307 and the request 2{,}067 under the by
 gain of the curve over the peak against 5.3$\times$ for the full corpus. The best measured estimate is the RSS
 peak of an earlier run, 598 minutes with no kills under the bytes-touched truth and equal to the exact peak under
 the RSS truth, because the weights the RSS counts are the footprint. Reactive resizing gives 753 minutes and
-\memprint{}'s 5\% peak 785 minutes, 602 kills per stream.
+\memprint{}'s 5\% peak 785 minutes, 602 kills per stream. Dynamic provisioning, which reads the next five minutes
+of the truth, gives 386 and 443 minutes with 140 and 200 restarts, and Pond 2{,}379 and 2{,}450.
 
 Every heap profiler fails. They read llama2.c at 0.08 to 0.21 of its peak and llama.cpp at about 1.05, so the
 margin calibrated on the other configurations cannot cover llama2.c's jobs, which would need headroom of 3.8 to
@@ -721,7 +763,9 @@ engines in the corpus, \memprint{}'s curves need one step more than before (192 
 gperftools and heaptrack fall from 256\,GB to never, through their calibrated margins. Under the RSS truth, the
 exact peak and the RSS of an earlier run need 6.0\,TB, reactive resizing 7.0\,TB, \memprint{} windowed at 5\%,
 DHAT, Massif, the ML peak and the request 9.0\,TB, and \memprint{} pages only 11.0\,TB, which repeats the finding
-that a curve on a reference clock loses its advantage against a wall-clock truth.
+that a curve on a reference clock loses its advantage against a wall-clock truth. Dynamic provisioning needs
+7.0\,TB under the bytes-touched truth and 6.0\,TB under the RSS truth, like the exact peak. Pond does not meet the
+target at 320\,GB per node under either truth, because the pool, not local memory, is what its placement fills.
 
 \subsection{What each estimator's cost buys}
 

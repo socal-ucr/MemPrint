@@ -53,6 +53,8 @@ STYLE = {  # oracle: (label, color, marker, dash)
     "request": ("User request", PAL[6], "h", "-"),
     "ml-peak": ("ML peak (quantile GBM)", PAL[7], "p", "-"),
     "reactive": ("Reactive resizing (5 min)", PAL[7], "p", (0, (4, 2))),
+    "pond": ("Pond (untouched in pool)", PAL[6], "H", (0, (1, 1.5))),
+    "zacarias": ("Dynamic provisioning (5 min)", PAL[7], "8", (0, (1, 1.5))),
     # section "The time axis and the level": MemPrint curves on the native clock, and scaled to an earlier
     # run's RSS peak
     "memprint-W5nat": ("MemPrint 5%, native clock", PAL[4], "o", "-"),
@@ -215,10 +217,13 @@ def load_grid(data, pattern):
             print(f"{pattern}: {bad} failed runs left out")
         g = g[g.error.isna()]
     g["margin"] = g.margin.astype(str)
+    if "restarts" in g:   # dynamic provisioning's failed resizes restart the job: counted with the OOM kills
+        g["kills"] = g.kills + g.restarts.fillna(0)
     return g
 
 
-UNCALIBRATED = {"request", "ml-peak", "reactive"}   # no profile to calibrate: always run with a 10% margin
+UNCALIBRATED = {"request", "ml-peak", "reactive", "pond", "zacarias"}   # no profile to calibrate: run with a 10%
+# margin (Pond and dynamic provisioning use none, and their single run carries the same label)
 
 
 def select(g, margin):
@@ -417,7 +422,7 @@ def main():
     g = load_grid(a.data, "grid_all*.csv")
     if g is not None:
         main_oracles = ["exact", "exact-coarse", "exact-peak", "memprint-W5", "massif-i", "massif", "dhat", "dhat-curve",
-                        "heaptrack", "rss-peak", "request", "ml-peak", "reactive"]
+                        "heaptrack", "rss-peak", "request", "ml-peak", "reactive", "pond", "zacarias"]
         fig_response_vs_load(g, a.out, "response_vs_load", main_oracles)
         fig_response_vs_load(g, a.out, "response_vs_load_best", main_oracles, margin="best")
         fig_response_vs_load(g, a.out, "kills_vs_load", main_oracles, metric="kills", ylabel="OOM kills")
@@ -428,13 +433,13 @@ def main():
     if gs is not None:
         fig_response_vs_load(gs, a.out, "static_response_vs_load",
                              ["exact", "exact-peak", "memprint-static", "memprint-W5", "massif-i", "massif", "dhat",
-                              "dhat-curve", "heaptrack", "request", "reactive"])
+                              "dhat-curve", "heaptrack", "request", "reactive", "pond", "zacarias"])
     fig_llm_curves(cv, a.out)
     gl = load_grid(a.data, "grid_llm*.csv")
     if gl is not None:
         fig_response_vs_load(gl, a.out, "llm_response_vs_load",
                              ["exact", "exact-coarse", "exact-peak", "memprint-W5", "memprint-P", "massif-i", "dhat",
-                              "heaptrack", "gperf", "rss-peak", "request", "reactive"])
+                              "heaptrack", "gperf", "rss-peak", "request", "reactive", "pond", "zacarias"])
     v3 = os.path.expanduser("~/memprint-data/2026-10-13-sched-fm")
     gv = load_grid(v3, "v3m_all.csv")
     if gv is not None:
