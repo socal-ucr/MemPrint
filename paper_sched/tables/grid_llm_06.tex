@@ -1,0 +1,31 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = RSS} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Oracle & Resp. (min) & BSLD & Kills & Res. \% & Used \% & Resp. (min) & BSLD & Kills & Res. \% & Used \% \\
+\midrule
+Exact curve & 64 & 1.6 & 0 & 66 & 66 & 64 & 1.6 & 0 & 66 & 66 \\
+Exact, 20 windows & 65 & 1.6 & 0 & 68 & 66 & 65 & 1.6 & 0 & 68 & 66 \\
+Exact peak & 74 & 1.9 & 0 & 71 & 65 & 87 & 2.5 & 0 & 73 & 63 \\
+Dynamic provisioning (5 min) & 105 & 3.3 & 107 & 69 & 62 & 129 & 4.3 & 148 & 68 & 60 \\
+RSS peak (earlier run) & 220 & 8.3 & 0 & 67 & 57 & 87 & 2.5 & 0 & 73 & 63 \\
+KS+ (segments from other inputs) & 327 & 13.1 & 1537 & 63 & 48 & 190 & 7.0 & 800 & 64 & 52 \\
+Reactive resizing (5 min) & 345 & 13.8 & 9 & 64 & 53 & 349 & 14.0 & 11 & 64 & 53 \\
+MemPrint windowed 5\%, peak & 377 & 14.8 & 602 & 67 & 51 & 489 & 19.7 & 602 & 69 & 48 \\
+ML peak (quantile GBM) & 1404 & 60.2 & 115 & 60 & 36 & 1496 & 64.2 & 115 & 60 & 33 \\
+User request & 1630 & 70.1 & 0 & 57 & 33 & 1715 & 73.8 & 0 & 58 & 32 \\
+Pond (untouched in pool) & 1950 & 83.9 & 0 & 53 & 31 & 2024 & 87.2 & 0 & 53 & 29 \\
+Massif pages-as-heap & 2219 & 95.9 & 0 & 47 & 26 & 1782 & 76.8 & 0 & 50 & 29 \\
+Massif pages-as-heap, ms clock & 2534 & 109.5 & 0 & 46 & 25 & 2085 & 89.9 & 0 & 48 & 26 \\
+MemPrint windowed 1\% & 2691 & 116.9 & 1049 & 45 & 23 & 2616 & 113.3 & 1045 & 47 & 23 \\
+MemPrint windowed 5\% & 3706 & 161.4 & 1035 & 42 & 19 & 3421 & 149.5 & 1035 & 43 & 19 \\
+MemPrint pages only & 6238 & 273.5 & 610 & 29 & 9 & 6838 & 300.0 & 1220 & 29 & 9 \\
+heaptrack curve & 8312 & 362.1 & 1195 & 31 & 9 & 8063 & 351.7 & 1195 & 31 & 9 \\
+Massif curve & 8426 & 367.2 & 1195 & 30 & 9 & 8135 & 355.1 & 1195 & 31 & 9 \\
+Massif curve, ms clock & 8509 & 370.9 & 1195 & 31 & 9 & 8257 & 360.1 & 1195 & 31 & 9 \\
+DHAT curve (3 points) & 8687 & 379.3 & 1195 & 30 & 8 & 8345 & 364.6 & 1195 & 31 & 9 \\
+DHAT peak & 8835 & 385.1 & 1195 & 30 & 8 & 8312 & 362.1 & 1195 & 31 & 8 \\
+gperftools peak & 8835 & 385.8 & 1195 & 30 & 8 & 8684 & 379.2 & 1195 & 30 & 8 \\
+DHAT hold-then-decay & 9023 & 394.0 & 1195 & 30 & 8 & 8832 & 385.7 & 1195 & 30 & 8 \\
+\bottomrule
+\end{tabular}

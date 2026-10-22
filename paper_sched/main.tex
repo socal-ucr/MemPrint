@@ -121,8 +121,9 @@ allocation of disaggregated memory to jobs with piecewise-constant memory phases
 schedules jobs against per-job slowdown curves measured offline~\cite{Amaro2020CFM}, and Pond predicts the
 untouched memory of virtual machines with a gradient-boosted model, places it in a CXL pool and corrects
 overpredictions with a QoS monitor~\cite{Li2023Pond}. We evaluate it as a baseline as well. KS+ predicts the memory of
-workflow tasks over time and reduces wasted GB-seconds by 51\% against peak-only prediction~\cite{KSplus2024},
-but it has no cluster scheduler or memory pool.
+workflow tasks over time, as a step function whose segments it learns from earlier executions with other inputs,
+and reduces wasted GB-seconds by 51\% against peak-only prediction~\cite{KSplus2024}, but it has no cluster
+scheduler or memory pool. We evaluate it as a third published baseline.
 
 \paragraph{Footprint estimators.} Massif samples the heap at up to 100 snapshots by default, on a time axis of
 instructions or of milliseconds under Valgrind~\cite{ValgrindMassif}, and with \texttt{--pages-as-heap} it
@@ -263,6 +264,7 @@ ML peak & peak & request $\times$ a 0.95-quantile gradient-boosted prediction of
 Reactive resizing & curve & request for 5 minutes, then the last 5 minutes' largest use $+$ headroom \\
 Pond & peak & the request, its predicted untouched part in the pool; QoS monitor \\
 Dynamic provisioning & curve & request, then each 5 minutes the coming 5 minutes' largest use \\
+KS+ & curve & 4 segments regressed on input size from the other inputs' RSS; retry \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -290,6 +292,18 @@ local memory first and the pool next, with no headroom. Unlike the reactive orac
 when it happens, so another job may take the memory first. A resize that does not fit then fails the job,
 which restarts from the beginning (their fail/restart policy), and we count it with the OOM kills. Its runtime
 stretch is fixed when it is admitted, from the placement it would get then. Neither oracle uses a margin.
+
+The \term{KS+} oracle follows Bader et al.~\cite{KSplus2024} and the authors' code. KS+ learns a task's
+memory over time from earlier executions of the same task with other inputs. It cuts each execution's monitored
+memory into four segments of a non-decreasing step function, and fits, for each segment, a linear regression of
+its end time and one of its peak on the input size. For a new input it ends every segment 15\% earlier than
+predicted and raises every peak by 10\%, with peaks of at least 100\,MB. After an OOM kill, it ends the failed
+segment, and proportionally the later ones, at the time of the failure, or raises the last segment's peak by
+20\% if the failure was there, and runs the job again. We give KS+ the RSS of each program's native runs at its
+other corpus inputs, on their wall clocks, and the size of the data each input describes (array elements,
+vertices, grid points, the source file, the model file). A job, at the program's largest input, is predicted
+from the two smaller ones; on the LLM stream, every input is predicted from the other two of its engine. darknet
+has a single input and no history, so KS+ reserves its request. KS+ uses its own offsets and no further margin.
 
 Every estimate needs a margin, because an estimate below the truth causes OOM kills. A curve oracle's margin is
 headroom added as a share of its own peak, since a curve on another clock can be low where the truth is not,
@@ -441,6 +455,7 @@ blind test, for a reason we have not found.
 We first ask how much an exact footprint is worth and where the gain comes from, then how close each measured
 estimator gets, and finally what each estimator's cost buys. \tabref{tab:load08} gives every oracle at offered
 load 0.8 with calibrated 90\% margins, and \figref{fig:load} gives the response time across loads.
+Appendix~\ref{sec:loads} repeats every result of this section at offered loads 0.4, 0.6, 1.0 and 1.2.
 
 \begin{table}[t]
 \centering
@@ -530,6 +545,18 @@ even when the node's local memory is free. With a pool of 4\,TB instead of 1\,TB
 quantile, and still overpredicts for 11\% of the jobs, because they come from users the model has not seen.
 Pond saves local DRAM, not total memory, which is the resource the job streams contend for.
 
+\paragraph{KS+.} KS+ gives 1{,}262 minutes under the bytes-touched truth and 813 under the RSS truth, better than
+the request and Pond but behind the exact peak, an earlier run's RSS and both resizing policies, with about 8{,}200
+and 8{,}500 OOM kills per stream. For most programs its prediction of the largest input from the two smaller
+ones is close: the peak it first predicts is 0.86 to 1.18 times the true RSS peak for 19 of the 24 programs it
+can predict, and those jobs fail at most twice. Two programs cause nearly all the kills. The smaller inputs of
+atax and NPB MG barely rise above the runtime's baseline, so the regressions predict almost nothing for the
+largest input, and their jobs climb from the 100\,MB floor in 20\% steps, 36 to 38 times for atax and 20 to 23
+times for MG. GCC's cc1 never fails but reserves 8.6 to 10.7 times its peak, because the two smaller source files
+predict a steep line. KS+ was designed for workflow tasks with hundreds of earlier executions; with three inputs
+per program, far apart in size, an input-size regression has little to extrapolate from, and its errors are
+the large errors that cost a scheduler most.
+
 \begin{table}[t]
 \centering
 \caption{The margin each oracle needs to stay above the truth, as a share of its own peak (\%), over the 25
@@ -539,6 +566,7 @@ programs at their largest inputs.}
 \end{table}
 
 \subsection{The RSS truth and the time axis}
+\label{sec:rsstruth}
 
 Under the RSS truth, the measured curves lose their advantage. \memprint{}'s windowed and pages-only curves give
 1{,}869 to 2{,}516 minutes, worse than the DHAT peak (1{,}302 minutes) and the \memprint{} 5\% peak (959 minutes). The
@@ -627,7 +655,8 @@ gain of the curve over the peak against 5.3$\times$ for the full corpus. The bes
 peak of an earlier run, 598 minutes with no kills under the bytes-touched truth and equal to the exact peak under
 the RSS truth, because the weights the RSS counts are the footprint. Reactive resizing gives 753 minutes and
 \memprint{}'s 5\% peak 785 minutes, 602 kills per stream. Dynamic provisioning, which reads the next five minutes
-of the truth, gives 386 and 443 minutes with 140 and 200 restarts, and Pond 2{,}379 and 2{,}450.
+of the truth, gives 386 and 443 minutes with 140 and 200 restarts, Pond 2{,}379 and 2{,}450, and KS+, which
+predicts each configuration from the engine's other two, 737 and 547 minutes with about 1{,}540 and 800 kills.
 
 Every heap profiler fails. They read llama2.c at 0.08 to 0.21 of its peak and llama.cpp at about 1.05, so the
 margin calibrated on the other configurations cannot cover llama2.c's jobs, which would need headroom of 3.8 to
@@ -749,7 +778,7 @@ per node under both RSS truths (7.0\,TB), instead of 256\,GB on their clock of r
 \includegraphics[width=\textwidth]{figures/capacity.pdf}
 \caption{The total memory (32 nodes of local DRAM plus the 1\,TB pool) each oracle needs to keep the mean
 bounded slowdown within 1.5 times that of the exact curve at 128\,GB per node, at a fixed arrival rate (load 0.8
-on the 128\,GB cluster). Local memory per node was swept over 64, 96, 128, 160, 192, 256 and 320\,GB.}
+on the 128\,GB cluster). Local memory per node was swept over 48, 64, 96, 128, 160, 192, 256, 320, 384 and 512\,GB.}
 \label{fig:capacity}
 \end{figure}
 
@@ -757,15 +786,16 @@ The response-time gains translate into memory a site would have to buy (\figref{
 arrival rate, the exact curve meets the target with 128\,GB per node (5.0\,TB in all). Under the bytes-touched
 truth, the exact peak needs 160\,GB per node (6.0\,TB, 20\% more), \memprint{}'s windowed and pages-only curves
 and reactive resizing 192\,GB (7.0\,TB, 40\% more), DHAT, an earlier run's RSS and the ML peak 256\,GB (9.0\,TB,
-80\% more), and Massif's curve and the request 320\,GB (11.0\,TB, 120\% more). gperftools, heaptrack, Massif's
-curve on its millisecond clock and the DHAT curve do not meet the target even at 320\,GB per node. With the LLM
+80\% more), and Massif's curve and the request 320\,GB (11.0\,TB, 120\% more). The DHAT curve needs 384\,GB per node
+(13.0\,TB) and Massif's curve on its millisecond clock 512\,GB (17.0\,TB), and gperftools and heaptrack do not
+meet the target even at 512\,GB per node. With the LLM
 engines in the corpus, \memprint{}'s curves need one step more than before (192 instead of 160\,GB per node), and
 gperftools and heaptrack fall from 256\,GB to never, through their calibrated margins. Under the RSS truth, the
 exact peak and the RSS of an earlier run need 6.0\,TB, reactive resizing 7.0\,TB, \memprint{} windowed at 5\%,
 DHAT, Massif, the ML peak and the request 9.0\,TB, and \memprint{} pages only 11.0\,TB, which repeats the finding
 that a curve on a reference clock loses its advantage against a wall-clock truth. Dynamic provisioning needs
-7.0\,TB under the bytes-touched truth and 6.0\,TB under the RSS truth, like the exact peak. Pond does not meet the
-target at 320\,GB per node under either truth, because the pool, not local memory, is what its placement fills.
+7.0\,TB under the bytes-touched truth and 6.0\,TB under the RSS truth, like the exact peak. Pond needs 512\,GB per node
+(17.0\,TB) under both truths, because the pool, not local memory, is what its placement fills.
 
 \subsection{What each estimator's cost buys}
 
@@ -898,6 +928,200 @@ inputs, limit it today to programs whose footprint is set by their input sizes.
 \label{fig:kills}
 \end{figure}
 
+
+\section{Results at every offered load}
+\label{sec:loads}
+
+The results of \secref{sec:results} are given at offered load 0.8. This appendix gives each of them at loads
+0.4, 0.6, 1.0 and 1.2 as well, from the same runs (three seeds per point): the main stream
+(\tabref{tab:load04} to \tabref{tab:load12}), the margins (\figref{fig:margins-loads}), what each estimator's cost
+buys (\figref{fig:roi-loads}), DHAT's curves (\figref{fig:dhat-loads}), the LLM stream (\tabref{tab:llm04} to
+\tabref{tab:llm12}), the file mappings (\tabref{tab:fm04} to \tabref{tab:fm12}), the time axis and the level
+(\tabref{tab:ta04} to \tabref{tab:ta12}), and the memory needed for the same service, for which the memory
+sweep was rerun at every load (\tabref{tab:capacity-loads}, \figref{fig:capacity-loads}).
+
+\paragraph{Where load 0.8 sits.} At load 0.4 no oracle that does not over-reserve leaves jobs waiting, so the
+exact curve, the exact peak, \memprint{}'s curves under the bytes-touched truth, reactive resizing and dynamic
+provisioning all give 51 to 71 minutes, close to the runtimes. Only the oracles that over-reserve (the request,
+Pond, the ML peak, the profilers with large calibrated margins) or are killed repeatedly (DHAT, and the RSS peak
+under the bytes-touched truth) stand apart. From load 0.6 memory is contended, and the gain of the exact curve over
+the exact peak is 2.7$\times$ at 0.6, 5.3$\times$ at 0.8, 2.6$\times$ at 1.0 and 2.1$\times$ at 1.2 under the
+bytes-touched truth (2.2, 4.3, 2.3 and 1.9$\times$ under the RSS truth). Load 0.8 is where the curve gains most:
+there the curve still keeps up with arrivals (84 minutes) while the peak no longer does; above it, the curve
+saturates as well and both queue. The gain over the request falls from 22 to 33$\times$ at loads up to 0.8 to
+9.4$\times$ at 1.0 and 6.7$\times$ at 1.2, because the request saturates first and gains little from more load.
+
+\paragraph{What holds at every load.} The order of the oracles hardly changes with load. Under the
+bytes-touched truth, \memprint{} windowed at 5\% beats the exact peak at every contended load (140, 389, 617 and
+728 minutes against 149, 448, 665 and 822 at loads 0.6 to 1.2), and it and dynamic provisioning are the two best
+oracles other than the exact ones at every load, followed by \memprint{} pages only and reactive resizing in either
+order. At load 0.4, where the exact peak needs no more than the curve, the exact peak (55 minutes) beats every
+estimate. Under the RSS truth, the RSS peak of an earlier run and dynamic provisioning are the two best at every
+load, and \memprint{}'s curves on their clock of references fall behind the exact peak at every load, as at load 0.8
+(\secref{sec:rsstruth}). On the LLM
+stream, the RSS peak of an earlier run and dynamic provisioning lead at every load, and the heap profilers fail at
+every load. On the programs the static route predicts, dynamic provisioning leads at every load and \memprint{}
+windowed at 5\% is second under the bytes-touched truth. Pond is slower than the request at every load and on
+every stream, because it reserves the whole request and holds part of it in the pool. KS+ is between the
+resizing policies and the request at every load on the main stream, and its number of kills does not depend on the
+load (8{,}190 to 8{,}550 per stream), because they come from the same two programs' predictions.
+
+\paragraph{Memory needed for the same service.} The memory sweep was rerun at every load, over 48 to 512\,GB of
+local memory per node (\tabref{tab:capacity-loads}). The target is set at each load as 1.5 times the exact
+curve's bounded slowdown at 128\,GB per node, which is 1.5 to 1.8 at loads 0.4 and 0.6, 3.6 to 4.6 at 0.8, and
+15 to 25 at loads 1.0 and 1.2, where even the exact curve queues. The ranking hardly moves with load. The exact
+curve needs 4.0\,TB at load 0.4 and 5.0\,TB at every other load, and the exact peak one step more (5.0 to
+6.0\,TB). Under the bytes-touched truth, \memprint{}'s curves and dynamic provisioning need the same as the exact
+peak, or one step more at load 0.8 (6.0 to 7.0\,TB), reactive resizing 6.0 to 7.0\,TB, an earlier run's RSS and
+DHAT 6.0 to 9.0\,TB, the ML peak 9.0\,TB and the request 9.0 to 11.0\,TB at every load. Pond needs 11.0 to
+17.0\,TB, more than the request at every load, and gperftools and heaptrack do not meet the target at 512\,GB per
+node at any load. Under the RSS truth, the RSS of an earlier run and dynamic provisioning need what the exact peak
+needs (5.0 to 6.0\,TB) at every load, while \memprint{}'s curves on their clock of references need 7.0 to 11.0\,TB.
+The reruns of \secref{sec:filemaps} and \secref{sec:timeaxis} keep their findings at every load
+(\tabref{tab:capacity-ta-loads} and \tabref{tab:capacity-fm-loads}): with file mappings tracked, \memprint{}'s
+windowed curve needs what the exact peak needs under the bytes-touched truth at every load, and on the native
+clock its curves need 5.0 to 7.0\,TB under both RSS truths, against 7.0 to 9.0\,TB on the clock of references.
+
+\begin{table}[p]
+\centering
+\caption{Every oracle at offered load 0.4, as \tabref{tab:load08}.}
+\label{tab:load04}
+\resizebox{\textwidth}{!}{\input{tables/grid_04.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Every oracle at offered load 0.6, as \tabref{tab:load08}.}
+\label{tab:load06}
+\resizebox{\textwidth}{!}{\input{tables/grid_06.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Every oracle at offered load 1.0, as \tabref{tab:load08}.}
+\label{tab:load10}
+\resizebox{\textwidth}{!}{\input{tables/grid_10.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Every oracle at offered load 1.2, as \tabref{tab:load08}.}
+\label{tab:load12}
+\resizebox{\textwidth}{!}{\input{tables/grid_12.tex}}
+\end{table}
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{figures/margin_tradeoff_loads.pdf}
+\caption{Response time against OOM kills for every margin policy, as \figref{fig:margins}, at every offered load.}
+\label{fig:margins-loads}
+\end{figure}
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{figures/roi_loads.pdf}
+\caption{The response-time gain over the user's request against what each estimator costs, as \figref{fig:roi}, at every offered load.}
+\label{fig:roi-loads}
+\end{figure}
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{figures/dhat_curves_loads.pdf}
+\caption{DHAT's peak and its three-point curves at every margin policy, as \figref{fig:dhat}, at every offered load.}
+\label{fig:dhat-loads}
+\end{figure}
+\begin{table}[p]
+\centering
+\caption{The LLM stream at offered load 0.4, as \tabref{tab:llm}.}
+\label{tab:llm04}
+\resizebox{\textwidth}{!}{\input{tables/grid_llm_04.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{The LLM stream at offered load 0.6, as \tabref{tab:llm}.}
+\label{tab:llm06}
+\resizebox{\textwidth}{!}{\input{tables/grid_llm_06.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{The LLM stream at offered load 1.0, as \tabref{tab:llm}.}
+\label{tab:llm10}
+\resizebox{\textwidth}{!}{\input{tables/grid_llm_10.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{The LLM stream at offered load 1.2, as \tabref{tab:llm}.}
+\label{tab:llm12}
+\resizebox{\textwidth}{!}{\input{tables/grid_llm_12.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{\memprint{}'s oracles before and after tracking file mappings, at offered load 0.4, as \tabref{tab:filemaps}.}
+\label{tab:fm04}
+\input{tables/file_maps_04.tex}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{\memprint{}'s oracles before and after tracking file mappings, at offered load 0.6, as \tabref{tab:filemaps}.}
+\label{tab:fm06}
+\input{tables/file_maps_06.tex}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{\memprint{}'s oracles before and after tracking file mappings, at offered load 1.0, as \tabref{tab:filemaps}.}
+\label{tab:fm10}
+\input{tables/file_maps_10.tex}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{\memprint{}'s oracles before and after tracking file mappings, at offered load 1.2, as \tabref{tab:filemaps}.}
+\label{tab:fm12}
+\input{tables/file_maps_12.tex}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Mean response time under three truths at offered load 0.4, as \tabref{tab:timeaxis}.}
+\label{tab:ta04}
+\resizebox{\textwidth}{!}{\input{tables/time_axis_04.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Mean response time under three truths at offered load 0.6, as \tabref{tab:timeaxis}.}
+\label{tab:ta06}
+\resizebox{\textwidth}{!}{\input{tables/time_axis_06.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Mean response time under three truths at offered load 1.0, as \tabref{tab:timeaxis}.}
+\label{tab:ta10}
+\resizebox{\textwidth}{!}{\input{tables/time_axis_10.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Mean response time under three truths at offered load 1.2, as \tabref{tab:timeaxis}.}
+\label{tab:ta12}
+\resizebox{\textwidth}{!}{\input{tables/time_axis_12.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Total memory (TB: 32 nodes of local DRAM plus the 1\,TB pool) each oracle needs to keep the mean bounded slowdown within 1.5 times the exact curve's at 128\,GB per node, at every offered load (the target is set at each load). The sweep runs from 48 to 512\,GB per node; -- means not met at 512\,GB.}
+\label{tab:capacity-loads}
+\resizebox{\textwidth}{!}{\input{tables/capacity_loads.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{The same for the oracles of the section on the time axis and the level, under three truths.}
+\label{tab:capacity-ta-loads}
+\resizebox{\textwidth}{!}{\input{tables/capacity_timeaxis_loads.tex}}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{The same for \memprint{}'s curves with file mappings tracked, held to the targets of \tabref{tab:capacity-loads}.}
+\label{tab:capacity-fm-loads}
+\input{tables/capacity_fm_loads.tex}
+\end{table}
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{figures/capacity_loads.pdf}
+\caption{The total memory each oracle needs for the same service, as \figref{fig:capacity}, at every offered load.}
+\label{fig:capacity-loads}
+\end{figure}
+
+\clearpage
 \bibliographystyle{plain}
 \bibliography{references}
 

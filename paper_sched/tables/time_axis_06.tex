@@ -1,0 +1,19 @@
+\begin{tabular}{lrrr}
+\toprule
+Oracle & Truth = bytes touched & Truth = RSS & Truth = RSS without code \\
+\midrule
+Exact curve & 56 & 56 & 56 \\
+Exact peak & 149 & 124 & 134 \\
+RSS peak (earlier run) & 603 & 124 & 134 \\
+MemPrint windowed 5\% & 102 & 1{,}485 & 1{,}510 \\
+MemPrint 5\%, native clock & 1{,}180 & 331 & 221 \\
+MemPrint pages, native clock & 1{,}169 & 404 & 318 \\
+MemPrint 5\%, native clock, RSS level & 1{,}672 & 250 & 161 \\
+MemPrint pages, native clock, RSS level & 1{,}664 & 243 & 167 \\
+DHAT peak & 676 & 931 & 829 \\
+Massif curve & 2{,}025 & 1{,}723 & 1{,}885 \\
+heaptrack curve & 11{,}432 & 12{,}153 & 12{,}007 \\
+gperftools peak & 10{,}144 & 10{,}758 & 10{,}706 \\
+User request & 1{,}833 & 1{,}788 & 1{,}815 \\
+\bottomrule
+\end{tabular}

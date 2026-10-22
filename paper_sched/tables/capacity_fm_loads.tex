@@ -1,0 +1,10 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = resident set (RSS)} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Load & 0.4 & 0.6 & 0.8 & 1 & 1.2 & 0.4 & 0.6 & 0.8 & 1 & 1.2 \\
+\midrule
+MemPrint windowed 5\% & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+MemPrint pages only & 5.0 & 6.0 & 7.0 & 6.0 & 6.0 & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+\bottomrule
+\end{tabular}

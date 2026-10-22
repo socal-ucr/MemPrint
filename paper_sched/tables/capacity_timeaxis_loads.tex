@@ -1,0 +1,15 @@
+\begin{tabular}{lrrrrrrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = resident set (RSS)} & \multicolumn{5}{c}{Truth = RSS without code} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11} \cmidrule(lr){12-16}
+Load & 0.4 & 0.6 & 0.8 & 1 & 1.2 & 0.4 & 0.6 & 0.8 & 1 & 1.2 & 0.4 & 0.6 & 0.8 & 1 & 1.2 \\
+\midrule
+Exact curve & 4.0 & 5.0 & 5.0 & 5.0 & 5.0 & 4.0 & 5.0 & 5.0 & 5.0 & 5.0 & 4.0 & 5.0 & 5.0 & 5.0 & 5.0 \\
+Exact peak & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 \\
+MemPrint windowed 5\% & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+DHAT peak & 6.0 & 7.0 & 9.0 & 7.0 & 7.0 & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 & 7.0 & 9.0 & 9.0 & 9.0 & 7.0 \\
+MemPrint 5\%, native clock & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 & 6.0 & 6.0 & 7.0 & 7.0 & 6.0 & 5.0 & 6.0 & 7.0 & 7.0 & 6.0 \\
+RSS peak (earlier run) & 6.0 & 7.0 & 9.0 & 7.0 & 7.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 \\
+MemPrint 5\%, native clock, RSS level & 9.0 & 9.0 & 11.0 & 9.0 & 9.0 & 5.0 & 6.0 & 7.0 & 6.0 & 6.0 & 5.0 & 6.0 & 7.0 & 6.0 & 6.0 \\
+\bottomrule
+\end{tabular}

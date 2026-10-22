@@ -1,0 +1,13 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Main stream (25 programs)} & \multicolumn{4}{c}{LLM stream} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+ & \multicolumn{2}{c}{Bytes touched} & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Bytes touched} & \multicolumn{2}{c}{RSS} \\
+Oracle & before & after & before & after & before & after & before & after \\
+\midrule
+MemPrint windowed 5\% & 140 & 102 & 1460 & 1485 & 3706 & 123 & 3421 & 502 \\
+MemPrint windowed 1\% & 444 & 121 & 1964 & 1456 & 2691 & 120 & 2616 & 541 \\
+MemPrint pages only & 177 & 161 & 2148 & 1469 & 6238 & 117 & 6838 & 548 \\
+MemPrint windowed 5\%, peak & 473 & 448 & 569 & 598 & 377 & 278 & 489 & 626 \\
+\bottomrule
+\end{tabular}

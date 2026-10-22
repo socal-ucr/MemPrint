@@ -1,0 +1,31 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = RSS} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Oracle & Resp. (min) & BSLD & Kills & Res. \% & Used \% & Resp. (min) & BSLD & Kills & Res. \% & Used \% \\
+\midrule
+Exact curve & 386 & 15.7 & 0 & 81 & 81 & 414 & 17.0 & 0 & 82 & 82 \\
+Exact, 20 windows & 497 & 20.6 & 0 & 82 & 73 & 511 & 21.2 & 0 & 82 & 75 \\
+MemPrint windowed 5\% & 728 & 30.6 & 461 & 79 & 60 & 2251 & 97.4 & 310 & 60 & 34 \\
+Dynamic provisioning (5 min) & 790 & 33.5 & 298 & 79 & 67 & 793 & 33.6 & 289 & 78 & 67 \\
+Exact peak & 822 & 34.7 & 0 & 78 & 58 & 796 & 33.6 & 0 & 77 & 61 \\
+MemPrint pages only & 844 & 35.6 & 1901 & 74 & 53 & 2938 & 127.6 & 1495 & 57 & 29 \\
+Reactive resizing (5 min) & 947 & 40.4 & 16 & 73 & 56 & 1006 & 43.0 & 17 & 71 & 56 \\
+MemPrint windowed 1\% & 1159 & 49.6 & 1116 & 66 & 43 & 2723 & 118.1 & 620 & 56 & 29 \\
+MemPrint windowed 5\%, peak & 1201 & 51.2 & 379 & 74 & 50 & 1324 & 56.6 & 492 & 74 & 49 \\
+RSS peak (earlier run) & 1333 & 57.1 & 474 & 72 & 46 & 796 & 33.6 & 0 & 77 & 61 \\
+DHAT peak & 1377 & 59.1 & 1323 & 75 & 48 & 1658 & 71.3 & 1310 & 69 & 44 \\
+KS+ (segments from other inputs) & 1707 & 74.2 & 8201 & 63 & 40 & 1278 & 54.9 & 8542 & 67 & 47 \\
+ML peak (quantile GBM) & 2350 & 101.8 & 115 & 63 & 31 & 2354 & 101.9 & 115 & 63 & 32 \\
+User request & 2581 & 112.0 & 0 & 59 & 29 & 2568 & 111.3 & 0 & 61 & 31 \\
+Massif curve & 2755 & 119.5 & 1107 & 58 & 29 & 2531 & 109.6 & 1184 & 58 & 32 \\
+Pond (untouched in pool) & 2909 & 126.2 & 0 & 57 & 27 & 2880 & 124.9 & 0 & 57 & 29 \\
+DHAT curve (3 points) & 3882 & 169.2 & 1228 & 56 & 26 & 3442 & 149.8 & 1157 & 56 & 27 \\
+DHAT hold-then-decay & 4532 & 197.2 & 1144 & 53 & 22 & 4347 & 189.0 & 1152 & 52 & 24 \\
+Massif curve, ms clock & 4625 & 201.7 & 1056 & 48 & 19 & 3089 & 134.2 & 1190 & 56 & 28 \\
+Massif pages-as-heap & 4996 & 217.6 & 668 & 41 & 15 & 4846 & 210.8 & 692 & 42 & 17 \\
+Massif pages-as-heap, ms clock & 7190 & 314.0 & 466 & 36 & 11 & 6089 & 265.7 & 697 & 39 & 13 \\
+gperftools peak & 10858 & 474.7 & 1644 & 33 & 7 & 11555 & 507.0 & 1644 & 33 & 7 \\
+heaptrack curve & 12219 & 535.6 & 1285 & 31 & 6 & 12973 & 568.1 & 1439 & 31 & 6 \\
+\bottomrule
+\end{tabular}
