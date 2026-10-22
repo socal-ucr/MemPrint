@@ -8,7 +8,8 @@ end: at every slot, the part that does not fit in the node's free local memory m
 The runtime depends on the placement and the placement on the runtime: a job runs T = base (1 + beta f) where
 f is the share of its actual resident GB-minutes that lie above its local reservation, so the two are solved
 together by fixed-point iteration. If at some slot the actual footprint exceeds the reservation, the job is
-OOM-killed there, its work is lost, and it is requeued at the head with its reservation x 1.5.
+OOM-killed there, its work is lost, and it is requeued at the head with its reservation x 1.5 (or, for KS+,
+with the reservation its retry strategy gives).
 
 Two baselines change this. A Pond job (local_cap) keeps part of its reservation in the pool even where local
 memory is free, and its QoS monitor (qos_delay) moves that part to local memory after the job spills into it.
@@ -37,6 +38,7 @@ class Sim:
         self.pool = np.zeros(self.h)
         self.resident = np.zeros(self.h)   # actually resident GB at each slot, over all jobs
         self.mult = {j.id: 1.0 for j in self.jobs}
+        self.rev = {j.id: 0 for j in self.jobs}   # bumped when a retry replaces a job's reservation
         self._slots = {}   # (job id, which, multiplier, slots) -> the curve on that many slots
 
     def _ensure(self, end):
@@ -134,7 +136,7 @@ class Sim:
 
     def _at(self, job, which, T):
         m = self.mult[job.id] if which == "r" else 1.0
-        key = (job.id, which, m, T)
+        key = (job.id, which, m, T, self.rev[job.id])
         v = self._slots.get(key)
         if v is None:
             v = self._slots[key] = at_slots(job.reservation * m if which == "r" else job.resident, T)
@@ -267,7 +269,12 @@ class Sim:
                     self._commit(job, p, -1, frm=p["kill"])
                     stats["kills"] += 1
                     stats["wasted_core_min"] += job.cores * p["kill"]
-                    self.mult[job.id] *= c.oom_growth
+                    new = job.retry(job, p["kill"] / p["T"]) if job.retry else None
+                    if new is None:
+                        self.mult[job.id] *= c.oom_growth
+                    else:
+                        job.reservation = np.asarray(new, float)
+                        self.rev[job.id] += 1
                     killed.append(job)
                 else:
                     done[job.id] = dict(id=job.id, shape=job.shape, arrival=job.arrival, start=p["s"], end=t,

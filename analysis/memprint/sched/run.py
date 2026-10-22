@@ -13,7 +13,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 
-from . import ml, oracles, real
+from . import ksplus, ml, oracles, real
 from .model import Cluster, Job, at_slots
 from .sim import Sim
 from copy import copy
@@ -24,14 +24,14 @@ ORDER = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2, "S": 0, "W": 1, "A": 2, "small": 0
 LLM = ("llama2c", "llamacpp")
 EXCLUDE = {("npb-mg", "A"), ("llamacpp", "360m-n64")}   # the splitter ran out of memory: no truth
 EXACT = {"exact", "exact-coarse", "exact-peak"}
-NO_MARGIN = EXACT | {"pond", "zacarias"}   # run once: they do not use a margin
-LEARNED = {"ml-peak", "pond"}
+NO_MARGIN = EXACT | {"pond", "zacarias", "ksplus"}   # run once: they do not use a margin (KS+ has its own)
+LEARNED = {"ml-peak", "pond", "ksplus"}
 CALIBRATED = {"memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "memprint-static", "massif",
               "massif-pages", "massif-i", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak",
               *(f"memprint-{n}" for n in oracles.CLOCK_PAGES), *oracles.HYBRID}
 ORACLES = ["exact", "exact-coarse", "exact-peak", "memprint-static", "memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "massif",
            "massif-pages", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak", "request", "ml-peak",
-           "reactive", "pond", "zacarias"]
+           "reactive", "pond", "zacarias", "ksplus"]
 
 
 def rank(s):
@@ -64,10 +64,16 @@ class Setup:
         if programs == "llm":
             keep = np.array([(p, i) not in EXCLUDE for p, i in zip(all_curves.prog, all_curves.input)], bool)
             c = all_curves[all_curves.prog.isin(LLM).to_numpy() & keep].copy()
+            targets = [(p, i, f"{p}-{i}") for p, i in c[["prog", "input"]].drop_duplicates().to_numpy()]
             c["prog"] = c.prog + "-" + c.input
             self.curves = c
         else:
             self.curves = largest(all_curves, require="static" if programs == "static" else None)
+            targets = [(p, i, p) for p, i in self.curves[["prog", "input"]].drop_duplicates().to_numpy()]
+        # KS+: each job's program and input predicted from the program's other inputs
+        history = all_curves[[(p, i) not in EXCLUDE for p, i in zip(all_curves.prog, all_curves.input)]]
+        self.ksplus = ksplus.models(history, pd.read_csv(f"{corpus}/costs.csv", dtype={"input": str}), targets,
+                                    real.rebase)
         cm5 = real.cm5_ratios(f"{traces}/LANL-CM5-1994-4.1-cln.swf.gz")
         self.cm5_train, self.cm5_test = ml.split_users(cm5)
         self.model = ml.PeakModel(self.cm5_train)
@@ -126,6 +132,8 @@ class Setup:
             return ml.oracle(self.model)
         if name == "pond":
             return ml.pond(self.pond_model)
+        if name == "ksplus":
+            return ksplus.oracle(self.ksplus)
         return oracles.REAL[name]
 
 

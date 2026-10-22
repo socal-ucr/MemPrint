@@ -109,4 +109,29 @@ st = d.set_index("id")
 check("dynamic: growth that does not fit fails and restarts", s["restarts"] == 1 and st.start[1] == 20
       and st.start[0] >= 120, f"restarts {s['restarts']}, starts {st.start.to_dict()}")
 
+# KS+: segmentation into a non-decreasing step function, the retry strategy, and the simulator's retry hook.
+from memprint.sched import ksplus  # noqa: E402
+sizes, peaks = ksplus.get_segments([1, 1, 3, 2, 3, 5, 5, 4, 8, 8], 3)
+check("KS+: segments non-decreasing, k of them", len(sizes) == 3 and sum(sizes) == 10 and peaks == sorted(peaks)
+      and peaks[-1] == 8, f"sizes {sizes} peaks {peaks}")
+ends, pk = ksplus.fail_at([0.2, 0.5, 1.0], [1, 2, 3], 0.3)
+check("KS+: failure before the last segment pulls the later ends in", np.allclose(ends, [0.2, 0.3, 0.6]) and pk == [1, 2, 3],
+      f"ends {ends}")
+ends, pk = ksplus.fail_at([0.2, 0.5, 1.0], [1, 2, 3], 0.7)
+check("KS+: failure in the last segment raises its peak 20%", np.allclose(pk, [1, 2, 3.6]) and ends == [0.2, 0.5, 1.0])
+c = Cluster(nodes=1, cores=8, local=100, pool=0)
+kj = job(0, np.where(half, 30.0, 60.0), np.full(K, 50.0))
+seen = []
+
+
+def retry(j, t):
+    seen.append(round(t, 2))
+    return np.full(K, 70.0)
+
+
+kj.retry = retry
+d, s = Sim(c, [kj]).run()
+check("KS+: the simulator retries with the strategy's reservation", s["kills"] == 1 and seen == [0.5]
+      and d.end.iloc[0] == 150, f"kills {s['kills']}, failed at {seen}")
+
 sys.exit(failed)

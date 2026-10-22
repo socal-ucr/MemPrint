@@ -42,6 +42,9 @@ class Job:
     # `interval` minutes, then is resized every interval to the largest footprint of the coming interval; each
     # resize is committed only when it happens, and a job whose growth does not fit is failed and restarted
     interval: int = 0
+    # KS+ (Bader et al., eScience 2024): after an OOM kill at progress t, retry(job, t) gives the new reservation
+    # (None: grow it as for every other oracle)
+    retry: object = None
 
 
 def at_slots(curve, slots):
