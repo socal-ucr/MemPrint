@@ -293,7 +293,34 @@ def numbers():
     if os.path.exists(gaps):
         allg = [x for v in json.load(open(gaps)).values() for x in v]
         n["SimDelayUs"] = f"{np.median(allg) / 1000:.1f}"
+    n.update(betweenness_numbers())
     return n
+
+
+def betweenness_numbers(name="graphbig-betweenness"):
+    """What the hybrid interpreter's dependences of the largest benchmark cost and buy: \\numBtw..."""
+    sim, cost, bench = load("sim.csv"), load("block_overhead.csv"), load("benchmarks.csv")
+    if sim is None or cost is None or bench is None or name not in set(sim.name) or name not in set(cost.name):
+        return {}
+    s = sim[sim.name == name].set_index("policy")
+    b = bench.set_index("name")
+    hy_s, native = b.loc[name, "hybrid_s"], b.loc[name, "native_s"]
+    lock = cost.set_index("name").loc[name, "ops_s"]
+    others = b.drop(name)
+    save = lambda p: (s.loc[p, "makespan_us"] - s.loc["hybrid", "makespan_us"]) / 1e6  # noqa: E731  seconds per run
+    return {"BtwNativeX": f"{round(hy_s / native, -2):,.0f}".replace(",", "{,}"),
+            "BtwOthersNativeX": f"{(others.hybrid_s / others.native_s).median():.0f}",
+            "BtwLockstepMin": f"{lock / 60:.0f}",
+            "BtwOrdersShare": f"{100 * (1 - lock / hy_s):.0f}\\%",
+            "BtwSeqMs": f"{s.loc['sequential', 'makespan_us'] / 1000:.1f}",
+            "BtwHyMs": f"{s.loc['hybrid', 'makespan_us'] / 1000:.1f}",
+            "BtwSaveMs": f"{save('sequential') * 1000:.1f}",
+            "BtwHy": f"{s.loc['hybrid', 'speedup']:.3f}",
+            "BtwBufRw": f"{s.loc['buffer-rw', 'speedup']:.3f}",
+            "BtwPairsFewer": f"{round(s.loc['buffer-rw', 'pairs'] / s.loc['hybrid', 'pairs'], -2):,.0f}".replace(",", "{,}"),
+            "BtwBreakEven": f"{hy_s / save('sequential') / 1e6:.1f}",
+            "BtwBreakEvenRw": f"{hy_s / save('buffer-rw') / 1e6:.1f}",
+            "BtwBreakEvenLock": f"{lock / save('sequential') / 1e3:.0f}"}
 
 
 def main():

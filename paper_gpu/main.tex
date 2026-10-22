@@ -1139,6 +1139,21 @@ must wait for the copy that clears it. In \code{srad}, resolving the reads past 
 GPU's placement of the buffers lets the interpreter refine its dependences to blocks, and it reaches the traced
 dependences (\numSimLargeSradHyBlk{}).
 
+\paragraph{What the largest benchmark's dependences cost and buy.} GraphBIG's \code{betweenness} shows both
+sides at their extremes. Its dependences are exact, and on the simulated A30 they take its operations from
+\numBtwSeqMs{}~ms in issue order to \numBtwHyMs{}~ms (\numBtwHy{}), the same as the traced dependences, with no
+operation rolled back at any scheduling delay; ordering operations that share a buffer one of them writes gives
+\numBtwBufRw{}, and makes a scheduler check about \numBtwPairsFewer{} times as many pairs of operations. Its kernels
+each launch one block, so dependences between blocks add nothing. Finding the dependences took
+\numBenchHyAloneHours{} hours, about \numBtwNativeX{} times the program's own run of 0.74~s, against a median of
+\numBtwOthersNativeX{} times for the other benchmarks; \numBtwOrdersShare{} of it went to the three orders after
+lockstep, which alone takes \numBtwLockstepMin{} minutes, although on this run they found no dependence that
+lockstep did not. Saving \numBtwSaveMs{}~ms per run, the analysis pays for itself only after about
+\numBtwBreakEven{} million runs, or \numBtwBreakEvenRw{} million against the buffer oracle that orders writers;
+lockstep alone would need about \numBtwBreakEvenLock{}{,}000, but would not be safe for every order. Unless the
+analysis runs once for many runs of the same program on the same input, its cost has to fall before it pays off
+on programs of this size.
+
 \clearpage
 \section{Related work}
 \label{sec:related}
@@ -1196,8 +1211,9 @@ it a possible access to every buffer.
 
 A limitation of the cost is that the interpreters simulate every GPU thread on one CPU core in Python, which means
 that their run time grows with the number of threads, and that GraphBIG's \code{betweenness}, ten times larger than
-any other benchmark, took \numBenchHyAloneHours{} hours in the hybrid interpreter and did not finish in two hours in
-the whole-program interpreter. The whole-program interpreter's run time also grows with
+any other benchmark, took \numBenchHyAloneHours{} hours in the hybrid interpreter, which pays for itself only after about
+\numBtwBreakEven{} million runs (\secref{sec:eval-sim}), and did not finish in two hours in the whole-program
+interpreter. The whole-program interpreter's run time also grows with
 sequential host loops, and the extra thread orders
 multiply the cost of either interpreter by up to \numHyOrdersHi{} for programs whose reordered kernels have many
 warps (\secref{sec:eval-overhead}).
