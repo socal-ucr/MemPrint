@@ -795,7 +795,9 @@ exact peak and the RSS of an earlier run need 6.0\,TB, reactive resizing 7.0\,TB
 DHAT, Massif, the ML peak and the request 9.0\,TB, and \memprint{} pages only 11.0\,TB, which repeats the finding
 that a curve on a reference clock loses its advantage against a wall-clock truth. Dynamic provisioning needs
 7.0\,TB under the bytes-touched truth and 6.0\,TB under the RSS truth, like the exact peak. Pond needs 512\,GB per node
-(17.0\,TB) under both truths, because the pool, not local memory, is what its placement fills.
+(17.0\,TB) under both truths, because the pool, not local memory, is what its placement fills. KS+ needs
+256\,GB per node (9.0\,TB) under both truths, as DHAT and the ML peak do: its retries keep a few programs'
+jobs failing, and cc1's over-reservation holds memory the others could use.
 
 \subsection{What each estimator's cost buys}
 
@@ -973,8 +975,8 @@ curve's bounded slowdown at 128\,GB per node, which is 1.5 to 1.8 at loads 0.4 a
 curve needs 4.0\,TB at load 0.4 and 5.0\,TB at every other load, and the exact peak one step more (5.0 to
 6.0\,TB). Under the bytes-touched truth, \memprint{}'s curves and dynamic provisioning need the same as the exact
 peak, or one step more at load 0.8 (6.0 to 7.0\,TB), reactive resizing 6.0 to 7.0\,TB, an earlier run's RSS and
-DHAT 6.0 to 9.0\,TB, the ML peak 9.0\,TB and the request 9.0 to 11.0\,TB at every load. Pond needs 11.0 to
-17.0\,TB, more than the request at every load, and gperftools and heaptrack do not meet the target at 512\,GB per
+DHAT 6.0 to 9.0\,TB, the ML peak 9.0\,TB and the request 9.0 to 11.0\,TB at every load. KS+ needs 6.0\,TB at load 0.4 and 7.0 to 9.0\,TB at
+the others. Pond needs 11.0 to 17.0\,TB, more than the request at every load, and gperftools and heaptrack do not meet the target at 512\,GB per
 node at any load. Under the RSS truth, the RSS of an earlier run and dynamic provisioning need what the exact peak
 needs (5.0 to 6.0\,TB) at every load, while \memprint{}'s curves on their clock of references need 7.0 to 11.0\,TB.
 The reruns of \secref{sec:filemaps} and \secref{sec:timeaxis} keep their findings at every load
