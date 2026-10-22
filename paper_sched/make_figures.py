@@ -72,6 +72,17 @@ METHOD_ORACLE = {"W5": "memprint-W5", "W1": "memprint-W1", "P": "memprint-P", "s
                  "massifpagesi": "massif-pages-i", "dhat": "dhat", "heaptrack": "heaptrack",
                  "gperf": "gperf", "rss": "rss-peak"}
 
+# --no-memprint: the figures without any of MemPrint's evaluations (the motivation version of the paper: what the
+# existing estimators and runtime policies give against an exact footprint)
+NO_MEMPRINT = False
+MEMPRINT_METHODS = {"W1", "W5", "P", "static", "static_all"}
+
+
+def keep(names):
+    """`names` (oracles or corpus methods) without MemPrint's under --no-memprint."""
+    return [n for n in names if not (NO_MEMPRINT and (n.startswith("memprint") or n in MEMPRINT_METHODS))]
+
+
 plt.rcParams.update({
     "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8, "legend.fontsize": 6.5,
     "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
@@ -85,6 +96,19 @@ SCEN = {"bytes": "truth = bytes touched", "rss": "truth = resident set (RSS)",
 
 def style(o):
     return STYLE.get(o, (o, MUTED, ".", "-"))
+
+
+LOADS = (0.4, 0.6, 0.8, 1.0, 1.2)
+
+
+def by_load(loads, width, row_height, sharey=True):
+    """A figure with one row of two panels (the two truths) per offered load, and the file suffix: none for
+    the single load of the paper's main figures, _loads for the appendix's every-load version."""
+    fig, axes = plt.subplots(len(loads), 2, figsize=(width, row_height * len(loads)), sharey=sharey,
+                             sharex=not sharey, squeeze=False)
+    if len(loads) > 1:
+        fig.subplots_adjust(hspace=0.65)
+    return fig, axes, "" if len(loads) == 1 else "_loads"
 
 
 def save(fig, out, name):
@@ -112,7 +136,8 @@ def fig_llm_curves(cv, out, cases=(("llama2c", "110M", "llama2.c, stories110M, 1
         ax.fill_between(p, 0, c["truth"], color=INK, alpha=0.12, linewidth=0, label="True footprint (bytes touched)")
         ax.plot(p, c["truth"], color=INK, linewidth=1.0)
         ax.plot(p, c["rss"], color=PAL[5], linewidth=1.0, linestyle=(0, (1, 1.5)), label="Resident set (RSS)")
-        for m, o in [("W5", "memprint-W5"), ("P", "memprint-P"), ("massifi", "massif-i"), ("heaptrack", "heaptrack")]:
+        for m, o in [(m, o) for m, o in [("W5", "memprint-W5"), ("P", "memprint-P"), ("massifi", "massif-i"),
+                                         ("heaptrack", "heaptrack")] if keep([o])]:
             lab, col, _, dash = style(o)
             ax.plot(p, c[m], color=col, linestyle=dash, label=lab)
         ax.axhline(c["dhat"].max(), color=PAL[2], linewidth=0.9, linestyle=(0, (6, 2, 1, 2)), label="DHAT peak")
@@ -134,7 +159,7 @@ def fig_motivation(cv, out, prog="python", inp="1"):
     ax.fill_between(p, 0, c["truth"], color=INK, alpha=0.12, linewidth=0, label="True footprint (bytes touched)")
     ax.plot(p, c["truth"], color=INK, linewidth=1.0)
     ax.plot(p, c["rss"], color=PAL[5], linewidth=1.0, linestyle=(0, (1, 1.5)), label="Resident set (RSS)")
-    lines = [("W5", "memprint-W5"), ("massifi", "massif-i"), ("dhatcurve", "dhat-curve")]
+    lines = [(m, o) for m, o in [("W5", "memprint-W5"), ("massifi", "massif-i"), ("dhatcurve", "dhat-curve")] if keep([o])]
     for m, o in lines:
         lab, col, _, dash = style(o)
         ax.plot(p, c[m], color=col, linestyle=dash, label=lab)
@@ -151,7 +176,7 @@ def fig_peak_accuracy(cv, out):
     """Estimated peak / true peak per program at its largest input, one row per method."""
     big = largest(cv)
     w = big.groupby(["prog", "method"]).bytes.max().unstack()
-    methods = ["W5", "P", "static", "massifi", "massifpagesi", "dhat", "heaptrack", "gperf", "rss"]
+    methods = keep(["W5", "P", "static", "massifi", "massifpagesi", "dhat", "heaptrack", "gperf", "rss"])
     fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.6), sharey=True)
     for ax, ref in zip(axes, ["truth", "rss"]):
         r = w[methods].div(w[ref], axis=0)
@@ -178,7 +203,9 @@ def fig_cost(costs, cv, out, static_summary=None):
     """Time under each method over the program alone, every program at its largest input."""
     big = largest(cv)[["prog", "input"]].drop_duplicates()
     k = costs.merge(big, on=["prog", "input"])
-    methods = ["heaptrack", "gperf", "massifi", "massifpagesi", "dhat", "P", "W1", "W5", "truth"]
+    methods = keep(["heaptrack", "gperf", "massifi", "massifpagesi", "dhat", "P", "W1", "W5", "truth"])
+    if NO_MEMPRINT:
+        static_summary = None
     fig, ax = plt.subplots(figsize=(3.4, 2.4))
     for i, m in enumerate(methods):
         v = k[k.method == m].slowdown.dropna()
@@ -248,7 +275,7 @@ def fig_response_vs_load(g, out, name, oracles, margin="cal", metric="steady_res
                          ylabel="Mean response time (min)", scenarios=("bytes", "rss")):
     fig, axes = plt.subplots(1, len(scenarios), figsize=(3.5 * len(scenarios), 2.6), sharey=True)
     for ax, sc in zip(axes, scenarios):
-        for o in oracles:
+        for o in keep(oracles):
             d = select(g, margin)
             d = d[(d.scenario == sc) & (d.oracle == o)]
             if d.empty:
@@ -269,12 +296,12 @@ def fig_response_vs_load(g, out, name, oracles, margin="cal", metric="steady_res
     save(fig, out, name)
 
 
-def fig_margins(g, out, oracles, load=0.8):
+def fig_margins(g, out, oracles, loads=(0.8,)):
     """Response time against OOM kills for every margin policy: no fixed margin escapes the trade-off."""
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.6), sharey=True)
-    for ax, sc in zip(axes, ["bytes", "rss"]):
+    fig, grid, suffix = by_load(loads, 7.0, 2.6)
+    for (ax, sc), load in ((p, load) for load, row in zip(loads, grid) for p in zip(row, ["bytes", "rss"])):
         d = g[(g.scenario == sc) & (g.load == load)]
-        for o in oracles:
+        for o in keep(oracles):
             e = d[d.oracle == o].groupby("margin")[["steady_response", "kills"]].mean()
             if e.empty:
                 continue
@@ -288,36 +315,48 @@ def fig_margins(g, out, oracles, load=0.8):
         ax.set_yscale("log")
         ax.set_xlabel("OOM kills + 1 (log scale)")
         ax.set_title(f"{SCEN[sc]}, load {load}")
-    axes[0].set_ylabel("Mean response time (min)")
-    h, lab = axes[0].get_legend_handles_labels()
-    fig.legend(h, lab, loc="upper center", bbox_to_anchor=(0.5, -0.04), ncol=4)
-    save(fig, out, "margin_tradeoff")
+    for row in grid:
+        row[0].set_ylabel("Mean response time (min)")
+    h, lab = grid[0][0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="upper center", bbox_to_anchor=(0.5, -0.04 / len(loads)), ncol=4)
+    save(fig, out, "margin_tradeoff" + suffix)
 
 
-def capacity_needed(cap, target=None):
-    """Smallest local GB per node at which each oracle's mean bounded slowdown is within `target` (default:
-    1.5x the exact curve's at 128 GB)."""
-    m = cap.groupby(["scenario", "oracle", "local_gb"]).steady_bsld.mean().reset_index()
+def capacity_targets(cap):
+    """The service target per (load, truth): 1.5x the exact curve's mean bounded slowdown at 128 GB per node."""
+    e = cap[(cap.oracle == "exact") & (cap.local_gb == 128)]
+    return (1.5 * e.groupby(["load", "scenario"]).steady_bsld.mean()).to_dict()
+
+
+def capacity_needed(cap, targets=None):
+    """Per offered load: the smallest local GB per node at which each oracle's mean bounded slowdown is within
+    the target (`targets`: (load, truth) -> bounded slowdown, by default capacity_targets(cap))."""
+    targets = targets or capacity_targets(cap)
+    m = cap.groupby(["load", "scenario", "oracle", "local_gb"]).steady_bsld.mean().reset_index()
     rows = []
-    for sc, d in m.groupby("scenario"):
-        tgt = target or 1.5 * d[(d.oracle == "exact") & (d.local_gb == 128)].steady_bsld.iloc[0]
+    for (load, sc), d in m.groupby(["load", "scenario"]):
+        if (load, sc) not in targets:
+            continue
+        tgt = targets[(load, sc)]
         for o, e in d.groupby("oracle"):
             ok = e[e.steady_bsld <= tgt].local_gb
-            rows.append(dict(scenario=sc, oracle=o, target=tgt, local_gb=ok.min() if len(ok) else np.nan))
+            rows.append(dict(load=load, scenario=sc, oracle=o, target=tgt, local_gb=ok.min() if len(ok) else np.nan,
+                             largest_gb=e.local_gb.max()))
     return pd.DataFrame(rows)
 
 
-def fig_capacity(cap, out, nodes=32, pool=1024):
+def fig_capacity(cap, out, nodes=32, pool=1024, loads=(0.8,)):
     need = capacity_needed(cap)
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.0), sharex=True, gridspec_kw={"wspace": 1.0})
-    for ax, sc in zip(axes, ["bytes", "rss"]):
-        d = need[need.scenario == sc].copy()
+    fig, grid, suffix = by_load(loads, 7.2, 3.0, sharey=False)
+    fig.subplots_adjust(wspace=1.0, hspace=0.45 if len(loads) > 1 else None)
+    for (ax, sc), load in ((p, load) for load, row in zip(loads, grid) for p in zip(row, ["bytes", "rss"])):
+        d = need[(need.scenario == sc) & (need.load == load) & need.oracle.isin(keep(need.oracle.unique()))].copy()
         d["total_tb"] = (d.local_gb * nodes + pool) / 1024
         d = d.sort_values("total_tb", na_position="last")
         for i, r in enumerate(d.itertuples()):
             lab, col, mk, _ = style(r.oracle)
             if np.isnan(r.total_tb):
-                ax.text(0.1, i, "not met at 320 GB/node", va="center", fontsize=6, color=MUTED)
+                ax.text(0.1, i, f"not met at {r.largest_gb:.0f} GB/node", va="center", fontsize=6, color=MUTED)
                 continue
             ax.barh(i, r.total_tb, color=col, height=0.6)
             ax.text(r.total_tb + 0.1, i, f"{r.total_tb:.1f} TB", va="center", fontsize=6, color=INK)
@@ -325,14 +364,14 @@ def fig_capacity(cap, out, nodes=32, pool=1024):
         ax.set_yticklabels([style(o)[0] for o in d.oracle])
         ax.invert_yaxis()
         ax.set_xlabel("Total memory for equal service (TB)")
-        ax.set_xlim(0, 13.5)
-        ax.set_title(SCEN[sc])
+        ax.set_xlim(0, (need.largest_gb.max() * nodes + pool) / 1024 + 2.5)
+        ax.set_title(f"{SCEN[sc]}, load {load}")
         ax.grid(axis="y", visible=False)
-    save(fig, out, "capacity")
+    save(fig, out, "capacity" + suffix)
     return need
 
 
-def fig_roi(g, costs, cv, out, static_summary, load=0.8, margin="cal"):
+def fig_roi(g, costs, cv, out, static_summary, loads=(0.8,), margin="cal"):
     """What each estimator's cost buys: profiling cost against the response time it gives, against the user's
     request (no profiling, the baseline)."""
     big = largest(cv)[["prog", "input"]].drop_duplicates()
@@ -346,12 +385,12 @@ def fig_roi(g, costs, cv, out, static_summary, load=0.8, margin="cal"):
            "gperf": "gperf", "rss-peak": "native", "exact": "truth", "exact-coarse": "truth",
            "exact-peak": "truth"}
     cost["native"] = 1.0
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.8), sharey=True)
-    for ax, sc in zip(axes, ["bytes", "rss"]):
-        d = select(g, margin)
-        d = d[(d.scenario == sc) & (d.load == load)]
+    fig, grid, suffix = by_load(loads, 7.0, 2.8)
+    sel = select(g, margin)
+    for (ax, sc), load in ((p, load) for load, row in zip(loads, grid) for p in zip(row, ["bytes", "rss"])):
+        d = sel[(sel.scenario == sc) & (sel.load == load)]
         base = d[d.oracle == "request"].groupby("seed").steady_response.mean()
-        for o, m in pts.items():
+        for o, m in ((o, m) for o, m in pts.items() if keep([o])):
             if sc == "rss" and o.startswith("exact"):
                 m = "native"   # under the RSS truth the exact curve is the sampled RSS: the cost of a native run
             e = d[d.oracle == o].groupby("seed").steady_response.mean()
@@ -371,20 +410,21 @@ def fig_roi(g, costs, cv, out, static_summary, load=0.8, margin="cal"):
         ax.set_yscale("log")
         ax.set_xlabel("Profiling cost per job (time / native run, log)")
         ax.set_title(f"{SCEN[sc]}, load {load}")
-    axes[0].set_ylabel("Response-time gain over user request (x)")
-    axes[0].set_ylim(0.3, 60)
-    h, lab = axes[0].get_legend_handles_labels()
-    fig.legend(h, lab, loc="upper center", bbox_to_anchor=(0.5, -0.04), ncol=4)
-    save(fig, out, "roi")
+    for row in grid:
+        row[0].set_ylabel("Response-time gain over user request (x)" if len(loads) == 1 else "Gain over request (x)")
+    grid[0][0].set_ylim(0.3, 60 if len(loads) == 1 else 200)
+    h, lab = grid[0][0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="upper center", bbox_to_anchor=(0.5, -0.04 / len(loads)), ncol=4)
+    save(fig, out, "roi" + suffix)
     return cost
 
 
-def fig_dhat(g, out, load=0.8):
+def fig_dhat(g, out, loads=(0.8,)):
     """DHAT's peak, its three-point curves, and MemPrint, at every margin policy."""
-    oracles = ["dhat", "dhat-curve", "dhat-hold", "memprint-W5", "exact-peak", "exact"]
+    oracles = keep(["dhat", "dhat-curve", "dhat-hold", "memprint-W5", "exact-peak", "exact"])
     margins = ["0.1", "0.3", "cal", "cal100"]
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.5), sharey=True)
-    for ax, sc in zip(axes, ["bytes", "rss"]):
+    fig, grid, suffix = by_load(loads, 7.0, 2.5)
+    for (ax, sc), load in ((p, load) for load, row in zip(loads, grid) for p in zip(row, ["bytes", "rss"])):
         d = g[(g.scenario == sc) & (g.load == load)]
         w = 0.8 / len(oracles)
         for i, o in enumerate(oracles):
@@ -401,17 +441,23 @@ def fig_dhat(g, out, load=0.8):
         ax.set_yscale("log")
         ax.set_title(f"{SCEN[sc]}, load {load}")
         ax.grid(axis="x", visible=False)
-    axes[0].set_ylabel("Mean response time (min)")
-    h, lab = axes[0].get_legend_handles_labels()
-    fig.legend(h, lab, loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=3)
-    save(fig, out, "dhat_curves")
+    for row in grid:
+        row[0].set_ylabel("Mean response time (min)")
+    h, lab = grid[0][0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="upper center", bbox_to_anchor=(0.5, -0.02 / len(loads)), ncol=3)
+    save(fig, out, "dhat_curves" + suffix)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-13-sched-llm"))
-    ap.add_argument("--out", default=os.path.join(HERE, "figures"))
+    ap.add_argument("--out", default=None, help="default: figures/, or figures_motivation/ with --no-memprint")
+    ap.add_argument("--no-memprint", action="store_true",
+                    help="leave out every MemPrint oracle and method, and the figures that only evaluate MemPrint")
     a = ap.parse_args()
+    global NO_MEMPRINT
+    NO_MEMPRINT = a.no_memprint
+    a.out = a.out or os.path.join(HERE, "figures_motivation" if NO_MEMPRINT else "figures")
     os.makedirs(a.out, exist_ok=True)
     cv, costs = load_corpus(a.data)
     ss = f"{a.data}/corpus/static_summary.csv"
@@ -429,7 +475,12 @@ def main():
         fig_margins(g, a.out, ["memprint-W5", "massif-i", "massif", "dhat", "dhat-curve", "heaptrack", "rss-peak"])
         fig_dhat(g, a.out)
         cost = fig_roi(g, costs, cv, a.out, static_summary, margin="best")
-    gs = load_grid(a.data, "grid_static*.csv")
+        # the appendix: the same at every offered load
+        fig_margins(g, a.out, ["memprint-W5", "massif-i", "massif", "dhat", "dhat-curve", "heaptrack", "rss-peak"],
+                    loads=LOADS)
+        fig_dhat(g, a.out, loads=LOADS)
+        fig_roi(g, costs, cv, a.out, static_summary, loads=LOADS, margin="best")
+    gs = None if NO_MEMPRINT else load_grid(a.data, "grid_static*.csv")   # the programs MemPrint's static route predicts
     if gs is not None:
         fig_response_vs_load(gs, a.out, "static_response_vs_load",
                              ["exact", "exact-peak", "memprint-static", "memprint-W5", "massif-i", "massif", "dhat",
@@ -441,7 +492,7 @@ def main():
                              ["exact", "exact-coarse", "exact-peak", "memprint-W5", "memprint-P", "massif-i", "dhat",
                               "heaptrack", "gperf", "rss-peak", "request", "reactive", "pond", "zacarias"])
     v3 = os.path.expanduser("~/memprint-data/2026-10-13-sched-fm")
-    gv = load_grid(v3, "v3m_all.csv")
+    gv = None if NO_MEMPRINT else load_grid(v3, "v3m_all.csv")   # MemPrint's clock and level variants
     if gv is not None:
         fig_response_vs_load(gv, a.out, "timeaxis_response_vs_load",
                              ["exact", "exact-peak", "rss-peak", "memprint-W5", "memprint-W5nat",
@@ -449,7 +500,20 @@ def main():
     cap = load_grid(a.data, "capacity_*.csv")
     if cap is not None:
         need = fig_capacity(cap, a.out)
-        need.to_csv(os.path.join(a.out, "capacity_needed.csv"), index=False)
+        need[need.oracle.isin(keep(need.oracle.unique()))].to_csv(os.path.join(a.out, "capacity_needed.csv"), index=False)
+        # every load whose sweep is complete (the sweeps at the other loads are long runs)
+        sizes = cap.groupby("load").local_gb.nunique()
+        done = sorted(sizes[sizes == sizes.max()].index)
+        if len(done) > 1:
+            fig_capacity(cap, a.out, loads=done)
+    # the reruns of section 6: the time-axis sweep has its own exact curve (and the third truth); the file-maps
+    # sweep has MemPrint only and is held to the main sweep's targets
+    for name, pattern in () if NO_MEMPRINT else (("capacity_needed_timeaxis", "v3m_capacity_*.csv"),
+                                                  ("capacity_needed_fm", "capacity_fm_*.csv")):
+        c = load_grid(v3, pattern)
+        if c is not None:
+            t = None if "exact" in set(c.oracle) else capacity_targets(cap)
+            capacity_needed(c, t).to_csv(os.path.join(a.out, name + ".csv"), index=False)
 
 
 if __name__ == "__main__":

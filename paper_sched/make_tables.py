@@ -105,7 +105,7 @@ def grid_table(data, out, load=0.8, pattern="grid_all*.csv", name=None):
         head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
-def file_maps_table(data, fm, out, load=0.8):
+def file_maps_table(data, fm, out, load=0.8, name="file_maps"):
     """MemPrint's oracles before and after -file_maps (fm: the data root of the reruns), calibrated 90% margins."""
     from make_figures import select
     mp = ["memprint-W5", "memprint-W1", "memprint-P", "memprint-W5-peak"]
@@ -130,10 +130,10 @@ def file_maps_table(data, fm, out, load=0.8):
             r"\cmidrule(lr){2-5} \cmidrule(lr){6-9}" "\n"
             r" & \multicolumn{2}{c}{Bytes touched} & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Bytes touched} & \multicolumn{2}{c}{RSS} \\" "\n"
             r"Oracle & before & after & before & after & before & after & before & after \\" "\n" r"\midrule")
-    open(f"{out}/file_maps.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+    open(f"{out}/{name}.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
-def time_axis_table(v3, out, load=0.8):
+def time_axis_table(v3, out, load=0.8, name="time_axis"):
     """The section on the time axis and the level: oracles under the three truths, calibrated 90% margins, main
     stream (rssdata: the RSS without code)."""
     from make_figures import select
@@ -147,11 +147,41 @@ def time_axis_table(v3, out, load=0.8):
             for o in order]
     head = (r"\begin{tabular}{lrrr}" "\n" r"\toprule" "\n"
             r"Oracle & Truth = bytes touched & Truth = RSS & Truth = RSS without code \\" "\n" r"\midrule")
-    open(f"{out}/time_axis.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+    open(f"{out}/{name}.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+
+
+def capacity_table(need, out, name, scenarios=("bytes", "rss"), nodes=32, pool=1024):
+    """Total memory (TB) each oracle needs for the service target, at every offered load (from
+    make_figures.capacity_needed). Rows ordered by the need at load 0.8 under the first truth."""
+    from make_figures import SCEN
+    need = need.copy()
+    need["tb"] = (need.local_gb * nodes + pool) / 1024
+    loads = sorted(need.load.unique())
+    t = need.set_index(["oracle", "scenario", "load"]).tb
+    first = need[(need.scenario == scenarios[0]) & (need.load == 0.8)].sort_values("tb", na_position="last")
+    rows = []
+    for o in first.oracle:
+        cells = [run_label(o)]
+        for sc in scenarios:
+            cells += ["--" if pd.isna(t.get((o, sc, l))) else f"{t.get((o, sc, l)):.1f}" for l in loads]
+        rows.append(" & ".join(cells) + r" \\")
+    n = len(loads)
+    head = ("\\begin{tabular}{l" + "r" * (n * len(scenarios)) + "}\n\\toprule\n & "
+            + " & ".join(f"\\multicolumn{{{n}}}{{c}}{{{SCEN[sc][0].upper() + SCEN[sc][1:]}}}" for sc in scenarios) + r" \\" "\n"
+            + " ".join(f"\\cmidrule(lr){{{2 + i * n}-{1 + (i + 1) * n}}}" for i in range(len(scenarios))) + "\n"
+            + "Load & " + " & ".join(f"{l:g}" for _ in scenarios for l in loads) + r" \\" "\n\\midrule")
+    open(f"{out}/{name}.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
 def n0f(x):
     return "--" if x is None or pd.isna(x) else f"{x:,.0f}".replace(",", "{,}")
+
+
+OTHER_LOADS = (0.4, 0.6, 1.0, 1.2)
+
+
+def tag(load):
+    return f"{load:.1f}".replace(".", "")
 
 
 def main():
@@ -165,11 +195,26 @@ def main():
     margins_table(a.data, a.out)
     grid_table(a.data, a.out)
     grid_table(a.data, a.out, pattern="grid_llm*.csv", name="grid_llm_08")
+    for load in OTHER_LOADS:   # the appendix: every other offered load
+        grid_table(a.data, a.out, load=load, name=f"grid_{tag(load)}")
+        grid_table(a.data, a.out, load=load, pattern="grid_llm*.csv", name=f"grid_llm_{tag(load)}")
     fm = os.path.expanduser("~/memprint-data/2026-10-13-sched-fm")
     if os.path.exists(f"{fm}/results/grid_all_fm.csv"):
         file_maps_table(a.data, fm, a.out)
+        for load in OTHER_LOADS:
+            file_maps_table(a.data, fm, a.out, load=load, name=f"file_maps_{tag(load)}")
     if os.path.exists(f"{fm}/results/v3m_all.csv"):
         time_axis_table(fm, a.out)
+        for load in OTHER_LOADS:
+            time_axis_table(fm, a.out, load=load, name=f"time_axis_{tag(load)}")
+    from make_figures import capacity_needed, capacity_targets, load_grid
+    main_targets = capacity_targets(load_grid(a.data, "capacity_*.csv"))
+    for name, root, pattern, scs in (("capacity_loads", a.data, "capacity_*.csv", ("bytes", "rss")),
+                                     ("capacity_timeaxis_loads", fm, "v3m_capacity_*.csv", ("bytes", "rss", "rssdata")),
+                                     ("capacity_fm_loads", fm, "capacity_fm_*.csv", ("bytes", "rss"))):
+        c = load_grid(root, pattern)
+        if c is not None:
+            capacity_table(capacity_needed(c, None if "exact" in set(c.oracle) else main_targets), a.out, name, scs)
     print("tables written to", a.out)
 
 
