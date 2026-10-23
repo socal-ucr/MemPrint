@@ -134,4 +134,18 @@ d, s = Sim(c, [kj]).run()
 check("KS+: the simulator retries with the strategy's reservation", s["kills"] == 1 and seen == [0.5]
       and d.end.iloc[0] == 150, f"kills {s['kills']}, failed at {seen}")
 
+# The policies' own costs: a growing resize costs progress (dynamic provisioning), a mitigation costs copying.
+c = Cluster(nodes=1, cores=8, local=100, pool=0)
+dj = job(0, np.where(half, 20.0, 60.0), np.full(K, 90.0))
+dj.interval, dj.resize_cost = 10, 60.0   # one growth (20 -> 60 GB at minute 50), a minute lost
+d, s = Sim(c, [dj]).run()
+check("costs: a growing resize lengthens the run", d.runtime.iloc[0] == 101 and s["resizes"] >= 2,
+      f"runtime {d.runtime.iloc[0]}, resizes {s['resizes']}")
+c = Cluster(nodes=1, cores=8, local=100, pool=100, beta=0.5)
+pj = job(0, np.full(K, 60.0), np.full(K, 80.0))
+pj.local_cap, pj.qos_delay, pj.migrate_cost = 40.0, 10, 3.0   # 40 GB moved at 3 s/GB: two minutes
+d, s = Sim(c, [pj]).run()
+check("costs: Pond's mitigation is counted and costs its copy", s["migrations"] == 1 and s["overhead_core_h"] > 0
+      and d.runtime.iloc[0] == 104, f"runtime {d.runtime.iloc[0]}, migrations {s['migrations']}")
+
 sys.exit(failed)

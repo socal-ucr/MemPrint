@@ -3,7 +3,9 @@ analysis/memprint/sched/resize_cluster.py's runs.
 
     ~/environments/memfp/bin/python paper_resize/cluster.py [--data DIR] [--out paper_resize]
 
-DIR holds grid.csv (every load) and capacity.csv (the memory sweep at load 0.8), ~/memprint-data/2026-10-22-resize-cluster.
+DIR holds grid_<o>.csv (every load) and capacity_<o>.csv (the memory sweep at load 0.8) for o = none (no policy
+costs), native (with costs, MemPrintResize profiled at native speed) and pin (profiled with the Pin tool),
+~/memprint-data/2026-10-22-resize-cluster.
 """
 
 import argparse
@@ -122,15 +124,52 @@ def table(g, cap, out, loads=(0.8, 1.2)):
     return t, need
 
 
+def table_costs(grids, out, load=0.8, truth="rss"):
+    """What each policy costs at one load: throughput and response without and with its costs (native-speed and
+    Pin profiling for MemPrintResize), work lost to OOM kills and restarts, time its own actions add (resizes,
+    migrations, libmpr's runtime ratio is in the runtimes), profiling time, and its control actions per stream."""
+    def at(o):
+        g = grids[o]
+        return g[(g.truth == truth) & (g.load == load) & (g.local_gb == 128)].groupby("policy").mean(numeric_only=True)
+    a, n, p = at("none"), at("native"), at("pin")
+    lines = [r"\begin{tabular}{lrrrrrrrrrr}", r"\toprule",
+             r" & \multicolumn{3}{c}{Jobs/h} & \multicolumn{3}{c}{Resp.\ (min)} & Lost & Actions & \multicolumn{2}{c}{Profiling} \\",
+             r"\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){10-11}",
+             r"Policy & no cost & native & Pin & no cost & native & Pin & core-h & core-h & native & Pin \\",
+             r"\midrule"]
+    for pol, (name, *_) in STYLE.items():
+        if pol not in a.index:
+            continue
+        lost = n.loc[pol, "wasted_core_h"]
+        act = n.loc[pol, "overhead_core_h"]
+        cells = [name, fmt(a.loc[pol, "throughput"], 1), fmt(n.loc[pol, "throughput"], 1), fmt(p.loc[pol, "throughput"], 1),
+                 fmt(a.loc[pol, "steady_response"]), fmt(n.loc[pol, "steady_response"]), fmt(p.loc[pol, "steady_response"]),
+                 fmt(lost), fmt(act), fmt(n.loc[pol, "profiling_core_h"]), fmt(p.loc[pol, "profiling_core_h"])]
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/cluster_costs.tex", "w").write("\n".join(lines) + "\n")
+    cols = ["throughput", "steady_response", "wasted_core_h", "overhead_core_h", "profiling_core_h", "kills", "restarts",
+            "resizes", "migrations", "sim_cpu_s"]
+    return pd.concat({"none": a[cols], "native": n[cols], "pin": p[cols]}, axis=1)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-22-resize-cluster"))
     ap.add_argument("--out", default=HERE)
     a = ap.parse_args()
-    g = load(a.data, "grid.csv")
-    cap = load(a.data, "capacity.csv") if os.path.exists(f"{a.data}/capacity.csv") else None
+    g = load(a.data, "grid_none.csv")
+    cap = load(a.data, "capacity_none.csv") if os.path.exists(f"{a.data}/capacity_none.csv") else None
     fig_load(g, a.out)
     t, need = table(g, cap, a.out)
+    grids = {o: load(a.data, f"grid_{o}.csv") for o in ("none", "native", "pin") if os.path.exists(f"{a.data}/grid_{o}.csv")}
+    if len(grids) == 3:
+        c = table_costs(grids, a.out)
+        print(c.round(1).to_string())
+        caps = {o: capacity_needed(load(a.data, f"capacity_{o}.csv")) for o in ("native", "pin")
+                if os.path.exists(f"{a.data}/capacity_{o}.csv")}
+        for o, nd in caps.items():
+            print("capacity with costs,", o); print(nd.pivot(index="policy", columns="truth", values="tb").to_string())
     pd.set_option("display.width", 200)
     print(t.unstack("load").round(1).to_string())
     if need is not None:

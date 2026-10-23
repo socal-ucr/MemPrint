@@ -45,6 +45,10 @@ class Job:
     # KS+ (Bader et al., eScience 2024): after an OOM kill at progress t, retry(job, t) gives the new reservation
     # (None: grow it as for every other oracle)
     retry: object = None
+    # the policies' own costs (0: none): seconds of progress lost per growing resize (dynamic provisioning; 10 s in
+    # Zacarias et al.'s simulator), and seconds per GB moved by Pond's mitigation (50 ms/GB in the Pond paper)
+    resize_cost: float = 0.0
+    migrate_cost: float = 0.0
 
 
 def at_slots(curve, slots):

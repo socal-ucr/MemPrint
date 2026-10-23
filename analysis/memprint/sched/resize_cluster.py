@@ -21,6 +21,13 @@ The truth (what the job must be given, or it is OOM-killed) is its RSS ("rss") o
   mpr+zacarias         libmpr build, dynamic provisioning
   mpr+pond             libmpr build, Pond
   exact, mpr-exact     the truth's own curve, each build (the upper bounds)
+
+With --overheads native or pin, each policy also pays its own costs: a job built with the pass runs for its
+workload's measured libmpr runtime ratio (libmpr's run against glibc's), and the first job of each workload in the
+stream is the profiling run, under libmpr's native-speed profiler (native) or the Pin tool (pin), at its measured
+slowdown and holding the glibc build's request; a growing resize of dynamic provisioning costs 10 s of progress
+(Zacarias et al.'s simulator); Pond's mitigation costs 50 ms per GB it copies to local memory (the Pond paper). KS+'s
+retries and dynamic provisioning's restarts are counted as lost work either way.
 """
 
 import argparse
@@ -43,6 +50,34 @@ SCHED = os.path.expanduser("~/memprint-data/2026-10-13-sched-llm")
 LLM = {"llamacpp-135m-n32": ("llamacpp", "135m-n32"), "llamacpp-135m-n128": ("llamacpp", "135m-n128"),
        "llamacpp-360m-n64": ("llamacpp", "360m-n64"), "llama2c-15M": ("llama2c", "15M"),
        "llama2c-42M": ("llama2c", "42M"), "llama2c-110M": ("llama2c", "110M")}
+COSTS = dict(resize_s=10.0, migrate_s_per_gb=0.05)
+
+
+def overhead_tables():
+    """Per workload: libmpr's runtime ratio (own profile, mean of 3 runs against glibc's) and the two profilers'
+    slowdowns (libmpr's native-speed profile: profiling run / glibc run; the Pin -sites profile)."""
+    def secs(path):
+        t = pd.read_csv(path, sep=r"\s+", header=None, names=["label", "rss", "commit", "secs", "hash", "status"],
+                        engine="python")
+        t["cfg"] = t.label.str.replace(r"-\d+$", "", regex=True)
+        return t.groupby("cfg").secs.mean()
+    ratio = {}
+    for path in glob.glob(f"{RESIZE}/runs/corpus/*/summary.txt") + glob.glob(f"{RESIZE}/runs/ml/*/summary.txt"):
+        g = secs(path)
+        ratio[path.split("/")[-2]] = g["self"] / g["base"]
+    g = secs(f"{RESIZE}/runs/minivite-v4/summary.txt")
+    ratio["miniVite (pass)"] = g["self"] / g["none"]
+    nat = pd.read_csv(f"{RESIZE}/runs/nprof_summary.csv").set_index("name")
+    native = (nat.prof_s / nat.base_secs).dropna().to_dict()
+    pin = pd.read_csv(f"{RESIZE}/results/pin_cost.csv").set_index("workload").slowdown.to_dict()
+    for d in (native, pin):
+        if "miniVite" in d:
+            d["miniVite (pass)"] = d["miniVite"]
+    # llama.cpp 135M at 128 tokens has no native-profile run: the same model's 32-token profile
+    native.setdefault("llamacpp-135m-n128", native.get("llamacpp-135m-n32", 1.0))
+    return ratio, native, pin
+
+
 POLICIES = ["exact", "request", "pond", "zacarias", "ksplus", "mpr-exact", "mpr", "mpr+zacarias", "mpr+pond"]
 
 
@@ -82,8 +117,10 @@ def untouched(runs):
 
 
 class Setup:
-    def __init__(self, n=3000):
+    def __init__(self, n=3000, overheads="none"):
         self.wl = workloads()
+        self.overheads = overheads
+        self.ratio, self.native, self.pin = overhead_tables()
         self.names = sorted(self.wl)
         curves = pd.read_csv(f"{SCHED}/corpus/curves.csv", dtype={"input": str})
         costs = pd.read_csv(f"{SCHED}/corpus/costs.csv", dtype={"input": str})
@@ -126,10 +163,24 @@ class Setup:
         """Copies of the jobs with the policy's build, reservation and simulator attributes."""
         out = []
         ks = ksplus.oracle(self.ks)
-        for j0 in jobs:
+        cost = self.overheads != "none"
+        prof = self.native if self.overheads == "native" else self.pin
+        profiled = set()
+        for j0 in sorted(jobs, key=lambda j: (j.arrival, j.id)):
             j = copy(j0)
             i = j.info
             mpr = policy.startswith("mpr")
+            if cost and mpr and policy != "mpr-exact" and j.shape not in profiled:
+                # the workload's first job is its profiling run: the glibc build under the profiler
+                profiled.add(j.shape)
+                j.resident = i["glibc_truth"]
+                j.reservation = np.full(K, i["request"])
+                j.base = max(1, int(round(j.base * prof.get(j.shape, 1.0))))
+                j.profiling = True
+                out.append(j)
+                continue
+            if cost and mpr:
+                j.base = max(1, int(round(j.base * self.ratio.get(j.shape, 1.0))))
             j.resident = i["mpr_truth"] if mpr else i["glibc_truth"]
             R = i["mpr_request"] if mpr else i["request"]
             um = i["mpr_um"] if mpr else i["um"]
@@ -142,8 +193,10 @@ class Setup:
                 j.reservation = np.full(K, R)
                 if policy.endswith("pond"):
                     j.local_cap, j.qos_delay = R - np.floor(R * um), 5
+                    j.migrate_cost = COSTS["migrate_s_per_gb"] if cost else 0.0
                 if policy.endswith("zacarias"):
                     j.interval = 5
+                    j.resize_cost = COSTS["resize_s"] if cost else 0.0
             out.append(j)
         return out
 
@@ -151,19 +204,23 @@ class Setup:
 _setup = None
 
 
-def _init(n):
+def _init(n, overheads):
     global _setup
-    _setup = Setup(n)
+    _setup = Setup(n, overheads)
 
 
 def _one(task):
     truth, load, seed, policy, local = task
     try:
+        import time
         cluster = Cluster(local=local)
         jobs = _setup.assign(_setup.stream(truth, load, seed), policy)
+        prof = sum(j.cores * j.base for j in jobs if getattr(j, "profiling", False)) / 60
+        t0 = time.process_time()
         sim = Sim(cluster, jobs)
         d, s = sim.run()
-        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, **s, **steady(d, sim))
+        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, overheads=_setup.overheads,
+                    profiling_core_h=prof, sim_cpu_s=time.process_time() - t0, **s, **steady(d, sim))
     except Exception as e:  # one bad task must not lose the grid
         import traceback
         return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, error=repr(e),
@@ -171,10 +228,10 @@ def _one(task):
 
 
 def run(out, truths=("rss", "strict"), loads=(0.4, 0.6, 0.8, 1.0, 1.2), seeds=(0, 1, 2), policies=POLICIES,
-        locals_=(128,), n=3000, procs=28):
+        locals_=(128,), n=3000, procs=28, overheads="none"):
     tasks = list(product(truths, loads, seeds, policies, locals_))
     rows = []
-    with Pool(procs, _init, (n,)) as p, open(out + ".jsonl", "a") as log:
+    with Pool(procs, _init, (n, overheads)) as p, open(out + ".jsonl", "a") as log:
         for r in p.imap_unordered(_one, tasks, chunksize=1):
             rows.append(r)
             log.write(pd.Series(r).to_json() + "\n")
@@ -192,8 +249,9 @@ def main():
     ap.add_argument("--policies", nargs="+", default=POLICIES)
     ap.add_argument("--locals", type=float, nargs="+", default=[128])
     ap.add_argument("--procs", type=int, default=28)
+    ap.add_argument("--overheads", choices=["none", "native", "pin"], default="none")
     a = ap.parse_args()
-    run(a.out, loads=a.loads, seeds=a.seeds, policies=a.policies, locals_=a.locals, procs=a.procs)
+    run(a.out, loads=a.loads, seeds=a.seeds, policies=a.policies, locals_=a.locals, procs=a.procs, overheads=a.overheads)
 
 
 if __name__ == "__main__":
