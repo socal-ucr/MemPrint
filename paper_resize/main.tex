@@ -67,7 +67,13 @@ kernels it finds every site Pin finds, with total high water within 0.5\%, and i
 configurations its reservations commit what the Pin profile's do (2{,}391 against 2{,}383\,MB) after 95\,s of
 profiling instead of 21{,}676\,s. Mapping threads' stacks \texttt{MAP\_NORESERVE} cuts a further 60\% of the commit of
 miniVite and llama.cpp, and a second run parameter, the prompt's length, leaves nothing beyond the commitment on 9
-of 10 unseen llama.cpp inputs.
+of 10 unseen llama.cpp inputs. Against three published memory-provisioning policies, Pond, dynamic provisioning
+and KS+, which change what a system holds for a job but not what the job commits or touches, \libmpr{} holds 23\%
+less memory over the 29 workloads, and in a simulated cluster it is the only one that raises throughput: 25.1 jobs
+per hour against 21.6 for the request and at most 21.5 for the three, with every policy's own costs counted. Its
+native-speed profile costs 1\% of the cluster's time; a Pin profile taken in the same stream would cost 88\% of its
+throughput, so Pin profiles must be taken offline. With dynamic provisioning on top, it gives the shortest response
+time of any policy and needs 5.0 instead of 6.0\,TB for the same service.
 \end{abstract}
 
 \section{Introduction}
@@ -128,6 +134,11 @@ In this work, we make the following contributions:
   outputs and no time cost, and we measure what each refinement adds (\secref{sec:eval}). The savings hold on
   21 unseen LLM inputs, and the parameterised reservation follows their lengths (\secref{sec:inputs}); the
   static profiles of GAP agree with Pin's site by site (\secref{sec:staticeval}).
+  \item We compare \libmpr{} with three published memory-provisioning policies, Pond, dynamic provisioning and
+  KS+, job by job and in a simulated cluster, with each policy's own costs (profiling, resizes, migrations,
+  retries): \libmpr{} is the only one that raises throughput, because it shrinks the jobs rather than how they
+  are held, and it composes with dynamic provisioning (\secref{sec:baselines}, \secref{sec:cluster},
+  \secref{sec:costs}).
   \item We report what the measurements show about footprint estimation: where miniVite's extra memory comes
   from, why the bytes a program touches can exceed its resident set, and why the time axis of a footprint
   curve matters more than its unit (\secref{sec:discussion}).
@@ -1500,7 +1511,10 @@ The results separate three cases. A program that allocates buffers it never touc
 scheduler arrays) gains commit but no RSS, because the kernel never backed those buffers. A program whose
 allocator or own code touches memory it does not need (a zeroing \texttt{memset}, vector doubling, huge pages over
 sparse writes) gains RSS, and only a change in how the memory is obtained recovers it. A program that already
-uses what it allocates, which is the median program in our corpus, gains nothing and loses nothing.
+uses what it allocates, which is the median program in our corpus, gains nothing and loses nothing. Policies
+that act on what a system holds, such as Pond, dynamic provisioning and KS+, can recover the first case's
+commit only by reserving less than the request, and none of them the second case's RSS; in a cluster this is
+the difference between holding the same jobs differently and running smaller jobs (\secref{sec:cluster}).
 
 \section{Limitations and future work}
 \label{sec:limits}
@@ -1546,6 +1560,14 @@ instrumented run but was slower than Pin on GAP, 1.3 to 14.8 times its time and 
 (\secref{sec:staticeval}, \secref{sec:cost}). We ran single short completions; an LLM server that
 runs many sequences fills its KV cache over time, and its savings would shrink as it does.
 
+The comparison with the published policies has its own limits. The cluster's job stream is synthetic, with each
+job one of 29 workloads scaled from tens or hundreds of MB to tens of GB, which assumes the savings scale with the
+job. Dynamic provisioning reads the coming five minutes of a job's use from the recorded run, as its authors'
+simulator does, which favours it. Pond's policies are not in its artifact and follow its paper. KS+ learns from two
+smaller inputs per program and with the authors' 100\,MB floor, which suits GB-scale tasks better than ours. The
+profiling cost assumes one profile per workload in a stream of 3{,}000 jobs; a site that runs a program many more
+times amortizes even a Pin profile.
+
 \section{Conclusion}
 \label{sec:conclusion}
 
@@ -1569,6 +1591,13 @@ gave the same reservations as the Pin profile at a two-hundredth of its cost; ma
 \texttt{MAP\_NORESERVE} removed most of the commit that remained in the multithreaded programs; and a second run
 parameter, the prompt's length, let the reservations follow llama.cpp's compute buffer as the first follows its KV
 cache.
+
+Compared with policies that act on what a system holds for a job, such as Pond, dynamic provisioning and KS+,
+changing what the job itself commits and touches is what raises a cluster's throughput: in our simulation \libmpr{}
+completes 16\% more jobs per hour than the request, where the three published policies complete none more, and
+dynamic provisioning applied to jobs built with the pass shortens the response time further. The profile that makes
+this possible must be cheap where it is taken: \libmpr{}'s native-speed profile costs one run at native speed, while a
+Pin profile belongs offline.
 
 \bibliographystyle{plain}
 \bibliography{references}

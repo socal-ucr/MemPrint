@@ -50,7 +50,14 @@ measured curve, \memprint{}'s included, needs about 60\% headroom and peaks do b
 \memprint{}'s curve on the native clock, through hardware counts of the native run's memory references, and at the
 level of an earlier run's RSS cuts that headroom to 17\% and its response time from 1{,}873 to 569 minutes, and
 against the resident set without code it matches the exact peak (422 against 429 minutes); a curve still gains
-nothing over a peak there, because the allocator keeps freed memory resident.
+nothing over a peak there, because the allocator keeps freed memory resident. We also evaluate three published
+policies, checked against their authors' code where it is published. Pond, which holds a job's request and places
+its predicted untouched memory in the pool, is slower than the request itself (2{,}519 minutes), because the pool
+fills first. KS+, which learns a step function over time from the program's other inputs, gives 1{,}262 minutes:
+its regressions extrapolate well for most programs but predict almost nothing for two, whose jobs then fail dozens
+of times. Dynamic provisioning, which resizes a running job every five minutes to the coming five minutes of its
+use, gives 457 minutes, between \memprint{}'s curve and the exact peak, but only because it reads that use from the
+trace, and it restarts about 300 jobs per stream. An appendix repeats every result at offered loads from 0.4 to 1.2.
 \end{abstract}
 
 \section{Introduction}
@@ -866,6 +873,13 @@ scheduler is the timing of every phase, and DHAT records the timing of one.
 
 The results rest on a model of a cluster and of its jobs, and each simplification limits what they show.
 
+\paragraph{The published baselines.} Pond's artifact holds none of its policies, so our Pond follows the paper's
+description; it leaves out the model that places latency-insensitive virtual machines entirely in the pool, which
+needs hardware performance counters our jobs do not have. Our dynamic provisioning fixes a job's runtime stretch at
+admission and charges nothing per resize, both in its favour, and its resizes read
+the coming interval as the authors' simulator does. KS+ learns from two smaller inputs per program, where its
+authors had hundreds of executions per task.
+
 \paragraph{Scaled footprints.} The corpus programs peak at 15 to 450\,MB, and the simulated jobs at tens to
 hundreds of GB. Scaling a measured curve to a job's size keeps its shape and every estimator's ratio to the
 truth, but it assumes the ratio does not change with the input. The corpus shows that it often does at small
@@ -914,7 +928,11 @@ programs) and 40\% more memory than the exact curve for the same service, at 11 
 jobs alone it failed, because its curve learned of the weights only in its windows, while the footprint reaches
 its peak in the first percent of the run; tracking the program's file mappings between windows, as its heap blocks
 are tracked, removed that failure and made every \memprint{} curve beat the exact peak on the full corpus. DHAT's three recorded points do not make a
-usable curve. Two results set the direction of further work. First, under the RSS truth every measured curve
+usable curve. Of three published policies, the one that comes
+closest to the exact peak, dynamic provisioning, does so by reading the coming minutes of a job's use from its
+trace, which a running system cannot do, and by restarting the jobs whose growth no longer fits; Pond saves local
+DRAM but not total memory, and KS+'s regressions on input size cannot extrapolate from inputs far smaller than
+the job's. Knowing a job's footprint before it starts, which no published policy does, remains the missing piece. Two results set the direction of further work. First, under the RSS truth every measured curve
 lost its advantage; placing \memprint{}'s curve on the native clock through hardware counts of memory references,
 at the level of an earlier run's RSS, brings it to the exact peak, but beating the peak there needs an estimate of
 the memory an allocator keeps after a free. Second, the static route predicts footprints
