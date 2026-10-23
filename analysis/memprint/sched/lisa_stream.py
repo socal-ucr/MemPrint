@@ -8,8 +8,8 @@ pattern (rescaled to an offered load, as the other streams), runtimes, node coun
   the synthetic stream), scaled so its peak is the job's measured peak, so that every corpus estimator and the
   resize study's builds can be replayed on the trace's mix of sizes, runtimes and node counts.
 
-Lisa records no memory request; a job requests what Slurm's default would give it, the node's memory per core times
-the cores it uses on each node (a whole 16-core, 103 GB node for most jobs).
+Lisa records no memory request; a job requests what Slurm's default would give it on the simulated cluster, the
+node's memory per core times the cores it uses on each node (a whole node for most jobs).
 """
 
 import os
@@ -47,7 +47,7 @@ def trace(n=3000, seed=0, cluster=None, d=LISA, curve="active"):
     t["arrival"] = (t.submit - t.submit.min()) / 60
     t["base"] = np.clip(np.ceil(t.minutes), 1, None).astype(int)
     t["procs"] = per_node.iloc[sel].to_numpy()
-    t["req_gb"] = np.minimum(t.procs * NODE_GB / NODE_CORES, cluster.local + cluster.pool)
+    t["req_gb"] = np.minimum(t.procs * cluster.local / cluster.cores, cluster.local + cluster.pool)
     t["curve"] = list(curves[sel] / 1e9)
     return t.reset_index(drop=True)
 

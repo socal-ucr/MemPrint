@@ -6,8 +6,8 @@ swept down from Lisa's 103 GB per node, a pool of a quarter of the local memory.
 kind "lisa-measured": every job's memory is its own measured curve; the oracles are those that need only the job's
 own memory (exact, exact-coarse, exact-peak, request, reactive, zacarias, zacarias-past). kind "lisa-hybrid": the
 trace's arrivals, runtimes, node counts and peaks with corpus footprint shapes (real.make_jobs), every oracle. The
-arrivals are rescaled to the offered load against the 103 GB cluster, so a sweep over local memory replays the same
-jobs at the same rate, as the main study's memory sweep does.
+arrivals are rescaled to the offered load against each cluster's own memory (against the 103 GB cluster, a small
+cluster runs several times over its capacity, its queue grows without bound and so does the simulation).
 """
 
 import argparse
@@ -28,7 +28,7 @@ def lisa_cluster(local):
 
 class LisaSetup(run.Setup):
     def stream(self, scenario, load, seed):
-        ref = lisa_cluster(103.0)
+        ref = self.cluster
         if seed not in self._trace:
             self._trace[seed] = lisa_stream.trace(self.n, seed, cluster=self.cluster)
         tr = self._trace[seed]
