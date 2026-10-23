@@ -34,19 +34,28 @@ STYLE = {
     "request": ("Request (glibc build)", MUTED, "h", (0, (4, 2))),
     "pond": ("Pond", PAL[6], "H", (0, (4, 2))),
     "zacarias": ("Dynamic provisioning", PAL[7], "8", (0, (4, 2))),
+    "zacarias-past": ("Dynamic provisioning, look-back", PAL[3], "8", (0, (4, 2))),
     "ksplus": ("KS+", PAL[4], "d", (0, (4, 2))),
     "mpr-exact": ("Exact curve (pass build)", INK, None, "-"),
     "mpr": ("MemPrintResize", PAL[0], "o", "-"),
     "mpr+zacarias": ("MemPrintResize + dynamic", PAL[7], "8", "-"),
+    "mpr+zacarias-past": ("MemPrintResize + dynamic, look-back", PAL[3], "8", "-"),
     "mpr+pond": ("MemPrintResize + Pond", PAL[6], "H", "-"),
+    "mprh": ("MemPrintResize, held-out profile", PAL[0], "o", (0, (1, 1.5))),
+    "mprh+zacarias": ("MemPrintResize, held-out, + dynamic", PAL[7], "8", (0, (1, 1.5))),
 }
 TRUTH = {"rss": "demand = RSS", "strict": "demand = max(commit, RSS)"}
 
 
-def load(data, name):
+def load(data, name, inflate=0.0):
+    """One results file; inflate selects the over-request (None: every one)."""
     d = pd.read_csv(f"{data}/{name}")
     if "error" in d:
         d = d[d.error.isna()]
+    if "inflate" not in d:
+        d["inflate"] = 0.0
+    if inflate is not None:
+        d = d[d.inflate == inflate]
     d["fails"] = d.kills + d.restarts.fillna(0)
     return d
 
@@ -140,17 +149,36 @@ def table_costs(grids, out, load=0.8, truth="rss"):
     for pol, (name, *_) in STYLE.items():
         if pol not in a.index:
             continue
-        lost = n.loc[pol, "wasted_core_h"]
-        act = n.loc[pol, "overhead_core_h"]
-        cells = [name, fmt(a.loc[pol, "throughput"], 1), fmt(n.loc[pol, "throughput"], 1), fmt(p.loc[pol, "throughput"], 1),
-                 fmt(a.loc[pol, "steady_response"]), fmt(n.loc[pol, "steady_response"]), fmt(p.loc[pol, "steady_response"]),
-                 fmt(lost), fmt(act), fmt(n.loc[pol, "profiling_core_h"]), fmt(p.loc[pol, "profiling_core_h"])]
+        v = lambda d, c: d.loc[pol, c] if pol in d.index else float("nan")   # round 1's Pin runs lack the new policies
+        cells = [name, fmt(v(a, "throughput"), 1), fmt(v(n, "throughput"), 1), fmt(v(p, "throughput"), 1),
+                 fmt(v(a, "steady_response")), fmt(v(n, "steady_response")), fmt(v(p, "steady_response")),
+                 fmt(v(n, "wasted_core_h")), fmt(v(n, "overhead_core_h")), fmt(v(n, "profiling_core_h")),
+                 fmt(v(p, "profiling_core_h"))]
         lines.append(" & ".join(cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     open(f"{out}/tables/cluster_costs.tex", "w").write("\n".join(lines) + "\n")
     cols = ["throughput", "steady_response", "wasted_core_h", "overhead_core_h", "profiling_core_h", "kills", "restarts",
             "resizes", "migrations", "sim_cpu_s"]
-    return pd.concat({"none": a[cols], "native": n[cols], "pin": p[cols]}, axis=1)
+    return pd.concat({"none": a[cols], "native": n[cols], "pin": p.reindex(columns=cols)}, axis=1)
+
+
+def table_inflate(g, out, load=0.8):
+    """Throughput and mean response time at one load as the glibc build's request grows past the allocation."""
+    t = g[(g.load == load) & (g.local_gb == 128)].groupby(["truth", "policy", "inflate"])[["throughput", "steady_response"]].mean()
+    infl = sorted(g.inflate.unique())
+    lines = [r"\begin{tabular}{l" + "r" * (2 * len(infl)) + "}", r"\toprule",
+             r" & \multicolumn{%d}{c}{Jobs/h} & \multicolumn{%d}{c}{Resp.\ (min)} \\" % (len(infl), len(infl)),
+             r"\cmidrule(lr){2-%d} \cmidrule(lr){%d-%d}" % (1 + len(infl), 2 + len(infl), 1 + 2 * len(infl)),
+             "Request over allocation & " + " & ".join([f"+{100 * o:.0f}\\%" for o in infl] * 2) + r" \\", r"\midrule"]
+    for p, (name, *_) in STYLE.items():
+        if (("rss", p, infl[0])) not in t.index:
+            continue
+        cells = [name] + [fmt(t["throughput"].get(("rss", p, o)), 1) for o in infl] + \
+                [fmt(t["steady_response"].get(("rss", p, o))) for o in infl]
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/cluster_inflate.tex", "w").write("\n".join(lines) + "\n")
+    return t
 
 
 def main():
@@ -158,16 +186,20 @@ def main():
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-22-resize-cluster"))
     ap.add_argument("--out", default=HERE)
     a = ap.parse_args()
-    g = load(a.data, "grid_none.csv")
-    cap = load(a.data, "capacity_none.csv") if os.path.exists(f"{a.data}/capacity_none.csv") else None
+    # round 2 (grid2_*, capacity2_*): every policy, over-requests; round 1's Pin-profiling runs (grid_pin)
+    g = load(a.data, "grid2_none.csv")
+    cap = load(a.data, "capacity2_none.csv")
     fig_load(g, a.out)
     t, need = table(g, cap, a.out)
-    grids = {o: load(a.data, f"grid_{o}.csv") for o in ("none", "native", "pin") if os.path.exists(f"{a.data}/grid_{o}.csv")}
+    print(table_inflate(load(a.data, "grid2_none.csv", None), a.out).unstack("inflate").round(1).to_string())
+    grids = {"none": g, "native": load(a.data, "grid2_native.csv"), "pin": load(a.data, "grid_pin.csv")}
     if len(grids) == 3:
         c = table_costs(grids, a.out)
         print(c.round(1).to_string())
         caps = {o: capacity_needed(load(a.data, f"capacity_{o}.csv")) for o in ("native", "pin")
                 if os.path.exists(f"{a.data}/capacity_{o}.csv")}
+        caps["over-request 60%"] = capacity_needed(load(a.data, "capacity2_none.csv", 0.6).assign(
+            policy=lambda d: d.policy))
         for o, nd in caps.items():
             print("capacity with costs,", o); print(nd.pivot(index="policy", columns="truth", values="tb").to_string())
     pd.set_option("display.width", 200)
