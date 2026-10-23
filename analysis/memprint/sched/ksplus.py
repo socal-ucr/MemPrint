@@ -80,8 +80,8 @@ def get_segments(data, segcount=SEGMENTS):
         a[0], a[1] = max(a[0], b[0]), a[1] + b[1]
         res.pop(i + 1)
     sizes, peaks = [r[1] for r in res], [r[0] for r in res]
-    while len(sizes) < segcount:   # as the authors' code: pad with flat segments
-        sizes.append(10)
+    while len(sizes) < segcount:   # as the authors' code: pad with flat segments, each 10 samples longer than the last
+        sizes.append(sizes[-1] + 10)
         peaks.append(peaks[-1])
     return sizes, peaks
 
