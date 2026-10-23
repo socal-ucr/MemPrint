@@ -148,4 +148,44 @@ d, s = Sim(c, [pj]).run()
 check("costs: Pond's mitigation is counted and costs its copy", s["migrations"] == 1 and s["overhead_core_h"] > 0
       and d.runtime.iloc[0] == 104, f"runtime {d.runtime.iloc[0]}, migrations {s['migrations']}")
 
+# Look-back dynamic provisioning: the previous interval's use, grown on demand, committed a minute at a time.
+c = Cluster(nodes=1, cores=8, local=100, pool=0)
+lj = job(0, np.where(half, 20.0, 60.0), np.full(K, 90.0))
+lj.interval, lj.lookback = 10, True
+sim = Sim(c, [lj])
+d, s = sim.run()
+check("look-back: past use, then grown on demand", s["restarts"] == 0 and sim.local[0, :10].max() == 90
+      and sim.local[0, 10:50].max() == 20 and sim.local[0, 50] == 60, f"local {sim.local[0, [5, 30, 50]].tolist()}")
+lj = job(0, np.where(half, 20.0, 60.0), np.full(K, 90.0))
+lj.interval, lj.lookback = 10, True
+d, s = Sim(c, [lj, job(1, np.full(K, 50.0), np.full(K, 50.0), base=100, arrival=20)]).run()
+check("look-back: on-demand growth that does not fit restarts the job", s["restarts"] >= 1, f"restarts {s['restarts']}")
+
+# Jobs on several nodes: every node holds the footprint, the pool is shared, the slowest node sets the runtime.
+c = Cluster(nodes=2, cores=8, local=100, pool=0)
+g = job(0, np.full(K, 60.0), np.full(K, 60.0), arrival=1)
+g.nodes = 2
+d, s = Sim(c, [job(1, np.full(K, 50.0), np.full(K, 50.0), base=100), g]).run()
+st = d.set_index("id")
+check("multi-node: waits until both nodes have room", st.start[0] == 100 and st.nodes[0] == 2,
+      f"start {st.start[0]}, nodes {st.nodes[0]}")
+c = Cluster(nodes=2, cores=8, local=0, pool=100)
+g = job(0, np.full(K, 60.0), np.full(K, 60.0))
+g.nodes = 2
+d, s = Sim(c, [g]).run()
+check("multi-node: the job's nodes share the pool", s.get("jobs", 0) == 0 and s["rejected"] == 1,
+      f"jobs {s.get('jobs')}, rejected {s['rejected']}")
+c = Cluster(nodes=2, cores=8, local=40, pool=100, beta=0.5)
+g = job(0, np.full(K, 60.0), np.full(K, 60.0))
+g.nodes = 2
+d, s = Sim(c, [g]).run()
+check("multi-node: pool memory stretches the run", d.runtime.iloc[0] == 117 and abs(s["pool_share"] - 1 / 3) < 1e-6,
+      f"runtime {d.runtime.iloc[0]}, pool share {s['pool_share']:.3f}")
+c = Cluster(nodes=2, cores=8, local=100, pool=0)
+g = job(0, np.where(half, 30.0, 60.0), np.full(K, 50.0))
+g.nodes = 2
+d, s = Sim(c, [g]).run()
+check("multi-node: an under-reservation kills the whole job", s["kills"] == 1 and s["wasted_core_h"] == 2 * 50 / 60,
+      f"kills {s['kills']}, wasted {s['wasted_core_h']:.2f}")
+
 sys.exit(failed)

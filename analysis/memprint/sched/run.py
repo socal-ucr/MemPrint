@@ -24,14 +24,14 @@ ORDER = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2, "S": 0, "W": 1, "A": 2, "small": 0
 LLM = ("llama2c", "llamacpp")
 EXCLUDE = {("npb-mg", "A"), ("llamacpp", "360m-n64")}   # the splitter ran out of memory: no truth
 EXACT = {"exact", "exact-coarse", "exact-peak"}
-NO_MARGIN = EXACT | {"pond", "zacarias", "ksplus"}   # run once: they do not use a margin (KS+ has its own)
+NO_MARGIN = EXACT | {"pond", "zacarias", "zacarias-past", "ksplus"}   # run once: they do not use a margin (KS+ has its own)
 LEARNED = {"ml-peak", "pond", "ksplus"}
 CALIBRATED = {"memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "memprint-static", "massif",
               "massif-pages", "massif-i", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak",
               *(f"memprint-{n}" for n in oracles.CLOCK_PAGES), *oracles.HYBRID}
 ORACLES = ["exact", "exact-coarse", "exact-peak", "memprint-static", "memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "massif",
            "massif-pages", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak", "request", "ml-peak",
-           "reactive", "pond", "zacarias", "ksplus"]
+           "reactive", "pond", "zacarias", "zacarias-past", "ksplus"]
 
 
 def rank(s):

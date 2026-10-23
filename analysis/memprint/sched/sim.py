@@ -15,6 +15,9 @@ Two baselines change this. A Pond job (local_cap) keeps part of its reservation 
 memory is free, and its QoS monitor (qos_delay) moves that part to local memory after the job spills into it.
 A dynamic-provisioning job (interval) commits only its first interval at the start and each resize when it
 happens; a resize that does not fit fails the job, which restarts from the beginning.
+
+A job on several nodes (job.nodes) holds its footprint curve on each of them, every node placed local-first with the
+pool shared by all; it runs as long as its slowest node, and a kill or a failed resize on any node fails it.
 """
 
 import heapq
@@ -50,10 +53,13 @@ class Sim:
         self.local, self.cores, self.pool = grow(self.local), grow(self.cores), grow(self.pool)
         self.resident, self.h = grow(self.resident), h
 
-    def plan(self, job, node, s):
-        """The placement of `job` on `node` starting at slot `s`, or None if it does not fit."""
+    def plan(self, job, nodes, s):
+        """The placement of `job` on `nodes` (a node, or a list of job.nodes nodes) starting at slot `s`, or None if
+        it does not fit. Every node holds the job's footprint curve (SPMD); the pool is shared by the job's nodes;
+        the runtime is the slowest node's."""
+        nodes = [nodes] if np.isscalar(nodes) else list(nodes)
         c = self.c
-        if self.cores[node, s] + job.cores > c.cores:
+        if any(self.cores[n, s] + job.cores > c.cores for n in nodes):
             return None
         res = job.reservation * self.mult[job.id]
         if res.max() > c.local + c.pool:
@@ -62,47 +68,70 @@ class Sim:
         for it in range(8):
             self._ensure(s + T)
             r, a = self._at(job, "r", T), self._at(job, "a", T)
-            if np.any(self.cores[node, s:s + T] + job.cores > c.cores):
-                return None
             if job.interval:
                 r = self._resizes(job, r, a)
             win = min(T, job.interval) if job.interval else T   # what must fit now
-            free = np.maximum(c.local - self.local[node, s:s + T], 0)
-            local = np.minimum(r, free)
-            if job.local_cap is not None:
-                local = np.minimum(local, job.local_cap)
-            pool = r - local
-            if np.any(pool[:win] > c.pool - self.pool[s:s + win] + EPS):
-                return None
+            parts, pool_used = [], np.zeros(T)
+            for n in nodes:
+                part = self._part(job, n, s, T, r, a, win, pool_used)
+                if part is None:
+                    return None
+                parts.append(part)
+                pool_used = pool_used + part["pool"]
             extra = 0.0   # minutes the policy's own actions add to the run (resize and migration costs)
             if job.interval and job.resize_cost:
                 L = job.interval
-                grows = sum(r[i] > r[i - L] + EPS for i in range(L, T, L))
+                grows = (sum(r[i] > r[i - 1] + EPS for i in range(L, T)) if job.lookback
+                         else sum(r[i] > r[i - L] + EPS for i in range(L, T, L)))
                 extra += grows * job.resize_cost / 60
-            if job.qos_delay is not None:
-                before = pool
-                local, pool = self._mitigate(job, a, r, local, free)
-                moved = float(np.max(before - pool, initial=0.0))
-                if job.migrate_cost:
-                    extra += moved * job.migrate_cost / 60
-            if job.elastic:
-                local, pool, r, kill = self._grant(node, s, T, a, r, local, pool)
-            else:
-                over = np.flatnonzero(a > r + EPS)
-                kill = int(over[0]) if len(over) else None
+            if job.qos_delay is not None and job.migrate_cost:
+                extra += max(q["moved"] for q in parts) * job.migrate_cost / 60
+            kills = [q["kill"] for q in parts if q["kill"] is not None]
+            kill = min(kills) if kills else None
             run = slice(0, T if kill is None else kill)
-            f = float(np.maximum(a[run] - local[run], 0).sum() / max(a[run].sum(), EPS))
+            f = max(float(np.maximum(a[run] - q["local"][run], 0).sum() / max(a[run].sum(), EPS)) for q in parts)
             T2 = max(1, math.ceil(job.base * (1 + c.beta * f) + extra))
             if T2 == T or it == 7:   # unconverged after 8 rounds: keep the last placement, computed for T
                 break
             T = T2
-        p = dict(node=node, s=s, T=T, local=local, pool=pool, r=r, a=a, kill=kill, remote=f, extra=extra,
-                 migrated=job.qos_delay is not None and moved > EPS)
+        p = dict(node=nodes[0], nodes=nodes, parts=parts, s=s, T=T, r=parts[0]["r"], a=a, kill=kill, remote=f,
+                 extra=extra, migrated=job.qos_delay is not None and any(q["moved"] > EPS for q in parts))
+        p["local"], p["pool"] = parts[0]["local"], sum(q["pool"] for q in parts)
         if job.interval:
             # only the first interval is committed now; the resizes are committed at their ticks (run)
             p["resizes"] = r
-            p["local"], p["pool"], p["r"] = (np.where(np.arange(T) < win, v, 0.0) for v in (local, pool, r))
+            first = np.arange(T) < win
+            for q in parts:
+                q["local"], q["pool"] = np.where(first, q["local"], 0.0), np.where(first, q["pool"], 0.0)
+            p["r"] = np.where(first, r, 0.0)
+            p["local"], p["pool"] = parts[0]["local"], sum(q["pool"] for q in parts)
         return p
+
+    def _part(self, job, node, s, T, r, a, win, pool_used):
+        """One node's share of a placement: local first, the rest from the pool left after the job's other nodes."""
+        c = self.c
+        if np.any(self.cores[node, s:s + T] + job.cores > c.cores):
+            return None
+        free = np.maximum(c.local - self.local[node, s:s + T], 0)
+        local = np.minimum(r, free)
+        if job.local_cap is not None:
+            local = np.minimum(local, job.local_cap)
+        pool = r - local
+        avail = c.pool - self.pool[s:s + T] - pool_used
+        if np.any(pool[:win] > avail[:win] + EPS):
+            return None
+        moved = 0.0
+        if job.qos_delay is not None:
+            before = pool
+            local, pool = self._mitigate(job, a, r, local, free)
+            moved = float(np.max(before - pool, initial=0.0))
+        rr = r
+        if job.elastic:
+            local, pool, rr, kill = self._grant(node, s, T, a, r, local, pool, pool_used)
+        else:
+            over = np.flatnonzero(a > r + EPS)
+            kill = int(over[0]) if len(over) else None
+        return dict(node=node, local=local, pool=pool, r=rr, kill=kill, moved=moved)
 
     @staticmethod
     def _resizes(job, r, a):
@@ -111,7 +140,12 @@ class Sim:
         al.'s simulator)."""
         L, out = job.interval, a.copy()
         for i in range(L, len(a), L):
-            out[i:i + L] = a[i:i + L].max()
+            if job.lookback:
+                # a running system: at each update the previous interval's largest use, then grown on demand
+                # within the interval whenever the use exceeds it (each value depends only on the past)
+                out[i:i + L] = np.maximum(a[i - L:i].max(), np.maximum.accumulate(a[i:i + L]))
+            else:
+                out[i:i + L] = a[i:i + L].max()
         out[:L] = r[:L]
         return out
 
@@ -127,7 +161,7 @@ class Sim:
         local[k:] = np.minimum(r[k:], free[k:])
         return local, r - local
 
-    def _grant(self, node, s, T, a, r, local, pool):
+    def _grant(self, node, s, T, a, r, local, pool, pool_used=0.0):
         """An elastic job's growth past its reservation, granted from the node's free local memory, then the
         free pool. It is killed at the first slot where neither has room; the grants before that count as
         reserved."""
@@ -136,7 +170,7 @@ class Sim:
         free_local = np.maximum(c.local - self.local[node, s:s + T] - local, 0)
         add_local = np.minimum(extra, free_local)
         add_pool = extra - add_local
-        short = np.flatnonzero(add_pool > c.pool - self.pool[s:s + T] - pool + EPS)
+        short = np.flatnonzero(add_pool > c.pool - self.pool[s:s + T] - pool_used - pool + EPS)
         kill = int(short[0]) if len(short) else None
         end = T if kill is None else kill
         local, pool, r = local.copy(), pool.copy(), r.copy()
@@ -176,18 +210,25 @@ class Sim:
         if not ok.any():
             return None
         nodes = np.flatnonzero(ok)
+        if len(nodes) < job.nodes:
+            return None
         order = nodes[np.lexsort(((free - local)[nodes].sum(1), pool[nodes].sum(1)))]
+        chosen = []
         for n in order:
-            p = self.plan(job, int(n), s)
+            p = self.plan(job, chosen + [int(n)], s)
             if p is not None:
-                return p
+                chosen.append(int(n))
+                if len(chosen) == job.nodes:
+                    return p
         return None
 
     def _commit(self, job, p, sign, frm=0):
-        n, s, T = p["node"], p["s"], p["T"]
-        self.local[n, s + frm:s + T] += sign * p["local"][frm:]
-        self.pool[s + frm:s + T] += sign * p["pool"][frm:]
-        self.cores[n, s + frm:s + T] += sign * job.cores
+        s, T = p["s"], p["T"]
+        for q in p["parts"]:
+            n = q["node"]
+            self.local[n, s + frm:s + T] += sign * q["local"][frm:]
+            self.pool[s + frm:s + T] += sign * q["pool"][frm:]
+            self.cores[n, s + frm:s + T] += sign * job.cores
 
     def run(self):
         c, jobs = self.c, self.jobs
@@ -199,15 +240,16 @@ class Sim:
 
         def account(p, t, n):
             used = slice(0, n)
-            stats["reserved"] += p["r"][used].sum()
-            stats["resident"] += p["a"][used].sum()
-            self.resident[t:t + n] += p["a"][used]
-            stats["remote"] += np.maximum(p["a"][used] - p["local"][used], 0).sum()
+            k = len(p["parts"])
+            stats["reserved"] += sum(q["local"][used].sum() + q["pool"][used].sum() for q in p["parts"])
+            stats["resident"] += k * p["a"][used].sum()
+            self.resident[t:t + n] += k * p["a"][used]
+            stats["remote"] += sum(np.maximum(p["a"][used] - q["local"][used], 0).sum() for q in p["parts"])
 
         def start(job, p, t):
             self._commit(job, p, +1)
             stats["migrations"] += int(p.get("migrated", False))
-            stats["overhead_core_min"] += job.cores * p.get("extra", 0.0)
+            stats["overhead_core_min"] += job.cores * len(p["parts"]) * p.get("extra", 0.0)
             end = t + (p["T"] if p["kill"] is None else p["kill"])
             heapq.heappush(ends, (end, job.id, next(seq), job, p))
             if job.interval:   # accounted when it ends, once its resizes are known
@@ -219,24 +261,32 @@ class Sim:
         def resize(job, p, t):
             """A dynamic job's resize at slot t: local first, then the pool. If the pool cannot take the rest,
             the job fails and restarts from the beginning with the same request (Zacarias et al.'s F/R)."""
-            n, k0 = p["node"], t - p["s"]
-            k1 = min(k0 + job.interval, p["T"])
+            k0 = t - p["s"]
+            step = 1 if job.lookback else job.interval   # a look-back job grows on demand: one minute at a time
+            k1 = min(k0 + step, p["T"])
             need = p["resizes"][k0:k1]
-            local = np.minimum(need, np.maximum(c.local - self.local[n, t:t + k1 - k0], 0))
-            pool = need - local
-            if np.any(pool > c.pool - self.pool[t:t + k1 - k0] + EPS):
-                self.cores[n, t:p["s"] + p["T"]] -= job.cores
-                p["dead"] = True
-                stats["restarts"] += 1
-                stats["wasted_core_min"] += job.cores * k0
-                account(p, p["s"], k0)
-                return job
+            shares, pool_used = [], np.zeros(k1 - k0)
+            for q in p["parts"]:
+                local = np.minimum(need, np.maximum(c.local - self.local[q["node"], t:t + k1 - k0], 0))
+                pool = need - local
+                if np.any(pool + pool_used > c.pool - self.pool[t:t + k1 - k0] + EPS):
+                    for q2 in p["parts"]:
+                        self.cores[q2["node"], t:p["s"] + p["T"]] -= job.cores
+                    p["dead"] = True
+                    stats["restarts"] += 1
+                    stats["wasted_core_min"] += job.cores * len(p["parts"]) * k0
+                    account(p, p["s"], k0)
+                    return job
+                shares.append((q, local, pool))
+                pool_used = pool_used + pool
             stats["resizes"] += int(k0 == 0 or not np.isclose(need[0], p["r"][k0 - 1]))
-            p["local"][k0:k1], p["pool"][k0:k1], p["r"][k0:k1] = local, pool, need
-            self.local[n, t:t + k1 - k0] += local
-            self.pool[t:t + k1 - k0] += pool
+            p["r"][k0:k1] = need
+            for q, local, pool in shares:
+                q["local"][k0:k1], q["pool"][k0:k1] = local, pool
+                self.local[q["node"], t:t + k1 - k0] += local
+                self.pool[t:t + k1 - k0] += pool
             if k1 < p["T"]:
-                heapq.heappush(ticks, (t + job.interval, job.id, next(seq), job, p))
+                heapq.heappush(ticks, (t + step, job.id, next(seq), job, p))
             return None
 
         def earliest(job, t):
@@ -284,7 +334,7 @@ class Sim:
                 if p["kill"] is not None:
                     self._commit(job, p, -1, frm=p["kill"])
                     stats["kills"] += 1
-                    stats["wasted_core_min"] += job.cores * p["kill"]
+                    stats["wasted_core_min"] += job.cores * len(p["parts"]) * p["kill"]
                     new = job.retry(job, p["kill"] / p["T"]) if job.retry else None
                     if new is None:
                         self.mult[job.id] *= c.oom_growth
@@ -295,7 +345,7 @@ class Sim:
                 else:
                     done[job.id] = dict(id=job.id, shape=job.shape, arrival=job.arrival, start=p["s"], end=t,
                                         base=job.base, runtime=p["T"], cores=job.cores, remote=p["remote"],
-                                        node=p["node"])
+                                        node=p["node"], nodes=len(p["parts"]))
             while ticks and ticks[0][0] == t:
                 _, _, _, job, p = heapq.heappop(ticks)
                 if not p.get("dead") and resize(job, p, t) is not None:

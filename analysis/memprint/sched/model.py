@@ -26,7 +26,7 @@ class Cluster:
 class Job:
     id: int
     arrival: int              # minute
-    cores: int
+    cores: int                # per node
     base: int                 # runtime in minutes with all memory local
     resident: np.ndarray      # actual resident footprint over progress, GB (K samples)
     info: dict = field(default_factory=dict)  # what the oracles may see (profiled curves, peaks, ...)
@@ -42,11 +42,15 @@ class Job:
     # `interval` minutes, then is resized every interval to the largest footprint of the coming interval; each
     # resize is committed only when it happens, and a job whose growth does not fit is failed and restarted
     interval: int = 0
+    # with lookback, the resize uses the previous interval's largest use (what a running monitor knows) and the job
+    # grows on demand within the interval, each minute committed only when it comes; without, the coming interval's
+    lookback: bool = False
     # KS+ (Bader et al., eScience 2024): after an OOM kill at progress t, retry(job, t) gives the new reservation
     # (None: grow it as for every other oracle)
     retry: object = None
     # the policies' own costs (0: none): seconds of progress lost per growing resize (dynamic provisioning; 10 s in
     # Zacarias et al.'s simulator), and seconds per GB moved by Pond's mitigation (50 ms/GB in the Pond paper)
+    nodes: int = 1            # nodes the job spans; each holds `resident` (SPMD)
     resize_cost: float = 0.0
     migrate_cost: float = 0.0
 

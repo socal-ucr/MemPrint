@@ -21,6 +21,15 @@ The truth (what the job must be given, or it is OOM-killed) is its RSS ("rss") o
   mpr+zacarias         libmpr build, dynamic provisioning
   mpr+pond             libmpr build, Pond
   exact, mpr-exact     the truth's own curve, each build (the upper bounds)
+  zacarias-past        glibc build, dynamic provisioning as a running system can do it: each update to the previous
+                       interval's largest use, grown on demand within the interval (failing and restarting when the
+                       growth does not fit), memory committed one minute at a time
+  mpr+zacarias-past    the same on the libmpr build
+  mprh, mprh+zacarias  the libmpr build with a held-out profile (from the program's other inputs or models)
+
+--inflate o sets every glibc-build request to (1 + o) times the program's allocation, as a user who over-requests
+would (Zacarias et al. study +60%); the libmpr builds take their requests from the profile, not from the user, so
+they are unaffected.
 
 With --overheads native or pin, each policy also pays its own costs: a job built with the pass runs for its
 workload's measured libmpr runtime ratio (libmpr's run against glibc's), and the first job of each workload in the
@@ -78,7 +87,8 @@ def overhead_tables():
     return ratio, native, pin
 
 
-POLICIES = ["exact", "request", "pond", "zacarias", "ksplus", "mpr-exact", "mpr", "mpr+zacarias", "mpr+pond"]
+POLICIES = ["exact", "request", "pond", "zacarias", "zacarias-past", "ksplus", "mpr-exact", "mpr", "mpr+zacarias",
+            "mpr+zacarias-past", "mpr+pond", "mprh", "mprh+zacarias"]
 
 
 def _curve(t, col, base):
@@ -102,12 +112,12 @@ def workloads():
     for name, d, base_label, prog, inp in cases:
         g = [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/{base_label}-[0-9].csv")) if os.path.getsize(f)]
         m = [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/self-[0-9].csv")) if os.path.getsize(f)]
+        h = [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/heldout-[0-9].csv")) if os.path.getsize(f)]
         if not g or not m:
             continue
         b = g[0].rss_bytes.min()
-        out[name] = dict(prog=prog, input=inp,
-                         glibc=[(_curve(t, "rss_bytes", b), _curve(t, "commit_bytes", b)) for t in g],
-                         mpr=[(_curve(t, "rss_bytes", b), _curve(t, "commit_bytes", b)) for t in m])
+        cv = lambda runs: [(_curve(t, "rss_bytes", b), _curve(t, "commit_bytes", b)) for t in runs]
+        out[name] = dict(prog=prog, input=inp, glibc=cv(g), mpr=cv(m), mprh=cv(h) or cv(m))
     return out
 
 
@@ -129,7 +139,7 @@ class Setup:
         self.n = n
         self._trace = {}
 
-    def stream(self, truth, load, seed):
+    def stream(self, truth, load, seed, inflate=0.0):
         """The jobs of one stream: workload, scale and both builds' truths; arrivals at the glibc offered load."""
         ref = Cluster()
         if seed not in self._trace:
@@ -143,14 +153,20 @@ class Setup:
             k = rng.integers(len(w["glibc"]))
             rss, com = w["glibc"][k]
             mrss, mcom = w["mpr"][min(k, len(w["mpr"]) - 1)]
+            hrss, hcom = w["mprh"][min(k, len(w["mprh"]) - 1)]
             req = np.maximum(rss, com).max()
             s = r.req_gb / max(req, 1e-12)   # GB per byte of the program's own scale
             pick = (lambda a, c: np.maximum(a, c)) if truth == "strict" else (lambda a, c: a)
             others = [x for j, x in enumerate(w["glibc"]) if j != k] or w["glibc"]
             mothers = [x for j, x in enumerate(w["mpr"]) if j != min(k, len(w["mpr"]) - 1)] or w["mpr"]
-            info = dict(prog=name, scale=s, request=req * s, mpr_request=np.maximum(mrss, mcom).max() * s,
-                        glibc_truth=pick(rss, com) * s, mpr_truth=pick(mrss, mcom) * s,
-                        um=untouched(others), mpr_um=untouched(mothers))
+            hothers = [x for j, x in enumerate(w["mprh"]) if j != min(k, len(w["mprh"]) - 1)] or w["mprh"]
+            cap = Cluster().local + Cluster().pool
+            um = untouched(others)
+            info = dict(prog=name, scale=s, request=min(req * s * (1 + inflate), cap),
+                        mpr_request=np.maximum(mrss, mcom).max() * s, mprh_request=np.maximum(hrss, hcom).max() * s,
+                        glibc_truth=pick(rss, com) * s, mpr_truth=pick(mrss, mcom) * s, mprh_truth=pick(hrss, hcom) * s,
+                        # Pond's history sees the user's request: the untouched share includes the over-request
+                        um=1 - (1 - um) / (1 + inflate), mpr_um=untouched(mothers), mprh_um=untouched(hothers))
             jobs.append(Job(id=i, arrival=r.arrival, cores=int(r.procs), base=int(r.base),
                             resident=info["glibc_truth"], info=info, shape=name))
         gbmin = sum(at_slots(j.resident, j.base).sum() for j in jobs)
@@ -170,6 +186,7 @@ class Setup:
             j = copy(j0)
             i = j.info
             mpr = policy.startswith("mpr")
+            build = "mprh" if policy.startswith("mprh") else "mpr" if mpr else None
             if cost and mpr and policy != "mpr-exact" and j.shape not in profiled:
                 # the workload's first job is its profiling run: the glibc build under the profiler
                 profiled.add(j.shape)
@@ -181,9 +198,9 @@ class Setup:
                 continue
             if cost and mpr:
                 j.base = max(1, int(round(j.base * self.ratio.get(j.shape, 1.0))))
-            j.resident = i["mpr_truth"] if mpr else i["glibc_truth"]
-            R = i["mpr_request"] if mpr else i["request"]
-            um = i["mpr_um"] if mpr else i["um"]
+            j.resident = i[f"{build}_truth"] if build else i["glibc_truth"]
+            R = i[f"{build}_request"] if build else i["request"]
+            um = i[f"{build}_um"] if build else i["um"]
             if policy in ("exact", "mpr-exact"):
                 j.reservation = j.resident.copy()
             elif policy == "ksplus":
@@ -194,8 +211,9 @@ class Setup:
                 if policy.endswith("pond"):
                     j.local_cap, j.qos_delay = R - np.floor(R * um), 5
                     j.migrate_cost = COSTS["migrate_s_per_gb"] if cost else 0.0
-                if policy.endswith("zacarias"):
+                if "zacarias" in policy:
                     j.interval = 5
+                    j.lookback = policy.endswith("-past")
                     j.resize_cost = COSTS["resize_s"] if cost else 0.0
             out.append(j)
         return out
@@ -210,26 +228,27 @@ def _init(n, overheads):
 
 
 def _one(task):
-    truth, load, seed, policy, local = task
+    truth, load, seed, policy, local, inflate = task
     try:
         import time
         cluster = Cluster(local=local)
-        jobs = _setup.assign(_setup.stream(truth, load, seed), policy)
+        jobs = _setup.assign(_setup.stream(truth, load, seed, inflate), policy)
         prof = sum(j.cores * j.base for j in jobs if getattr(j, "profiling", False)) / 60
         t0 = time.process_time()
         sim = Sim(cluster, jobs)
         d, s = sim.run()
-        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, overheads=_setup.overheads,
+        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, inflate=inflate,
+                    overheads=_setup.overheads,
                     profiling_core_h=prof, sim_cpu_s=time.process_time() - t0, **s, **steady(d, sim))
     except Exception as e:  # one bad task must not lose the grid
         import traceback
-        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, error=repr(e),
+        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, inflate=inflate, error=repr(e),
                     trace=traceback.format_exc()[-500:])
 
 
 def run(out, truths=("rss", "strict"), loads=(0.4, 0.6, 0.8, 1.0, 1.2), seeds=(0, 1, 2), policies=POLICIES,
-        locals_=(128,), n=3000, procs=28, overheads="none"):
-    tasks = list(product(truths, loads, seeds, policies, locals_))
+        locals_=(128,), n=3000, procs=28, overheads="none", inflates=(0.0,)):
+    tasks = list(product(truths, loads, seeds, policies, locals_, inflates))
     rows = []
     with Pool(procs, _init, (n, overheads)) as p, open(out + ".jsonl", "a") as log:
         for r in p.imap_unordered(_one, tasks, chunksize=1):
@@ -250,8 +269,10 @@ def main():
     ap.add_argument("--locals", type=float, nargs="+", default=[128])
     ap.add_argument("--procs", type=int, default=28)
     ap.add_argument("--overheads", choices=["none", "native", "pin"], default="none")
+    ap.add_argument("--inflate", type=float, nargs="+", default=[0.0])
     a = ap.parse_args()
-    run(a.out, loads=a.loads, seeds=a.seeds, policies=a.policies, locals_=a.locals, procs=a.procs, overheads=a.overheads)
+    run(a.out, loads=a.loads, seeds=a.seeds, policies=a.policies, locals_=a.locals, procs=a.procs, overheads=a.overheads,
+        inflates=a.inflate)
 
 
 if __name__ == "__main__":

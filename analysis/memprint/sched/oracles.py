@@ -86,6 +86,16 @@ def zacarias(j, m, interval=5):
 zacarias.attrs = lambda j, m, interval=5: dict(interval=interval)
 
 
+def zacarias_past(j, m):
+    """Dynamic provisioning as a running system can do it: each update sets the allocation to the previous interval's
+    largest use, and the job grows on demand within the interval (failing and restarting when the growth does not
+    fit); memory is committed one minute at a time. The margin is not used."""
+    return zacarias(j, m)
+
+
+zacarias_past.attrs = lambda j, m, interval=5: dict(interval=interval, lookback=True)
+
+
 CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",
                "W5sec": "W5sec", "W5pages": "W5pages", "W5pagessec": "W5pagessec",
                # on the native wall clock, through the native run's memory references over time (nativerefs)
@@ -108,6 +118,7 @@ HYBRID = {"memprint-W5nat-rss": "W5nat", "memprint-Pnat-rss": "Pnat"}
 REAL = {
     "reactive": reactive,
     "zacarias": zacarias,
+    "zacarias-past": zacarias_past,
     "exact": lambda j, m: curve(j.resident),
     "exact-peak": lambda j, m: peak(j.resident),
     "exact-coarse": lambda j, m: curve(j.resident, windows=20, widen=1),   # exact, at the measured curves' resolution
