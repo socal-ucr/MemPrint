@@ -196,4 +196,12 @@ d, s = Sim(c, [lj, job(1, np.full(K, 50.0), np.full(K, 50.0), base=100, arrival=
 check("look-back: after its restarts the job runs with its request held", s["restarts"] == 1 and s["fallbacks"] == 1
       and len(d) == 2, f"restarts {s['restarts']}, fallbacks {s['fallbacks']}, done {len(d)}")
 
+# A dynamic job OOM-killed in its first interval (request below its use) leaves no resize behind for its next run.
+c = Cluster(nodes=1, cores=8, local=200, pool=0)
+oj = job(0, np.where(np.arange(K) < 5, 80.0, 20.0), np.full(K, 50.0))   # killed at 50, then at 75 GB; fits at 112.5
+oj.interval, oj.lookback, oj.fallback_after = 10, True, 3
+d, s = Sim(c, [oj]).run()
+check("dynamic: an OOM kill retires the placement and its resizes", s["kills"] == 2 and len(d) == 1,
+      f"kills {s['kills']}, done {len(d)}")
+
 sys.exit(failed)

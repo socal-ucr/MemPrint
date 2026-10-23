@@ -67,4 +67,5 @@ def hybrid_trace(tr):
     """The trace in real.make_jobs's form, the measured peak standing in for the request x u that sizes a job."""
     t = tr.copy()
     t["peak_gb"] = [float(np.max(c)) for c in t.curve]
+    t["req_gb"] = np.maximum(t.req_gb, t.peak_gb)   # as in measured_jobs: a request at least the job's peak
     return t

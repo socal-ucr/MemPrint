@@ -337,6 +337,7 @@ class Sim:
                 if job.interval:
                     account(p, p["s"], p["T"])
                 if p["kill"] is not None:
+                    p["dead"] = True   # its pending resizes (a dynamic job) must not run for the requeued job
                     self._commit(job, p, -1, frm=p["kill"])
                     stats["kills"] += 1
                     stats["wasted_core_min"] += job.cores * len(p["parts"]) * p["kill"]
