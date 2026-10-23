@@ -1,0 +1,141 @@
+"""Cluster throughput with MemPrintResize against Pond, dynamic provisioning and KS+: figure and tables from
+analysis/memprint/sched/resize_cluster.py's runs.
+
+    ~/environments/memfp/bin/python paper_resize/cluster.py [--data DIR] [--out paper_resize]
+
+DIR holds grid.csv (every load) and capacity.csv (the memory sweep at load 0.8), ~/memprint-data/2026-10-22-resize-cluster.
+"""
+
+import argparse
+import os
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
+PAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+plt.rcParams.update({
+    "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8, "legend.fontsize": 6.5,
+    "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
+    "xtick.color": MUTED, "ytick.color": MUTED, "text.color": INK, "axes.spines.top": False,
+    "axes.spines.right": False, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5,
+    "lines.linewidth": 1.2, "legend.frameon": False, "pdf.fonttype": 42, "savefig.bbox": "tight",
+})
+# label, colour, marker, line: glibc builds dashed, libmpr builds solid
+STYLE = {
+    "exact": ("Exact curve (glibc build)", INK, None, (0, (4, 2))),
+    "request": ("Request (glibc build)", MUTED, "h", (0, (4, 2))),
+    "pond": ("Pond", PAL[6], "H", (0, (4, 2))),
+    "zacarias": ("Dynamic provisioning", PAL[7], "8", (0, (4, 2))),
+    "ksplus": ("KS+", PAL[4], "d", (0, (4, 2))),
+    "mpr-exact": ("Exact curve (pass build)", INK, None, "-"),
+    "mpr": ("MemPrintResize", PAL[0], "o", "-"),
+    "mpr+zacarias": ("MemPrintResize + dynamic", PAL[7], "8", "-"),
+    "mpr+pond": ("MemPrintResize + Pond", PAL[6], "H", "-"),
+}
+TRUTH = {"rss": "demand = RSS", "strict": "demand = max(commit, RSS)"}
+
+
+def load(data, name):
+    d = pd.read_csv(f"{data}/{name}")
+    if "error" in d:
+        d = d[d.error.isna()]
+    d["fails"] = d.kills + d.restarts.fillna(0)
+    return d
+
+
+def fig_load(g, out):
+    """Throughput and mean response time against offered load, both demands."""
+    fig, axes = plt.subplots(2, 2, figsize=(7.0, 4.6), sharex=True)
+    for col, tr in enumerate(("rss", "strict")):
+        d = g[(g.truth == tr) & (g.local_gb == 128)]
+        for row, (metric, lab) in enumerate((("throughput", "Throughput (jobs/h)"),
+                                             ("steady_response", "Mean response time (min)"))):
+            ax = axes[row][col]
+            for p, (name, c, mk, ls) in STYLE.items():
+                e = d[d.policy == p].groupby("load")[metric].agg(["mean", "std"])
+                if e.empty:
+                    continue
+                ax.errorbar(e.index, e["mean"], yerr=e["std"], color=c, marker=mk, markersize=3.5, linestyle=ls,
+                            capsize=1.5, label=name, linewidth=1.6 if p.endswith("exact") else 1.1)
+            if metric == "steady_response":
+                ax.set_yscale("log")
+            ax.set_ylabel(lab)
+            if row == 0:
+                ax.set_title(TRUTH[tr])
+            else:
+                ax.set_xlabel("Offered load (glibc stream)")
+    h, l = axes[0][0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=3)
+    fig.savefig(f"{out}/figures/cluster.pdf")
+    plt.close(fig)
+
+
+def capacity_needed(cap):
+    """Smallest local GB per node at which each policy's mean bounded slowdown is within 1.5x the glibc exact
+    curve's at 128 GB (as the scheduling study's memory sweep), per demand."""
+    m = cap.groupby(["truth", "policy", "local_gb"]).steady_bsld.mean().reset_index()
+    rows = []
+    for tr, d in m.groupby("truth"):
+        tgt = 1.5 * d[(d.policy == "exact") & (d.local_gb == 128)].steady_bsld.iloc[0]
+        for p, e in d.groupby("policy"):
+            ok = e[e.steady_bsld <= tgt].local_gb
+            rows.append(dict(truth=tr, policy=p, local_gb=ok.min() if len(ok) else np.nan))
+    n = pd.DataFrame(rows)
+    n["tb"] = (n.local_gb * 32 + 1024) / 1024
+    return n
+
+
+def fmt(v, d=0):
+    return "--" if pd.isna(v) else f"{v:,.{d}f}".replace(",", "{,}")
+
+
+def table(g, cap, out, loads=(0.8, 1.2)):
+    """Per policy: throughput and mean response at two loads, OOM kills and restarts at 0.8, and the memory needed
+    for the same service (TB), both demands."""
+    need = capacity_needed(cap) if cap is not None else None
+    t = g[g.local_gb == 128].groupby(["truth", "policy", "load"])[["throughput", "steady_response", "fails"]].mean()
+    lines = [r"\begin{tabular}{l" + "r" * 12 + "}", r"\toprule",
+             r" & \multicolumn{6}{c}{Demand = RSS} & \multicolumn{6}{c}{Demand = max(commit, RSS)} \\",
+             r"\cmidrule(lr){2-7} \cmidrule(lr){8-13}",
+             " & " + " & ".join([r"\multicolumn{2}{c}{Jobs/h}", r"\multicolumn{2}{c}{Resp.\ (min)}", "Fails", "TB"] * 2)
+             + r" \\",
+             "Load & " + " & ".join([f"{loads[0]:g}", f"{loads[1]:g}"] * 2 + [f"{loads[0]:g}", f"{loads[0]:g}"]) + " & "
+             + " & ".join([f"{loads[0]:g}", f"{loads[1]:g}"] * 2 + [f"{loads[0]:g}", f"{loads[0]:g}"]) + r" \\",
+             r"\midrule"]
+    for p, (name, *_ ) in STYLE.items():
+        cells = [name]
+        for tr in ("rss", "strict"):
+            cells += [fmt(t["throughput"].get((tr, p, l)), 1) for l in loads]
+            cells += [fmt(t["steady_response"].get((tr, p, l))) for l in loads]
+            cells.append(fmt(t["fails"].get((tr, p, loads[0]))))
+            tb = None if need is None else need[(need.truth == tr) & (need.policy == p)].tb
+            cells.append("--" if tb is None or not len(tb) or pd.isna(tb.iloc[0]) else f"{tb.iloc[0]:.1f}")
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/cluster.tex", "w").write("\n".join(lines) + "\n")
+    return t, need
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-22-resize-cluster"))
+    ap.add_argument("--out", default=HERE)
+    a = ap.parse_args()
+    g = load(a.data, "grid.csv")
+    cap = load(a.data, "capacity.csv") if os.path.exists(f"{a.data}/capacity.csv") else None
+    fig_load(g, a.out)
+    t, need = table(g, cap, a.out)
+    pd.set_option("display.width", 200)
+    print(t.unstack("load").round(1).to_string())
+    if need is not None:
+        print(need.pivot(index="policy", columns="truth", values="tb").to_string())
+
+
+if __name__ == "__main__":
+    main()
