@@ -89,11 +89,13 @@ zacarias.attrs = lambda j, m, interval=5: dict(interval=interval)
 def zacarias_past(j, m):
     """Dynamic provisioning as a running system can do it: each update sets the allocation to the previous interval's
     largest use, and the job grows on demand within the interval (failing and restarting when the growth does not
-    fit); memory is committed one minute at a time. The margin is not used."""
+    fit); memory is committed one minute at a time. After three restarts the job runs with its request held, as
+    Zacarias et al. suggest against repeated failures (without it, jobs whose growth others keep taking restart
+    indefinitely). The margin is not used."""
     return zacarias(j, m)
 
 
-zacarias_past.attrs = lambda j, m, interval=5: dict(interval=interval, lookback=True)
+zacarias_past.attrs = lambda j, m, interval=5: dict(interval=interval, lookback=True, fallback_after=3)
 
 
 CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",

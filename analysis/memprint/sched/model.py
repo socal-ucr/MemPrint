@@ -45,6 +45,9 @@ class Job:
     # with lookback, the resize uses the previous interval's largest use (what a running monitor knows) and the job
     # grows on demand within the interval, each minute committed only when it comes; without, the coming interval's
     lookback: bool = False
+    # after this many restarts the job runs with its request held, statically ("initiate the job without dynamic
+    # resource allocation", as Zacarias et al. suggest against repeated failures); None: never
+    fallback_after: int = None
     # KS+ (Bader et al., eScience 2024): after an OOM kill at progress t, retry(job, t) gives the new reservation
     # (None: grow it as for every other oracle)
     retry: object = None

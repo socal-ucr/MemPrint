@@ -142,7 +142,11 @@ _setup = None
 
 def _init(corpus, traces, n, cluster, kind="synthetic", programs=None):
     global _setup
-    _setup = Setup(corpus, traces, n, cluster, kind, programs)
+    if kind.startswith("lisa"):   # the SURF Lisa trace (lisa_run.py)
+        from .lisa_run import LisaSetup
+        _setup = LisaSetup(corpus, traces, n, cluster, kind, programs)
+    else:
+        _setup = Setup(corpus, traces, n, cluster, kind, programs)
 
 
 def steady(d, sim, trim=0.1):

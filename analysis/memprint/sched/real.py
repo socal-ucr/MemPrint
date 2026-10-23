@@ -106,7 +106,8 @@ def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
     for i, r in trace.iterrows():
         prog = progs[rng.integers(len(progs))]
         c = cm5.iloc[rng.integers(len(cm5))]
-        peak = r.req_gb * c.u
+        # a trace with measured peaks (the Lisa trace) sizes the job by them; otherwise request x u from CM5
+        peak = r.peak_gb if "peak_gb" in r else r.req_gb * c.u
         info = {m: wide[(p_, m)] for (p_, m) in wide if p_ == prog}
         info = rebase(info)
         t = info[truth_method]
@@ -117,5 +118,5 @@ def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
             info["rssview"] = rss_view(info, scenario)
         # arrival in trace time; run.Setup rescales it to the offered load
         jobs.append(Job(id=i, arrival=r.arrival, cores=int(r.procs), base=int(r.base), resident=info[truth_method],
-                        info=info, shape=prog))
+                        info=info, shape=prog, nodes=int(r.nodes) if "nodes" in r else 1))
     return jobs

@@ -43,6 +43,7 @@ class Sim:
         self.resident = np.zeros(self.h)   # actually resident GB at each slot, over all jobs
         self.mult = {j.id: 1.0 for j in self.jobs}
         self.rev = {j.id: 0 for j in self.jobs}   # bumped when a retry replaces a job's reservation
+        self.restarts = {}   # job id -> restarts of a dynamic job
         self._slots = {}   # (job id, which, multiplier, slots) -> the curve on that many slots
 
     def _ensure(self, end):
@@ -235,7 +236,7 @@ class Sim:
         queue, ends, ticks, done, rejected = [], [], [], {}, []
         seq = itertools.count()   # tie-break: a restarted job's dead end event can share its new one's time
         stats = dict(kills=0, restarts=0, wasted_core_min=0.0, reserved=0.0, resident=0.0, remote=0.0, resizes=0,
-                     migrations=0, overhead_core_min=0.0)
+                     migrations=0, overhead_core_min=0.0, fallbacks=0)
         nxt = 0
 
         def account(p, t, n):
@@ -274,6 +275,10 @@ class Sim:
                         self.cores[q2["node"], t:p["s"] + p["T"]] -= job.cores
                     p["dead"] = True
                     stats["restarts"] += 1
+                    self.restarts[job.id] = self.restarts.get(job.id, 0) + 1
+                    if job.fallback_after is not None and self.restarts[job.id] >= job.fallback_after:
+                        job.interval, job.lookback = 0, False   # from now on its request, held statically
+                        stats["fallbacks"] += 1
                     stats["wasted_core_min"] += job.cores * len(p["parts"]) * k0
                     account(p, p["s"], k0)
                     return job
@@ -373,7 +378,8 @@ def summarize(d, stats, c, rejected):
         throughput=len(d) / (span / 60),
         response=d.response.mean(), response_p95=d.response.quantile(0.95), wait=(d.start - d.arrival).mean(),
         bsld=d.bsld.mean(), stretch=(d.runtime / d.base).mean(),
-        kills=stats["kills"], restarts=stats["restarts"], resizes=stats["resizes"], migrations=stats["migrations"],
+        kills=stats["kills"], restarts=stats["restarts"], fallbacks=stats["fallbacks"], resizes=stats["resizes"],
+        migrations=stats["migrations"],
         overhead_core_h=stats["overhead_core_min"] / 60, wasted_core_h=stats["wasted_core_min"] / 60,
         reserved_util=stats["reserved"] / capacity, resident_util=stats["resident"] / capacity,
         pool_share=stats["remote"] / max(stats["resident"], EPS), makespan_h=span / 60,

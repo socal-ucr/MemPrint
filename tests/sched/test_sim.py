@@ -188,4 +188,12 @@ d, s = Sim(c, [g]).run()
 check("multi-node: an under-reservation kills the whole job", s["kills"] == 1 and s["wasted_core_h"] == 2 * 50 / 60,
       f"kills {s['kills']}, wasted {s['wasted_core_h']:.2f}")
 
+# Look-back with a fallback: a job whose growth never fits runs statically after its restarts.
+c = Cluster(nodes=1, cores=8, local=100, pool=0)
+lj = job(0, np.where(half, 20.0, 60.0), np.full(K, 90.0))
+lj.interval, lj.lookback, lj.fallback_after = 10, True, 1
+d, s = Sim(c, [lj, job(1, np.full(K, 50.0), np.full(K, 50.0), base=100, arrival=20)]).run()
+check("look-back: after its restarts the job runs with its request held", s["restarts"] == 1 and s["fallbacks"] == 1
+      and len(d) == 2, f"restarts {s['restarts']}, fallbacks {s['fallbacks']}, done {len(d)}")
+
 sys.exit(failed)

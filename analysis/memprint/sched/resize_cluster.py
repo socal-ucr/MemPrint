@@ -214,6 +214,7 @@ class Setup:
                 if "zacarias" in policy:
                     j.interval = 5
                     j.lookback = policy.endswith("-past")
+                    j.fallback_after = 3 if j.lookback else None   # repeated failures: run it statically
                     j.resize_cost = COSTS["resize_s"] if cost else 0.0
             out.append(j)
         return out
