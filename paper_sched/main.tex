@@ -57,7 +57,8 @@ fills first. KS+, which learns a step function over time from the program's othe
 its regressions extrapolate well for most programs but predict almost nothing for two, whose jobs then fail dozens
 of times. Dynamic provisioning, which resizes a running job every five minutes to the coming five minutes of its
 use, gives 457 minutes, between \memprint{}'s curve and the exact peak, but only because it reads that use from the
-trace, and it restarts about 300 jobs per stream. An appendix repeats every result at offered loads from 0.4 to 1.2.
+trace, and it restarts about 300 jobs per stream; a variant that knows only the past, as a running system does,
+gives 504 minutes, behind both. An appendix repeats every result at offered loads from 0.4 to 1.2.
 \end{abstract}
 
 \section{Introduction}
@@ -271,6 +272,7 @@ ML peak & peak & request $\times$ a 0.95-quantile gradient-boosted prediction of
 Reactive resizing & curve & request for 5 minutes, then the last 5 minutes' largest use $+$ headroom \\
 Pond & peak & the request, its predicted untouched part in the pool; QoS monitor \\
 Dynamic provisioning & curve & request, then each 5 minutes the coming 5 minutes' largest use \\
+Dynamic, look-back & curve & request, then the past 5 minutes' largest use, grown on demand \\
 KS+ & curve & 4 segments regressed on input size from the other inputs' RSS; retry \\
 \bottomrule
 \end{tabular}
@@ -297,7 +299,13 @@ al.~\cite{Zacarias2023Dynamic}. A job starts with its request. Every five minute
 largest use of the coming five minutes, which their simulator reads from the usage trace. The resize takes
 local memory first and the pool next, with no headroom. Unlike the reactive oracle, a resize is committed only
 when it happens, so another job may take the memory first. A resize that does not fit then fails the job,
-which restarts from the beginning (their fail/restart policy), and we count it with the OOM kills. Its runtime
+which restarts from the beginning (their fail/restart policy), and we count it with the OOM kills. A running
+system cannot read the coming interval, so we also evaluate a \term{look-back} variant: each update sets the
+allocation to the previous five minutes' largest use, the job grows on demand whenever its use exceeds the
+allocation, from free local memory and then the pool, and memory is committed a minute at a time. A growth that
+does not fit fails the job as before; after three restarts it runs with its request held, as Zacarias et al.\
+suggest for jobs that fail repeatedly, because otherwise a job whose growth the scheduler keeps giving to newer
+jobs restarts indefinitely. Its runtime
 stretch is fixed when it is admitted, from the placement it would get then. Neither oracle uses a margin.
 We checked both against the authors' artifacts. Pond's artifact contains only its CXL emulation scripts, not
 its prediction models, QoS monitor or scheduler, so our Pond oracle follows the paper's description. The
@@ -550,9 +558,13 @@ per stream, each a restart from the beginning. Two things make it this good, and
 rather than from what a running system could know. Each resize is the largest use of the coming five minutes,
 read from the truth, so between resizes it is an exact curve at a five-minute resolution, with no margin and on
 the wall clock. And a job's first five minutes, at its full request, are a small share of runs with a median of
-30 minutes. The reactive oracle, which resizes to the past five minutes instead, gives 580 and 612 minutes.
-Dynamic provisioning therefore bounds what a runtime monitor can reach; \memprint{}'s curve under the
-bytes-touched truth gets there before the job starts and without restarts.
+30 minutes. The look-back variant, which knows only the past as a running system does, gives 504 and 493 minutes, with 444 and
+478 restarts and 25 and 27 jobs falling back to a static request per stream: behind the exact peak (448 and 423) and,
+under the bytes-touched truth, behind \memprint{}'s curve (389). The reactive oracle, which also resizes to the past
+five minutes but reserves its future resizes when the job starts, gives 580 and 612 minutes. Dynamic provisioning
+as simulated by its authors therefore bounds what a runtime monitor can reach; \memprint{}'s curve under the
+bytes-touched truth does better than the monitor a system could deploy, before the job starts and without
+restarts.
 Pond gives 2{,}519 minutes, worse than the request (2{,}208), and causes no kills. It reserves the whole request,
 so it cannot pack more jobs than the request does, and the share it places in the pool must fit in the pool
 even when the node's local memory is free. With a pool of 4\,TB instead of 1\,TB, Pond and the request give
@@ -670,7 +682,7 @@ gain of the curve over the peak against 5.3$\times$ for the full corpus. The bes
 peak of an earlier run, 598 minutes with no kills under the bytes-touched truth and equal to the exact peak under
 the RSS truth, because the weights the RSS counts are the footprint. Reactive resizing gives 753 minutes and
 \memprint{}'s 5\% peak 785 minutes, 602 kills per stream. Dynamic provisioning, which reads the next five minutes
-of the truth, gives 386 and 443 minutes with 140 and 200 restarts, Pond 2{,}379 and 2{,}450, and KS+, which
+of the truth, gives 386 and 443 minutes with 140 and 200 restarts (528 and 694 for its look-back variant), Pond 2{,}379 and 2{,}450, and KS+, which
 predicts each configuration from the engine's other two, 737 and 547 minutes with about 1{,}540 and 800 kills.
 
 Every heap profiler fails. They read llama2.c at 0.08 to 0.21 of its peak and llama.cpp at about 1.05, so the
@@ -809,7 +821,8 @@ gperftools and heaptrack fall from 256\,GB to never, through their calibrated ma
 exact peak and the RSS of an earlier run need 6.0\,TB, reactive resizing 7.0\,TB, \memprint{} windowed at 5\%,
 DHAT, Massif, the ML peak and the request 9.0\,TB, and \memprint{} pages only 11.0\,TB, which repeats the finding
 that a curve on a reference clock loses its advantage against a wall-clock truth. Dynamic provisioning needs
-7.0\,TB under the bytes-touched truth and 6.0\,TB under the RSS truth, like the exact peak. Pond needs 512\,GB per node
+7.0\,TB under the bytes-touched truth and 6.0\,TB under the RSS truth, like the exact peak; its look-back variant
+needs 7.0 and 9.0\,TB. Pond needs 512\,GB per node
 (17.0\,TB) under both truths, because the pool, not local memory, is what its placement fills. KS+ needs
 256\,GB per node (9.0\,TB) under both truths, as DHAT and the ML peak do: its retries keep a few programs'
 jobs failing, and cc1's over-reservation holds memory the others could use.
@@ -930,7 +943,8 @@ its peak in the first percent of the run; tracking the program's file mappings b
 are tracked, removed that failure and made every \memprint{} curve beat the exact peak on the full corpus. DHAT's three recorded points do not make a
 usable curve. Of three published policies, the one that comes
 closest to the exact peak, dynamic provisioning, does so by reading the coming minutes of a job's use from its
-trace, which a running system cannot do, and by restarting the jobs whose growth no longer fits; Pond saves local
+trace, which a running system cannot do, and by restarting the jobs whose growth no longer fits (looking back
+instead, it falls behind the exact peak); Pond saves local
 DRAM but not total memory, and KS+'s regressions on input size cannot extrapolate from inputs far smaller than
 the job's. Knowing a job's footprint before it starts, which no published policy does, remains the missing piece. Two results set the direction of further work. First, under the RSS truth every measured curve
 lost its advantage; placing \memprint{}'s curve on the native clock through hardware counts of memory references,

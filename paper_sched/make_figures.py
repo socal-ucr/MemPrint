@@ -55,6 +55,7 @@ STYLE = {  # oracle: (label, color, marker, dash)
     "reactive": ("Reactive resizing (5 min)", PAL[7], "p", (0, (4, 2))),
     "pond": ("Pond (untouched in pool)", PAL[6], "H", (0, (1, 1.5))),
     "zacarias": ("Dynamic provisioning (5 min)", PAL[7], "8", (0, (1, 1.5))),
+    "zacarias-past": ("Dynamic provisioning, look-back", PAL[7], "8", (0, (6, 2, 1, 2))),
     "ksplus": ("KS+ (segments from other inputs)", PAL[4], "d", (0, (4, 2))),
     # section "The time axis and the level": MemPrint curves on the native clock, and scaled to an earlier
     # run's RSS peak
@@ -250,7 +251,7 @@ def load_grid(data, pattern):
     return g
 
 
-UNCALIBRATED = {"request", "ml-peak", "reactive", "pond", "zacarias", "ksplus"}   # no profile to calibrate: run with a 10%
+UNCALIBRATED = {"request", "ml-peak", "reactive", "pond", "zacarias", "zacarias-past", "ksplus"}   # no profile to calibrate: run with a 10%
 # margin (Pond and dynamic provisioning use none, and their single run carries the same label)
 
 
@@ -469,7 +470,7 @@ def main():
     g = load_grid(a.data, "grid_all*.csv")
     if g is not None:
         main_oracles = ["exact", "exact-coarse", "exact-peak", "memprint-W5", "massif-i", "massif", "dhat", "dhat-curve",
-                        "heaptrack", "rss-peak", "request", "ml-peak", "reactive", "pond", "zacarias", "ksplus"]
+                        "heaptrack", "rss-peak", "request", "ml-peak", "reactive", "pond", "zacarias", "zacarias-past", "ksplus"]
         fig_response_vs_load(g, a.out, "response_vs_load", main_oracles)
         fig_response_vs_load(g, a.out, "response_vs_load_best", main_oracles, margin="best")
         fig_response_vs_load(g, a.out, "kills_vs_load", main_oracles, metric="kills", ylabel="OOM kills")
@@ -485,13 +486,13 @@ def main():
     if gs is not None:
         fig_response_vs_load(gs, a.out, "static_response_vs_load",
                              ["exact", "exact-peak", "memprint-static", "memprint-W5", "massif-i", "massif", "dhat",
-                              "dhat-curve", "heaptrack", "request", "reactive", "pond", "zacarias", "ksplus"])
+                              "dhat-curve", "heaptrack", "request", "reactive", "pond", "zacarias", "zacarias-past", "ksplus"])
     fig_llm_curves(cv, a.out)
     gl = load_grid(a.data, "grid_llm*.csv")
     if gl is not None:
         fig_response_vs_load(gl, a.out, "llm_response_vs_load",
                              ["exact", "exact-coarse", "exact-peak", "memprint-W5", "memprint-P", "massif-i", "dhat",
-                              "heaptrack", "gperf", "rss-peak", "request", "reactive", "pond", "zacarias", "ksplus"])
+                              "heaptrack", "gperf", "rss-peak", "request", "reactive", "pond", "zacarias", "zacarias-past", "ksplus"])
     v3 = os.path.expanduser("~/memprint-data/2026-10-13-sched-fm")
     gv = None if NO_MEMPRINT else load_grid(v3, "v3m_all.csv")   # MemPrint's clock and level variants
     if gv is not None:
