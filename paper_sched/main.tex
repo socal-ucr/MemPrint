@@ -292,6 +292,14 @@ local memory first and the pool next, with no headroom. Unlike the reactive orac
 when it happens, so another job may take the memory first. A resize that does not fit then fails the job,
 which restarts from the beginning (their fail/restart policy), and we count it with the OOM kills. Its runtime
 stretch is fixed when it is admitted, from the placement it would get then. Neither oracle uses a margin.
+We checked both against the authors' artifacts. Pond's artifact contains only its CXL emulation scripts, not
+its prediction models, QoS monitor or scheduler, so our Pond oracle follows the paper's description. The
+dynamic-provisioning code in the authors' Slurm simulator (branch \texttt{dynamic\_mem\_reschedule\_ov\_bj})
+matches our oracle in admission against current allocations only, remote-first release and local-first growth, and
+restart from the beginning with the original request; it differs in recomputing the remote-memory slowdown at
+every resize and in charging 10\,s of progress for every resize that grows, both of which we leave out, in favour
+of the baseline. Which trace value a resize applies is set by a preprocessing step that is not published; we
+follow the paper.
 
 The \term{KS+} oracle follows Bader et al.~\cite{KSplus2024} and the authors' code. KS+ learns a task's
 memory over time from earlier executions of the same task with other inputs. It cuts each execution's monitored
@@ -545,7 +553,7 @@ even when the node's local memory is free. With a pool of 4\,TB instead of 1\,TB
 quantile, and still overpredicts for 11\% of the jobs, because they come from users the model has not seen.
 Pond saves local DRAM, not total memory, which is the resource the job streams contend for.
 
-\paragraph{KS+.} KS+ gives 1{,}262 minutes under the bytes-touched truth and 813 under the RSS truth, better than
+\paragraph{KS+.} KS+ gives 1{,}262 minutes under the bytes-touched truth and 844 under the RSS truth, better than
 the request and Pond but behind the exact peak, an earlier run's RSS and both resizing policies, with about 8{,}200
 and 8{,}500 OOM kills per stream. For most programs its prediction of the largest input from the two smaller
 ones is close: the peak it first predicts is 0.86 to 1.18 times the true RSS peak for 19 of the 24 programs it
@@ -975,8 +983,8 @@ curve's bounded slowdown at 128\,GB per node, which is 1.5 to 1.8 at loads 0.4 a
 curve needs 4.0\,TB at load 0.4 and 5.0\,TB at every other load, and the exact peak one step more (5.0 to
 6.0\,TB). Under the bytes-touched truth, \memprint{}'s curves and dynamic provisioning need the same as the exact
 peak, or one step more at load 0.8 (6.0 to 7.0\,TB), reactive resizing 6.0 to 7.0\,TB, an earlier run's RSS and
-DHAT 6.0 to 9.0\,TB, the ML peak 9.0\,TB and the request 9.0 to 11.0\,TB at every load. KS+ needs 6.0\,TB at load 0.4 and 7.0 to 9.0\,TB at
-the others. Pond needs 11.0 to 17.0\,TB, more than the request at every load, and gperftools and heaptrack do not meet the target at 512\,GB per
+DHAT 6.0 to 9.0\,TB, the ML peak 9.0\,TB and the request 9.0 to 11.0\,TB at every load. KS+ needs 6.0\,TB at load 0.4 and 9.0\,TB at the
+others. Pond needs 11.0 to 17.0\,TB, more than the request at every load, and gperftools and heaptrack do not meet the target at 512\,GB per
 node at any load. Under the RSS truth, the RSS of an earlier run and dynamic provisioning need what the exact peak
 needs (5.0 to 6.0\,TB) at every load, while \memprint{}'s curves on their clock of references need 7.0 to 11.0\,TB.
 The reruns of \secref{sec:filemaps} and \secref{sec:timeaxis} keep their findings at every load
