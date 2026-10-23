@@ -267,8 +267,11 @@ serving framework~\cite{Prabhu2025vAttention}. Our llama.cpp result obtains the 
 CPU for an unmodified engine: the cache keeps its full virtual size, and only the pages it writes are backed,
 because \libmpr{} skips the zeroing that would otherwise touch the whole cache. At cluster scale, Pond predicts
 how much of a virtual machine's memory will stay untouched and places that part on a CXL pool~\cite{Li2023Pond},
-and Zacarias et al.\ show that a 60\% overestimate of memory demand reduces the throughput of a disaggregated system
-by about 25\%~\cite{Zacarias2021Accurate}. These works motivate knowing what a job touches, which our earlier study
+Zacarias et al.\ show that a 60\% overestimate of memory demand reduces the throughput of a disaggregated system
+by about 25\%~\cite{Zacarias2021Accurate} and resize each job's allocation to its use every five
+minutes~\cite{Zacarias2023Dynamic}, and KS+ predicts a workflow task's memory over time from earlier executions with
+other inputs~\cite{KSplus2024}. All three change what a system holds for a job, not what the job commits or
+touches; \secref{sec:baselines} compares them with this work. These works motivate knowing what a job touches, which our earlier study
 measured for scheduling~\cite{memprintsched} and this work passes to the allocator.
 
 \section{Overview}
@@ -1274,6 +1277,66 @@ hardly moved: the exact curve gives 103 minutes (91 under the RSS truth) and Mem
 therefore do not depend on resizing allocations, since its gain comes from reserving a curve instead of a peak.
 Resizing matters for programs that commit or hold much more than they touch, such as darknet and the LLM engines,
 and for systems with strict overcommit, where the saved commit is memory that can be promised to other jobs.
+
+
+\subsection{Against Pond, dynamic provisioning and KS+}
+\label{sec:baselines}
+
+\begin{table}[t]
+\centering\small
+\input{tables/baselines_totals.tex}
+\caption{Memory each approach holds for the 29 workloads (the 23 corpus programs at their largest inputs, miniVite
+built with the pass, six LLM configurations), summed over the workloads: the peak and the time-averaged memory
+held over the run, in MB, mean of three runs. The demand a job must be given is its RSS (default overcommit, a
+cgroup limit) or the larger of its commit and its RSS (strict overcommit). Every approach starts from the same exact
+request, the job's peak of commit and RSS under glibc. Pond holds the whole request; the row below it is the part
+in local DRAM. Failures count KS+'s re-executions over all workloads and runs.}
+\label{tab:baselines}
+\end{table}
+
+\begin{table}[t]
+\centering\small
+\resizebox{\linewidth}{!}{\input{tables/baselines_strict.tex}}
+\caption{Per workload: the time-averaged memory held (MB, mean of three runs) when the demand is the larger of commit and
+RSS. KS+ with the 1\,MB floor; its failures (re-executions per run) in parentheses. MPR: \libmpr{} with its own
+profile.}
+\label{tab:baselines-workloads}
+\end{table}
+
+Three published systems reduce the memory a job is given: Pond~\cite{Li2023Pond} places the part of a virtual
+machine's memory it predicts will stay untouched in a CXL pool, the dynamic provisioning of Zacarias et
+al.~\cite{Zacarias2023Dynamic} resizes a job's allocation to its use every five minutes, and KS+~\cite{KSplus2024}
+reserves a step function over time that it learns from earlier executions with other inputs. They act on what a
+system holds for the job; \pass{} and \libmpr{} act on what the job commits and touches. We compare them on the
+recorded runs of this section (\texttt{paper\_resize/baselines.py}), with the policies of our scheduling
+study~\cite{memprintsched}, where all three are implemented as scheduler oracles and checked against the authors'
+code where it is published. Every approach starts from an exact request, the job's peak of commit and RSS under
+glibc, so none gains from a user's overestimate. Pond holds the request and keeps in local DRAM only the request minus
+its predicted untouched memory, taken from the job's other runs of the same input (its per-customer history at its
+best). Dynamic provisioning holds the request for the first sixth of the run (five minutes of a median 30) and then
+each sixth's largest use, read from the run itself, as their simulator reads it from the usage trace. KS+ predicts
+from the RSS of the program's other corpus inputs and re-runs the job with its retry strategy when the use exceeds
+the reservation; we report it with the authors' 100\,MB floor on every predicted peak and with a 1\,MB floor,
+since the 100\,MB floor exceeds the whole footprint of many of our programs. \pass{} is given the same exact request
+under \libmpr{}: the peak of commit and RSS of the run with its reservations.
+
+\tabref{tab:baselines} gives the totals and \tabref{tab:baselines-workloads} the workloads. \libmpr{} with its own profile holds 3{,}765\,MB on time average against
+4{,}905\,MB for the request, 23\% less, and 18\% less with a held-out profile, under either demand. Dynamic
+provisioning holds 10\% less than the request when the demand is the RSS and 4\% less when it includes the commit,
+which it cannot change; with a resize every sixtieth of the run it holds 3{,}763\,MB under the RSS demand, as much as
+\libmpr{}, but only because each resize is the coming interval's largest use, which a running system cannot know.
+Pond holds the whole request, as it never fails, and keeps 6\% of it out of local DRAM, almost all of it darknet's
+dead training buffers (247 of 299\,MB), which \libmpr{} does not commit at all. KS+ holds more than the request: its
+extrapolation from the two smaller inputs reserves 8.5 times GCC's cc1 peak (1{,}140 against 134\,MB), and with the
+authors' floor every small program holds at least 100\,MB. Without cc1 and with a 1\,MB floor it holds 2\% less
+than the request, with 36 failures over all runs.
+
+The gain of \libmpr{} that none of the three can obtain is on the LLM engines. Under glibc, llama.cpp touches its
+whole KV cache when it clears it, so its RSS is its commit, and no system can give it less without killing it; with
+\libmpr{}, the clearing skips untouched pages, and the RSS itself falls from 380 to 177\,MB (135M model) and from 767
+to 419\,MB (360M model). The approaches compose: dynamic provisioning applied to the runs under \libmpr{} holds
+3{,}553\,MB, 28\% less than the request, and Pond's local DRAM under \libmpr{} is 3{,}763\,MB, because \libmpr{}
+has already removed most of the untouched memory Pond would place in the pool.
 
 \section{Discussion}
 \label{sec:discussion}

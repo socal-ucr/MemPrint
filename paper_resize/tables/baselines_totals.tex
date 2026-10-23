@@ -1,0 +1,21 @@
+\begin{tabular}{lrrrr}
+\toprule
+ & \multicolumn{2}{c}{Demand = RSS} & \multicolumn{2}{c}{Demand = max(commit, RSS)} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+Approach & Peak & Mean & Peak & Mean \\
+\midrule
+Exact request (glibc) & 4{,}912 & 4{,}905 & 4{,}912 & 4{,}905 \\
+Pond: all held & 4{,}912 & 4{,}905 & 4{,}912 & 4{,}905 \\
+Pond: local DRAM & 4{,}606 & 4{,}606 & 4{,}606 & 4{,}606 \\
+Dynamic provisioning & 4{,}912 & 4{,}418 & 4{,}912 & 4{,}685 \\
+KS+ (100\,MB floor) & 6{,}956 & 6{,}578 & 6{,}956 & 6{,}610 \\
+KS+ (1\,MB floor) & 6{,}378 & 5{,}791 & 6{,}385 & 5{,}929 \\
+MemPrintResize & 3{,}770 & 3{,}765 & 3{,}770 & 3{,}765 \\
+MemPrintResize, held-out profile & 4{,}031 & 4{,}025 & 4{,}031 & 4{,}025 \\
+MemPrintResize + Pond: local & 3{,}763 & 3{,}763 & 3{,}763 & 3{,}763 \\
+MemPrintResize + dynamic & 3{,}770 & 3{,}553 & 3{,}770 & 3{,}576 \\
+\midrule
+KS+ (100\,MB) failures & 9 &  & 11 &  \\
+KS+ (1\,MB) failures & 36 &  & 54 &  \\
+\bottomrule
+\end{tabular}
