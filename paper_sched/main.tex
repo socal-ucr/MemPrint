@@ -224,6 +224,23 @@ used memory). In a window of 3{,}000 single-node jobs, 1\% of the jobs carry 92\
 so the results of a replay depend on a handful of very large jobs. We therefore use the controlled stream for
 the main results.
 
+\paragraph{A real trace with measured memory.} The SURF Lisa trace~\cite{LisaTrace} joins 1.6 million Slurm jobs
+of a 343-node cluster with their nodes' Prometheus metrics, sampled every 30\,s from June to November 2022. A
+node's memory is a job's only while the job has the node to itself, so we keep a job only if no other job shared
+any of its nodes at any sample and at least 80\% of the samples its runtime implies are present: 88{,}767 jobs of
+at least five minutes, 1{,}429 of them on 2 to 22 nodes. A job's memory is its nodes' active memory above each
+node's idle level (its 1st percentile), resampled to the job's progress, the largest over its nodes at each
+point; most jobs take whole 16-core nodes and peak at a few GB. We replay windows of 3{,}000 consecutive jobs
+in two ways. In the \term{measured} stream every job keeps its own curve, and only the oracles that need nothing
+but the job's own memory apply. In the \term{hybrid} stream every job keeps the trace's arrival, runtime, node
+count and measured peak, with a corpus program's footprint shape scaled to that peak, so that every estimator
+applies. Lisa records no memory request; a job requests Slurm's default on the simulated cluster, the node's
+memory per core times the cores it uses, and at least its peak. Both streams run on a Lisa-shaped cluster of 32
+nodes with 16 cores each, a pool of a quarter of the local memory, and local memory per node swept from Lisa's
+103\,GB down to 4\,GB; the offered load is set against each cluster's own memory, so a policy's results are
+compared with the other policies' at the same memory, not across memories. A job on several nodes holds its
+footprint on each, its nodes share the pool, and it runs as long as its slowest node.
+
 \subsection{Two truths}
 \label{sec:truths}
 
@@ -703,6 +720,53 @@ cause: a curve is worth only as much as its timing, and \memprint{}'s windowed t
 program maps and reads before the first window. \secref{sec:filemaps} adds file mappings to what the windowed
 mode tracks between windows.
 
+\subsection{A real trace}
+\label{sec:lisa}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\textwidth]{figures/lisa_measured.pdf}
+\caption{SURF Lisa jobs with their measured memory on a Lisa-shaped cluster (32 nodes of 16 cores, a pool of a quarter
+of the local memory), offered load 0.8: jobs per hour against local memory per node (mean and 95\% interval over
+three seeds). At Lisa's own 103\,GB per node the cores limit every policy alike.}
+\label{fig:lisa}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{The measured Lisa stream at offered load 0.8: jobs per hour and mean response time for each local memory
+per node (mean of three seeds; dynamic provisioning's look-back variant at 4\,GB, loads 0.6 to 1.2: two seeds).
+The load is set against each cluster's memory, so numbers compare across rows, not across columns.}
+\label{tab:lisa}
+\resizebox{\textwidth}{!}{\input{tables/lisa_measured.tex}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{The hybrid Lisa stream (the trace's jobs with corpus footprint shapes) at 32\,GB per node and offered load
+0.8, calibrated 90\% margins as in \tabref{tab:load08}. Fails counts OOM kills and dynamic provisioning's restarts.}
+\label{tab:lisahybrid}
+\resizebox{0.8\textwidth}{!}{\input{tables/lisa_hybrid.tex}}
+\end{table}
+
+On the measured Lisa stream (\figref{fig:lisa}, \tabref{tab:lisa}), knowing a job's memory matters only once memory
+is scarce. At Lisa's own 103\,GB and at 64\,GB per node every policy completes the same 9.4 to 9.6 jobs per hour:
+most jobs take whole 16-core nodes and use a few GB, so the cores are the bottleneck, 98\% busy. From 32\,GB per
+node memory is contended, and the exact curve completes 8.6 jobs per hour against 6.6 for the exact peak (30\%
+more, with a 40\% shorter response time), and 18 to 31\% more from 16 down to 4\,GB. The peak and the request give
+the same results, because a whole-node job blocks its node whatever memory it reserves; what differs is whether
+it also holds pool memory it is not using. Reactive resizing comes between the peak and the curve. Dynamic
+provisioning restarts 775 to 2{,}129 jobs per stream at 32\,GB per node and below and gains least of the curve
+policies; its look-back variant does better at 32\,GB (7.3 jobs per hour) and worse at 16\,GB (2.1).
+
+The hybrid stream (\tabref{tab:lisahybrid}), at 32\,GB per node, replays the main results on the trace's mix of
+job sizes, runtimes and node counts. Under the bytes-touched truth, the exact curve gives 10{,}481 minutes and the
+exact peak 15{,}563; \memprint{}'s curves give 11{,}118 (pages only) and 12{,}954 minutes (windowed at 5\%), ahead of
+the exact peak, both dynamic-provisioning variants (13{,}451 and 13{,}722), KS+ (19{,}920), Pond (19{,}710) and every
+heap profiler (21{,}440 to 59{,}035). Under the RSS truth, as in the main stream, \memprint{}'s curves on their
+clock of references lose that advantage (28{,}571 and 33{,}582 minutes), and reactive resizing and the look-back
+dynamic provisioning come next after the exact curves.
+
 \subsection{Tracking file mappings between windows}
 \label{sec:filemaps}
 
@@ -892,6 +956,12 @@ needs hardware performance counters our jobs do not have. Our dynamic provisioni
 admission and charges nothing per resize, both in its favour, and its resizes read
 the coming interval as the authors' simulator does. KS+ learns from two smaller inputs per program, where its
 authors had hundreds of executions per task.
+
+\paragraph{The Lisa trace.} Its jobs are those that had their nodes to themselves (88{,}767 of 267{,}384 jobs with
+metrics), which leaves out the jobs that shared nodes, mostly small ones. Active memory counts the page cache the
+job keeps active and not the memory it has mapped and not touched, and the node's idle level is taken as its 1st
+percentile over the whole trace. The trace records no memory request, so the request is Slurm's default for the
+simulated node.
 
 \paragraph{Scaled footprints.} The corpus programs peak at 15 to 450\,MB, and the simulated jobs at tens to
 hundreds of GB. Scaling a measured curve to a job's size keeps its shape and every estimator's ratio to the

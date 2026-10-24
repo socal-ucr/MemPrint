@@ -450,6 +450,30 @@ def fig_dhat(g, out, loads=(0.8,)):
     save(fig, out, "dhat_curves" + suffix)
 
 
+def fig_lisa(out, d=os.path.expanduser("~/memprint-data/2026-10-23-lisa"), load=0.8):
+    """The measured Lisa stream on a Lisa-shaped cluster: jobs per hour against local memory per node."""
+    files = sorted(glob.glob(f"{d}/lisa_measured_*.csv"))
+    if not files:
+        return
+    g = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    g = g[(g.error.isna() if "error" in g else True) & (g.load == load)]
+    fig, ax = plt.subplots(figsize=(3.6, 2.6))
+    for o in ["exact", "exact-coarse", "exact-peak", "request", "reactive", "zacarias", "zacarias-past"]:
+        e = g[g.oracle == o].groupby("local_gb").throughput.apply(lambda v: mean_ci(v)).apply(pd.Series)
+        if e.empty:
+            continue
+        lab, col, mk, dash = style(o)
+        ax.errorbar(e.index, e[0], yerr=e[1], color=col, marker=mk, markersize=3.5, linestyle=dash, label=lab, capsize=1.5)
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(sorted(g.local_gb.unique()))
+    ax.set_xticklabels([f"{x:g}" for x in sorted(g.local_gb.unique())])
+    ax.set_xlabel("Local memory per node (GB)")
+    ax.set_ylabel("Jobs per hour")
+    ax.set_title(f"SURF Lisa jobs, measured memory, load {load}")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), ncol=2)
+    save(fig, out, "lisa_measured")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-13-sched-llm"))
@@ -488,6 +512,7 @@ def main():
                              ["exact", "exact-peak", "memprint-static", "memprint-W5", "massif-i", "massif", "dhat",
                               "dhat-curve", "heaptrack", "request", "reactive", "pond", "zacarias", "zacarias-past", "ksplus"])
     fig_llm_curves(cv, a.out)
+    fig_lisa(a.out)
     gl = load_grid(a.data, "grid_llm*.csv")
     if gl is not None:
         fig_response_vs_load(gl, a.out, "llm_response_vs_load",

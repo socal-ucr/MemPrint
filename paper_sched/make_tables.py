@@ -173,6 +173,66 @@ def capacity_table(need, out, name, scenarios=("bytes", "rss"), nodes=32, pool=1
     open(f"{out}/{name}.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
+LISA = os.path.expanduser("~/memprint-data/2026-10-23-lisa")
+LISA_MEASURED = ["exact", "exact-coarse", "exact-peak", "request", "reactive", "zacarias", "zacarias-past"]
+
+
+def lisa_runs(kind):
+    files = sorted(glob.glob(f"{LISA}/lisa_{kind}_*.csv"))
+    if not files:
+        return None
+    g = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    if "error" in g:
+        g = g[g.error.isna()]
+    g["margin"] = g.margin.astype(str)
+    if "restarts" in g:
+        g["kills"] = g.kills + g.restarts.fillna(0)
+    return g
+
+
+def lisa_measured_table(out, load=0.8):
+    """The measured Lisa stream: jobs per hour and mean response time at one load, per local memory per node."""
+    g = lisa_runs("measured")
+    if g is None:
+        return
+    g = g[g.load == load]
+    locs = sorted(g.local_gb.unique(), reverse=True)
+    t = g.groupby(["oracle", "local_gb"])[["throughput", "steady_response"]].mean()
+    head = (r"\begin{tabular}{l" + "r" * (2 * len(locs)) + "}\n\\toprule\n"
+            + f" & \\multicolumn{{{len(locs)}}}{{c}}{{Jobs per hour}} & \\multicolumn{{{len(locs)}}}{{c}}{{Mean response (min)}} \\\\\n"
+            + f"\\cmidrule(lr){{2-{1 + len(locs)}}} \\cmidrule(lr){{{2 + len(locs)}-{1 + 2 * len(locs)}}}\n"
+            + "Local GB per node & " + " & ".join(f"{l:g}" for l in locs * 2) + r" \\" + "\n\\midrule")
+    rows = []
+    for o in LISA_MEASURED:
+        cells = [run_label(o)] + [f"{t['throughput'].get((o, l), float('nan')):.1f}" for l in locs] + \
+                [n0f(t["steady_response"].get((o, l))) for l in locs]
+        rows.append(" & ".join(cells) + r" \\")
+    open(f"{out}/lisa_measured.tex", "w").write(head + "\n" + "\n".join(rows) + "\n\\bottomrule\n\\end{tabular}\n")
+
+
+def lisa_hybrid_table(out, load=0.8):
+    """The hybrid Lisa stream at 32 GB per node: as grid_table, both truths."""
+    g = lisa_runs("hybrid")
+    if g is None:
+        return
+    from make_figures import select
+    g = select(g, "cal")
+    g = g[g.load == load]
+    order = g[g.scenario == "bytes"].groupby("oracle").steady_response.mean().sort_values().index
+    rows = []
+    for o in order:
+        cells = [run_label(o)]
+        for sc in ("bytes", "rss"):
+            d = g[(g.scenario == sc) & (g.oracle == o)]
+            cells += [fmt(d.throughput.mean(), 1), n0f(d.steady_response.mean()), fmt(d.kills.mean(), 0)]
+        rows.append(" & ".join(cells) + r" \\")
+    head = (r"\begin{tabular}{lrrrrrr}" "\n" r"\toprule" "\n"
+            r" & \multicolumn{3}{c}{Truth = bytes touched} & \multicolumn{3}{c}{Truth = RSS} \\" "\n"
+            r"\cmidrule(lr){2-4} \cmidrule(lr){5-7}" "\n"
+            r"Oracle & Jobs/h & Resp.\ (min) & Fails & Jobs/h & Resp.\ (min) & Fails \\" "\n" r"\midrule")
+    open(f"{out}/lisa_hybrid.tex", "w").write(head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+
+
 def n0f(x):
     return "--" if x is None or pd.isna(x) else f"{x:,.0f}".replace(",", "{,}")
 
@@ -207,6 +267,8 @@ def main():
         time_axis_table(fm, a.out)
         for load in OTHER_LOADS:
             time_axis_table(fm, a.out, load=load, name=f"time_axis_{tag(load)}")
+    lisa_measured_table(a.out)
+    lisa_hybrid_table(a.out)
     from make_figures import capacity_needed, capacity_targets, load_grid
     main_targets = capacity_targets(load_grid(a.data, "capacity_*.csv"))
     for name, root, pattern, scs in (("capacity_loads", a.data, "capacity_*.csv", ("bytes", "rss")),
