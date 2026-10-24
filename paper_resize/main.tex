@@ -1082,6 +1082,32 @@ commitment on nine of the ten unseen inputs of the 135M model (\tabref{tab:promp
 the 2048-token context, 2.0\,MB beyond: its compute buffer is laid out differently, and a range given as a fraction
 of the block does not carry over between layouts.
 
+\subsection{An LLM server}
+\label{sec:server}
+
+\begin{table}[t]
+\centering\small
+\input{tables/server.tex}
+\caption{llama.cpp serving concurrent clients (its parallel example: continuous batching, 8 requests per client, a
+shared system prompt, greedy decoding), under glibc and under \libmpr{} with reservations from \libmpr{}'s own
+profile of a smaller load (2 clients, 8 requests). Peak RSS and commit, mean of 3 runs; Time: \libmpr{}'s run time
+over glibc's; Outputs: every request's prompt and response token counts, the same in all six runs.}
+\label{tab:server}
+\end{table}
+
+The LLM runs above are single short completions, which use a small part of a KV cache sized for the whole context. A
+server runs many sequences at once and fills more of its cache as it goes. We ran llama.cpp's parallel example,
+which serves 8 requests per client from 4, 8 or 16 concurrent clients with continuous batching, for both models
+at 8192- and 16384-token contexts (\tabref{tab:server}). The reservations come from \libmpr{}'s own profile
+(\secref{sec:nprof}) of a smaller load, 2 clients and 8 requests, taken in 9 to 17\,s, so they are held out from the
+load they serve. Every run served every request with the same token counts as under glibc. \libmpr{} cuts peak commit
+by 29 to 42\% at the 8192-token context and by 18 to 34\% at 16384 tokens, where more of the larger cache is written,
+and its run time is within 0.99 to 1.07 times glibc's. The resident memory falls by less, and less as the server gets
+busier: by 8 to 14\% with 4 clients, 4 to 8\% with 8 and 3 to 4\% with 16, because the clients' sequences touch the
+cache that a single completion leaves untouched, and that memory is in use. With 16 clients in an 8192-token
+context llama.cpp itself ran out of KV-cache slots, under glibc and \libmpr{} alike, and served only part of the
+load.
+
 \subsection{Built with the pass, or preloaded}
 \label{sec:passpreload}
 
@@ -1592,8 +1618,10 @@ runs of 0.8 to 2\,s, and 617\,s for llama2.c 110M (18\,s natively). \libmpr{}'s 
 the large blocks a reservation needs, at the price of whole pages and final sizes (\secref{sec:nprof}); the Pin tool
 is still needed for container growth chains, small blocks and byte-exact footprints. The interpreter avoids the
 instrumented run but was slower than Pin on GAP, 1.3 to 14.8 times its time and 3 to 7 times its memory
-(\secref{sec:staticeval}, \secref{sec:cost}). We ran single short completions; an LLM server that
-runs many sequences fills its KV cache over time, and its savings would shrink as it does.
+(\secref{sec:staticeval}, \secref{sec:cost}). An LLM server that runs many sequences fills its KV cache
+over time, and its RSS savings shrink as it does, to 3 to 4\% with 16 concurrent clients, while its commit savings
+remain (\secref{sec:server}); we measured a server's load from llama.cpp's own client simulation, not from a real
+request trace.
 
 The comparison with the published policies has its own limits. The cluster's job stream is synthetic, with each
 job one of 29 workloads scaled from tens or hundreds of MB to tens of GB, which assumes the savings scale with the

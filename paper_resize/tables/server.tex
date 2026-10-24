@@ -1,0 +1,20 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & & & \multicolumn{2}{c}{Peak RSS (MB)} & \multicolumn{2}{c}{Peak commit (MB)} & & \\
+\cmidrule(lr){4-5} \cmidrule(lr){6-7}
+Model & Context & Clients & glibc & \libmpr{} & glibc & \libmpr{} & Time & Outputs \\
+\midrule
+SmolLM2-135M & 8192 & 4 & 400 & 366 & 421 & 246 & 0.99 & same \\
+SmolLM2-135M & 8192 & 8 & 410 & 389 & 430 & 253 & 1.04 & same \\
+SmolLM2-135M & 8192 & 16 & \multicolumn{6}{l}{llama.cpp ran out of KV-cache slots under glibc and \libmpr{} alike} \\
+SmolLM2-135M & 16384 & 4 & 583 & 500 & 600 & 417 & 1.01 & same \\
+SmolLM2-135M & 16384 & 8 & 625 & 575 & 644 & 426 & 1.04 & same \\
+SmolLM2-135M & 16384 & 16 & 605 & 584 & 627 & 432 & 1.00 & same \\
+SmolLM2-360M & 8192 & 4 & 811 & 749 & 590 & 417 & 0.99 & same \\
+SmolLM2-360M & 8192 & 8 & 824 & 791 & 601 & 426 & 1.02 & same \\
+SmolLM2-360M & 8192 & 16 & \multicolumn{6}{l}{llama.cpp ran out of KV-cache slots under glibc and \libmpr{} alike} \\
+SmolLM2-360M & 16384 & 4 & 1{,}126 & 1{,}001 & 907 & 732 & 1.07 & same \\
+SmolLM2-360M & 16384 & 8 & 1{,}205 & 1{,}129 & 983 & 808 & 1.03 & same \\
+SmolLM2-360M & 16384 & 16 & 1{,}168 & 1{,}136 & 946 & 769 & 1.01 & same \\
+\bottomrule
+\end{tabular}

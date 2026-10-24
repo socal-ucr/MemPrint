@@ -581,6 +581,44 @@ def table_prompt(data, out):
     open(f"{out}/tables/prompt.tex", "w").write("\n".join(lines) + "\n")
 
 
+def server_summary(data):
+    """runs/server/<model>-c<ctx>-np<clients>/ (ml/server_eval.sh): glibc and libmpr peak RSS and commit (MB, mean of 3
+    runs), run time ratio, whether every run served every request with the same token counts, and the profile's time."""
+    rows = []
+    for d in sorted(glob.glob(f"{data}/runs/server/*-c*-np*/")):
+        s = summary(f"{d}summary.txt")
+        status = pd.read_csv(f"{d}summary.txt", sep=r"\s+", header=None).iloc[:, 5]
+        outs = [l.split() for l in open(f"{d}outputs.txt") if l.strip()]
+        model, ctx, np_ = d.rstrip("/").split("/")[-1].split("-")
+        rows.append(dict(model=model.upper(), ctx=int(ctx[1:]), clients=int(np_[2:]), base_rss=s.loc["base"].rss,
+                         mpr_rss=s.loc["mpr"].rss, base_commit=s.loc["base"].commit, mpr_commit=s.loc["mpr"].commit,
+                         time_x=s.loc["mpr"].secs / s.loc["base"].secs, ok=bool((status == 0).all()),
+                         same=len({o[1] for o in outs}) == 1, requests=int(outs[0][2]),
+                         profile_s=float(open(f"{d}profile.time").read().split()[0])))
+    t = pd.DataFrame(rows).sort_values(["model", "ctx", "clients"])
+    t.to_csv(f"{data}/results/server_summary.csv", index=False)
+    return t
+
+
+def table_server(data, out):
+    t = server_summary(data)
+    lines = [r"\begin{tabular}{lrrrrrrrr}", r"\toprule",
+             r" & & & \multicolumn{2}{c}{Peak RSS (MB)} & \multicolumn{2}{c}{Peak commit (MB)} & & \\",
+             r"\cmidrule(lr){4-5} \cmidrule(lr){6-7}",
+             r"Model & Context & Clients & glibc & \libmpr{} & glibc & \libmpr{} & Time & Outputs \\", r"\midrule"]
+    for r in t.itertuples():
+        if not r.ok:   # llama.cpp itself ran out of KV-cache slots (16 clients in an 8192-token context)
+            lines.append(f"SmolLM2-{r.model} & {r.ctx} & {r.clients} & \\multicolumn{{6}}{{l}}{{llama.cpp ran out of KV-cache slots "
+                         f"under glibc and \\libmpr{{}} alike}} \\\\")
+            continue
+        lines.append(f"SmolLM2-{r.model} & {r.ctx} & {r.clients} & {_num(r.base_rss, 0)} & {_num(r.mpr_rss, 0)} & "
+                     f"{_num(r.base_commit, 0)} & {_num(r.mpr_commit, 0)} & {r.time_x:.2f} & "
+                     f"{'same' if r.same else 'differ'} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/server.tex", "w").write("\n".join(lines) + "\n")
+    return t
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.expanduser("~/memprint-data/2026-10-12-resize"))
@@ -611,6 +649,8 @@ def main():
             fn(a.data, a.out)
     if os.path.exists(f"{a.data}/static/overhead.csv"):
         table_static(a.data, a.out)
+    if glob.glob(f"{a.data}/runs/server/*-c*-np*/summary.txt"):
+        print(table_server(a.data, a.out).round(2).to_string(index=False))
     for name, b, s, h in rows:
         print(f"{name:26s} glibc {b.rss:7.1f} {b.commit:7.1f}  own {s.rss:7.1f} {s.commit:7.1f}  held {h.rss:7.1f} {h.commit:7.1f}  "
               f"time {s.secs / b.secs:.2f} same {s.same and h.same}")
