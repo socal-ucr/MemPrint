@@ -49,7 +49,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 
-from . import ksplus, real
+from . import ksplus, oracles, real
 from .model import K, Cluster, Job, at_slots
 from .run import steady
 from .sim import Sim
@@ -60,6 +60,7 @@ LLM = {"llamacpp-135m-n32": ("llamacpp", "135m-n32"), "llamacpp-135m-n128": ("ll
        "llamacpp-360m-n64": ("llamacpp", "360m-n64"), "llama2c-15M": ("llama2c", "15M"),
        "llama2c-42M": ("llama2c", "42M"), "llama2c-110M": ("llama2c", "110M")}
 COSTS = dict(resize_s=10.0, migrate_s_per_gb=0.05)
+CLUSTER_KW = {}   # cluster settings other than local memory (beta, pool) for the sensitivity runs; set by run()
 
 
 def overhead_tables():
@@ -212,7 +213,7 @@ class Setup:
                     j.local_cap, j.qos_delay = R - np.floor(R * um), 5
                     j.migrate_cost = COSTS["migrate_s_per_gb"] if cost else 0.0
                 if "zacarias" in policy:
-                    j.interval = 5
+                    j.interval = oracles.INTERVAL
                     j.lookback = policy.endswith("-past")
                     j.fallback_after = 3 if j.lookback else None   # repeated failures: run it statically
                     j.resize_cost = COSTS["resize_s"] if cost else 0.0
@@ -223,8 +224,10 @@ class Setup:
 _setup = None
 
 
-def _init(n, overheads):
+def _init(n, overheads, interval=None):
     global _setup
+    if interval:   # the dynamic policies' update interval (minutes), for the sensitivity runs
+        oracles.INTERVAL = interval
     _setup = Setup(n, overheads)
 
 
@@ -232,7 +235,7 @@ def _one(task):
     truth, load, seed, policy, local, inflate = task
     try:
         import time
-        cluster = Cluster(local=local)
+        cluster = Cluster(local=local, **CLUSTER_KW)
         jobs = _setup.assign(_setup.stream(truth, load, seed, inflate), policy)
         prof = sum(j.cores * j.base for j in jobs if getattr(j, "profiling", False)) / 60
         t0 = time.process_time()
@@ -248,10 +251,12 @@ def _one(task):
 
 
 def run(out, truths=("rss", "strict"), loads=(0.4, 0.6, 0.8, 1.0, 1.2), seeds=(0, 1, 2), policies=POLICIES,
-        locals_=(128,), n=3000, procs=28, overheads="none", inflates=(0.0,)):
+        locals_=(128,), n=3000, procs=28, overheads="none", inflates=(0.0,), cluster_kw=None, interval=None):
     tasks = list(product(truths, loads, seeds, policies, locals_, inflates))
     rows = []
-    with Pool(procs, _init, (n, overheads)) as p, open(out + ".jsonl", "a") as log:
+    global CLUSTER_KW
+    CLUSTER_KW = cluster_kw or {}
+    with Pool(procs, _init, (n, overheads, interval)) as p, open(out + ".jsonl", "a") as log:
         for r in p.imap_unordered(_one, tasks, chunksize=1):
             rows.append(r)
             log.write(pd.Series(r).to_json() + "\n")

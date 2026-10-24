@@ -1,0 +1,18 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Demand = RSS} & \multicolumn{5}{c}{Demand = max(commit, RSS)} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+$\beta$ & 0.1 & 0.25 & 0.5 & 1 & 2 & 0.1 & 0.25 & 0.5 & 1 & 2 \\
+\midrule
+Exact curve (glibc build) & 36.7 & 34.0 & 30.5 & 24.7 & 18.2 & 33.3 & 30.9 & 27.7 & 22.4 & 16.4 \\
+Request (glibc build) & 25.4 & 23.9 & 21.6 & 18.1 & 13.5 & 25.5 & 23.7 & 21.5 & 17.8 & 13.4 \\
+Pond & 24.9 & 23.2 & 21.2 & 17.7 & 13.3 & 25.1 & 23.6 & 21.2 & 17.7 & 13.2 \\
+Dynamic provisioning & 25.4 & 23.5 & 21.2 & 17.7 & 12.6 & 23.4 & 22.2 & 20.2 & 16.6 & 12.1 \\
+Dynamic provisioning, look-back & 25.9 & 24.4 & 21.1 & 18.1 & 13.5 & 24.4 & 22.9 & 20.5 & 17.3 & 12.9 \\
+KS+ & 22.0 & 21.1 & 21.5 & 19.1 & 14.1 & 22.1 & 21.6 & 20.1 & 18.1 & 14.6 \\
+Exact curve (pass build) & 41.1 & 38.4 & 34.6 & 28.5 & 21.1 & 38.4 & 36.0 & 32.5 & 26.7 & 19.8 \\
+MemPrintResize & 29.8 & 27.9 & 25.0 & 21.2 & 16.0 & 29.7 & 27.6 & 24.9 & 21.0 & 15.8 \\
+MemPrintResize + dynamic & 27.2 & 26.6 & 23.8 & 19.9 & 15.3 & 28.2 & 26.6 & 23.9 & 19.1 & 14.3 \\
+MemPrintResize + dynamic, look-back & 29.2 & 26.9 & 24.6 & 21.0 & 15.3 & 29.0 & 27.5 & 24.1 & 20.8 & 14.8 \\
+\bottomrule
+\end{tabular}

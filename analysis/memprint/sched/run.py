@@ -140,8 +140,10 @@ class Setup:
 _setup = None
 
 
-def _init(corpus, traces, n, cluster, kind="synthetic", programs=None):
+def _init(corpus, traces, n, cluster, kind="synthetic", programs=None, interval=None):
     global _setup
+    if interval:   # the dynamic policies' update interval (minutes), for the sensitivity runs
+        oracles.INTERVAL = interval
     if kind.startswith("lisa"):   # the SURF Lisa trace (lisa_run.py)
         from .lisa_run import LisaSetup
         _setup = LisaSetup(corpus, traces, n, cluster, kind, programs)
@@ -195,13 +197,14 @@ def _run_one(task):
 
 
 def run(corpus, traces, out, scenarios=("rss", "bytes"), loads=(0.5, 0.7, 0.9, 1.2), seeds=(0, 1, 2),
-        margins=(0.0, 0.1, 0.3), names=ORACLES, n=3000, cluster=None, procs=24, kind="synthetic", programs=None):
+        margins=(0.0, 0.1, 0.3), names=ORACLES, n=3000, cluster=None, procs=24, kind="synthetic", programs=None,
+        interval=None):
     cluster = cluster or Cluster()
     tasks = list(product(scenarios, loads, seeds, margins, names))
     # the exact oracles, Pond and dynamic provisioning do not use a margin
     tasks = [t for t in tasks if not (t[4] in NO_MARGIN and t[3] != margins[0])]
     rows = []
-    with Pool(procs, _init, (corpus, traces, n, cluster, kind, programs)) as p, open(out + ".jsonl", "a") as log:
+    with Pool(procs, _init, (corpus, traces, n, cluster, kind, programs, interval)) as p, open(out + ".jsonl", "a") as log:
         for r in p.imap_unordered(_one, tasks, chunksize=1):
             if r:
                 rows.append(r)

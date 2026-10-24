@@ -57,12 +57,16 @@ def _peak(method):
     return lambda j, m: peak(j.info[method], m)
 
 
-def reactive(j, m, interval=5):
+INTERVAL = 5   # minutes between the dynamic policies' updates (reactive, zacarias, zacarias-past); run._init sets it
+
+
+def reactive(j, m, interval=None):
     """Dynamic provisioning (monitor and resize every `interval` minutes, as in Zacarias et al., SC-W 2023): the
     request for the first interval, then each interval the largest footprint seen in the previous one x
     (1 + margin). Growth faster than that is an OOM kill. The scheduler is shown the future resizes, which
     favours this baseline."""
     a = np.asarray(j.resident, float)
+    interval = interval or INTERVAL
     lag = max(1, int(np.ceil(K * interval / max(j.base, 1))))
     r = np.empty(K)
     r[:lag] = j.info["request"]
@@ -74,7 +78,7 @@ def reactive(j, m, interval=5):
 reactive.elastic = True
 
 
-def zacarias(j, m, interval=5):
+def zacarias(j, m, interval=None):
     """Dynamic provisioning as Zacarias et al. (SC-W 2023) simulate it: the request is the initial allocation;
     every `interval` minutes the allocation is resized to the largest footprint of the coming interval (their
     simulator reads it from the usage trace), with no headroom, local memory first. Unlike `reactive`, a resize
@@ -83,7 +87,7 @@ def zacarias(j, m, interval=5):
     return np.full(K, float(j.info["request"]))
 
 
-zacarias.attrs = lambda j, m, interval=5: dict(interval=interval)
+zacarias.attrs = lambda j, m: dict(interval=INTERVAL)
 
 
 def zacarias_past(j, m):
@@ -95,7 +99,7 @@ def zacarias_past(j, m):
     return zacarias(j, m)
 
 
-zacarias_past.attrs = lambda j, m, interval=5: dict(interval=interval, lookback=True, fallback_after=3)
+zacarias_past.attrs = lambda j, m: dict(interval=INTERVAL, lookback=True, fallback_after=3)
 
 
 CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpagessec": "truthpagessec",

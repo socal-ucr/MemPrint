@@ -1506,6 +1506,28 @@ to be paid once and reused over many more runs than one stream holds, while the 
 on the job's own first run. With dynamic provisioning on top, \pass{} keeps the shortest response time of any
 policy (803 minutes with all costs) and needs 5.0\,TB for the target service, against 6.0\,TB for the request.
 
+\subsection{Sensitivity to the simulator's assumptions}
+\label{sec:sensitivity}
+
+\begin{table}[t]
+\centering\small
+\resizebox{\textwidth}{!}{\input{tables/sens_beta.tex}}
+\resizebox{\textwidth}{!}{\input{tables/sens_pool.tex}}
+\input{tables/sens_interval.tex}
+\caption{Throughput (jobs per hour) at offered load 0.8 as the remote-memory slowdown $\beta$ (default 0.5), the pool
+(default 1\,TB) and the update interval of dynamic provisioning (default 5 minutes) vary, one at a time, mean of three
+seeds. Without a pool, 1{,}112 jobs per stream larger than a node are rejected, so that case is left out.}
+\label{tab:sens}
+\end{table}
+
+The cluster results hold as the simulator's assumptions vary one at a time (\tabref{tab:sens}). At every $\beta$ from
+0.1 to 2, \pass{} completes 16 to 19\% more jobs per hour than the request under the RSS demand, while Pond and both
+dynamic-provisioning variants stay within 2\% of the request and KS+ below it. A larger pool makes memory less
+contended: with 2\,TB every policy but KS+ comes within 12\% of the exact curve, and with 4\,TB every policy but KS+ completes the 44.4 jobs per hour the arrivals
+allow; with 512\,GB, \pass{} completes 14\% more than the request. A shorter update interval helps dynamic
+provisioning, to 24.4 jobs per hour with an update every minute, still below \pass{} alone (25.0), and with the pass
+it reaches 27.6.
+
 \section{Discussion}
 \label{sec:discussion}
 

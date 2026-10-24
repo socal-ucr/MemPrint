@@ -1233,6 +1233,45 @@ clock its curves need 5.0 to 7.0\,TB under both RSS truths, against 7.0 to 9.0\,
 \label{fig:capacity-loads}
 \end{figure}
 
+\section{Sensitivity to the simulator's assumptions}
+\label{sec:sensitivity}
+
+\begin{table}[p]
+\centering
+\caption{Mean response time (minutes) at offered load 0.8 as the remote-memory slowdown $\beta$ varies (default 0.5),
+calibrated 90\% margins, mean of three seeds.}
+\label{tab:sens-beta}
+\resizebox{\textwidth}{!}{\input{tables/sens_beta.tex}}
+\end{table}
+
+\begin{table}[p]
+\centering
+\caption{Mean response time (minutes) at offered load 0.8 as the pool varies (default 1\,TB). Without a pool, the 569
+jobs per stream larger than a node are rejected, so that case is left out; a 512\,GB pool rejects 11.}
+\label{tab:sens-pool}
+\resizebox{\textwidth}{!}{\input{tables/sens_pool.tex}}
+\end{table}
+
+\begin{table}[p]
+\centering
+\caption{Mean response time (minutes) at offered load 0.8 as the update interval of the three policies that resize a
+running job varies (default 5 minutes).}
+\label{tab:sens-interval}
+\input{tables/sens_interval.tex}
+\end{table}
+
+We varied each of the simulator's assumptions alone, at offered load 0.8. The remote-memory slowdown $\beta$ changes
+every oracle's response time, from 58 to 390 minutes for the exact curve between $\beta = 0.1$ and 2, but not their
+order (\tabref{tab:sens-beta}): under the bytes-touched truth \memprint{} windowed at 5\% beats the exact peak at every
+$\beta$ (236 against 274 minutes at 0.1, 825 against 1{,}162 at 2), and the request and Pond stay last. The pool decides
+how much memory is contended (\tabref{tab:sens-pool}): with 4\,TB every oracle but the request, Pond and KS+ comes within
+a few minutes of the runtimes, and with 512\,GB the differences grow (the exact curve 565 minutes, the exact peak
+1{,}499, the request 4{,}441). The update interval matters most for the policies that resize a running job
+(\tabref{tab:sens-interval}): dynamic provisioning gives 157 minutes with an update every minute and 1{,}330 with one
+every 30 minutes under the bytes-touched truth, against 389 for \memprint{}'s curve, which needs no updates; its
+look-back variant gives 182 to 1{,}657 minutes. A site that can resize jobs every minute gets close to the exact
+curve with dynamic provisioning; one that resizes every 15 minutes or more loses most of its advantage.
+
 \clearpage
 \bibliographystyle{plain}
 \bibliography{references}

@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Demand = RSS} & \multicolumn{4}{c}{Demand = max(commit, RSS)} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+Update interval (min) & 1 & 5 & 15 & 30 & 1 & 5 & 15 & 30 \\
+\midrule
+Dynamic provisioning & 24.4 & 21.2 & 20.8 & 20.4 & 22.3 & 20.2 & 19.6 & 19.5 \\
+Dynamic provisioning, look-back & 23.3 & 21.1 & 19.2 & 18.1 & 21.8 & 20.5 & 19.0 & 18.0 \\
+MemPrintResize + dynamic & 27.6 & 23.8 & 22.7 & 22.9 & 26.9 & 23.9 & 22.7 & 21.9 \\
+MemPrintResize + dynamic, look-back & 26.2 & 24.6 & 22.1 & 21.3 & 25.4 & 24.1 & 22.1 & 21.7 \\
+\bottomrule
+\end{tabular}
