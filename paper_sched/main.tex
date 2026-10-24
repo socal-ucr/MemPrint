@@ -1272,6 +1272,51 @@ every 30 minutes under the bytes-touched truth, against 389 for \memprint{}'s cu
 look-back variant gives 182 to 1{,}657 minutes. A site that can resize jobs every minute gets close to the exact
 curve with dynamic provisioning; one that resizes every 15 minutes or more loses most of its advantage.
 
+\section{Reproducing the baselines' own results}
+\label{sec:repro}
+
+\begin{table}[p]
+\centering
+\caption{KS+'s memory wastage against its baselines, as the KS+ paper's Figure 6 reports it and as the authors' code
+(dos-group/KSPlus) gives it on their traces (dos-group/k-Segments-traces): the reduction, in percent, of KS+'s
+wastage summed over each workflow's tasks (mean of 10 seeds) for 25, 50 and 75\% training data.}
+\label{tab:repro-ksplus}
+\input{tables/repro_ksplus.tex}
+\end{table}
+
+\begin{table}[p]
+\centering
+\caption{DRAM saved by pooling a fixed share of every virtual machine's memory, in percent, against the pool size in
+CPU sockets, from the public Azure packing trace, mean of 10 clusters of tenants, with each server provisioned for its
+own peak or every server for the cluster's largest peak; and Pond's Figure 3 at a 50\% share.}
+\label{tab:repro-pond}
+\input{tables/repro_pond.tex}
+\end{table}
+
+We reran each baseline's own evaluation where its data or a public substitute exists.
+
+\paragraph{KS+.} The authors publish their simulation and the traces of the two nf-core workflows they use, so the
+evaluation can be rerun as published (\tabref{tab:repro-ksplus}). Every reduction the paper reports is reproduced
+within 2 percentage points: on eager, KS+ wastes 36, 40 and 40\% less memory than k-Segments Selective, the best
+baseline (the paper: 36, 39 and 40\%), and 54, 52 and 51\% less than PPM-Improved (the same); on sarek, 32, 28 and 30\%
+less than k-Segments Selective (31, 28 and 29\%) and 46 to 47\% less than PPM-Improved (45\% on average). The small
+differences fit the newer library versions we ran. Our own port of KS+ (\secref{sec:oracles}) matches the authors' code
+function by function on random inputs.
+
+\paragraph{Pond.} Pond's results rest on Azure's internal telemetry, which is not public, and its artifact does not hold
+its prediction models, so its own numbers cannot be rerun. Its Figure 3, the DRAM that pooling saves across a given
+number of sockets, needs only virtual machines' sizes, lifetimes and placements, and Azure publishes a packing trace of
+one zone over 14 days with sizes and lifetimes but no placements. We packed its virtual machines first-fit onto servers of
+its most common machine generation, in 10 clusters of tenants, and computed the DRAM needed with a fixed share of every
+virtual machine's memory in a pool shared by $s$ sockets (\texttt{analysis/memprint/repro/pond\_pooling.py};
+\tabref{tab:repro-pond}). Pond's paragraph on the figure does not say how a server's DRAM is sized without a pool, and the
+answer decides the result. If each server has DRAM for its own peak, pooling half of every machine's memory saves 0 to
+2.2\%, rising with the pool size and more slowly beyond 16 sockets, as in Pond's figure, but six times less than
+Pond's 12 to 13\% at 32 to 64 sockets. If every server of a cluster has the same DRAM, enough for its largest peak, as a
+fleet of identical servers does, pooling saves 19 to 21\%, near Pond's magnitude, but almost the same at every pool size,
+because the saving is the memory the uniform sizing strands. Pond's numbers lie between the two; the trace lacks the
+server types, memory sizes and placements Pond used, so we reproduce the shape of its result, not its magnitude.
+
 \clearpage
 \bibliographystyle{plain}
 \bibliography{references}
