@@ -1317,6 +1317,19 @@ fleet of identical servers does, pooling saves 19 to 21\%, near Pond's magnitude
 because the saving is the memory the uniform sizing strands. Pond's numbers lie between the two; the trace lacks the
 server types, memory sizes and placements Pond used, so we reproduce the shape of its result, not its magnitude.
 
+\paragraph{Dynamic provisioning.} Zacarias et al.\ publish an artifact (Zenodo 7881019) with their Slurm simulator, the
+scripts that generate their job and usage traces, and a test set of nine simulations, the baseline, static and dynamic
+policies on three synthetic traces, with the checksums of their outputs. We ran it as its appendix prescribes: the
+container built without root privileges (\texttt{apptainer --fakeroot}), the three simulators from the branch our code
+audit read (\texttt{dynamic\_mem\_reschedule\_ov\_bj}), the synthetic traces, and the nine simulations. The one change was
+to install the container's R packages from a CRAN snapshot of the artifact's date (2023-04-25) instead of the live mirror,
+which timed out and would resolve unpinned dependencies to today's versions. All nine outputs match the authors'
+checksums bit for bit. The test is a fully provisioned system with no overestimate, where the paper reports little
+difference between the policies, and the outputs agree: 9.9 jobs per hour and a mean response of 4.1\,h for all three. The
+paper's gains in underprovisioned systems and under overestimates come from its full simulation set, which the authors
+size at several days on an HPC system and which we did not run; the test establishes that the simulator and traces we
+read for our dynamic-provisioning oracle are the ones behind the paper.
+
 \clearpage
 \bibliographystyle{plain}
 \bibliography{references}
