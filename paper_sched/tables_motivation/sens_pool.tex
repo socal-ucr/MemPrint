@@ -1,0 +1,17 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Truth = bytes touched} & \multicolumn{4}{c}{Truth = RSS} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+Pool (GB) & 512 & 1024 & 2048 & 4096 & 512 & 1024 & 2048 & 4096 \\
+\midrule
+Exact curve & 565 & 84 & 51 & 51 & 671 & 99 & 51 & 51 \\
+Exact peak & 1{,}499 & 448 & 78 & 52 & 1{,}455 & 423 & 65 & 52 \\
+DHAT peak & 2{,}354 & 1{,}011 & 262 & 65 & 2{,}818 & 1{,}302 & 354 & 78 \\
+User request & 4{,}441 & 2{,}208 & 697 & 261 & 4{,}458 & 2{,}183 & 667 & 222 \\
+Reactive resizing (5 min) & 1{,}669 & 580 & 94 & 52 & 1{,}708 & 612 & 90 & 52 \\
+Pond (untouched in pool) & 4{,}982 & 2{,}519 & 802 & 258 & 4{,}976 & 2{,}472 & 770 & 221 \\
+Dynamic provisioning (5 min) & 1{,}624 & 457 & 58 & 50 & 1{,}617 & 395 & 57 & 50 \\
+Dynamic provisioning, look-back & 1{,}887 & 504 & 56 & 50 & 2{,}134 & 493 & 56 & 50 \\
+KS+ (segments from other inputs) & 2{,}005 & 1{,}262 & 437 & 126 & 1{,}669 & 844 & 350 & 113 \\
+\bottomrule
+\end{tabular}

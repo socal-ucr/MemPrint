@@ -1,0 +1,25 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = resident set (RSS)} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Load & 0.4 & 0.6 & 0.8 & 1 & 1.2 & 0.4 & 0.6 & 0.8 & 1 & 1.2 \\
+\midrule
+Exact curve & 4.0 & 5.0 & 5.0 & 5.0 & 5.0 & 4.0 & 5.0 & 5.0 & 5.0 & 5.0 \\
+Exact, 20 windows & 4.0 & 5.0 & 6.0 & 5.0 & 5.0 & 4.0 & 5.0 & 6.0 & 5.0 & 5.0 \\
+Exact peak & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 \\
+Reactive resizing (5 min) & 6.0 & 6.0 & 7.0 & 7.0 & 6.0 & 5.0 & 6.0 & 7.0 & 7.0 & 6.0 \\
+Dynamic provisioning (5 min) & 5.0 & 6.0 & 7.0 & 6.0 & 6.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 \\
+Dynamic provisioning, look-back & 6.0 & 7.0 & 7.0 & 6.0 & 7.0 & 6.0 & 7.0 & 9.0 & 6.0 & 6.0 \\
+RSS peak (earlier run) & 6.0 & 7.0 & 9.0 & 7.0 & 7.0 & 5.0 & 6.0 & 6.0 & 6.0 & 6.0 \\
+ML peak (quantile GBM) & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+KS+ (segments from other inputs) & 6.0 & 9.0 & 9.0 & 9.0 & 9.0 & 6.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+DHAT peak & 6.0 & 7.0 & 9.0 & 7.0 & 7.0 & 7.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+User request & 9.0 & 9.0 & 11.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+Massif curve & 9.0 & 11.0 & 11.0 & 11.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 & 9.0 \\
+DHAT curve (3 points) & 11.0 & 13.0 & 13.0 & 13.0 & 13.0 & 11.0 & 11.0 & 11.0 & 11.0 & 11.0 \\
+Massif curve, ms clock & 11.0 & 13.0 & 17.0 & 13.0 & 13.0 & 9.0 & 11.0 & 11.0 & 11.0 & 11.0 \\
+Pond (untouched in pool) & 11.0 & 13.0 & 17.0 & 13.0 & 13.0 & 11.0 & 13.0 & 17.0 & 13.0 & 13.0 \\
+gperftools peak & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+heaptrack curve & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,28 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = RSS} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Oracle & Resp. (min) & BSLD & Kills & Res. \% & Used \% & Resp. (min) & BSLD & Kills & Res. \% & Used \% \\
+\midrule
+Exact curve & 180 & 6.6 & 0 & 76 & 76 & 182 & 6.7 & 0 & 74 & 74 \\
+Exact, 20 windows & 226 & 8.6 & 0 & 75 & 72 & 202 & 7.5 & 0 & 76 & 73 \\
+Exact peak & 307 & 12.1 & 0 & 75 & 69 & 361 & 14.4 & 0 & 76 & 66 \\
+Dynamic provisioning (5 min) & 386 & 15.8 & 140 & 72 & 65 & 443 & 18.3 & 200 & 71 & 63 \\
+Dynamic provisioning, look-back & 528 & 22.2 & 260 & 68 & 62 & 694 & 29.3 & 356 & 62 & 56 \\
+RSS peak (earlier run) & 598 & 24.9 & 0 & 69 & 57 & 361 & 14.4 & 0 & 76 & 66 \\
+KS+ (segments from other inputs) & 737 & 31.1 & 1542 & 64 & 49 & 547 & 22.8 & 797 & 69 & 56 \\
+Reactive resizing (5 min) & 753 & 31.9 & 10 & 65 & 54 & 712 & 29.9 & 9 & 66 & 54 \\
+ML peak (quantile GBM) & 1836 & 79.1 & 115 & 61 & 36 & 1904 & 82.1 & 115 & 61 & 34 \\
+User request & 2067 & 89.3 & 0 & 58 & 33 & 2146 & 92.7 & 0 & 57 & 31 \\
+Pond (untouched in pool) & 2379 & 102.8 & 0 & 52 & 30 & 2450 & 105.9 & 0 & 53 & 28 \\
+Massif pages-as-heap & 2650 & 114.7 & 0 & 47 & 26 & 2186 & 94.5 & 0 & 52 & 30 \\
+Massif pages-as-heap, ms clock & 2955 & 127.9 & 0 & 45 & 24 & 2495 & 107.9 & 0 & 48 & 26 \\
+Massif curve & 8747 & 381.2 & 1195 & 32 & 9 & 8528 & 372.3 & 1195 & 32 & 10 \\
+heaptrack curve & 8794 & 383.2 & 1195 & 32 & 9 & 8333 & 363.2 & 1195 & 32 & 10 \\
+Massif curve, ms clock & 8869 & 386.7 & 1195 & 32 & 9 & 8630 & 376.5 & 1195 & 32 & 10 \\
+DHAT curve (3 points) & 9103 & 397.6 & 1195 & 31 & 9 & 8776 & 383.4 & 1195 & 32 & 9 \\
+DHAT peak & 9198 & 400.7 & 1195 & 31 & 9 & 8986 & 391.7 & 1195 & 32 & 9 \\
+gperftools peak & 9344 & 408.0 & 1195 & 31 & 9 & 9108 & 397.5 & 1195 & 32 & 9 \\
+DHAT hold-then-decay & 9561 & 417.3 & 1195 & 31 & 8 & 9251 & 404.3 & 1195 & 32 & 9 \\
+\bottomrule
+\end{tabular}

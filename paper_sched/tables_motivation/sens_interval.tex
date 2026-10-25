@@ -1,0 +1,11 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Truth = bytes touched} & \multicolumn{4}{c}{Truth = RSS} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+Update interval (min) & 1 & 5 & 15 & 30 & 1 & 5 & 15 & 30 \\
+\midrule
+Reactive resizing & 321 & 580 & 1{,}034 & 1{,}402 & 329 & 612 & 1{,}063 & 1{,}421 \\
+Dynamic provisioning & 157 & 457 & 812 & 1{,}330 & 182 & 395 & 872 & 1{,}232 \\
+Dynamic provisioning, look-back & 182 & 504 & 1{,}175 & 1{,}657 & 191 & 493 & 1{,}029 & 1{,}758 \\
+\bottomrule
+\end{tabular}

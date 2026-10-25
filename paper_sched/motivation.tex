@@ -1,0 +1,686 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+\newcommand{\memprint}{MemPrint}
+\newcommand{\secref}[1]{Section~\ref{#1}}
+\newcommand{\figref}[1]{Figure~\ref{#1}}
+\newcommand{\tabref}[1]{Table~\ref{#1}}
+\newcommand{\term}[1]{\emph{#1}}
+\graphicspath{{figures_motivation/}}
+
+\title{What Does a Scheduler Lose Without an Exact Memory Footprint?\\
+Existing Estimators and Provisioning Policies on Disaggregated Memory}
+\author{Nafis Mustakin\\University of California, Riverside}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A scheduler for a cluster with disaggregated memory can pack jobs only as tightly as its knowledge of each job's
+memory footprint allows. We measure how much an exact footprint is worth to such a scheduler, and how much of that
+worth the existing sources of footprint knowledge recover. We trace 25 programs at three inputs each, HPC kernels,
+interpreters, a compiler and two LLM inference engines among them, with a full instrumentation trace as the truth and
+with Massif, DHAT, heaptrack, the gperftools heap profiler and sampled RSS, and we replay the measured footprints
+through DMSched-Sim, a simulator of a cluster with local DRAM and a shared memory pool in which only the footprint
+oracle changes. We also evaluate three published provisioning policies, Pond, the dynamic provisioning of Zacarias et
+al.\ and KS+, and replay jobs of the SURF Lisa trace with their measured memory. At 80\% offered load the exact
+footprint curve gives a mean response time 26.4$\times$ shorter than the user's request and 5.3$\times$ shorter than
+the exact peak, and it needs 5.0\,TB of memory for a service level that the exact peak meets with 6.0\,TB and the
+request with 11.0\,TB. No existing source recovers this gain. The heap profilers report the right peak for most
+programs but read a compiler and an LLM engine at 0.14 to 0.17 of their peaks, because they see only the heap, so no
+margin makes them safe without over-reserving every other job. Pond holds the whole request and is slower than the
+request itself. Dynamic provisioning comes close to the exact peak only by reading the coming minutes of each job's
+use from its trace; a version that looks back, as a running system must, falls behind the exact peak. KS+'s
+regressions on input size fail when the job's input is far from the ones it has seen. On the Lisa trace the exact curve
+completes 18 to 31\% more jobs than the exact peak once memory is scarce. The exact curve itself costs 227 times the
+program's run to obtain. We derive from these results the requirements a footprint estimator must meet to be useful
+to a scheduler.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+A batch scheduler places a job only after it decides how much memory to reserve for it, and on a cluster with
+disaggregated memory that decision also sets how much of the shared pool the job takes from other jobs. Disaggregated
+memory attaches a pool of memory, over CXL or RDMA, that every node can use in addition to its local
+DRAM~\cite{Li2023Pond,Zacarias2021Throughput}. The pool lets a cluster provision less local memory per node, but only if
+the scheduler can pack jobs tightly, and it can pack them only as tightly as its knowledge of each job's memory allows.
+That knowledge is weak today. Peng et al.\ found that over 90\% of LLNL jobs use under 15\% of a node's
+memory~\cite{Peng2020Underutilization}, and Zacarias et al.\ showed that a uniform 60\% overestimate of memory demand cuts
+the throughput of a disaggregated system by about 25\% and raises the mean response time about five
+times~\cite{Zacarias2021Accurate}.
+
+Two kinds of knowledge are possible. A \term{peak} is one number per job, held for the whole run. A \term{footprint
+curve} gives the memory the job needs at every point of its run, so a scheduler can let two jobs whose peaks do not
+overlap share the same memory. The usual sources of either are the user's request, a heap profiler such as
+Massif~\cite{ValgrindMassif}, DHAT~\cite{ValgrindDHAT}, heaptrack~\cite{heaptrack} or the gperftools heap
+profiler~\cite{gperftools}, the resident set size (RSS) of an earlier run, and three kinds of published policy: a
+learned predictor of a job's untouched memory (Pond~\cite{Li2023Pond}), a monitor that resizes a running job's allocation
+(dynamic provisioning~\cite{Zacarias2023Dynamic}), and a model of a task's memory over time learned from its earlier
+executions (KS+~\cite{KSplus2024}).
+
+However, it is unclear how much a scheduler loses with these sources against an exact footprint, and why. The
+simulators that study scheduling on disaggregated memory either model one run in cycle detail with no
+scheduler~\cite{Puri2024DRackSim,CXLClusterSim,CXLDMSim,Yang2023CXLMemSim}, or treat a job's memory as one declared peak
+with a synthetic error~\cite{Zacarias2021Accurate,Zacarias2021Throughput}. None feeds the scheduler the footprints that
+real profilers report, and none compares them with an exact footprint curve. Therefore, we measure every source of
+footprint knowledge listed above on the same programs and replay the results through one scheduler, with everything but
+the footprint oracle held fixed.
+
+In this work, we make the following contributions:
+\begin{itemize}
+  \item We build a corpus of footprint curves for 25 programs at three inputs each, with a full instrumentation trace
+    as the truth, the curves and peaks of four heap profilers and sampled RSS, and what each method costs
+    (\secref{sec:corpus}).
+  \item We build DMSched-Sim, a cluster simulator with local memory and a shared pool, an EASY-backfilling scheduler
+    that admits a job only if its whole reservation curve fits, a remote-memory slowdown model, OOM kills, and
+    implementations of Pond, dynamic provisioning and KS+ checked against their authors' code where it is published
+    (\secref{sec:sim}).
+  \item We show how much of an exact footprint's gain comes from knowing the curve rather than the peak, how much each
+    existing source recovers, why each falls short, and how much memory each needs for the same service
+    (\secref{sec:results}), on a synthetic stream, on a stream of LLM jobs and on the SURF Lisa trace.
+  \item We derive the requirements a footprint estimator must meet to be useful to a scheduler (\secref{sec:req}).
+\end{itemize}
+
+\section{Background and related work}
+\label{sec:related}
+
+\paragraph{Disaggregated memory simulators.} DRackSim~\cite{Puri2024DRackSim}, CXL-ClusterSim~\cite{CXLClusterSim},
+CXL-DMSim~\cite{CXLDMSim} and CXLMemSim~\cite{Yang2023CXLMemSim} model the timing of accesses to pooled memory for one
+run, in cycle detail or from a trace, and none of them has a job scheduler. The BSC Slurm simulator extended by Zacarias
+et al.\ schedules real job traces on a disaggregated system~\cite{Zacarias2021Throughput}, but it represents a job's
+memory as one peak, and its study of accuracy multiplies that peak by a synthetic overestimate~\cite{Zacarias2021Accurate}.
+Boezennec et al.\ study the allocation of disaggregated memory to jobs with piecewise-constant memory
+phases~\cite{Boezennec2024}, and CFM schedules jobs against per-job slowdown curves measured offline~\cite{Amaro2020CFM}.
+
+\paragraph{Provisioning policies.} Pond predicts the untouched memory of virtual machines with a gradient-boosted model
+from their customers' history, places that memory in a CXL pool, and moves a virtual machine to local memory when it
+touches more than predicted~\cite{Li2023Pond}. The dynamic provisioning of Zacarias et al.\ resizes each job's allocation
+every five minutes to its use, read from usage traces, and fails and restarts a job whose growth does not
+fit~\cite{Zacarias2023Dynamic}. KS+ learns a workflow task's memory over time as a step function whose segments it
+regresses on the input size of earlier executions, and reduces wasted GB-seconds by 51\% against peak-only
+prediction~\cite{KSplus2024}. Pond and dynamic provisioning act on a job's allocation while it runs or from its owner's
+history, and KS+ needs earlier executions of the same task.
+
+\paragraph{Footprint estimators.} Massif samples the heap at up to 100 snapshots by default, on a time axis of
+instructions or of milliseconds under Valgrind~\cite{ValgrindMassif}, and with \texttt{--pages-as-heap} it counts mapped
+pages instead of heap blocks. DHAT reports the heap at its global peak (t-gmax) and at exit, and the time of the peak,
+but no time series~\cite{ValgrindDHAT}. heaptrack records every allocation and can export a heap curve~\cite{heaptrack},
+and the gperftools heap profiler writes a dump each time the heap grows by a set amount~\cite{gperftools}. All four count
+requested heap bytes, so they miss memory a program maps itself and count blocks that are allocated but never touched.
+
+\section{Simulator}
+\label{sec:sim}
+
+DMSched-Sim replays one stream of jobs once per footprint oracle, so that any difference between two runs comes from
+what the scheduler knows about memory. It is a time-slotted simulator (one slot is one minute) written in Python.
+
+\paragraph{System model.} The cluster has 32 nodes, each with 32 cores and 128\,GB of local DRAM, and one shared pool of
+1\,TB (one sixth of all memory). A job's memory is placed in its node's free local memory first, and the rest goes to the
+pool. A job on several nodes holds its footprint on each of them, its nodes share the pool, and it runs as long as its
+slowest node.
+
+\paragraph{Jobs.} A job has an arrival time, a core count, a base runtime (its runtime with all memory local), a true
+footprint curve $a(p)$ over its progress $p \in [0, 1]$, and a reservation curve $r(p)$ set by the oracle. Curves are
+defined over progress rather than time, so a job slowed by remote memory stretches its curve in wall-clock time.
+
+\paragraph{Scheduler.} The scheduler is first come, first served with EASY backfilling~\cite{Lifka1995EASY} over a window
+of 32 queued jobs. Each node keeps a timeline of committed local memory and cores, and the pool keeps one of committed
+memory. A job starts on a node only if, at every slot from now to its projected end, the part of its reservation that
+does not fit in the node's free local memory fits in the free pool. With a time-varying reservation, two jobs whose
+peaks do not overlap can therefore share the same memory. When the head of the queue cannot start, the scheduler reserves
+its earliest feasible start, and a later job may start early only if it fits beside that reservation. Among the nodes
+that fit, the scheduler picks the one with the least pool use and then the least free local memory left over.
+
+\paragraph{Remote-memory slowdown.} Following the linear models of CFM~\cite{Amaro2020CFM} and Boezennec et
+al.~\cite{Boezennec2024}, a job's runtime is stretched by the share of its resident GB-minutes that lie above its local
+reservation:
+\begin{equation}
+T = T_{\mathrm{base}}\,(1 + \beta f_{\mathrm{remote}}), \qquad
+f_{\mathrm{remote}} = \frac{\sum_t \max\bigl(0,\, a(t) - \ell(t)\bigr)}{\sum_t a(t)},
+\end{equation}
+where $\ell(t)$ is the local part of the reservation and $\beta = 0.5$, so a job whose memory is entirely remote runs 1.5
+times as long. The runtime and the placement are solved together by fixed-point iteration when the job is admitted.
+
+\paragraph{OOM kills.} If the true footprint exceeds the reservation at any slot, the job is killed there, its work is
+lost, and it is requeued at the head of the queue with its reservation multiplied by 1.5, as a batch system that raises a
+job's memory limit after an out-of-memory failure would do. The policies that resize a running job handle growth as
+\secref{sec:oracles} describes.
+
+\paragraph{Metrics.} We report the mean response time (completion minus arrival), the mean bounded slowdown (response
+over $\max(T_{\mathrm{base}}, 10\,\mathrm{min})$), the number of OOM kills, and the reserved and the resident memory as
+shares of all memory, over the jobs that arrive between the 10th and the 90th percentile of arrival times.
+
+\paragraph{Validation.} Unit tests check that two jobs with non-overlapping peaks share a node under their curves but run
+one after the other under their peaks, that an under-reservation is killed where the footprint passes it, that
+backfilling never delays the head of the queue, that a fully remote job runs $1 + \beta$ times as long, and the behaviour
+of each published policy. The published policies are checked against their authors' code where it is published
+(\secref{sec:oracles}), and Appendix~\ref{sec:sensitivity} reproduces the authors' own results.
+
+\subsection{Job streams}
+\label{sec:streams}
+
+The main experiments use a controlled stream of 3{,}000 jobs in which memory is the contended resource. Each job has 1 to
+16 cores, a lognormal base runtime with a median of 30 minutes clipped to 5 to 720 minutes, and a lognormal memory request
+with a median of 100\,GB. What a job really uses is its request multiplied by a ratio $u \le 1$ taken from the LANL CM5
+log of the Parallel Workloads Archive~\cite{PWA}, the archive log that records both requested and used memory (median
+$u = 0.79$ over its 94{,}335 jobs with both fields). The shape of the job's footprint, and what every estimator reports
+for it, come from one corpus program at its largest input (\secref{sec:corpus}), chosen at random, scaled so that the
+truth's peak is the job's peak and every estimator keeps its own over- or under-estimate. Arrivals are spread over a span
+set so that the \term{offered load}, the resident GB-minutes arriving per minute over the cluster's total memory, takes
+the values 0.4 to 1.2. Each point is three seeds.
+
+\paragraph{A real trace with measured memory.} The SURF Lisa trace~\cite{LisaTrace} joins 1.6 million Slurm jobs of a
+343-node cluster with their nodes' Prometheus metrics, sampled every 30\,s from June to November 2022. A node's memory is a
+job's only while the job has the node to itself, so we keep a job only if no other job shared any of its nodes at any
+sample and at least 80\% of the samples its runtime implies are present: 88{,}767 jobs of at least five minutes, 1{,}429
+of them on 2 to 22 nodes. A job's memory is its nodes' active memory above each node's idle level. We replay windows of
+3{,}000 consecutive jobs in two ways. In the \term{measured} stream every job keeps its own curve, and only the oracles
+that need nothing but the job's own memory apply. In the \term{hybrid} stream every job keeps the trace's arrival,
+runtime, node count and measured peak, with a corpus program's footprint shape scaled to that peak, so that every
+estimator applies. Lisa records no memory request, so a job requests Slurm's default on the simulated cluster, the node's
+memory per core times the cores it uses, and at least its peak. Both streams run on a cluster of 32 nodes with 16 cores
+each, as Lisa's, a pool of a quarter of the local memory, and local memory per node swept from Lisa's 103\,GB down to
+4\,GB; the offered load is set against each cluster's own memory.
+
+\subsection{Two truths}
+\label{sec:truths}
+
+A footprint can be counted as the bytes a program touches or as the pages a kernel holds for it, and a kernel charges and
+OOM-kills a process for the latter. The two differ by page granularity, by memory an allocator keeps after a free, and by
+the runtime's own pages. We run every experiment with two truths. With \term{bytes touched} as the truth, the scheduler
+must cover the footprint a page-perfect system would need. With \term{RSS} as the truth, it must cover the resident set
+sampled every 5\,ms.
+
+\subsection{Oracles and margins}
+\label{sec:oracles}
+
+An oracle turns what is known about a job into its reservation curve. Curve oracles follow a measured curve, coarsened to
+20 windows over progress, each holding its largest value and widened to its neighbours, because each method's clock
+(instructions or milliseconds under Valgrind for Massif, seconds for the RSS) maps to wall-clock progress only
+approximately. Peak oracles hold one value for the whole run. The \term{exact curve} and the \term{exact peak} are the
+truth's own curve and peak, the bounds no estimator can pass. The estimators are Massif's curve (heap, or mapped pages
+with \texttt{--pages-as-heap}) on its instruction clock and on its millisecond clock, heaptrack's curve, DHAT's peak and
+two curves built from DHAT's three recorded points (\secref{sec:dhat}), gperftools' peak, the RSS peak of an earlier run
+of the same input, the user's request, and an ML peak, the request times a 0.95-quantile gradient-boosted prediction of
+$u$ from the request, core count, requested time and the user's and executable's history, trained on half of the CM5
+users, as Pond's model predicts untouched memory~\cite{Li2023Pond}.
+
+The policies that resize a running job are three. \term{Reactive resizing} holds the request for five minutes, then each
+five minutes the past five minutes' largest use plus 10\% headroom, and grows the job from free memory when its use
+exceeds its allocation. \term{Dynamic provisioning}~\cite{Zacarias2023Dynamic} starts the job with its request and every
+five minutes resizes its allocation to the largest use of the coming five minutes, as the authors' simulator reads it from
+the usage trace, local memory first and then the pool; a resize is committed only when it happens, and a resize that does
+not fit fails the job, which restarts from the beginning. A running system cannot read the coming interval, so its
+\term{look-back} variant resizes to the past five minutes' largest use, grows the job on demand a minute at a time, and
+runs a job with its request held after three restarts, as the authors suggest for jobs that fail repeatedly. The
+\term{Pond} oracle~\cite{Li2023Pond} holds the job's whole request but keeps only the request minus its predicted untouched
+memory in local DRAM, the rest in the pool, with the untouched share predicted at the 0.98 quantile (Pond's target of 98\%
+of jobs within their margin) and a QoS monitor that moves the pool part to local memory five minutes after the job first
+touches it. The \term{KS+} oracle~\cite{KSplus2024} learns four segments of a non-decreasing step function from the RSS of
+the program's other corpus inputs, regresses each segment's end and peak on the input size, ends segments 15\% earlier and
+raises peaks 10\%, and after an OOM kill pulls the later segments forward to the failure or raises the last peak 20\%.
+
+We checked these policies against their authors' published code. Our KS+ matches the authors' segmentation, prediction
+and retry on random inputs. The dynamic-provisioning code of the authors' Slurm simulator matches ours in admission
+against current allocations, remote-first release, local-first growth and restart with the original request; it also
+recomputes the slowdown at every resize and charges 10\,s per growing resize, which we leave out in the policy's favour.
+Pond's artifact holds none of its policies, so our Pond follows its paper.
+
+Every estimate needs a margin, because an estimate below the truth causes OOM kills. A curve oracle's margin is headroom
+added as a share of its own peak, and a peak oracle's margin multiplies its peak. Besides fixed margins of 10\% and 30\%,
+we use \term{calibrated} margins that a site could set from its own history. For each oracle and program we compute the
+smallest margin with which the oracle never falls below the truth, and a job receives the 90th percentile
+(\term{calibrated 90\%}) or the largest value (\term{calibrated 100\%}) of the other programs' margins, so no oracle is
+tuned on the program it predicts. The request, ML and reactive oracles have no profile to calibrate and keep a 10\% margin,
+and the dynamic-provisioning, Pond and KS+ oracles use none.
+
+\section{Footprint corpus}
+\label{sec:corpus}
+
+We ran 25 programs at three inputs each on a 32-core node with 62\,GB of memory (\tabref{tab:corpus}): four PolyBench
+kernels~\cite{polybench}, miniVite~\cite{minivite}, the GAP benchmarks bfs, pr, cc and sssp, Lua, Python, Perl and SQLite
+workloads, GCC's cc1 compiling three source files, HPCCG, LULESH, NPB IS, CG and MG, MiniFE, Quicksilver, Kripke, darknet
+classifying images with AlexNet, and two LLM inference engines, llama2.c~\cite{llama2c} with three models and
+llama.cpp~\cite{llamacpp} with SmolLM2-135M and 360M. Both engines map their weights from the model file rather than
+allocating them. The native runs take 0.12 to 14.9\,s, and the true peaks at the largest inputs are 15 to 450\,MB. Every
+(program, input) ran alone with its RSS sampled every 5\,ms; under a full instrumentation trace with Pin~\cite{Luk2005Pin},
+which records the bytes touched over time and is the truth; under Massif and Massif with \texttt{--pages-as-heap},
+each with its instruction clock and with milliseconds; and under DHAT, heaptrack and the gperftools heap profiler.
+
+\begin{table}[t]
+\centering
+\caption{The corpus at each program's largest input: the true peak (bytes touched), the mean over the run as a share of the
+peak, each method's peak as a share of the true peak, and the time each method takes over the native run.}
+\label{tab:corpus}
+\resizebox{\textwidth}{!}{\input{tables_motivation/corpus.tex}}
+\end{table}
+
+\subsection{Accuracy of the peak}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{peak_accuracy.pdf}
+\caption{Each method's peak over the true peak, every program at its largest input (one marker per program, the black bar
+is the median). Left: against bytes touched. Right: against the RSS.}
+\label{fig:peak}
+\end{figure}
+
+The heap profilers report the right peak for most of these programs and fail badly on the rest (\figref{fig:peak}).
+Specifically, Massif's peak is within 5\% of the true peak on 20 of the 25 programs, DHAT and gperftools on 20 and
+heaptrack on 19, because these programs touch nearly all the heap they allocate. However, the heap profilers read 0.14 to
+0.16 times the peak of GCC's cc1, whose garbage collector maps its own pages, and 0.17 times that of llama2.c, whose
+weights are mapped from the file and never pass through the heap; they read 1.97 times the peak of darknet and 1.42 to
+1.55 times that of miniVite, which allocate memory they never touch. Massif with \texttt{--pages-as-heap} overestimates
+every program (1.07 to 29.9 times), and the RSS is 0.95 to 1.99 times the bytes touched (median 1.05). A peak estimate is
+therefore right or wrong by program, not by a small error spread over all programs.
+
+\subsection{Shape over time}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\textwidth]{motivation_curve.pdf}
+\caption{Python (largest input): the true footprint over the run, the RSS, and the curves and peaks the heap profilers
+report, each on its own method's clock rescaled to progress.}
+\label{fig:motivation}
+\end{figure}
+
+The footprint of half of the programs varies over the run. The mean over the run is below 70\% of the peak for 11 of the
+25 programs, and it is 0.36 to 0.40 times the peak for the four GAP kernels, so a scheduler that holds the peak for such a
+job reserves memory that the job leaves unused for most of its run. \figref{fig:motivation} shows Python's footprint, which
+rises and falls seven times. Massif's curve follows its phases on its instruction clock but sits above it, because Massif
+counts requested heap bytes and Python allocates memory it never touches (1.29 times the true peak), and DHAT records only
+the peak, its time and the heap at exit.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{llm_curves.pdf}
+\caption{The two LLM engines at their largest inputs: the true footprint over the run, the RSS, and the curves and peaks
+the heap profilers report.}
+\label{fig:llmcurves}
+\end{figure}
+
+The LLM engines differ from the rest of the corpus in where their memory is (\figref{fig:llmcurves}). Both map the model's
+weights from the file and read all of them for the first token, so the true footprint reaches 90\% of its peak within the
+first 1 to 2\% of a llama2.c run and stays there, and llama.cpp reaches it at 12\% of a 128-token run. The heap profilers
+see only the heap, 0.08 to 0.21 of llama2.c's peak, and the KV cache and compute buffers of llama.cpp.
+
+\subsection{Cost}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\textwidth]{cost.pdf}
+\caption{Each method's time over the native run, every program at its largest input. The black bar is the median.}
+\label{fig:cost}
+\end{figure}
+
+The exact footprint is expensive to obtain (\figref{fig:cost}). At the largest inputs the full instrumentation trace costs
+226.8 times the native run at the median (41.2 to 772.5 times), against 1.4 times for heaptrack, 1.2 times for gperftools,
+5.7 times for Massif (6.4 times with its clock in milliseconds) and 23.8 times for DHAT. On llama.cpp, a sub-second run
+with four threads, the full trace costs 469 to 604 times the native run.
+
+\section{Results}
+\label{sec:results}
+
+We first ask how much an exact footprint is worth and where the gain comes from, then how much of it each existing source
+recovers and why each falls short. \tabref{tab:load08} gives every oracle at offered load 0.8 with calibrated 90\% margins,
+and \figref{fig:load} gives the response time across loads.
+
+\begin{table}[t]
+\centering
+\caption{Every oracle at offered load 0.8, calibrated 90\% margins (10\% for the request, ML and reactive oracles; none for
+Pond, dynamic provisioning and KS+, whose Kills column counts failed resizes and retries), mean of three seeds. Resp.\ is
+the mean response time, BSLD the mean bounded slowdown, Kills the OOM kills per stream of 3{,}000 jobs, Res.\ and Used the
+memory reserved and resident as a share of all memory.}
+\label{tab:load08}
+\resizebox{\textwidth}{!}{\input{tables_motivation/grid_08.tex}}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{response_vs_load.pdf}
+\caption{Mean response time against offered load, calibrated 90\% margins (95\% confidence intervals over three seeds, log
+scale). Left: the truth is bytes touched. Right: the truth is the RSS.}
+\label{fig:load}
+\end{figure}
+
+\subsection{What an exact footprint is worth}
+
+Knowing a job's footprint curve, rather than its peak, is where most of the gain lies. At load 0.8 the exact curve gives a
+mean response time of 84 minutes, against 448 minutes for the exact peak and 2{,}208 minutes for the user's request, under
+the bytes-touched truth, which makes the curve 26.4$\times$ better than the request and 5.3$\times$ better than the peak,
+and the peak 4.9$\times$ better than the request. The RSS truth gives the same picture (99, 423 and 2{,}183 minutes). The
+curve lets the scheduler keep 81\% of all memory resident with jobs, against 58\% for the exact peak and 27\% for the
+request, because jobs whose peaks fall at different times share the memory that a peak would hold idle. Coarsening the
+exact curve to the 20 widened windows used for every measured curve raises the response to 173 minutes, so most of the
+curve's advantage over the peak survives the resolution and timing slack a measured curve needs. The gap widens with load
+(\figref{fig:load}): at load 0.4 every oracle that does not over-reserve keeps up with arrivals, and from load 0.6 the peak
+and the request saturate memory while the curve does not.
+
+\subsection{Existing footprint estimators}
+
+No existing estimator comes close to the exact peak, let alone the exact curve. With calibrated 90\% margins, the RSS peak of
+an earlier run gives 985 minutes and the DHAT peak 1{,}011, 2.2 times the exact peak, and the ML peak 1{,}991, little better
+than the request it scales, because its 0.95-quantile prediction of $u$ covers only 76\% of jobs from unseen users. Massif's
+curve gives 2{,}399 minutes, worse than the request, because the headroom that covers 90\% of the programs is 52\% of its
+peak (\tabref{tab:margins}). Three kinds of program set that headroom: Massif reads GCC's cc1 at 0.16 times its peak and
+llama2.c at 0.17, and on the four GAP kernels its clock of instructions drifts from the truth's clock enough to need 12 to
+53\% headroom. With Massif's clock in milliseconds under Valgrind, which includes Valgrind's start-up and runs at a different
+pace from the native program, the headroom rises to 100\% and the response time to 4{,}268 minutes. For gperftools and
+heaptrack a third program falls above the 90th percentile, Python, whose heap they read at 0.21 and 0.14 times its peak, so
+every job reserves three to four times its estimate and the response time rises to 10{,}476 and 11{,}778 minutes, about five
+times the request's. The time axis of a curve is thus as important as its values, and an estimator that sees only the heap
+is wrong by large factors on exactly the programs that set a site's margins.
+
+\begin{table}[t]
+\centering
+\caption{The margin each oracle needs to stay above the truth, as a share of its own peak (\%), over the 25 programs at their
+largest inputs.}
+\label{tab:margins}
+\input{tables_motivation/margins.tex}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{margin_tradeoff.pdf}
+\caption{Mean response time against OOM kills at load 0.8, one marker per margin policy (10\%, 30\%, calibrated 90\% and
+100\%). No margin gives an existing estimator both few kills and a short response time.}
+\label{fig:margins}
+\end{figure}
+
+No margin policy rescues an estimator that is badly wrong for some programs (\figref{fig:margins}). A small margin lets those
+programs' jobs be killed, and a margin large enough to cover them over-reserves every other job. With calibrated 100\%
+margins every heap profiler must cover GCC's cc1, so each job reserves about 6.5 times its estimate and the response time
+rises to 15{,}000 to 17{,}000 minutes. With a fixed 10\% margin, which accepts the kills, Massif gives 991 minutes with
+1{,}714 kills per stream, and heaptrack and gperftools 1{,}154 and 1{,}158 minutes.
+
+\subsection{Published provisioning policies}
+
+The published policies recover part of the gain, each for a reason that a scheduler cannot rely on. \term{Dynamic
+provisioning} gives 457 minutes under the bytes-touched truth, close to the exact peak (448), and 395 minutes under the RSS
+truth, with 307 and 265 restarts per stream. It comes this close because each resize is the largest use of the coming five
+minutes, read from the truth, so between resizes it is an exact curve at a five-minute resolution with no margin. Its
+look-back variant, which knows only the past as a running system does, gives 504 and 493 minutes, behind the exact peak,
+with 444 and 478 restarts and 25 and 27 jobs falling back to their request per stream. Reactive resizing, which also looks
+back but reserves its resizes when the job starts, gives 580 and 612 minutes. A policy that resizes a running job thus
+reaches the exact peak only with a view of the job's future, and pays for growth it does not foresee with restarts.
+
+\term{Pond} gives 2{,}519 minutes, worse than the request (2{,}208), with no kills. It holds the whole request, so it cannot
+pack more jobs than the request does, and the share it places in the pool must fit there even when the node's local memory
+is free. Its model predicts 8\% of the request as untouched against 38\% in truth, and still overpredicts for 11\% of the
+jobs, because they come from users the model has not seen. Pond saves local DRAM, not the total memory that the job streams
+contend for.
+
+\term{KS+} gives 1{,}262 minutes under the bytes-touched truth and 844 under the RSS truth, with about 8{,}200 and 8{,}500 OOM
+kills per stream. Its first prediction of the largest input from the two smaller ones is 0.86 to 1.18 times the true RSS peak
+for 19 of the 24 programs it can predict. Two programs cause nearly all the kills: the smaller inputs of atax and NPB MG
+barely rise above the runtime's baseline, so the regressions predict almost nothing for the largest input, and their jobs
+climb from the 100\,MB floor in 20\% steps, 36 to 38 times for atax and 20 to 23 times for MG. GCC's cc1 never fails but
+reserves 8.6 to 10.7 times its peak. A model learned from a job's earlier executions with other inputs is thus only as good
+as those inputs are close to the job's.
+
+\subsection{LLM inference jobs}
+\label{sec:llm}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{llm_response_vs_load.pdf}
+\caption{A stream of LLM inference jobs alone (llama2.c with three models, llama.cpp with two lengths): mean response time
+against offered load, calibrated 90\% margins, each configuration's margin calibrated on the other four.}
+\label{fig:llm}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{The LLM stream at offered load 0.8, calibrated 90\% margins; columns as in \tabref{tab:load08}.}
+\label{tab:llm}
+\resizebox{\textwidth}{!}{\input{tables_motivation/grid_llm_08.tex}}
+\end{table}
+
+On a stream of LLM jobs alone, whose memory is mostly read-only model weights, every heap profiler fails (\figref{fig:llm},
+\tabref{tab:llm}). They read llama2.c at 0.08 to 0.21 of its peak, so the margin calibrated on the other configurations
+cannot cover llama2.c's jobs: with calibrated margins Massif, DHAT, heaptrack and gperftools give 8{,}747 to 9{,}344 minutes,
+four times the request (2{,}067). With a fixed 10\% margin, llama2.c's jobs are killed 9{,}050 to 15{,}661 times per stream
+until the requeue factor has raised their reservation enough. The best existing source is the RSS peak of an earlier run,
+598 minutes under the bytes-touched truth, because the weights the RSS counts are the footprint, against 180 minutes for the
+exact curve and 307 for the exact peak. Dynamic provisioning gives 386 minutes by reading the coming five minutes, and its
+look-back variant 528.
+
+\subsection{A real trace}
+\label{sec:lisa}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\textwidth]{lisa_measured.pdf}
+\caption{SURF Lisa jobs with their measured memory on a Lisa-shaped cluster, offered load 0.8: jobs per hour against local
+memory per node (mean and 95\% interval over three seeds).}
+\label{fig:lisa}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{The measured Lisa stream at offered load 0.8: jobs per hour and mean response time for each local memory per node
+(mean of three seeds). The load is set against each cluster's memory, so numbers compare across rows, not across columns.}
+\label{tab:lisa}
+\resizebox{\textwidth}{!}{\input{tables_motivation/lisa_measured.tex}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{The hybrid Lisa stream (the trace's jobs with corpus footprint shapes) at 32\,GB per node and offered load 0.8,
+calibrated 90\% margins. Fails counts OOM kills, restarts and retries.}
+\label{tab:lisahybrid}
+\resizebox{0.8\textwidth}{!}{\input{tables_motivation/lisa_hybrid.tex}}
+\end{table}
+
+On the Lisa trace with each job's measured memory (\figref{fig:lisa}, \tabref{tab:lisa}), knowing a job's memory matters once
+memory is scarce. At Lisa's own 103\,GB and at 64\,GB per node every policy completes the same 9.4 to 9.6 jobs per hour, because
+most jobs take whole 16-core nodes and use a few GB, so the cores are the bottleneck. From 32\,GB per node memory is
+contended, and the exact curve completes 8.6 jobs per hour against 6.6 for the exact peak (30\% more, with a 40\% shorter
+response time), and 18 to 31\% more from 16 down to 4\,GB. The peak and the request give the same results, because a
+whole-node job blocks its node whatever memory it reserves. Dynamic provisioning restarts 775 to 2{,}129 jobs per stream at
+32\,GB per node and below and gains less than reactive resizing. On the hybrid stream at 32\,GB per node
+(\tabref{tab:lisahybrid}), the exact curve gives 10{,}481 minutes, reactive resizing 11{,}740, the two dynamic-provisioning
+variants 13{,}451 and 13{,}722, the exact peak 15{,}563, Pond 19{,}710, KS+ 19{,}920 and the heap profilers 21{,}440 to
+59{,}035 under the bytes-touched truth. On the trace's mix of job sizes, runtimes and node counts, the exact curve
+therefore still leads, the resizing policies still fall between the curve and the peak, and the heap profilers still fall
+behind the request, although the request now ties the exact peak because most jobs take whole nodes.
+
+\subsection{Memory needed for the same service}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{capacity.pdf}
+\caption{The total memory (32 nodes of local DRAM plus the 1\,TB pool) each oracle needs to keep the mean bounded slowdown
+within 1.5 times that of the exact curve at 128\,GB per node, at load 0.8. Local memory per node was swept from 48 to
+512\,GB.}
+\label{fig:capacity}
+\end{figure}
+
+The response-time gains translate into memory a site would have to buy (\figref{fig:capacity}). At a fixed arrival rate, the
+exact curve meets the target with 5.0\,TB in all. Under the bytes-touched truth the exact peak needs 6.0\,TB (20\% more),
+reactive resizing and dynamic provisioning 7.0\,TB, DHAT, an earlier run's RSS, the ML peak and KS+ 9.0\,TB, Massif's curve
+and the request 11.0\,TB (120\% more), the DHAT curve 13.0\,TB, and Massif on its millisecond clock and Pond 17.0\,TB.
+gperftools and heaptrack do not meet the target even at 512\,GB per node.
+
+\subsection{What each source's cost buys}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{roi.pdf}
+\caption{Profiling cost per job (median time over the native run) against the gain in mean response time over the user's
+request, at load 0.8, each oracle at its best margin policy. The exact curve's cost is the full trace under the
+bytes-touched truth and an RSS sampler under the RSS truth.}
+\label{fig:roi}
+\end{figure}
+
+The cost of a footprint and its value are far apart for every existing source (\figref{fig:roi}). Under the bytes-touched
+truth the full trace costs 227 times the native run and gives a 26.4$\times$ gain over the request as a curve, or 4.9$\times$
+as a peak. heaptrack and gperftools cost under 1.5 times the run and give 1.9$\times$, DHAT costs 24 times and gives
+2.2$\times$, Massif's curve costs 5.7 times and gives 2.2$\times$ (1.3$\times$ with its millisecond clock), and an earlier
+run's RSS costs nothing extra and gives 2.2$\times$. A source that is cheap gives a tenth of the exact curve's gain, and the
+source that gives the exact curve costs two orders of magnitude more than the run.
+
+\section{DHAT curves}
+\label{sec:dhat}
+
+DHAT records the heap at its global peak, the time of that peak, and the heap at exit, but no time
+series~\cite{ValgrindDHAT}. A scheduler can use those three points to build a \term{DHAT curve}, which rises linearly from
+zero to the peak at its recorded time and falls to the exit value, or a \term{hold-then-decay} curve, which holds the peak
+until its recorded time and falls afterwards.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{dhat_curves.pdf}
+\caption{DHAT's peak and the two curves built from its three recorded points, against the exact peak and curve, at load 0.8
+under each margin policy (log scale).}
+\label{fig:dhat}
+\end{figure}
+
+Both DHAT curves do worse than the DHAT peak under every margin policy and both truths, except with calibrated 100\% margins,
+where all three reserve for GCC's cc1 (\figref{fig:dhat}). At load 0.8 with calibrated 90\% margins, the DHAT curve gives
+3{,}512 minutes and the hold-then-decay curve 4{,}161, against 1{,}011 for the DHAT peak, under the bytes-touched truth. The
+curves fall below the truth wherever a program has more than one phase, and the median program needs 36\% headroom on the
+DHAT curve. The information that makes a curve useful to a scheduler is the timing of every phase, and DHAT records the
+timing of one.
+
+\section{Requirements for a footprint estimator}
+\label{sec:req}
+
+The results above determine what a source of footprint knowledge must provide for a scheduler to recover the gain of an
+exact footprint.
+\begin{itemize}
+  \item \textbf{A curve, not a peak.} The exact curve is 5.3 times better than the exact peak at load 0.8 and needs 20\% less
+    memory for the same service, so an estimator must report the footprint over the run.
+  \item \textbf{A time axis that matches the run.} A curve on a clock other than the job's own (Massif's milliseconds under
+    Valgrind, or its instructions on the GAP kernels) needs headroom that erases its advantage, and DHAT's single recorded
+    time does not make a usable curve.
+  \item \textbf{All of the memory the program touches, and only that.} The heap profilers miss memory a program maps itself
+    (cc1's collector, the LLM engines' weights) and count memory it allocates and never touches (darknet, miniVite), and
+    those programs set every site-wide margin.
+  \item \textbf{A small margin that holds across programs.} An estimate that is exact for most programs and wrong by a large
+    factor for a few forces a margin that over-reserves every job.
+  \item \textbf{Known before the job starts.} Dynamic provisioning reaches the exact peak only by reading the job's future, and
+    without it falls behind the peak and restarts hundreds of jobs per stream; Pond and KS+ need history that a new user or
+    a new input does not have.
+  \item \textbf{A cost close to the run's.} The full trace gives the exact curve at 227 times the native run, which no site can
+    pay for every job.
+\end{itemize}
+
+\section{Limitations}
+\label{sec:limits}
+
+The results rest on a model of a cluster and of its jobs, and each simplification limits what they show.
+
+\paragraph{The published baselines.} Our Pond follows its paper, because its artifact holds none of its policies, and it
+leaves out the model that places latency-insensitive virtual machines entirely in the pool, which needs hardware counters our
+jobs do not have. Our dynamic provisioning fixes a job's runtime stretch at admission and charges nothing per resize, both in
+its favour. KS+ learns from two smaller inputs per program, where its authors had hundreds of executions per task.
+
+\paragraph{Scaled footprints.} The corpus programs peak at 15 to 450\,MB, and the simulated jobs at tens to hundreds of GB.
+Scaling a measured curve to a job's size keeps its shape and every estimator's ratio to the truth, but it assumes the ratio
+does not change with the input, so we use the largest input of every program.
+
+\paragraph{The job streams.} The main stream is synthetic, with memory the contended resource by design, and the
+used-to-requested ratio comes from the LANL CM5 log of 1994 to 1996. The Lisa trace's jobs are those that had their nodes to
+themselves, its memory is the nodes' active memory, and it records no memory request.
+
+\paragraph{Scheduler and machine.} The slowdown is linear in the remote share of the footprint with one $\beta$ for every job,
+the pool has no bandwidth contention, and only FCFS with EASY backfilling was tested. Appendix~\ref{sec:sensitivity} shows that the orderings
+hold for $\beta$ from 0.1 to 2 and pools of 0.5 to 4\,TB, and that the update interval of the resizing policies changes their
+results the most.
+
+\paragraph{Costs.} The costs were measured with up to 15 runs sharing the node, and Pin's fixed start-up cost weighs heavily on
+runs of a few seconds.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+An exact footprint is worth most to a scheduler on disaggregated memory as a curve over the job's run, and the gain comes from
+letting jobs with peaks at different times share memory: on our corpus and streams, the exact curve gives a 26.4$\times$
+shorter mean response time than the user's request and needs 5.0\,TB where the request needs 11.0\,TB, and on the Lisa trace it
+completes 18 to 31\% more jobs than the exact peak once memory is scarce. None of the existing sources recovers that gain. The
+heap profilers are wrong by large factors on the programs that map their memory or never touch what they allocate, and no
+margin covers those programs without over-reserving the rest. Of three published policies, dynamic provisioning comes close
+to the exact peak only by reading each job's coming use, Pond saves local DRAM but not total memory, and KS+ cannot
+extrapolate from inputs far from the job's. The exact curve itself costs 227 times the run. A footprint estimator for a
+scheduler must therefore report a curve on the run's own time axis, count all the memory a program touches and nothing it
+does not, hold with a small margin across programs, be known before the job starts, and cost close to the run. We present a
+tool that targets these requirements in companion work~\cite{memprint}.
+
+\appendix
+
+\section{Sensitivity to the simulator's assumptions}
+\label{sec:sensitivity}
+
+\begin{table}[h]
+\centering
+\caption{Mean response time (minutes) at offered load 0.8 as the remote-memory slowdown $\beta$ varies (default 0.5),
+calibrated 90\% margins, mean of three seeds.}
+\resizebox{\textwidth}{!}{\input{tables_motivation/sens_beta.tex}}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Mean response time (minutes) at offered load 0.8 as the pool varies (default 1\,TB).}
+\resizebox{\textwidth}{!}{\input{tables_motivation/sens_pool.tex}}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Mean response time (minutes) at offered load 0.8 as the update interval of the policies that resize a running job
+varies (default 5 minutes).}
+\input{tables_motivation/sens_interval.tex}
+\end{table}
+
+We varied each of the simulator's assumptions alone, at offered load 0.8. The remote-memory slowdown $\beta$ changes every
+oracle's response time, from 58 to 390 minutes for the exact curve between $\beta = 0.1$ and 2, but not their order. The pool
+decides how much memory is contended: with 4\,TB most oracles come within a few minutes of the runtimes, and with 512\,GB the
+differences grow (the exact curve 565 minutes, the exact peak 1{,}499, the request 4{,}441). The update interval matters most
+for the policies that resize a running job: dynamic provisioning gives 157 minutes with an update every minute and 1{,}330
+with one every 30 minutes under the bytes-touched truth, and its look-back variant 182 to 1{,}657 minutes.
+
+\section{Reproducing the baselines' own results}
+\label{sec:repro}
+
+\begin{table}[h]
+\centering
+\caption{KS+'s memory wastage reduction against its baselines, as the KS+ paper reports it and as the authors' code gives it
+on their traces, for 25, 50 and 75\% training data.}
+\input{tables_motivation/repro_ksplus.tex}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{DRAM saved by pooling a fixed share of every virtual machine's memory, in percent, against the pool size in CPU
+sockets, from the public Azure packing trace, with each server provisioned for its own peak or every server for the
+cluster's largest peak; and Pond's Figure 3 at a 50\% share.}
+\input{tables_motivation/repro_pond.tex}
+\end{table}
+
+We reran each baseline's own evaluation where its data or a public substitute exists. The authors of KS+ publish their
+simulation and traces, and every reduction their paper reports is reproduced within 2 percentage points. Zacarias et al.\
+publish an artifact with their Slurm simulator, trace generation and a test set of nine simulations with output checksums;
+built and run as its appendix prescribes, with its R packages taken from a CRAN snapshot of the artifact's date, all nine
+outputs match the authors' checksums bit for bit. Pond's results rest on Azure's internal telemetry and its artifact holds
+none of its policies, so only its Figure 3, the DRAM that pooling saves, can be rebuilt, from Azure's public packing trace.
+Provisioning each server for its own peak reproduces the figure's shape (savings rising with pool size, more slowly beyond
+16 sockets) at a sixth of its magnitude, and provisioning every server for the cluster's largest peak reproduces its magnitude
+without its shape; the public trace lacks the server types and placements Pond used.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

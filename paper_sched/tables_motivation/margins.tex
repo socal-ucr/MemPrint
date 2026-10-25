@@ -1,0 +1,18 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{Truth = bytes touched} & \multicolumn{3}{c}{Truth = RSS} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Oracle & Median & 90th pct. & Max & Median & 90th pct. & Max \\
+\midrule
+Massif curve & 0 & 52 & 534 & 2 & 56 & 689 \\
+Massif pages-as-heap & 0 & 28 & 62 & 0 & 30 & 63 \\
+Massif curve, ms clock & 0 & 100 & 535 & 20 & 71 & 690 \\
+Massif pages-as-heap, ms clock & 0 & 65 & 78 & 0 & 52 & 76 \\
+heaptrack curve & 1 & 326 & 593 & 2 & 376 & 747 \\
+DHAT peak & 0 & 6 & 546 & 2 & 24 & 706 \\
+DHAT curve (3 points) & 36 & 90 & 580 & 53 & 99 & 739 \\
+DHAT hold-then-decay & 21 & 90 & 580 & 39 & 99 & 739 \\
+gperftools peak & 0 & 233 & 554 & 2 & 290 & 716 \\
+RSS peak (earlier run) & 0 & 1 & 7 & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}
