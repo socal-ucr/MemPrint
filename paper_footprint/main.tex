@@ -1,0 +1,272 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+\newcommand{\memprint}{MemPrint}
+\newcommand{\secref}[1]{Section~\ref{#1}}
+\newcommand{\figref}[1]{Figure~\ref{#1}}
+\newcommand{\tabref}[1]{Table~\ref{#1}}
+\newcommand{\term}[1]{\emph{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{What Exact Memory Footprints of GPU Operations Save\\in Copies Between Host and Device}
+\author{Nafis Mustakin\\University of California, Riverside}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\input{numbers}
+
+\begin{abstract}
+A CUDA program copies its data to the GPU, runs kernels on it, and copies results back. A runtime system that
+knew exactly which bytes each operation reads and writes, its \term{footprint}, could leave out of a copy the bytes
+no later operation reads, and the bytes the GPU has not changed. In graph programs and other irregular code the
+footprint of a kernel depends on values in memory, so a compiler cannot determine it, and prior systems that use
+footprints either restrict themselves to regular access patterns or learn them from earlier runs. We measure what
+exact footprints are worth for copies, using the footprints that the \memprint{} hybrid interpreter computes before
+the program runs on the GPU, and the footprints an NVBit tool records on an NVIDIA A30 as an oracle. We first show
+that the footprint of one interpreted thread order is not safe to act on. In two GraphBIG programs whose result
+depends on thread order, the lockstep footprint would leave out bytes that the GPU run needs. We therefore compute
+the footprint over every thread order the interpreter runs, and count a write as overwriting a copied value only if
+it happens in every legal order. With these footprints no program loses a needed byte. On \numSmallPrograms{} small
+and \numLargePrograms{} large benchmarks from Rodinia, GraphBIG and PolyBench-GPU, \numSmallTrHtoDUnneeded{} and
+\numLargeTrHtoDUnneeded{} of the bytes copied to the device are never read before they are overwritten. Under a copy
+cost fitted to the A30, leaving these bytes out speeds up the GPU operations by a geometric mean of
+\numSmallTrGeo{}$\times$ and \numLargeTrGeo{}$\times$ with the oracle footprints, and saves up to \numLargeTrMax{}
+of the GPU operation time of \code{\numLargeTrMaxName{}}. With the interpreter's safe footprints, the speedups are
+\numSmallHyGeo{}$\times$ and \numLargeHyGeo{}$\times$. The savings come from a few programs, and the gap between
+the interpreter and the oracle comes from writes that happen only if a loaded value says so, which the interpreter
+cannot prove happen in every order.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+GPU programs spend a large share of their time on copies between host and device memory. On the benchmarks of this
+paper, copies take a median of \numSmallCopyShareMed{} of the time of all GPU operations on the small inputs and
+\numLargeCopyShareMed{} on the large ones. A copy moves a whole buffer, or a range of it, as the programmer wrote it,
+although the kernels that follow may read only part of what was copied, and a copy back to the host may return
+bytes that no kernel changed. A runtime system that knew each operation's \term{footprint}, the bytes it reads and
+writes, could copy less.
+
+However, the footprint of a kernel in irregular code is chosen by values in memory. A breadth-first search reads the
+neighbour list of each vertex in its frontier, so the bytes it reads depend on the graph. Static analyses of kernel
+indices, such as CODA~\cite{Kim2018CODA} and LADM~\cite{Khairy2020LADM}, compute the data each thread block
+accesses when its indices follow a stride, and CODA falls back to profiling or to interleaving the data across
+devices when they do not. Runtime systems for Unified Memory, such as SUV~\cite{B2024SUV}, decide placement per data structure,
+and MSched~\cite{Shen2025MSched} predicts a kernel's working set from its launch arguments, learned from earlier
+runs. Therefore, it is not known how much exact footprints of irregular kernels are worth.
+
+The \memprint{} hybrid interpreter computes exact footprints before the program runs on the GPU. It runs the
+program's host code natively and interprets each kernel on the real memory contents, so a loaded value, a branch on
+it and an address computed from it are known exactly. It runs every kernel under four thread orders, because the
+footprint of a kernel whose threads race through memory can depend on the order. We measure what its
+footprints save in copies between host and device, against the footprints that an NVBit~\cite{Villa2019NVBit} tool
+records on the GPU.
+
+In this work, we make the following contributions:
+\begin{itemize}
+\item We show that the footprint of one interpreted thread order is not safe to act on, because in two GraphBIG
+programs whose result depends on thread order, the lockstep footprint would leave bytes out of a copy that the GPU
+run needs (\secref{sec:union}).
+\item We define the footprint over every interpreted thread order, in which a write overwrites a copied value only
+if it happens in every legal order, and we compute it both during the interpreter's run and from the references
+it already records (\secref{sec:union}).
+\item We measure, on \numSmallPrograms{} small and \numLargePrograms{} large benchmarks, the bytes of each copy that
+no operation needs and the GPU time that leaving them out saves, for the traced footprints, the interpreter's
+footprint over every order, and its lockstep footprint (\secref{sec:eval}).
+\end{itemize}
+
+\section{Background}
+\label{sec:background}
+
+\paragraph{Operations and footprints.} A CUDA program issues a sequence of \term{operations} on the GPU: kernel
+launches, copies between host and device memory, and memory fills. We describe the footprint of an operation in
+units of 4 bytes of a device allocation: for each unit, whether the operation reads it and whether it writes it. A
+copy to the device writes the units it copies, and a copy to the host reads them.
+
+\paragraph{The hybrid interpreter.} The hybrid interpreter of \memprint{} compiles the program's host code against a
+stand-in CUDA runtime whose device memory is host memory, and runs it natively. When the host code launches a
+kernel, the interpreter runs all threads of the kernel at once as arrays, on the real contents of memory. It
+records, for each operation, the units it reads and writes. A reference is \term{certain} if it happens in the run,
+and \term{possible} if it may happen, for example through a pointer the interpreter could not place. Threads of a
+kernel can race through memory, for example when they lower a value with \code{atomicMin} or claim a slot of a
+worklist, and the result can then depend on the order in which the GPU runs them. The interpreter therefore runs
+each program under four thread orders. The first is \term{lockstep}, which runs all threads of a kernel together.
+In the other three, each block runs to completion before the next starts, in the order of block numbers, in
+reverse order, or in a random order. A unit is written \term{in every
+legal order} if a write to it is certain, and its address and the conditions under which it happens depend on no
+value loaded from memory.
+
+\paragraph{The traced footprints.} An NVBit tool records the units each operation of a GPU run reads and writes, on
+an NVIDIA A30. The traced footprints are exact for that run, and we use them as the oracle a footprint analysis
+cannot improve on.
+
+\section{Footprints over every thread order}
+\label{sec:union}
+
+The interpreter merges the dependences of its four thread orders, but before this work it wrote out the footprint
+of the lockstep run only. A runtime system that leaves bytes out of a copy needs a footprint that holds for every
+order, because the order in which the GPU runs a racing kernel is not known in advance. In
+\code{bfs-topo-atomic}, threads lower the level of each vertex with \code{atomicMin}, and which round lowers a level
+last depends on the order. Its lockstep footprint would leave out 4 bytes of a copy to the device that the traced
+run reads. In \code{connected-comp}, the number of rounds changes from run to run, and its lockstep footprint would
+leave out 4 bytes of a copy to the host that the traced run wrote.
+
+We define the footprint of an operation over every order as follows. First, we match the operations of each order
+to those of the lockstep run, from both ends of the sequence, as the interpreter does when it merges dependences.
+Second, a unit is read or written if some order reads or writes it in the matched operation. Third, a unit is
+\term{overwritten} only if every order that issues the operation writes it in every legal order, so that a later
+read sees this operation's value whatever the order. Fourth, an order that runs rounds the lockstep run does not
+have adds what those rounds touch to the lockstep run's kernels between the same matched operations, as possible
+references. The interpreter now writes this footprint during its run. For runs made before, we rebuild it from the
+per-block references that the interpreter already records for each order. On \code{gemm} and
+\code{bfs-topo-atomic}, the two give identical footprints.
+
+\section{What footprints save in copies}
+\label{sec:copies}
+
+We count, for each copy, the units it moves that no operation needs, from a footprint of every operation of the run.
+
+\paragraph{Copies to the device.} A unit that a copy to the device writes is \term{unread} if no later operation
+reads it before an operation overwrites it. A read of a unit and a write to it in one operation read the old value.
+A copy back to the host counts as a read, so a unit that the program copies in and straight back out is needed.
+
+\paragraph{Copies to the host.} A unit that a copy to the host reads is \term{unwritten} if no device operation
+wrote it since it was last copied in either direction, so that the host already has its value. This assumption
+holds only if the copy returns the unit to the host buffer it came from or went to last, which the footprints do
+not record, so the unwritten units are an upper bound on what a runtime system could leave out.
+
+\paragraph{Copy cost.} We model a copy as a fixed cost plus its bytes over a bandwidth, per direction, from all
+copies that Nsight Systems profiled in the benchmarks of both input sizes. The fixed cost is the median time of
+copies of 4~KB or less, and the bandwidth is the median over copies of 1~MB or more. A copy to the device costs
+\numCopyHtoDFixedUs{}~\textmu s plus \numCopyHtoDGBs{}~GB/s, and a copy to the host \numCopyDtoHFixedUs{}~\textmu s plus
+\numCopyDtoHGBs{}~GB/s. A copy that leaves out some units moves each contiguous range of the needed units as a copy
+of its own, and saves the share of the measured copy time that the model gives, or nothing if the ranges cost
+more than the whole copy. We report the time saved as a share of the time of all GPU operations of the program,
+issued one after another.
+
+\section{Evaluation}
+\label{sec:eval}
+
+\paragraph{Setup.} We use the benchmarks, inputs, traces and interpreter runs of \memprint{}: 8 programs from
+Rodinia, 10 from GraphBIG and 20 from PolyBench-GPU, unmodified, on small inputs and on larger ones (GraphBIG on a
+generated graph of 8{,}192 vertices). GraphBIG's \code{betweenness} has no run on the large input. On the small
+input, PolyBench's \code{corr} and \code{covar} launch most of their kernels with no thread block, because the grid
+size is the input size divided by 256, so their kernels do not run and their copies to the host return what was
+copied in. We leave both out of the small input. For each program we compare three footprints: the traced
+footprints, the interpreter's footprint over every order (\secref{sec:union}), and its lockstep footprint. A
+footprint is \term{unsafe} on a program if it marks a unit as not needed that the traced run needs.
+
+\begin{table*}[tbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\input{tables/summary}
+\caption{Copies between host and device with each footprint: the share of the bytes copied to the device that are
+unread and of the bytes copied to the host that are unwritten, the geometric-mean speedup of all GPU operations from
+leaving them out, the programs that save at least 1\% of their GPU operation time, and the programs on which the
+footprint marks a unit as not needed that the traced run needs.}
+\label{tab:summary}
+\end{table*}
+
+\paragraph{Results.} \tabref{tab:summary} summarises the results. \textit{With its footprint over every order, the
+interpreter never leaves out a unit that the GPU run needs, on either input.} Its lockstep footprint is unsafe on
+\numSmallLockUnsafeProgs{} programs on each input. The bytes copied to the device that are never read are
+\numSmallTrHtoDUnneeded{} of all such bytes on the small inputs and \numLargeTrHtoDUnneeded{} on the large ones, and
+the interpreter finds almost all of them (\numSmallHyHtoDUnneeded{} and \numLargeHyHtoDUnneeded{}). Leaving out the
+unneeded units speeds up the GPU operations by a geometric mean of \numSmallTrGeo{}$\times$ and
+\numLargeTrGeo{}$\times$ with the traced footprints, and by \numSmallHyGeo{}$\times$ and \numLargeHyGeo{}$\times$
+with the interpreter's footprint over every order.
+
+\begin{table*}[tbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\input{tables/programs}
+\caption{The programs whose traced footprints save at least 1\% of their GPU operation time on either input: the
+share of that time spent in copies, and the share saved with each footprint (\%).}
+\label{tab:programs}
+\end{table*}
+
+\paragraph{Where the savings come from.} The savings are concentrated in a few programs (\tabref{tab:programs}).
+In GraphBIG's \code{kcore}, no operation of the run reads most of the edge array the program copies to the
+device, so \numLargeKcoreHtoDUnneeded{} of the bytes copied to the device on the large input are never read, and
+leaving them out saves \numLargeKcoreTr{} of its GPU operation time, with the interpreter's footprints as with the
+traced ones. In PolyBench's \code{2mm}, \code{3mm} and \code{jacobi1d}, the program copies buffers to the device
+that a kernel overwrites before any kernel reads them. In \code{jacobi2d} and Rodinia's \code{nw}, a kernel also
+overwrites about half of the copied bytes before reading them, but these bytes lie in 998 and 128 separate ranges
+on the small input, so the fixed cost of copying each needed range between them outweighs the bytes saved, and the
+model saves nothing.
+
+\paragraph{The cost of safety.} The interpreter's footprint over every order saves less than the traced footprints
+in the GraphBIG programs and in Rodinia's \code{bfs} (\numSmallBfsHy{} against \numSmallBfsTr{} on the small input).
+In these programs a kernel writes a vertex's level or flag only if a loaded value says so, so the interpreter cannot
+prove that the write happens in every legal order, and it keeps the copied value as possibly read. The lockstep
+footprint reaches the traced savings on these programs, because the lockstep run does write the units, but the same
+footprint is unsafe on \code{bfs-topo-atomic} and \code{connected-comp}, where the order changes which units a
+kernel writes.
+
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Static footprints of thread blocks.} CODA~\cite{Kim2018CODA} inspects the index computations of a kernel
+and computes the stride between the data of consecutive thread blocks at launch, to place each block's data in the
+memory of the GPU that runs it. LADM~\cite{Khairy2020LADM} extends this index analysis to hierarchical access
+patterns and jointly places data and schedules thread blocks on systems of several GPUs. Unlike our footprints,
+both describe the accesses of a thread block by a stride, and do not determine accesses whose indices are loaded
+from memory.
+
+\paragraph{Footprints for Unified Memory.} SUV~\cite{B2024SUV} uses compiler-inferred access information to place
+data structures in host or device memory and to prefetch at kernel boundaries, at the granularity of data
+structures rather than bytes. MSched~\cite{Shen2025MSched} predicts the pages a kernel will touch from its launch
+arguments, from the history of earlier runs, and migrates them ahead of time when several programs share a GPU.
+ETC~\cite{Li2019ETC} manages memory oversubscription without footprints, by overlapping eviction with execution and
+by reducing thrashing, and finds that irregular programs suffer most from it.
+
+\paragraph{Dependences between operations.} Wireframe~\cite{Abdolrashidi2017Wireframe} executes a graph of
+dependences between thread blocks on the GPU. Footprints of the kind we use here are also what determines the
+dependences between GPU operations, which \memprint{} computes from the same interpreter runs.
+
+\section{Limitations}
+\label{sec:limits}
+
+A limitation of the unwritten units is that the footprints do not record which host buffer a copy to the host goes
+to, which means that the savings on copies to the host assume the copy returns each unit to the buffer it last came
+from or went to. A limitation of the traced footprints as an oracle is that they come from one GPU run, which means
+that a footprint can be unsafe for another run of a racing program even where it is safe against this one. A
+limitation of the footprint we rebuild for runs made before this work is that a copy that only another order's
+extra rounds issue is not in the per-block references, which means that it is left out of that footprint. The
+footprint the interpreter now writes during its run includes such a copy. A limitation of the copy model is that it charges
+each needed range a fixed cost and does not model copies of strided ranges, which means that it may undercount the
+savings on programs whose unneeded units are scattered.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+Exact footprints of GPU operations show that \numSmallTrHtoDUnneeded{} of the bytes the benchmarks copy to the device
+on the small inputs, and \numLargeTrHtoDUnneeded{} on the large ones, are never read, and leaving them out saves
+up to \numLargeTrMax{} of the GPU operation time of one program but little in most. The interpreter's footprints are
+safe to act on only when taken over every thread order, at a cost of part of the savings in programs whose writes
+depend on loaded values. We leave for future work the use of the same footprints to prefetch and evict pages of
+Unified Memory when the program's data does not fit in device memory, where irregular programs lose the most to
+demand paging~\cite{Li2019ETC}.
+
+% TODO: cite the MemPrint paper (paper_gpu) once it has a venue or a report number.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

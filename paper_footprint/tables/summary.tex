@@ -1,0 +1,11 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Small inputs (36 programs)} & \multicolumn{5}{c}{Large inputs (37 programs)} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Footprints & \shortstack{HtoD\\unread} & \shortstack{DtoH\\unwritten} & Speedup & \shortstack{$\geq$1\%\\programs} & Unsafe & \shortstack{HtoD\\unread} & \shortstack{DtoH\\unwritten} & Speedup & \shortstack{$\geq$1\%\\programs} & Unsafe \\
+\midrule
+Traced & 22.1\% & 1.1\% & 1.018 & 12 & -- & 4.5\% & 2.5\% & 1.056 & 9 & -- \\
+Interpreter, all orders & 21.9\% & 1.1\% & 1.008 & 8 & 0 & 4.4\% & 2.5\% & 1.052 & 4 & 0 \\
+Interpreter, lockstep & 22.1\% & 1.1\% & 1.017 & 12 & 2 & 4.5\% & 2.5\% & 1.055 & 9 & 2 \\
+\bottomrule
+\end{tabular}
