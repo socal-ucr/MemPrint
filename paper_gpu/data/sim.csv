@@ -56,8 +56,8 @@ graphbig-bfs-topo-thread-centric,GraphBIG,truth,20,157.06,1.0548,0,0.0,0,54
 graphbig-bfs-topo-atomic,GraphBIG,sequential,17,303.26,1.0,0,0.0,30,16
 graphbig-bfs-topo-atomic,GraphBIG,buffer,17,294.18,1.0309,0,0.0,0,81
 graphbig-bfs-topo-atomic,GraphBIG,buffer-rw,17,291.49,1.0404,0,0.0,0,74
-graphbig-bfs-topo-atomic,GraphBIG,hybrid,17,299.68,1.012,0,0.0,0,48
-graphbig-bfs-topo-atomic,GraphBIG,full,17,299.68,1.012,0,0.0,0,48
+graphbig-bfs-topo-atomic,GraphBIG,hybrid,17,299.68,1.012,0,0.0,0,47
+graphbig-bfs-topo-atomic,GraphBIG,full,17,299.68,1.012,0,0.0,0,47
 graphbig-bfs-topo-atomic,GraphBIG,truth,17,291.49,1.0404,0,0.0,0,39
 graphbig-bfs-data-thread-centric,GraphBIG,sequential,24,247.94,1.0,0,0.0,48,23
 graphbig-bfs-data-thread-centric,GraphBIG,buffer,24,236.74,1.0473,0,0.0,0,144

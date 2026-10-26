@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from bench_tables import small_only_running  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
 
@@ -136,6 +138,8 @@ def fig_sim(out):
     fig, axes = plt.subplots(len(runs), 1, figsize=(6.8, 2.8 * len(runs)), squeeze=False)
     for ax, (title, path) in zip(axes[:, 0], runs):
         d = pd.read_csv(path)
+        if title == "Small inputs":
+            d = small_only_running(d)
         p = d.pivot(index="name", columns="policy", values="speedup")
         p = p[(p[[q for q, _, _ in policies if q in p]].max(axis=1) > 1.005)]   # programs that gain at all
         order = p["truth-block"].sort_values(ascending=False).index

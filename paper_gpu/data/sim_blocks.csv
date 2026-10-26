@@ -74,10 +74,10 @@ graphbig-bfs-topo-thread-centric,GraphBIG,truth-block,20,work,20,157.06,1.0548,0
 graphbig-bfs-topo-atomic,GraphBIG,sequential,17,work,17,303.26,1.0,0,0.0,16,0
 graphbig-bfs-topo-atomic,GraphBIG,buffer,17,work,17,294.18,1.0309,0,0.0,81,0
 graphbig-bfs-topo-atomic,GraphBIG,buffer-rw,17,work,17,291.49,1.0404,0,0.0,74,0
-graphbig-bfs-topo-atomic,GraphBIG,hybrid,17,work,17,299.68,1.012,0,0.0,48,0
-graphbig-bfs-topo-atomic,GraphBIG,full,17,work,17,299.68,1.012,0,0.0,48,0
+graphbig-bfs-topo-atomic,GraphBIG,hybrid,17,work,17,299.68,1.012,0,0.0,47,0
+graphbig-bfs-topo-atomic,GraphBIG,full,17,work,17,299.68,1.012,0,0.0,47,0
 graphbig-bfs-topo-atomic,GraphBIG,truth,17,work,17,291.49,1.0404,0,0.0,39,0
-graphbig-bfs-topo-atomic,GraphBIG,hybrid-block,17,work,17,299.68,1.012,0,0.0,45,3
+graphbig-bfs-topo-atomic,GraphBIG,hybrid-block,17,work,17,299.68,1.012,0,0.0,44,3
 graphbig-bfs-topo-atomic,GraphBIG,truth-block,17,work,17,291.49,1.0404,0,0.0,0,39
 graphbig-bfs-data-thread-centric,GraphBIG,sequential,24,work,24,247.94,1.0,0,0.0,23,0
 graphbig-bfs-data-thread-centric,GraphBIG,buffer,24,work,24,236.74,1.0473,0,0.0,144,0

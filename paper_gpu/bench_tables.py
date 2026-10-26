@@ -11,6 +11,14 @@ OUT = os.path.join(HERE, "tables")
 SUITES = ["Rodinia", "GraphBIG", "PolyBench-GPU"]
 INTERPRETERS = (("hybrid", "Hybrid"), ("full", "Whole program"))
 ALONE = "graphbig-betweenness"   # the hybrid interpreter's run of it: alone, with a ten-hour limit
+# On the small inputs most kernels of these launch no block (grid = input size / 256 = 0), so they do not run:
+# left out of every small-input result (the files keep them).
+SMALL_EXCLUDED = {"polybench-corr", "polybench-covar"}
+
+
+def small_only_running(d, col="name"):
+    """A small-input frame without SMALL_EXCLUDED."""
+    return d[~d[col].isin(SMALL_EXCLUDED)].reset_index(drop=True)
 
 
 def tt(name):
@@ -20,7 +28,7 @@ def tt(name):
 def frame():
     """benchmarks.csv with, per interpreter, its dependences against the trace: certain on the GPU (ctp) or not
     (cfp), possible on the GPU (pyes) or not (pno), and the GPU's dependences it did not report (fn)."""
-    d = pd.read_csv(os.path.join(DATA, "benchmarks.csv"))
+    d = small_only_running(pd.read_csv(os.path.join(DATA, "benchmarks.csv")))
     for w, _ in INTERPRETERS:
         T, C, P = d[f"{w}_truth"], d[f"{w}_must"], d[f"{w}_may"]
         d[f"{w}_ctp"] = (d[f"{w}_must_precision"] * C).round()
@@ -90,7 +98,8 @@ def per_benchmark_table():
 def numbers():
     """Macros for the text: \\numBenchHy... and \\numBenchFu... (hybrid and whole-program interpreter)."""
     d = frame()
-    n = {"BenchTotal": len(d), "BenchNvbitLo": f"{(d.nvbit_s / d.native_s).min():.1f}",
+    n = {"BenchTotal": len(d) + len(SMALL_EXCLUDED), "BenchSmallExcluded": len(SMALL_EXCLUDED),
+         "BenchNvbitLo": f"{(d.nvbit_s / d.native_s).min():.1f}",
          "BenchNvbitHi": f"{(d.nvbit_s / d.native_s).max():.0f}",
          "BenchFullHostWarn": int(d.get("full_host_warning", pd.Series(dtype=float)).fillna(0).sum())}
     for w, k in (("hybrid", "Hy"), ("full", "Fu")):

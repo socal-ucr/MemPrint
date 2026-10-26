@@ -119,7 +119,7 @@ and a scoring method that compares two runs even when they issue a different num
 (\secref{sec:truth}).
 \item We evaluate both interpreters on \numPrograms{} test programs and on \numBenchTotal{} unmodified benchmarks on
 an NVIDIA A30. The hybrid interpreter misses no dependence and reports no wrong certain dependence on
-all \numBenchHyDone{} benchmarks (\secref{sec:eval}).
+all \numBenchHyDone{} benchmarks whose kernels run on our inputs (\secref{sec:eval}).
 \item We simulate the benchmarks on a model of the A30 that runs operations, and their thread blocks, as soon as
 their dependences allow. With the hybrid interpreter's dependences refined to blocks, they run \numSimSmallHyBlk{}
 times as fast as in issue order on the small inputs and \numSimLargeHyBlk{} on larger ones, within a fraction of a
@@ -709,7 +709,9 @@ interpreters fare on code we did not write, we ran them on \numBenchTotal{} unmo
 \code{pathfinder}, \code{hotspot} with generated temperature and power files, \code{lud}, \code{backprop} and
 \code{srad}), the 10 GPU programs of GraphBIG~\cite{Nai2015GraphBIG} on its small social-network graph (1{,}000
 vertices, 29{,}790 edges), and 20 programs of PolyBench-GPU~\cite{Grauer2012PolyBenchGPU}. Inputs were chosen small
-enough for the tracer. The sources were not changed, except where CUDA 13 no longer has an API they use:
+enough for the tracer. On them, PolyBench's \code{corr} and \code{covar} launch most of their kernels with no thread
+block, because the grid size is the problem size divided by 256, so these kernels do not run. We leave both programs
+out of every result on these inputs. The sources were not changed, except where CUDA 13 no longer has an API they use:
 \code{cudaThreadSynchronize} is defined as \code{cudaDeviceSynchronize}, two \code{printf} calls of
 \code{gaussian} that print removed device properties are commented out, and PolyBench's problem sizes are set in its
 headers. Rodinia's \code{kmeans} is left out because it uses texture references, which CUDA 13 removed. Each program
@@ -894,8 +896,8 @@ from a loop to a later segment, the round counted from the loop's end; into a lo
 set of rounds or distances that runs without a gap up to the end of the learning input's loop is taken to go on in
 a longer loop. An operation the learned structure does not account for, because the other input issues another
 sequence, waits for everything before it, and so does a launch whose counterpart ran no thread on the learning
-input (PolyBench's \code{corr} and \code{covar} launch kernels with an invalid configuration on the small input,
-so nothing is learned about them there). We learned on each of the two input sets of \secref{sec:eval-sim} and
+input. PolyBench's \code{corr} and \code{covar}, whose kernels do not run on the small input
+(\secref{sec:eval-bench}), are left out in both directions. We learned on each of the two input sets of \secref{sec:eval-sim} and
 applied the patterns to the other, and scored and simulated the result against the traced run like the other
 policies (\tabref{tab:transfer}).
 
@@ -912,7 +914,7 @@ interpreter run on the input itself, and the traced dependences.}
 \label{tab:transfer}
 \end{table*}
 
-The patterns predict every dependence of \numTrSmallLargeNoMiss{} of the 37 programs learned on the small inputs
+The patterns predict every dependence of \numTrSmallLargeNoMiss{} of the \numTrPrograms{} programs learned on the small inputs
 and applied to the large ones, and of \numTrLargeSmallNoMiss{} the other way round; most of the missed dependences
 are ordered anyway through others, and there is \numTrLargeSmallRb{} rollback in all, in GraphBIG's
 \code{triangle-count}. They do not, however, beat the oracle that knows which buffers each operation writes: the

@@ -6,6 +6,8 @@ import os
 import numpy as np
 import pandas as pd
 
+from bench_tables import small_only_running
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
 OUT = os.path.join(HERE, "tables")
@@ -23,8 +25,15 @@ def geo(x):
 
 
 def load(name):
+    """A data file; a small-input file without bench_tables.SMALL_EXCLUDED, and transfer.csv without them in
+    either direction (each direction uses the small run)."""
     path = os.path.join(DATA, name)
-    return pd.read_csv(path) if os.path.exists(path) else None
+    if not os.path.exists(path):
+        return None
+    d = pd.read_csv(path)
+    if "name" in d and ("_large" not in name or name == "transfer.csv"):
+        d = small_only_running(d)
+    return d
 
 
 def summary_table():

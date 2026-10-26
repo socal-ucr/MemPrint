@@ -81,8 +81,23 @@ def interp_edges(interp_dir, name):
     return events, edges
 
 
+def _direction(e):
+    """A copy's direction from its name (the interpreter names symbol copies by their API, the trace by
+    direction); None if the name does not say."""
+    for d, keys in (("h2d", ("H2D", "ToSymbol")), ("d2h", ("D2H", "FromSymbol")), ("d2d", ("D2D",))):
+        if any(k in e["name"] for k in keys):
+            return d
+    return None
+
+
 def _same(x, y):
-    return x["kind"] == y["kind"] and (x["kind"] != "kernel" or x["name"] in y["name"])
+    """One operation in two runs: a kernel by name, a copy only with a copy in the same direction."""
+    if x["kind"] != y["kind"]:
+        return False
+    if x["kind"] == "kernel":
+        return x["name"] in y["name"]
+    a, b = _direction(x), _direction(y)
+    return a is None or b is None or a == b
 
 
 def aligned(interp_events, truth_events):
