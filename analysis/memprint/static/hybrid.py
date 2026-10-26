@@ -37,7 +37,7 @@ from . import interp_cuda as ic
 from .clangast import K
 from .interp import Loc, Obj, Ptr, Real, SENTINEL, UNK, _key
 from .interp_cpp import _referee
-from .kdeps import R, W, Tracker, merge_schedules, write
+from .kdeps import R, W, Tracker, merge_schedules, touch_footprint, union_footprint, write
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHIM = os.path.join(HERE, "..", "..", "..", "gpu", "hybrid", "libkdeps_cudart.so")
@@ -741,6 +741,8 @@ def _several(args, argv):
             collect(job)
     matched = merge_schedules(trackers)
     ev_path, edge_path, rows = write(args.out_dir, name, trackers[0])
+    if trackers[0].access is not None and all(t.touch is not None for t in trackers):
+        write_access_all(args.out_dir, name, trackers)
     if oob:
         print(f"{name}: {len(oob)} places reference past the end of a device buffer (possible references to "
               f"every buffer): " + ", ".join(f"{k} x{v}" for k, v in sorted(oob.items(), key=lambda kv: -kv[1])[:5]),
@@ -751,6 +753,20 @@ def _several(args, argv):
           f"{time.time() - start:.1f} s", flush=True)
     print(f"  {ev_path}\n  {edge_path}", flush=True)
     return 0 if not failures else 1
+
+
+def write_access_all(out_dir, name, trackers):
+    """OUT_DIR/NAME_access_all.csv: each event's footprint over every schedule's run (kdeps.union_footprint),
+    where NAME_access.csv has the first run's only."""
+    t0 = trackers[0]
+    sizes = {int(r["alloc"]): max(int(r["bytes"]) + t0.unit - 1, t0.unit) // t0.unit
+             for r in t0.objects.values() if r.get("alloc", "") != ""}
+    runs = [([(e["kind"], e["name"], e["site"]) for e in t.events], touch_footprint(t)) for t in trackers]
+    path = os.path.join(out_dir, f"{name}_access_all.csv")
+    with open(path, "w", newline="") as f:
+        f.write("event,alloc,unit_lo,unit_hi,bits\n")
+        f.writelines(",".join(map(str, r)) + "\n" for r in union_footprint(runs, sizes))
+    return path
 
 
 def _unity(sources, out):

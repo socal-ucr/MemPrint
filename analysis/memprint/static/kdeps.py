@@ -316,6 +316,83 @@ def merge_schedules(trackers):
 
 # ---------------------------------------------------------------- what other schedules could do
 
+def union_footprint(runs, sizes):
+    """Each event's footprint over the runs of one program under several thread schedules, as the first run's
+    events: rows (event, alloc, unit_lo, unit_hi, bits) with bits 1 (read in some run), 2 (written in some run,
+    certainly or possibly) and 4 (written in every run that issues the event, certainly and in every legal
+    schedule, so a later read sees this event's value). runs: [(event signatures, {event: {alloc: (read, written,
+    killed)}} as bool arrays over units)], the first run first; sizes: {alloc: units}. Events are matched as in
+    merge_schedules; what an event another run has and the first has not touched (a round the first did not
+    run) goes to the first run's kernels in the same gap between matched events, or to the next one after it
+    (a copy keeps its own units), never as a certain write."""
+    base_sig, base = runs[0]
+    kernels = [i for i, s in enumerate(base_sig) if s[0] == "kernel"]
+    acc = {}                                                           # (event, alloc) -> [read, written, killed]
+
+    def add(e, a, rd, wr, kill, first):
+        n = sizes.get(a)
+        if n is None:
+            return
+        cur = acc.get((e, a))
+        if cur is None:
+            cur = acc[(e, a)] = [np.zeros(n, bool), np.zeros(n, bool), np.ones(n, bool) if first else None]
+        k = min(n, len(rd))
+        cur[0][:k] |= rd[:k]
+        cur[1][:k] |= wr[:k]
+        if cur[2] is None:                                             # another run's event the first lacks
+            cur[2] = np.zeros(n, bool)
+        elif kill is None:
+            cur[2][:] = False
+        else:
+            kk = np.zeros(n, bool)
+            kk[:k] = kill[:k]
+            cur[2] &= kk
+
+    for e, per in base.items():
+        for a, (rd, wr, kill) in per.items():
+            add(e, a, rd, wr, kill, True)
+    for sig, fp in runs[1:]:
+        m = align_ends(sig, base_sig)
+        matched = sorted(m)
+        for e, per in fp.items():
+            if e in m:
+                targets, kill_ok = [m[e]], True
+            else:
+                before = max((i for i in matched if i < e), default=None)
+                after = min((i for i in matched if i > e), default=None)
+                lo = m[before] + 1 if before is not None else 0
+                hi = m[after] if after is not None else len(base_sig)
+                targets = [i for i in kernels if lo <= i < hi] or [i for i in kernels if i >= lo][:1] or kernels[-1:]
+                kill_ok = False
+            for t in targets:
+                for a, (rd, wr, kill) in per.items():
+                    add(t, a, rd, wr, kill if kill_ok else None, False)
+    for (e, a), (rd, wr, kill) in acc.items():                         # an event of the first run another run
+        if e not in base or a not in base[e]:                          # had no match for: no certain write
+            kill[:] = False
+    rows = []
+    for (e, a), (rd, wr, kill) in sorted(acc.items()):
+        bits = rd.astype(np.uint8) | (wr.astype(np.uint8) << 1) | ((wr & kill).astype(np.uint8) << 2)
+        cuts = np.flatnonzero(np.diff(bits)) + 1
+        for lo, hi in zip(np.r_[0, cuts], np.r_[cuts, len(bits)]):
+            if bits[lo]:
+                rows.append((e, a, int(lo), int(hi), int(bits[lo])))
+    return rows
+
+
+def touch_footprint(tracker):
+    """A run's footprint for union_footprint from Tracker.keep_touch: {event: {alloc: (read, written, killed)}}."""
+    alloc = {row["name"]: row["alloc"] for row in tracker.objects.values() if row.get("alloc", "") != ""}
+    out = {}
+    for e, per in (tracker.touch or {}).items():
+        for name, entry in per.items():
+            if name in alloc:
+                rd, wr = _unpack(entry)
+                kill = np.unpackbits(entry[3])[:entry[2]].astype(bool)
+                out.setdefault(e, {})[int(alloc[name])] = (rd, wr, kill)
+    return out
+
+
 def _unpack(entry):
     r, w, n = entry[:3]
     return np.unpackbits(r)[:n].astype(bool), np.unpackbits(w)[:n].astype(bool)

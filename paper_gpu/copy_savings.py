@@ -3,7 +3,9 @@
     [PAPER_GPU_SIZE=large] python paper_gpu/copy_savings.py [--only NAME,...]
 
 Per benchmark of benchmarks.py with a traced run (data/bench*/NAME/truth) and a hybrid run, from the units each
-operation read (bit 1) and wrote (bit 2) in truth_access.csv and the hybrid interpreter's NAME_access.csv:
+operation read (bit 1) and wrote (bit 2) in truth_access.csv, and from the hybrid interpreter's footprint over
+its four schedules (NAME_access_all.csv: bit 4, written for certain in every schedule, is what overwrites a
+copied value) and, for comparison, its lockstep run's alone (NAME_access.csv, "_lock" columns):
 
     host to device   a copied unit is unneeded if no later operation reads it before something overwrites it
                      (the copy could leave it out)
@@ -11,11 +13,13 @@ operation read (bit 1) and wrote (bit 2) in truth_access.csv and the hybrid inte
                      way (the host already has its value, if the copy goes to the buffer it came from or went
                      to; the data does not say, so this is an upper bound)
 
-The traced run's footprints give what an oracle saves; the interpreter's (its lockstep run) what it saves, and
-the units it would leave out that the traced run needs (unsafe). A copy's time is modelled per direction from the
-profiled copies of both input sizes (sim_ops.csv) as a fixed cost (the median of copies of 4 KB or less) plus bytes over a bandwidth
-(the median over copies of 1 MB or more); leaving out part of a copy costs one fixed cost per contiguous run of
-needed units, and saves that share of the copy's measured time, never less than nothing.
+The traced run's footprints give what an oracle saves; the interpreter's what it saves, and the units it would
+leave out that the traced run needs (unsafe). Events are matched as kdeps.align_ends does, a copy only with a
+copy in the same direction (kdeps_score's matching does not look at the direction). A copy's time is modelled
+per direction from the profiled copies of both input sizes (sim_ops.csv) as a fixed cost (the median of copies
+of 4 KB or less) plus bytes over a bandwidth (the median over copies of 1 MB or more); leaving out part of a copy
+costs one fixed cost per contiguous run of needed units, and saves that share of the copy's measured time, never
+less than nothing.
 Writes data/copy_savings{,_large}.csv.
 """
 
@@ -30,7 +34,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import benchmarks as B  # noqa: E402
-from simulate import ks  # noqa: E402
+from memprint.static.kdeps import align_ends  # noqa: E402
 
 DATA = HERE / "data"
 UNIT = 4
@@ -46,8 +50,10 @@ def accesses(path):
     return out
 
 
-def needed(events, acc, sizes):
-    """Per copy event: [direction, allocation per unit, unit, needed mask]."""
+def needed(events, acc, sizes, kill=2):
+    """Per copy event: [direction, allocation per unit, unit, needed mask]. A write overwrites a copied value
+    only with the bit kill (a possible write may not happen); any write (bit 2) makes the unit differ from
+    the host's."""
     owner = {a: np.full(n, -1, np.int64) for a, n in sizes.items()}        # the H2D copy whose value a unit holds
     pos = {a: np.zeros(n, np.int64) for a, n in sizes.items()}             # ... and its place among that copy's
     dirty = {a: np.zeros(n, bool) for a, n in sizes.items()}               # written on the device since copied
@@ -80,8 +86,9 @@ def needed(events, acc, sizes):
                 dirty[a][lo:hi] = False
         else:
             for a, lo, hi, bits in rows:
-                if bits & 2:
+                if bits & kill:
                     owner[a][lo:hi] = -1
+                if bits & 2:
                     dirty[a][lo:hi] = True
     return out
 
@@ -121,14 +128,16 @@ def program(name, model):
         return {"name": name, "status": f"profile has {len(ops)} operations, trace {len(tev)}"}
     truth = needed(tev, accesses(tdir / "truth_access.csv"), sizes)
     iev = [e for e in csv.DictReader(open(hdir / f"{name}_events.csv")) if e["kind"] != "host"]
-    interp = needed(iev, accesses(hdir / f"{name}_access.csv"), sizes)
-    to_interp = ks.truth_map(iev, tev)                                   # trace event -> interpreter event
+    interps = {"hy": needed(iev, accesses(hdir / f"{name}_access_all.csv"), sizes, kill=4),
+               "lock": needed(iev, accesses(hdir / f"{name}_access.csv"), sizes)}
+    same = lambda x, y: x["kind"] == y["kind"] and (x["name"] == y["name"] if x["kind"] != "kernel"  # noqa: E731
+                                                    else x["name"].split("(")[0] == y["name"].split("(")[0])
+    to_interp = {t: int(iev[i]["index"]) for t, i in align_ends(tev, iev, same).items()}   # trace -> interpreter
     row = {"name": name, "suite": B.BENCH[name]["suite"], "status": "ok",
            "ops_s": round(sum(int(o["dur_ns"]) for o in ops.values()) / 1e9, 9)}
     for d, op in (("h2d", H2D), ("d2h", D2H)):
         fixed, per_byte = model.get(op, (0.0, 0.0))
-        r = defaultdict(float, {k: 0 for k in ("n", "bytes", "s", "unneeded_bytes", "saved_s", "unsafe_bytes_hy",
-                                               "unneeded_bytes_hy", "saved_s_hy", "unmatched")})
+        r = defaultdict(float, {k: 0 for k in ("n", "bytes", "s", "unneeded_bytes", "saved_s", "unmatched")})
 
         def saved(dur, mask, allocs, units):
             """The measured copy time times the fitted share that leaving out the unneeded units saves."""
@@ -146,17 +155,17 @@ def program(name, model):
             r["unneeded_bytes"] += int(np.count_nonzero(~mask)) * UNIT
             r["saved_s"] += saved(dur, mask, allocs, units)
             j = to_interp.get(i)
-            if j is None or j not in interp:
+            if j is None or j not in interps["hy"]:
                 r["unmatched"] += 1
                 continue
-            _, ia, iu, im = interp[j]
-            ikey = set(zip(ia[im].tolist(), iu[im].tolist()))                # units the interpreter keeps
             need = set(zip(allocs[mask].tolist(), units[mask].tolist()))
-            unsafe = len(need - ikey)
-            r["unsafe_bytes_hy"] += unsafe * UNIT
-            r["unneeded_bytes_hy"] += int(np.count_nonzero(~im)) * UNIT
-            r["saved_s_hy"] += saved(dur, im, ia, iu)
-        row.update({f"{d}_{k}": round(v, 9) if k in ("s", "saved_s", "saved_s_hy") else int(v) for k, v in r.items()})
+            for v, interp in interps.items():
+                _, ia, iu, im = interp[j]
+                keep = set(zip(ia[im].tolist(), iu[im].tolist()))                # units it would copy
+                r[f"unsafe_bytes_{v}"] += len(need - keep) * UNIT                # needed units it would leave out
+                r[f"unneeded_bytes_{v}"] += int(np.count_nonzero(~im)) * UNIT
+                r[f"saved_s_{v}"] += saved(dur, im, ia, iu)
+        row.update({f"{d}_{k}": round(v, 9) if k == "s" or k.startswith("saved_s") else int(v) for k, v in r.items()})
     return row
 
 
@@ -166,7 +175,7 @@ def main():
     args = ap.parse_args()
     names = args.only.split(",") if args.only else [
         n for n in B.BENCH if (B.workdir(B.BENCH[n]) / "truth" / "truth_access.csv").exists()
-        and (B.workdir(B.BENCH[n]) / "hybrid" / f"{n}_access.csv").exists()
+        and (B.workdir(B.BENCH[n]) / "hybrid" / f"{n}_access_all.csv").exists()
         and (B.workdir(B.BENCH[n]) / "sim_ops.csv").exists()]
     model = fit()
     for k, (fixed, per_byte) in model.items():
