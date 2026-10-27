@@ -1,0 +1,1026 @@
+name,suite,page_kb,pages,largest_wave,waves,kernels,fraction,capacity,status,fault_us,policy,resident_ns,explicit_ns,time_ns,stall_ns,faults,to_device_bytes,to_host_bytes,unmatched_kernels
+rodinia-bfs,Rodinia,4,28,27,26,26,0.25,7,a wave needs 27 pages,,,,,,,,,,
+rodinia-bfs,Rodinia,4,28,27,26,26,0.375,11,a wave needs 27 pages,,,,,,,,,,
+rodinia-bfs,Rodinia,4,28,27,26,26,0.5,14,a wave needs 27 pages,,,,,,,,,,
+rodinia-bfs,Rodinia,4,28,27,26,26,0.625,18,a wave needs 27 pages,,,,,,,,,,
+rodinia-bfs,Rodinia,4,28,27,26,26,0.75,21,a wave needs 27 pages,,,,,,,,,,
+rodinia-bfs,Rodinia,4,28,27,26,26,0.875,25,a wave needs 27 pages,,,,,,,,,,
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,10.0,demand,121696,191297,442388,320692,39,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,10.0,buffer,121696,191297,285284,163588,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,10.0,hybrid,121696,191297,289252,167556,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,10.0,truth,121696,191297,289252,167556,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,25.0,demand,121696,191297,892388,770692,39,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,25.0,buffer,121696,191297,480284,358588,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,25.0,hybrid,121696,191297,484252,362556,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,25.0,truth,121696,191297,484252,362556,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,50.0,demand,121696,191297,1642388,1520692,39,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,50.0,buffer,121696,191297,805284,683588,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,50.0,hybrid,121696,191297,809252,687556,0,159744,65536,0
+rodinia-bfs,Rodinia,4,28,27,26,26,1.0,28,ok,50.0,truth,121696,191297,809252,687556,0,159744,65536,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,0.25,3,a wave needs 9 pages,,,,,,,,,,
+rodinia-gaussian,Rodinia,4,9,9,126,126,0.375,4,a wave needs 9 pages,,,,,,,,,,
+rodinia-gaussian,Rodinia,4,9,9,126,126,0.5,5,a wave needs 9 pages,,,,,,,,,,
+rodinia-gaussian,Rodinia,4,9,9,126,126,0.625,6,a wave needs 9 pages,,,,,,,,,,
+rodinia-gaussian,Rodinia,4,9,9,126,126,0.75,7,a wave needs 9 pages,,,,,,,,,,
+rodinia-gaussian,Rodinia,4,9,9,126,126,0.875,8,a wave needs 9 pages,,,,,,,,,,
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,10.0,demand,410562,428098,467762,57200,9,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,10.0,buffer,410562,428098,449746,39184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,10.0,hybrid,410562,428098,449746,39184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,10.0,truth,410562,428098,449746,39184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,25.0,demand,410562,428098,542762,132200,9,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,25.0,buffer,410562,428098,494746,84184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,25.0,hybrid,410562,428098,494746,84184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,25.0,truth,410562,428098,494746,84184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,50.0,demand,410562,428098,667762,257200,9,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,50.0,buffer,410562,428098,569746,159184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,50.0,hybrid,410562,428098,569746,159184,0,36864,36864,0
+rodinia-gaussian,Rodinia,4,9,9,126,126,1.0,9,ok,50.0,truth,410562,428098,569746,159184,0,36864,36864,0
+rodinia-nw,Rodinia,4,34,34,15,15,0.25,9,a wave needs 34 pages,,,,,,,,,,
+rodinia-nw,Rodinia,4,34,34,15,15,0.375,13,a wave needs 34 pages,,,,,,,,,,
+rodinia-nw,Rodinia,4,34,34,15,15,0.5,17,a wave needs 34 pages,,,,,,,,,,
+rodinia-nw,Rodinia,4,34,34,15,15,0.625,22,a wave needs 34 pages,,,,,,,,,,
+rodinia-nw,Rodinia,4,34,34,15,15,0.75,26,a wave needs 34 pages,,,,,,,,,,
+rodinia-nw,Rodinia,4,34,34,15,15,0.875,30,a wave needs 34 pages,,,,,,,,,,
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,10.0,demand,127073,152129,236506,109433,34,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,10.0,buffer,127073,152129,157498,30425,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,10.0,hybrid,127073,152129,164442,37369,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,10.0,truth,127073,152129,164442,37369,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,25.0,demand,127073,152129,371506,244433,34,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,25.0,buffer,127073,152129,172498,45425,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,25.0,hybrid,127073,152129,179442,52369,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,25.0,truth,127073,152129,179442,52369,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,50.0,demand,127073,152129,596506,469433,34,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,50.0,buffer,127073,152129,197498,70425,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,50.0,hybrid,127073,152129,204442,77369,0,139264,69632,0
+rodinia-nw,Rodinia,4,34,34,15,15,1.0,34,ok,50.0,truth,127073,152129,204442,77369,0,139264,69632,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.25,6,a wave needs 8 pages,,,,,,,,,,
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,10.0,demand,23456,37600,81118,57662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,10.0,buffer,23456,37600,72110,48654,13,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,10.0,hybrid,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,10.0,truth,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,25.0,demand,23456,37600,156118,132662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,25.0,buffer,23456,37600,132110,108654,13,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,25.0,hybrid,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,25.0,truth,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,50.0,demand,23456,37600,281118,257662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,50.0,buffer,23456,37600,232110,208654,13,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,50.0,hybrid,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.375,8,ok,50.0,truth,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,10.0,demand,23456,37600,81118,57662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,10.0,buffer,23456,37600,72110,48654,10,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,10.0,hybrid,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,10.0,truth,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,25.0,demand,23456,37600,156118,132662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,25.0,buffer,23456,37600,132110,108654,10,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,25.0,hybrid,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,25.0,truth,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,50.0,demand,23456,37600,281118,257662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,50.0,buffer,23456,37600,232110,208654,10,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,50.0,hybrid,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.5,11,ok,50.0,truth,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,10.0,demand,23456,37600,81118,57662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,10.0,buffer,23456,37600,62110,38654,7,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,10.0,hybrid,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,10.0,truth,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,25.0,demand,23456,37600,156118,132662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,25.0,buffer,23456,37600,107110,83654,7,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,25.0,hybrid,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,25.0,truth,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,50.0,demand,23456,37600,281118,257662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,50.0,buffer,23456,37600,182110,158654,7,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,50.0,hybrid,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.625,14,ok,50.0,truth,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,10.0,demand,23456,37600,81118,57662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,10.0,buffer,23456,37600,62110,38654,5,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,10.0,hybrid,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,10.0,truth,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,25.0,demand,23456,37600,156118,132662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,25.0,buffer,23456,37600,107110,83654,5,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,25.0,hybrid,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,25.0,truth,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,50.0,demand,23456,37600,281118,257662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,50.0,buffer,23456,37600,182110,158654,5,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,50.0,hybrid,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.75,16,ok,50.0,truth,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,10.0,demand,23456,37600,81118,57662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,10.0,buffer,23456,37600,52110,28654,2,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,10.0,hybrid,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,10.0,truth,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,25.0,demand,23456,37600,156118,132662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,25.0,buffer,23456,37600,82110,58654,2,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,25.0,hybrid,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,25.0,truth,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,50.0,demand,23456,37600,281118,257662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,50.0,buffer,23456,37600,132110,108654,2,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,50.0,hybrid,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,0.875,19,ok,50.0,truth,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,10.0,demand,23456,37600,81118,57662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,10.0,buffer,23456,37600,42110,18654,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,10.0,hybrid,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,10.0,truth,23456,37600,45086,21630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,25.0,demand,23456,37600,156118,132662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,25.0,buffer,23456,37600,57110,33654,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,25.0,hybrid,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,25.0,truth,23456,37600,60086,36630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,50.0,demand,23456,37600,281118,257662,21,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,50.0,buffer,23456,37600,82110,58654,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,50.0,hybrid,23456,37600,85086,61630,0,86016,4096,0
+rodinia-pathfinder,Rodinia,4,21,8,4,4,1.0,21,ok,50.0,truth,23456,37600,85086,61630,0,86016,4096,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,0.25,3,a wave needs 12 pages,,,,,,,,,,
+rodinia-hotspot,Rodinia,4,12,12,1,1,0.375,5,a wave needs 12 pages,,,,,,,,,,
+rodinia-hotspot,Rodinia,4,12,12,1,1,0.5,6,a wave needs 12 pages,,,,,,,,,,
+rodinia-hotspot,Rodinia,4,12,12,1,1,0.625,8,a wave needs 12 pages,,,,,,,,,,
+rodinia-hotspot,Rodinia,4,12,12,1,1,0.75,9,a wave needs 12 pages,,,,,,,,,,
+rodinia-hotspot,Rodinia,4,12,12,1,1,0.875,11,a wave needs 12 pages,,,,,,,,,,
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,10.0,demand,4448,14464,30393,25945,12,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,10.0,buffer,4448,14464,21385,16937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,10.0,hybrid,4448,14464,21385,16937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,10.0,truth,4448,14464,21385,16937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,25.0,demand,4448,14464,60393,55945,12,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,25.0,buffer,4448,14464,36385,31937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,25.0,hybrid,4448,14464,36385,31937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,25.0,truth,4448,14464,36385,31937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,50.0,demand,4448,14464,110393,105945,12,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,50.0,buffer,4448,14464,61385,56937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,50.0,hybrid,4448,14464,61385,56937,0,49152,16384,0
+rodinia-hotspot,Rodinia,4,12,12,1,1,1.0,12,ok,50.0,truth,4448,14464,61385,56937,0,49152,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.25,1,a wave needs 4 pages,,,,,,,,,,
+rodinia-lud,Rodinia,4,4,4,10,10,0.375,2,a wave needs 4 pages,,,,,,,,,,
+rodinia-lud,Rodinia,4,4,4,10,10,0.5,2,a wave needs 4 pages,,,,,,,,,,
+rodinia-lud,Rodinia,4,4,4,10,10,0.625,3,a wave needs 4 pages,,,,,,,,,,
+rodinia-lud,Rodinia,4,4,4,10,10,0.75,3,a wave needs 4 pages,,,,,,,,,,
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,10.0,demand,169697,176737,202897,33200,4,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,10.0,buffer,169697,176737,183889,14192,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,10.0,hybrid,169697,176737,184881,15184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,10.0,truth,169697,176737,184881,15184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,25.0,demand,169697,176737,247897,78200,4,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,25.0,buffer,169697,176737,198889,29192,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,25.0,hybrid,169697,176737,199881,30184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,25.0,truth,169697,176737,199881,30184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,50.0,demand,169697,176737,322897,153200,4,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,50.0,buffer,169697,176737,223889,54192,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,50.0,hybrid,169697,176737,224881,55184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,0.875,4,ok,50.0,truth,169697,176737,224881,55184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,10.0,demand,169697,176737,202897,33200,4,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,10.0,buffer,169697,176737,183889,14192,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,10.0,hybrid,169697,176737,184881,15184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,10.0,truth,169697,176737,184881,15184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,25.0,demand,169697,176737,247897,78200,4,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,25.0,buffer,169697,176737,198889,29192,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,25.0,hybrid,169697,176737,199881,30184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,25.0,truth,169697,176737,199881,30184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,50.0,demand,169697,176737,322897,153200,4,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,50.0,buffer,169697,176737,223889,54192,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,50.0,hybrid,169697,176737,224881,55184,0,16384,16384,0
+rodinia-lud,Rodinia,4,4,4,10,10,1.0,4,ok,50.0,truth,169697,176737,224881,55184,0,16384,16384,0
+rodinia-backprop,Rodinia,4,148,144,2,2,0.25,37,a wave needs 144 pages,,,,,,,,,,
+rodinia-backprop,Rodinia,4,148,144,2,2,0.375,56,a wave needs 144 pages,,,,,,,,,,
+rodinia-backprop,Rodinia,4,148,144,2,2,0.5,74,a wave needs 144 pages,,,,,,,,,,
+rodinia-backprop,Rodinia,4,148,144,2,2,0.625,93,a wave needs 144 pages,,,,,,,,,,
+rodinia-backprop,Rodinia,4,148,144,2,2,0.75,111,a wave needs 144 pages,,,,,,,,,,
+rodinia-backprop,Rodinia,4,148,144,2,2,0.875,130,a wave needs 144 pages,,,,,,,,,,
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,10.0,demand,11104,125217,210442,199338,217,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,10.0,buffer,11104,125217,192426,181322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,10.0,hybrid,11104,125217,192426,181322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,10.0,truth,11104,125217,192426,181322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,25.0,demand,11104,125217,300442,289338,217,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,25.0,buffer,11104,125217,252426,241322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,25.0,hybrid,11104,125217,252426,241322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,25.0,truth,11104,125217,252426,241322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,50.0,demand,11104,125217,450442,439338,217,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,50.0,buffer,11104,125217,352426,341322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,50.0,hybrid,11104,125217,352426,341322,0,888832,581632,0
+rodinia-backprop,Rodinia,4,148,144,2,2,1.0,148,ok,50.0,truth,11104,125217,352426,341322,0,888832,581632,0
+rodinia-srad,Rodinia,4,24,24,4,4,0.25,6,a wave needs 24 pages,,,,,,,,,,
+rodinia-srad,Rodinia,4,24,24,4,4,0.375,9,a wave needs 24 pages,,,,,,,,,,
+rodinia-srad,Rodinia,4,24,24,4,4,0.5,12,a wave needs 24 pages,,,,,,,,,,
+rodinia-srad,Rodinia,4,24,24,4,4,0.625,15,a wave needs 24 pages,,,,,,,,,,
+rodinia-srad,Rodinia,4,24,24,4,4,0.75,18,a wave needs 24 pages,,,,,,,,,,
+rodinia-srad,Rodinia,4,24,24,4,4,0.875,21,a wave needs 24 pages,,,,,,,,,,
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,10.0,demand,21952,35648,75214,53262,28,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,10.0,buffer,21952,35648,57198,35246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,10.0,hybrid,21952,35648,57198,35246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,10.0,truth,21952,35648,57198,35246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,25.0,demand,21952,35648,135214,113262,28,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,25.0,buffer,21952,35648,87198,65246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,25.0,hybrid,21952,35648,87198,65246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,25.0,truth,21952,35648,87198,65246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,50.0,demand,21952,35648,235214,213262,28,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,50.0,buffer,21952,35648,137198,115246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,50.0,hybrid,21952,35648,137198,115246,0,114688,32768,0
+rodinia-srad,Rodinia,4,24,24,4,4,1.0,24,ok,50.0,truth,21952,35648,137198,115246,0,114688,32768,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,0.25,16,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,0.375,24,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,0.5,32,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,0.625,40,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,0.75,48,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,0.875,56,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,10.0,demand,118912,165664,254642,135730,67,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,10.0,buffer,118912,165664,209602,90690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,10.0,hybrid,118912,165664,209602,90690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,10.0,truth,118912,165664,209602,90690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,25.0,demand,118912,165664,419642,300730,67,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,25.0,buffer,118912,165664,299602,180690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,25.0,hybrid,118912,165664,299602,180690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,25.0,truth,118912,165664,299602,180690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,50.0,demand,118912,165664,694642,575730,67,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,50.0,buffer,118912,165664,449602,330690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,50.0,hybrid,118912,165664,449602,330690,0,274432,24576,0
+graphbig-bfs-topo-thread-centric,GraphBIG,4,63,63,6,6,1.0,63,ok,50.0,truth,118912,165664,449602,330690,0,274432,24576,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,0.25,16,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,0.375,24,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,0.5,32,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,0.625,40,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,0.75,48,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,0.875,56,a wave needs 63 pages,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,10.0,demand,259809,303265,374739,114930,66,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,10.0,buffer,259809,303265,338707,78898,0,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,10.0,hybrid,259809,303265,350042,90233,0,274432,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,10.0,truth,259809,303265,338707,78898,0,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,25.0,demand,259809,303265,509739,249930,66,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,25.0,buffer,259809,303265,413707,153898,0,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,25.0,hybrid,259809,303265,440042,180233,0,274432,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,25.0,truth,259809,303265,413707,153898,0,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,50.0,demand,259809,303265,734739,474930,66,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,50.0,buffer,259809,303265,538707,278898,0,270336,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,50.0,hybrid,259809,303265,590042,330233,0,274432,20480,0
+graphbig-bfs-topo-atomic,GraphBIG,4,63,63,5,5,1.0,63,ok,50.0,truth,259809,303265,538707,278898,0,270336,20480,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,0.25,17,a wave needs 67 pages,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,0.375,26,a wave needs 67 pages,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,0.5,34,a wave needs 67 pages,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,0.625,42,a wave needs 67 pages,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,0.75,51,a wave needs 67 pages,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,0.875,59,a wave needs 67 pages,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,10.0,demand,193696,247936,405256,211560,76,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,10.0,buffer,193696,247936,427170,233474,72,610304,57344,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,10.0,hybrid,193696,247936,351208,157512,0,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,10.0,truth,193696,247936,351208,157512,0,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,25.0,demand,193696,247936,675256,481560,76,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,25.0,buffer,193696,247936,682170,488474,72,610304,57344,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,25.0,hybrid,193696,247936,531208,337512,0,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,25.0,truth,193696,247936,531208,337512,0,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,50.0,demand,193696,247936,1125256,931560,76,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,50.0,buffer,193696,247936,1107170,913474,72,610304,57344,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,50.0,hybrid,193696,247936,831208,637512,0,311296,49152,0
+graphbig-bfs-data-thread-centric,GraphBIG,4,67,67,6,6,1.0,67,ok,50.0,truth,193696,247936,831208,637512,0,311296,49152,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,0.25,24,a wave needs 94 pages,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,0.375,36,a wave needs 94 pages,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,0.5,48,a wave needs 94 pages,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,0.625,60,a wave needs 94 pages,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,0.75,72,a wave needs 94 pages,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,0.875,84,a wave needs 94 pages,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,10.0,demand,138368,199169,325878,187510,100,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,10.0,buffer,138368,199169,251830,113462,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,10.0,hybrid,138368,199169,253814,115446,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,10.0,truth,138368,199169,253814,115446,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,25.0,demand,138368,199169,550878,412510,100,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,25.0,buffer,138368,199169,356830,218462,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,25.0,hybrid,138368,199169,358814,220446,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,25.0,truth,138368,199169,358814,220446,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,50.0,demand,138368,199169,925878,787510,100,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,50.0,buffer,138368,199169,531830,393462,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,50.0,hybrid,138368,199169,533814,395446,0,409600,28672,0
+graphbig-sssp-topo-thread-centric,GraphBIG,4,95,94,11,11,1.0,95,ok,50.0,truth,138368,199169,533814,395446,0,409600,28672,0
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,0.25,34,a wave needs 131 pages,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,0.375,50,a wave needs 131 pages,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,0.5,67,a wave needs 131 pages,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,0.625,84,a wave needs 131 pages,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,0.75,100,a wave needs 131 pages,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,0.875,117,a wave needs 131 pages,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,10.0,demand,238657,295553,450463,211806,139,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,10.0,buffer,238657,295553,378399,139742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,10.0,hybrid,238657,295553,378399,139742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,10.0,truth,238657,295553,378399,139742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,25.0,demand,238657,295553,690463,451806,139,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,25.0,buffer,238657,295553,498399,259742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,25.0,hybrid,238657,295553,498399,259742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,25.0,truth,238657,295553,498399,259742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,50.0,demand,238657,295553,1090463,851806,139,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,50.0,buffer,238657,295553,698399,459742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,50.0,hybrid,238657,295553,698399,459742,0,569344,36864,4
+graphbig-connected-comp,GraphBIG,4,133,131,33,33,1.0,133,ok,50.0,truth,238657,295553,698399,459742,0,569344,36864,4
+graphbig-kcore,GraphBIG,4,61,59,5,5,0.25,16,a wave needs 59 pages,,,,,,,,,,
+graphbig-kcore,GraphBIG,4,61,59,5,5,0.375,23,a wave needs 59 pages,,,,,,,,,,
+graphbig-kcore,GraphBIG,4,61,59,5,5,0.5,31,a wave needs 59 pages,,,,,,,,,,
+graphbig-kcore,GraphBIG,4,61,59,5,5,0.625,39,a wave needs 59 pages,,,,,,,,,,
+graphbig-kcore,GraphBIG,4,61,59,5,5,0.75,46,a wave needs 59 pages,,,,,,,,,,
+graphbig-kcore,GraphBIG,4,61,59,5,5,0.875,54,a wave needs 59 pages,,,,,,,,,,
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,10.0,demand,18592,59008,100893,82301,61,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,10.0,buffer,18592,59008,75241,56649,2,266240,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,10.0,hybrid,18592,59008,73869,55277,0,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,10.0,truth,18592,59008,73869,55277,0,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,25.0,demand,18592,59008,190893,172301,61,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,25.0,buffer,18592,59008,120241,101649,2,266240,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,25.0,hybrid,18592,59008,118869,100277,0,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,25.0,truth,18592,59008,118869,100277,0,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,50.0,demand,18592,59008,340893,322301,61,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,50.0,buffer,18592,59008,195241,176649,2,266240,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,50.0,hybrid,18592,59008,193869,175277,0,249856,12288,0
+graphbig-kcore,GraphBIG,4,61,59,5,5,1.0,61,ok,50.0,truth,18592,59008,193869,175277,0,249856,12288,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,0.25,16,a wave needs 64 pages,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,0.375,24,a wave needs 64 pages,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,0.5,32,a wave needs 64 pages,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,0.625,40,a wave needs 64 pages,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,0.75,48,a wave needs 64 pages,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,0.875,56,a wave needs 64 pages,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,10.0,demand,2378219,2710029,4188295,1810076,148,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,10.0,buffer,2378219,2710029,3413607,1035388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,10.0,hybrid,2378219,2710029,3413607,1035388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,10.0,truth,2378219,2710029,3413607,1035388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,25.0,demand,2378219,2710029,6768295,4390076,148,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,25.0,buffer,2378219,2710029,4703607,2325388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,25.0,hybrid,2378219,2710029,4703607,2325388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,25.0,truth,2378219,2710029,4703607,2325388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,50.0,demand,2378219,2710029,11068295,8690076,148,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,50.0,buffer,2378219,2710029,6853607,4475388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,50.0,hybrid,2378219,2710029,6853607,4475388,0,606208,352256,0
+graphbig-gc-topo-thread-centric,GraphBIG,4,64,64,87,87,1.0,64,ok,50.0,truth,2378219,2710029,6853607,4475388,0,606208,352256,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,0.25,16,a wave needs 62 pages,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,0.375,24,a wave needs 62 pages,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,0.5,31,a wave needs 62 pages,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,0.625,39,a wave needs 62 pages,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,0.75,47,a wave needs 62 pages,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,0.875,55,a wave needs 62 pages,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,10.0,demand,66688,94144,118418,51730,62,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,10.0,buffer,66688,94144,100402,33714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,10.0,hybrid,66688,94144,100402,33714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,10.0,truth,66688,94144,100402,33714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,25.0,demand,66688,94144,163418,96730,62,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,25.0,buffer,66688,94144,115402,48714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,25.0,hybrid,66688,94144,115402,48714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,25.0,truth,66688,94144,115402,48714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,50.0,demand,66688,94144,238418,171730,62,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,50.0,buffer,66688,94144,140402,73714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,50.0,hybrid,66688,94144,140402,73714,0,253952,4096,0
+graphbig-degree-centr,GraphBIG,4,62,62,2,2,1.0,62,ok,50.0,truth,66688,94144,140402,73714,0,253952,4096,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,0.25,16,a wave needs 62 pages,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,0.375,24,a wave needs 62 pages,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,0.5,32,a wave needs 62 pages,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,0.625,40,a wave needs 62 pages,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,0.75,48,a wave needs 62 pages,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,0.875,56,a wave needs 62 pages,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,10.0,demand,5116860,5148572,5189390,72530,63,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,10.0,buffer,5116860,5148572,5162366,45506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,10.0,hybrid,5116860,5148572,5162366,45506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,10.0,truth,5116860,5148572,5162366,45506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,25.0,demand,5116860,5148572,5264390,147530,63,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,25.0,buffer,5116860,5148572,5192366,75506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,25.0,hybrid,5116860,5148572,5192366,75506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,25.0,truth,5116860,5148572,5192366,75506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,50.0,demand,5116860,5148572,5389390,272530,63,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,50.0,buffer,5116860,5148572,5242366,125506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,50.0,hybrid,5116860,5148572,5242366,125506,0,258048,8192,0
+graphbig-triangle-count,GraphBIG,4,63,62,4,4,1.0,63,ok,50.0,truth,5116860,5148572,5242366,125506,0,258048,8192,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,0.25,17,a wave needs 64 pages,,,,,,,,,,
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,0.375,25,a wave needs 64 pages,,,,,,,,,,
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,0.5,33,a wave needs 64 pages,,,,,,,,,,
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,0.625,42,a wave needs 64 pages,,,,,,,,,,
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,0.75,50,a wave needs 64 pages,,,,,,,,,,
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,0.875,58,a wave needs 64 pages,,,,,,,,,,
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,10.0,demand,282918119,297383023,367294202,84376083,4119,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,10.0,buffer,282918119,297383023,330766762,47848643,1,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,10.0,hybrid,282918119,297383023,330757754,47839635,0,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,10.0,truth,282918119,297383023,330757754,47839635,0,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,25.0,demand,282918119,297383023,488959202,206041083,4119,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,25.0,buffer,282918119,297383023,391606762,108688643,1,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,25.0,hybrid,282918119,297383023,391582754,108664635,0,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,25.0,truth,282918119,297383023,391582754,108664635,0,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,50.0,demand,282918119,297383023,691734202,408816083,4119,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,50.0,buffer,282918119,297383023,493006762,210088643,1,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,50.0,hybrid,282918119,297383023,492957754,210039635,0,16871424,16609280,0
+graphbig-betweenness,GraphBIG,4,66,64,11109,11108,1.0,66,ok,50.0,truth,282918119,297383023,492957754,210039635,0,16871424,16609280,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,0.25,32,a wave needs 128 pages,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,0.375,48,a wave needs 128 pages,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,0.5,64,a wave needs 128 pages,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,0.625,80,a wave needs 128 pages,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,0.75,96,a wave needs 128 pages,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,0.875,112,a wave needs 128 pages,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,10.0,demand,4128,52416,97289,93161,128,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,10.0,buffer,4128,52416,88281,84153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,10.0,hybrid,4128,52416,88281,84153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,10.0,truth,4128,52416,88281,84153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,25.0,demand,4128,52416,127289,123161,128,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,25.0,buffer,4128,52416,103281,99153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,25.0,hybrid,4128,52416,103281,99153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,25.0,truth,4128,52416,103281,99153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,50.0,demand,4128,52416,177289,173161,128,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,50.0,buffer,4128,52416,128281,124153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,50.0,hybrid,4128,52416,128281,124153,0,524288,262144,0
+polybench-2dconv,PolyBench-GPU,4,128,128,1,1,1.0,128,ok,50.0,truth,4128,52416,128281,124153,0,524288,262144,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.25,20,a wave needs 48 pages,,,,,,,,,,
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.375,30,a wave needs 48 pages,,,,,,,,,,
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.5,40,a wave needs 48 pages,,,,,,,,,,
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,10.0,demand,95136,136544,159896,64760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,10.0,buffer,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,10.0,hybrid,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,10.0,truth,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,25.0,demand,95136,136544,204896,109760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,25.0,buffer,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,25.0,hybrid,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,25.0,truth,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,50.0,demand,95136,136544,279896,184760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,50.0,buffer,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,50.0,hybrid,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.625,50,ok,50.0,truth,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,10.0,demand,95136,136544,159896,64760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,10.0,buffer,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,10.0,hybrid,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,10.0,truth,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,25.0,demand,95136,136544,204896,109760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,25.0,buffer,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,25.0,hybrid,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,25.0,truth,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,50.0,demand,95136,136544,279896,184760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,50.0,buffer,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,50.0,hybrid,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.75,60,ok,50.0,truth,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,10.0,demand,95136,136544,159896,64760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,10.0,buffer,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,10.0,hybrid,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,10.0,truth,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,25.0,demand,95136,136544,204896,109760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,25.0,buffer,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,25.0,hybrid,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,25.0,truth,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,50.0,demand,95136,136544,279896,184760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,50.0,buffer,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,50.0,hybrid,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,0.875,70,ok,50.0,truth,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,10.0,demand,95136,136544,159896,64760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,10.0,buffer,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,10.0,hybrid,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,10.0,truth,95136,136544,141880,46744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,25.0,demand,95136,136544,204896,109760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,25.0,buffer,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,25.0,hybrid,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,25.0,truth,95136,136544,156880,61744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,50.0,demand,95136,136544,279896,184760,80,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,50.0,buffer,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,50.0,hybrid,95136,136544,181880,86744,0,327680,65536,0
+polybench-2mm,PolyBench-GPU,4,80,48,2,2,1.0,80,ok,50.0,truth,95136,136544,181880,86744,0,327680,65536,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,10.0,buffer,93313,133793,443746,350433,59,307200,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,25.0,buffer,93313,133793,908746,815433,59,307200,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,50.0,buffer,93313,133793,1683746,1590433,59,307200,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.25,16,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,10.0,buffer,93313,133793,446491,353178,59,339968,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,25.0,buffer,93313,133793,911491,818178,59,339968,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,50.0,buffer,93313,133793,1686491,1593178,59,339968,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.375,24,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,10.0,buffer,93313,133793,448893,355580,59,368640,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,25.0,buffer,93313,133793,913893,820580,59,368640,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,50.0,buffer,93313,133793,1688893,1595580,59,368640,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.5,31,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,10.0,buffer,93313,133793,387520,294207,47,352256,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,25.0,buffer,93313,133793,762520,669207,47,352256,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,50.0,buffer,93313,133793,1387520,1294207,47,352256,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.625,39,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,10.0,buffer,93313,133793,304775,211462,31,319488,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,25.0,buffer,93313,133793,559775,466462,31,319488,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,50.0,buffer,93313,133793,984775,891462,31,319488,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.75,47,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,10.0,buffer,93313,133793,222030,128717,15,286720,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,25.0,buffer,93313,133793,357030,263717,15,286720,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,50.0,buffer,93313,133793,582030,488717,15,286720,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,0.875,55,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,10.0,demand,93313,133793,438293,344980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,10.0,buffer,93313,133793,149629,56316,1,258048,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,10.0,hybrid,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,10.0,truth,93313,133793,168053,74740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,25.0,demand,93313,133793,903293,809980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,25.0,buffer,93313,133793,179629,86316,1,258048,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,25.0,hybrid,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,25.0,truth,93313,133793,183053,89740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,50.0,demand,93313,133793,1678293,1584980,62,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,50.0,buffer,93313,133793,229629,136316,1,258048,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,50.0,hybrid,93313,133793,208053,114740,0,253952,122880,0
+polybench-3dconv,PolyBench-GPU,4,62,4,30,30,1.0,62,ok,50.0,truth,93313,133793,208053,114740,0,253952,122880,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.25,7,a wave needs 12 pages,,,,,,,,,,
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.375,11,a wave needs 12 pages,,,,,,,,,,
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,10.0,demand,72321,97089,126956,54635,32,131072,32768,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,10.0,buffer,72321,97089,99932,27611,0,131072,32768,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,10.0,hybrid,72321,97089,98332,26011,0,122880,24576,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,10.0,truth,72321,97089,98332,26011,0,122880,24576,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,25.0,demand,72321,97089,186956,114635,32,131072,32768,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,25.0,buffer,72321,97089,114932,42611,0,131072,32768,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,25.0,hybrid,72321,97089,113332,41011,0,122880,24576,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,25.0,truth,72321,97089,113332,41011,0,122880,24576,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,50.0,demand,72321,97089,286956,214635,32,131072,32768,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,50.0,buffer,72321,97089,139932,67611,0,131072,32768,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,50.0,hybrid,72321,97089,138332,66011,0,122880,24576,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.5,14,ok,50.0,truth,72321,97089,138332,66011,0,122880,24576,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,10.0,demand,72321,97089,126156,53835,31,126976,28672,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,10.0,buffer,72321,97089,99132,26811,0,126976,28672,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,10.0,hybrid,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,10.0,truth,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,25.0,demand,72321,97089,186156,113835,31,126976,28672,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,25.0,buffer,72321,97089,114132,41811,0,126976,28672,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,25.0,hybrid,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,25.0,truth,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,50.0,demand,72321,97089,286156,213835,31,126976,28672,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,50.0,buffer,72321,97089,139132,66811,0,126976,28672,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,50.0,hybrid,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.625,18,ok,50.0,truth,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,10.0,demand,72321,97089,124556,52235,29,118784,20480,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,10.0,buffer,72321,97089,97532,25211,0,118784,20480,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,10.0,hybrid,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,10.0,truth,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,25.0,demand,72321,97089,184556,112235,29,118784,20480,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,25.0,buffer,72321,97089,112532,40211,0,118784,20480,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,25.0,hybrid,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,25.0,truth,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,50.0,demand,72321,97089,284556,212235,29,118784,20480,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,50.0,buffer,72321,97089,137532,65211,0,118784,20480,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,50.0,hybrid,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.75,21,ok,50.0,truth,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,10.0,demand,72321,97089,123756,51435,28,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,10.0,buffer,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,10.0,hybrid,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,10.0,truth,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,25.0,demand,72321,97089,183756,111435,28,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,25.0,buffer,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,25.0,hybrid,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,25.0,truth,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,50.0,demand,72321,97089,283756,211435,28,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,50.0,buffer,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,50.0,hybrid,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,0.875,25,ok,50.0,truth,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,10.0,demand,72321,97089,123756,51435,28,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,10.0,buffer,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,10.0,hybrid,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,10.0,truth,72321,97089,96732,24411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,25.0,demand,72321,97089,183756,111435,28,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,25.0,buffer,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,25.0,hybrid,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,25.0,truth,72321,97089,111732,39411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,50.0,demand,72321,97089,283756,211435,28,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,50.0,buffer,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,50.0,hybrid,72321,97089,136732,64411,0,114688,16384,0
+polybench-3mm,PolyBench-GPU,4,28,12,3,3,1.0,28,ok,50.0,truth,72321,97089,136732,64411,0,114688,16384,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,0.25,65,a wave needs 258 pages,,,,,,,,,,
+polybench-atax,PolyBench-GPU,4,259,258,2,2,0.375,98,a wave needs 258 pages,,,,,,,,,,
+polybench-atax,PolyBench-GPU,4,259,258,2,2,0.5,130,a wave needs 258 pages,,,,,,,,,,
+polybench-atax,PolyBench-GPU,4,259,258,2,2,0.625,162,a wave needs 258 pages,,,,,,,,,,
+polybench-atax,PolyBench-GPU,4,259,258,2,2,0.75,195,a wave needs 258 pages,,,,,,,,,,
+polybench-atax,PolyBench-GPU,4,259,258,2,2,0.875,227,a wave needs 258 pages,,,,,,,,,,
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,10.0,demand,327330,423043,456656,129326,259,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,10.0,buffer,327330,423043,428640,101310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,10.0,hybrid,327330,423043,428640,101310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,10.0,truth,327330,423043,428640,101310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,25.0,demand,327330,423043,516656,189326,259,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,25.0,buffer,327330,423043,443640,116310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,25.0,hybrid,327330,423043,443640,116310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,25.0,truth,327330,423043,443640,116310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,50.0,demand,327330,423043,616656,289326,259,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,50.0,buffer,327330,423043,468640,141310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,50.0,hybrid,327330,423043,468640,141310,0,1060864,4096,0
+polybench-atax,PolyBench-GPU,4,259,258,2,2,1.0,259,ok,50.0,truth,327330,423043,468640,141310,0,1060864,4096,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,0.25,65,a wave needs 258 pages,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,0.375,98,a wave needs 258 pages,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,0.5,130,a wave needs 258 pages,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,0.625,163,a wave needs 258 pages,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,0.75,195,a wave needs 258 pages,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,0.875,228,a wave needs 258 pages,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,demand,337922,437923,478048,140126,260,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,buffer,337922,437923,450032,112110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,hybrid,337922,437923,450032,112110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,truth,337922,437923,450032,112110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,demand,337922,437923,553048,215126,260,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,buffer,337922,437923,480032,142110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,hybrid,337922,437923,480032,142110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,truth,337922,437923,480032,142110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,demand,337922,437923,678048,340126,260,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,buffer,337922,437923,530032,192110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,hybrid,337922,437923,530032,192110,0,1064960,8192,0
+polybench-bicg,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,truth,337922,437923,530032,192110,0,1064960,8192,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,0.25,5,a wave needs 18 pages,,,,,,,,,,
+polybench-corr,PolyBench-GPU,4,18,18,4,4,0.375,7,a wave needs 18 pages,,,,,,,,,,
+polybench-corr,PolyBench-GPU,4,18,18,4,4,0.5,9,a wave needs 18 pages,,,,,,,,,,
+polybench-corr,PolyBench-GPU,4,18,18,4,4,0.625,12,a wave needs 18 pages,,,,,,,,,,
+polybench-corr,PolyBench-GPU,4,18,18,4,4,0.75,14,a wave needs 18 pages,,,,,,,,,,
+polybench-corr,PolyBench-GPU,4,18,18,4,4,0.875,16,a wave needs 18 pages,,,,,,,,,,
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,10.0,demand,4064,29825,20240,16176,18,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,10.0,buffer,4064,29825,11232,7168,0,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,10.0,hybrid,4064,29825,12910,8846,0,81920,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,10.0,truth,4064,29825,11232,7168,0,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,25.0,demand,4064,29825,35240,31176,18,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,25.0,buffer,4064,29825,11232,7168,0,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,25.0,hybrid,4064,29825,12910,8846,0,81920,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,25.0,truth,4064,29825,11232,7168,0,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,50.0,demand,4064,29825,60240,56176,18,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,50.0,buffer,4064,29825,11232,7168,0,73728,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,50.0,hybrid,4064,29825,12910,8846,0,81920,0,0
+polybench-corr,PolyBench-GPU,4,18,18,4,4,1.0,18,ok,50.0,truth,4064,29825,11232,7168,0,73728,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.25,2,a wave needs 5 pages,,,,,,,,,,
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.375,2,a wave needs 5 pages,,,,,,,,,,
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.5,3,a wave needs 5 pages,,,,,,,,,,
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.625,4,a wave needs 5 pages,,,,,,,,,,
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.75,4,a wave needs 5 pages,,,,,,,,,,
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,10.0,demand,3136,26016,14851,11715,5,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,10.0,buffer,3136,26016,16186,13050,1,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,10.0,hybrid,3136,26016,7178,4042,0,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,10.0,truth,3136,26016,5843,2707,0,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,25.0,demand,3136,26016,29851,26715,5,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,25.0,buffer,3136,26016,31186,28050,1,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,25.0,hybrid,3136,26016,7178,4042,0,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,25.0,truth,3136,26016,5843,2707,0,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,50.0,demand,3136,26016,54851,51715,5,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,50.0,buffer,3136,26016,56186,53050,1,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,50.0,hybrid,3136,26016,7178,4042,0,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,0.875,5,ok,50.0,truth,3136,26016,5843,2707,0,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,10.0,demand,3136,26016,14851,11715,5,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,10.0,buffer,3136,26016,16186,13050,1,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,10.0,hybrid,3136,26016,7178,4042,0,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,10.0,truth,3136,26016,5843,2707,0,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,25.0,demand,3136,26016,29851,26715,5,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,25.0,buffer,3136,26016,31186,28050,1,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,25.0,hybrid,3136,26016,7178,4042,0,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,25.0,truth,3136,26016,5843,2707,0,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,50.0,demand,3136,26016,54851,51715,5,20480,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,50.0,buffer,3136,26016,56186,53050,1,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,50.0,hybrid,3136,26016,7178,4042,0,24576,0,0
+polybench-covar,PolyBench-GPU,4,5,5,3,3,1.0,5,ok,50.0,truth,3136,26016,5843,2707,0,20480,0,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,0.25,49,a wave needs 192 pages,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,0.375,73,a wave needs 192 pages,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,0.5,97,a wave needs 192 pages,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,0.625,121,a wave needs 192 pages,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,0.75,145,a wave needs 192 pages,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,0.875,169,a wave needs 192 pages,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,10.0,demand,117154,215237,242619,125465,193,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,10.0,buffer,117154,215237,224603,107449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,10.0,hybrid,117154,215237,224603,107449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,10.0,truth,117154,215237,224603,107449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,25.0,demand,117154,215237,287619,170465,193,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,25.0,buffer,117154,215237,239603,122449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,25.0,hybrid,117154,215237,239603,122449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,25.0,truth,117154,215237,239603,122449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,50.0,demand,117154,215237,362619,245465,193,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,50.0,buffer,117154,215237,264603,147449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,50.0,hybrid,117154,215237,264603,147449,0,790528,262144,0
+polybench-fdtd-2d,PolyBench-GPU,4,193,192,30,30,1.0,193,ok,50.0,truth,117154,215237,264603,147449,0,790528,262144,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,0.25,12,a wave needs 48 pages,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,0.375,18,a wave needs 48 pages,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,0.5,24,a wave needs 48 pages,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,0.625,30,a wave needs 48 pages,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,0.75,36,a wave needs 48 pages,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,0.875,42,a wave needs 48 pages,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,demand,49152,77472,92932,43780,48,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,buffer,49152,77472,83924,34772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,hybrid,49152,77472,83924,34772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,truth,49152,77472,83924,34772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,demand,49152,77472,122932,73780,48,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,buffer,49152,77472,98924,49772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,hybrid,49152,77472,98924,49772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,truth,49152,77472,98924,49772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,demand,49152,77472,172932,123780,48,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,buffer,49152,77472,123924,74772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,hybrid,49152,77472,123924,74772,0,196608,65536,0
+polybench-gemm,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,truth,49152,77472,123924,74772,0,196608,65536,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,0.25,129,a wave needs 515 pages,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,0.375,194,a wave needs 515 pages,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,0.5,258,a wave needs 515 pages,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,0.625,322,a wave needs 515 pages,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,0.75,387,a wave needs 515 pages,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,0.875,451,a wave needs 515 pages,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,10.0,demand,362466,546434,579632,217166,515,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,10.0,buffer,362466,546434,550624,188158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,10.0,hybrid,362466,546434,550624,188158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,10.0,truth,362466,546434,550624,188158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,25.0,demand,362466,546434,639632,277166,515,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,25.0,buffer,362466,546434,565624,203158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,25.0,hybrid,362466,546434,565624,203158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,25.0,truth,362466,546434,565624,203158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,50.0,demand,362466,546434,739632,377166,515,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,50.0,buffer,362466,546434,590624,228158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,50.0,hybrid,362466,546434,590624,228158,0,2109440,4096,0
+polybench-gesummv,PolyBench-GPU,4,515,515,1,1,1.0,515,ok,50.0,truth,362466,546434,590624,228158,0,2109440,4096,0
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.25,12,a wave needs 33 pages,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.375,18,a wave needs 33 pages,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.5,24,a wave needs 33 pages,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.625,30,a wave needs 33 pages,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,10.0,demand,7445801,7460393,7655064,209263,48,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,10.0,buffer,7445801,7460393,10636572,3190771,1536,12681216,6369280,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,10.0,hybrid,7445801,7460393,7501928,56127,0,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,10.0,truth,7445801,7460393,7501928,56127,0,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,25.0,demand,7445801,7460393,7925064,479263,48,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,25.0,buffer,7445801,7460393,12571572,5125771,1536,12681216,6369280,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,25.0,hybrid,7445801,7460393,7516928,71127,0,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,25.0,truth,7445801,7460393,7516928,71127,0,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,50.0,demand,7445801,7460393,8375064,929263,48,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,50.0,buffer,7445801,7460393,15796572,8350771,1536,12681216,6369280,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,50.0,hybrid,7445801,7460393,7541928,96127,0,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.75,36,ok,50.0,truth,7445801,7460393,7541928,96127,0,196608,114688,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,10.0,demand,7445801,7460393,7652322,206521,48,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,10.0,buffer,7445801,7460393,9765487,2319686,768,6438912,3248128,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,10.0,hybrid,7445801,7460393,7499186,53385,0,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,10.0,truth,7445801,7460393,7499186,53385,0,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,25.0,demand,7445801,7460393,7922322,476521,48,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,25.0,buffer,7445801,7460393,11700487,4254686,768,6438912,3248128,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,25.0,hybrid,7445801,7460393,7514186,68385,0,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,25.0,truth,7445801,7460393,7514186,68385,0,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,50.0,demand,7445801,7460393,8372322,926521,48,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,50.0,buffer,7445801,7460393,14925487,7479686,768,6438912,3248128,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,50.0,hybrid,7445801,7460393,7539186,93385,0,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,0.875,42,ok,50.0,truth,7445801,7460393,7539186,93385,0,196608,90112,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,10.0,demand,7445801,7460393,7649581,203780,48,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,10.0,buffer,7445801,7460393,7481565,35764,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,10.0,hybrid,7445801,7460393,7496445,50644,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,10.0,truth,7445801,7460393,7496445,50644,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,25.0,demand,7445801,7460393,7919581,473780,48,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,25.0,buffer,7445801,7460393,7496565,50764,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,25.0,hybrid,7445801,7460393,7511445,65644,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,25.0,truth,7445801,7460393,7511445,65644,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,50.0,demand,7445801,7460393,8369581,923780,48,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,50.0,buffer,7445801,7460393,7521565,75764,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,50.0,hybrid,7445801,7460393,7536445,90644,0,196608,65536,1
+polybench-gramschm,PolyBench-GPU,4,48,33,384,384,1.0,48,ok,50.0,truth,7445801,7460393,7536445,90644,0,196608,65536,1
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.25,1,a wave needs 2 pages,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.375,1,a wave needs 2 pages,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.5,1,a wave needs 2 pages,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,10.0,demand,58048,67328,89648,31600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,10.0,buffer,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,10.0,hybrid,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,10.0,truth,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,25.0,demand,58048,67328,134648,76600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,25.0,buffer,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,25.0,hybrid,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,25.0,truth,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,50.0,demand,58048,67328,209648,151600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,50.0,buffer,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,50.0,hybrid,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.625,2,ok,50.0,truth,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,10.0,demand,58048,67328,89648,31600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,10.0,buffer,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,10.0,hybrid,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,10.0,truth,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,25.0,demand,58048,67328,134648,76600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,25.0,buffer,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,25.0,hybrid,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,25.0,truth,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,50.0,demand,58048,67328,209648,151600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,50.0,buffer,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,50.0,hybrid,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.75,2,ok,50.0,truth,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,10.0,demand,58048,67328,89648,31600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,10.0,buffer,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,10.0,hybrid,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,10.0,truth,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,25.0,demand,58048,67328,134648,76600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,25.0,buffer,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,25.0,hybrid,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,25.0,truth,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,50.0,demand,58048,67328,209648,151600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,50.0,buffer,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,50.0,hybrid,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,0.875,2,ok,50.0,truth,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,10.0,demand,58048,67328,89648,31600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,10.0,buffer,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,10.0,hybrid,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,10.0,truth,58048,67328,80640,22592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,25.0,demand,58048,67328,134648,76600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,25.0,buffer,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,25.0,hybrid,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,25.0,truth,58048,67328,110640,52592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,50.0,demand,58048,67328,209648,151600,2,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,50.0,buffer,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,50.0,hybrid,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi1d,PolyBench-GPU,4,2,2,20,20,1.0,2,ok,50.0,truth,58048,67328,160640,102592,0,8192,8192,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,10.0,demand,539676,4036470,48795332,48255656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,10.0,buffer,539676,4036470,48926025,48386349,77989,321445888,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,10.0,hybrid,539676,4036470,40779234,40239558,0,270938112,154062848,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,10.0,truth,539676,4036470,40779234,40239558,0,270938112,154062848,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,25.0,demand,539676,4036470,54225332,53685656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,25.0,buffer,539676,4036470,54356025,53816349,77989,321445888,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,25.0,hybrid,539676,4036470,40809234,40269558,0,270938112,154062848,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,25.0,truth,539676,4036470,40809234,40269558,0,270938112,154062848,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,50.0,demand,539676,4036470,63275332,62735656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,50.0,buffer,539676,4036470,63406025,62866349,77989,321445888,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,50.0,hybrid,539676,4036470,40859234,40319558,0,270938112,154062848,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.25,489,ok,50.0,truth,539676,4036470,40859234,40319558,0,270938112,154062848,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,10.0,demand,539676,4036470,48795332,48255656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,10.0,buffer,539676,4036470,49009747,48470071,77989,322445312,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,10.0,hybrid,539676,4036470,34750544,34210868,0,226963456,133308416,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,10.0,truth,539676,4036470,34750544,34210868,0,226963456,133308416,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,25.0,demand,539676,4036470,54225332,53685656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,25.0,buffer,539676,4036470,54439747,53900071,77989,322445312,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,25.0,hybrid,539676,4036470,34780544,34240868,0,226963456,133308416,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,25.0,truth,539676,4036470,34780544,34240868,0,226963456,133308416,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,50.0,demand,539676,4036470,63275332,62735656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,50.0,buffer,539676,4036470,63489747,62950071,77989,322445312,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,50.0,hybrid,539676,4036470,34830544,34290868,0,226963456,133308416,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.375,733,ok,50.0,truth,539676,4036470,34830544,34290868,0,226963456,133308416,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,10.0,demand,539676,4036470,48795332,48255656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,10.0,buffer,539676,4036470,49093470,48553794,77989,323444736,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,10.0,hybrid,539676,4036470,28595109,28055433,0,182988800,111542272,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,10.0,truth,539676,4036470,28595109,28055433,0,182988800,111542272,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,25.0,demand,539676,4036470,54225332,53685656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,25.0,buffer,539676,4036470,54523470,53983794,77989,323444736,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,25.0,hybrid,539676,4036470,28625109,28085433,0,182988800,111542272,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,25.0,truth,539676,4036470,28625109,28085433,0,182988800,111542272,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,50.0,demand,539676,4036470,63275332,62735656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,50.0,buffer,539676,4036470,63573470,63033794,77989,323444736,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,50.0,hybrid,539676,4036470,28675109,28135433,0,182988800,111542272,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.5,977,ok,50.0,truth,539676,4036470,28675109,28135433,0,182988800,111542272,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,10.0,demand,539676,4036470,48795332,48255656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,10.0,buffer,539676,4036470,48990090,48450414,77502,322449408,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,10.0,hybrid,539676,4036470,22467620,21927944,0,139014144,89706496,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,10.0,truth,539676,4036470,22467620,21927944,0,139014144,89706496,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,25.0,demand,539676,4036470,54225332,53685656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,25.0,buffer,539676,4036470,54390090,53850414,77502,322449408,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,25.0,hybrid,539676,4036470,22497620,21957944,0,139014144,89706496,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,25.0,truth,539676,4036470,22497620,21957944,0,139014144,89706496,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,50.0,demand,539676,4036470,63275332,62735656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,50.0,buffer,539676,4036470,63390090,62850414,77502,322449408,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,50.0,hybrid,539676,4036470,22547620,22007944,0,139014144,89706496,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.625,1221,ok,50.0,truth,539676,4036470,22547620,22007944,0,139014144,89706496,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,10.0,demand,539676,4036470,48795332,48255656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,10.0,buffer,539676,4036470,48886025,48346349,77013,321445888,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,10.0,hybrid,539676,4036470,16344169,15804493,0,95039488,68227072,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,10.0,truth,539676,4036470,16344169,15804493,0,95039488,68227072,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,25.0,demand,539676,4036470,54225332,53685656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,25.0,buffer,539676,4036470,54256025,53716349,77013,321445888,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,25.0,hybrid,539676,4036470,16374169,15834493,0,95039488,68227072,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,25.0,truth,539676,4036470,16374169,15834493,0,95039488,68227072,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,50.0,demand,539676,4036470,63275332,62735656,78100,319897600,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,50.0,buffer,539676,4036470,63206025,62666349,77013,321445888,159907840,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,50.0,hybrid,539676,4036470,16424169,15884493,0,95039488,68227072,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.75,1465,ok,50.0,truth,539676,4036470,16424169,15884493,0,95039488,68227072,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,10.0,demand,539676,4036470,48393118,47853442,77282,316547072,158818304,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,10.0,buffer,539676,4036470,48380432,47840756,75708,317100032,158818304,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,10.0,hybrid,539676,4036470,10210583,9670907,0,51064832,46354432,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,10.0,truth,539676,4036470,10210583,9670907,0,51064832,46354432,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,25.0,demand,539676,4036470,53823118,53283442,77282,316547072,158818304,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,25.0,buffer,539676,4036470,53720432,53180756,75708,317100032,158818304,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,25.0,hybrid,539676,4036470,10240583,9700907,0,51064832,46354432,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,25.0,truth,539676,4036470,10240583,9700907,0,51064832,46354432,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,50.0,demand,539676,4036470,62873118,62333442,77282,316547072,158818304,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,50.0,buffer,539676,4036470,62620432,62080756,75708,317100032,158818304,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,50.0,hybrid,539676,4036470,10290583,9750907,0,51064832,46354432,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,0.875,1709,ok,50.0,truth,539676,4036470,10290583,9750907,0,51064832,46354432,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,10.0,demand,539676,4036470,2211678,1672002,1953,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,10.0,buffer,539676,4036470,2122670,1582994,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,10.0,hybrid,539676,4036470,2130606,1590930,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,10.0,truth,539676,4036470,2130606,1590930,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,25.0,demand,539676,4036470,2376678,1837002,1953,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,25.0,buffer,539676,4036470,2152670,1612994,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,25.0,hybrid,539676,4036470,2160606,1620930,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,25.0,truth,539676,4036470,2160606,1620930,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,50.0,demand,539676,4036470,2651678,2112002,1953,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,50.0,buffer,539676,4036470,2202670,1662994,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,50.0,hybrid,539676,4036470,2210606,1670930,0,7999488,7995392,0
+polybench-jacobi2d,PolyBench-GPU,4,1953,224,360,40,1.0,1953,ok,50.0,truth,539676,4036470,2210606,1670930,0,7999488,7995392,0
+polybench-lu,PolyBench-GPU,4,16,16,256,256,0.25,4,a wave needs 16 pages,,,,,,,,,,
+polybench-lu,PolyBench-GPU,4,16,16,256,256,0.375,6,a wave needs 16 pages,,,,,,,,,,
+polybench-lu,PolyBench-GPU,4,16,16,256,256,0.5,8,a wave needs 16 pages,,,,,,,,,,
+polybench-lu,PolyBench-GPU,4,16,16,256,256,0.625,10,a wave needs 16 pages,,,,,,,,,,
+polybench-lu,PolyBench-GPU,4,16,16,256,256,0.75,12,a wave needs 16 pages,,,,,,,,,,
+polybench-lu,PolyBench-GPU,4,16,16,256,256,0.875,14,a wave needs 16 pages,,,,,,,,,,
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,10.0,demand,703139,717603,745939,42800,16,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,10.0,buffer,703139,717603,726931,23792,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,10.0,hybrid,703139,717603,727923,24784,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,10.0,truth,703139,717603,727923,24784,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,25.0,demand,703139,717603,790939,87800,16,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,25.0,buffer,703139,717603,741931,38792,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,25.0,hybrid,703139,717603,742923,39784,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,25.0,truth,703139,717603,742923,39784,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,50.0,demand,703139,717603,865939,162800,16,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,50.0,buffer,703139,717603,766931,63792,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,50.0,hybrid,703139,717603,767923,64784,0,65536,65536,64
+polybench-lu,PolyBench-GPU,4,16,16,256,256,1.0,16,ok,50.0,truth,703139,717603,767923,64784,0,65536,65536,64
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,0.25,65,a wave needs 258 pages,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,0.375,98,a wave needs 258 pages,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,0.5,130,a wave needs 258 pages,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,0.625,163,a wave needs 258 pages,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,0.75,195,a wave needs 258 pages,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,0.875,228,a wave needs 258 pages,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,demand,326466,426562,466592,140126,260,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,buffer,326466,426562,438576,112110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,hybrid,326466,426562,438576,112110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,10.0,truth,326466,426562,438576,112110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,demand,326466,426562,541592,215126,260,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,buffer,326466,426562,468576,142110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,hybrid,326466,426562,468576,142110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,25.0,truth,326466,426562,468576,142110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,demand,326466,426562,666592,340126,260,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,buffer,326466,426562,518576,192110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,hybrid,326466,426562,518576,192110,0,1064960,8192,0
+polybench-mvt,PolyBench-GPU,4,260,258,2,2,1.0,260,ok,50.0,truth,326466,426562,518576,192110,0,1064960,8192,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,0.25,12,a wave needs 48 pages,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,0.375,18,a wave needs 48 pages,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,0.5,24,a wave needs 48 pages,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,0.625,30,a wave needs 48 pages,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,0.75,36,a wave needs 48 pages,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,0.875,42,a wave needs 48 pages,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,demand,157601,185569,201381,43780,48,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,buffer,157601,185569,192373,34772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,hybrid,157601,185569,192373,34772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,10.0,truth,157601,185569,192373,34772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,demand,157601,185569,231381,73780,48,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,buffer,157601,185569,207373,49772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,hybrid,157601,185569,207373,49772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,25.0,truth,157601,185569,207373,49772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,demand,157601,185569,281381,123780,48,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,buffer,157601,185569,232373,74772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,hybrid,157601,185569,232373,74772,0,196608,65536,0
+polybench-syr2k,PolyBench-GPU,4,48,48,1,1,1.0,48,ok,50.0,truth,157601,185569,232373,74772,0,196608,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,0.25,8,a wave needs 32 pages,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,0.375,12,a wave needs 32 pages,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,0.5,16,a wave needs 32 pages,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,0.625,20,a wave needs 32 pages,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,0.75,24,a wave needs 32 pages,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,0.875,28,a wave needs 32 pages,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,10.0,demand,83136,104448,121426,38290,32,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,10.0,buffer,83136,104448,112418,29282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,10.0,hybrid,83136,104448,112418,29282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,10.0,truth,83136,104448,112418,29282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,25.0,demand,83136,104448,151426,68290,32,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,25.0,buffer,83136,104448,127418,44282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,25.0,hybrid,83136,104448,127418,44282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,25.0,truth,83136,104448,127418,44282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,50.0,demand,83136,104448,201426,118290,32,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,50.0,buffer,83136,104448,152418,69282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,50.0,hybrid,83136,104448,152418,69282,0,131072,65536,0
+polybench-syrk,PolyBench-GPU,4,32,32,1,1,1.0,32,ok,50.0,truth,83136,104448,152418,69282,0,131072,65536,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,0.25,66,a wave needs 259 pages,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,0.375,99,a wave needs 259 pages,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,0.5,132,a wave needs 259 pages,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,0.625,165,a wave needs 259 pages,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,0.75,198,a wave needs 259 pages,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,0.875,231,a wave needs 259 pages,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,10.0,demand,357153,460995,508194,151041,264,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,10.0,buffer,357153,460995,461170,104017,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,10.0,hybrid,357153,460995,463154,106001,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,10.0,truth,357153,460995,463154,106001,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,25.0,demand,357153,460995,598194,241041,264,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,25.0,buffer,357153,460995,476170,119017,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,25.0,hybrid,357153,460995,478154,121001,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,25.0,truth,357153,460995,478154,121001,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,50.0,demand,357153,460995,748194,391041,264,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,50.0,buffer,357153,460995,501170,144017,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,50.0,hybrid,357153,460995,503154,146001,0,1081344,4096,0
+polybench-gemver,PolyBench-GPU,4,264,259,5,3,1.0,264,ok,50.0,truth,357153,460995,503154,146001,0,1081344,4096,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,0.25,12,a wave needs 48 pages,,,,,,,,,,
+polybench-adi,PolyBench-GPU,4,48,48,257,257,0.375,18,a wave needs 48 pages,,,,,,,,,,
+polybench-adi,PolyBench-GPU,4,48,48,257,257,0.5,24,a wave needs 48 pages,,,,,,,,,,
+polybench-adi,PolyBench-GPU,4,48,48,257,257,0.625,30,a wave needs 48 pages,,,,,,,,,,
+polybench-adi,PolyBench-GPU,4,48,48,257,257,0.75,36,a wave needs 48 pages,,,,,,,,,,
+polybench-adi,PolyBench-GPU,4,48,48,257,257,0.875,42,a wave needs 48 pages,,,,,,,,,,
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,10.0,demand,1001253,1036773,1062343,61090,48,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,10.0,buffer,1001253,1036773,1053335,52082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,10.0,hybrid,1001253,1036773,1053335,52082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,10.0,truth,1001253,1036773,1053335,52082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,25.0,demand,1001253,1036773,1107343,106090,48,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,25.0,buffer,1001253,1036773,1083335,82082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,25.0,hybrid,1001253,1036773,1083335,82082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,25.0,truth,1001253,1036773,1083335,82082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,50.0,demand,1001253,1036773,1182343,181090,48,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,50.0,buffer,1001253,1036773,1133335,132082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,50.0,hybrid,1001253,1036773,1133335,132082,0,196608,131072,0
+polybench-adi,PolyBench-GPU,4,48,48,257,257,1.0,48,ok,50.0,truth,1001253,1036773,1133335,132082,0,196608,131072,0
