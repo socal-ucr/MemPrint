@@ -82,6 +82,8 @@ def rebase(info):
     for method, base in TRUTHS.values():
         if base and method in info:
             info[method] = np.maximum(info[method] - info.get(base, info[method]).min(), 0)
+    for method in [m for m in info if m.startswith("rssrep") and m + "base" in info]:   # repeat RSS runs, each on its own base
+        info[method] = np.maximum(info[method] - info[method + "base"].min(), 0)
     return info
 
 

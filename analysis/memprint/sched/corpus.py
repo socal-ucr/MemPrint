@@ -53,7 +53,7 @@ def native_clock(d):
         return None
     r = pd.read_csv(f, comment="#", header=None, usecols=[0, 1], names=["t", "n"], na_values=["<not counted>"])
     r = r.dropna().groupby("t").n.sum()
-    if len(r) < 2 or r.sum() <= 0:
+    if len(r) < 1 or r.sum() <= 0:   # (a run shorter than one interval: a linear clock)
         return None
     cum = np.concatenate([[0.0], np.cumsum(r.to_numpy(float))])
     sec = np.concatenate([[0.0], r.index.to_numpy(float)])
@@ -201,7 +201,7 @@ def rss_data(d):
     return (r.seconds, (r.rss_bytes - r.code_bytes).clip(lower=0)) if len(r) >= 2 else None
 
 
-PARSERS = {"static": static, "native": rss, "nativecode": rss_data, "truth": truth, "W1": windowed, "W5": windowed, "P": windowed,
+PARSERS = {"static": static, "native": rss, "rssrep1": rss, "rssrep2": rss, "nativecode": rss_data, "truth": truth, "W1": windowed, "W5": windowed, "P": windowed,
            "truthpages": truth, "W5pages": windowed_pages, "W5sec": windowed, "massif": massif,
            "massifpages": massif, "massifi": massif, "massifpagesi": massif, "dhat": dhat, "heaptrack": heaptrack, "gperf": gperf}
 
@@ -242,11 +242,11 @@ def curves(root):
             for name, hold in (("dhatcurve", False), ("dhathold", True)):
                 rows.append(pd.DataFrame(dict(prog=prog, input=inp, method=name, k=np.arange(K),
                                               bytes=resample(*dhat_curve(d.rstrip("/"), hold)))))
-        if method == "native":
+        if PARSERS[method] is rss:
             # the runtime's own RSS (loader, libraries, interpreter): the smallest raw sample, before the program
             # allocates its data
-            rows.append(pd.DataFrame(dict(prog=prog, input=inp, method="rssbase", k=np.arange(K),
-                                          bytes=float(np.min(got[1])))))
+            rows.append(pd.DataFrame(dict(prog=prog, input=inp, method=("rss" if method == "native" else method) + "base",
+                                          k=np.arange(K), bytes=float(np.min(got[1])))))
     return pd.concat(rows, ignore_index=True)
 
 

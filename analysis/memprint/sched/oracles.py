@@ -108,18 +108,34 @@ CLOCK_PAGES = {"T": "truth", "Tsec": "truthsec", "Tpages": "truthpages", "Tpages
                "Tnat": "truthnat", "W5nat": "W5nat", "W1nat": "W1nat", "Pnat": "Pnat"}
 
 
-def _scaled_to_rss(method):
+def _scaled_to_rss(method, level=None):
     """A hybrid: the shape of a MemPrint curve, at the level of an earlier run's RSS (its curve scaled so its peak
-    is the RSS peak). MemPrint's curve knows when the program uses memory; the RSS knows how much the kernel
-    backs, code and allocator caches included."""
+    is the RSS peak; `level` names that run's curve, the RSS view by default). MemPrint's curve knows when the
+    program uses memory; the RSS knows how much the kernel backs, code and allocator caches included."""
     def f(j, m):
         c = np.asarray(j.info[method], float)
-        level = np.max(j.info.get("rssview", j.info["rss"]))
-        return curve(c * (level / max(c.max(), 1e-12)), m, windows=20, widen=1, headroom=True)
+        lv = np.max(j.info[level] if level else j.info.get("rssview", j.info["rss"]))
+        return curve(c * (lv / max(c.max(), 1e-12)), m, windows=20, widen=1, headroom=True)
     return f
 
 
 HYBRID = {"memprint-W5nat-rss": "W5nat", "memprint-Pnat-rss": "Pnat"}
+
+# Is an earlier run's RSS enough (earlier.py)? rssrep1 is a repeat native run of the same input, not the RSS truth's
+# own run (which rss-peak and the hybrids above read); -x: every curve predicted for the job's input from the
+# program's smaller inputs (earlier.transfer: methods with suffix X). name -> (kind, curve, level for a hybrid)
+EARLIER = {"rss-peak-rep": ("peak", "rssrep1", None), "rss-curve-rep": ("curve", "rssrep1", None),
+           "hybrid-rep": ("curve", "W5nat", "rssrep1"),
+           "rss-peak-x": ("peak", "rssrep1X", None), "rss-curve-x": ("curve", "rssrep1X", None),
+           "memprint-W5-x": ("curve", "W5X", None), "memprint-W5nat-x": ("curve", "W5natX", None),
+           "hybrid-x": ("curve", "W5natX", "rssrep1X")}
+
+
+def _earlier(kind, method, level):
+    """An EARLIER oracle; without its curves (a transfer with nothing to extrapolate) it reserves the request."""
+    f = _scaled_to_rss(method, level) if level else _peak(method) if kind == "peak" else _curve(method)
+    return lambda j, m: (f(j, m) if all(x in j.info for x in (method, level) if x)
+                         else np.full(K, float(j.info["request"])))
 
 REAL = {
     "reactive": reactive,
@@ -140,6 +156,7 @@ REAL = {
     "rss-peak": lambda j, m: peak(j.info.get("rssview", j.info["rss"]), m),
     "request": lambda j, m: np.full(K, j.info["request"]),
     **{n: _scaled_to_rss(m) for n, m in HYBRID.items()},
+    **{n: _earlier(*v) for n, v in EARLIER.items()},
 }
 
 
@@ -151,6 +168,8 @@ def available(jobs, name):
             "gperf": "gperf", "rss-peak": "rss",
             "dhat-curve": "dhatcurve", "dhat-hold": "dhathold",
             **{f"memprint-{n}": m for n, m in CLOCK_PAGES.items()}, **HYBRID}.get(name)
+    if name in EARLIER:
+        return all(all(m in j.info for m in EARLIER[name][1:] if m) or "request" in j.info for j in jobs)
     return need is None or all(need in j.info and (name not in HYBRID or "rss" in j.info) for j in jobs)
 
 

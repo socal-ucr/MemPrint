@@ -28,7 +28,7 @@ NO_MARGIN = EXACT | {"pond", "zacarias", "zacarias-past", "ksplus"}   # run once
 LEARNED = {"ml-peak", "pond", "ksplus"}
 CALIBRATED = {"memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "memprint-static", "massif",
               "massif-pages", "massif-i", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak",
-              *(f"memprint-{n}" for n in oracles.CLOCK_PAGES), *oracles.HYBRID}
+              *(f"memprint-{n}" for n in oracles.CLOCK_PAGES), *oracles.HYBRID, *oracles.EARLIER}
 ORACLES = ["exact", "exact-coarse", "exact-peak", "memprint-static", "memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak", "massif",
            "massif-pages", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf", "rss-peak", "request", "ml-peak",
            "reactive", "pond", "zacarias", "zacarias-past", "ksplus"]
