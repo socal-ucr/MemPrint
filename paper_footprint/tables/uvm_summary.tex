@@ -1,0 +1,13 @@
+\begin{tabular}{lllrrrrrrrr}
+\toprule
+ & & & & & \multicolumn{3}{c}{Oversubscribed} & \multicolumn{3}{c}{All data fits} \\
+\cmidrule(lr){6-8} \cmidrule(lr){9-11}
+Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & Buffers & \shortstack{Inter-\\preter} & Traced \\
+\midrule
+Kernels & Large & 64~KB & 9 of 37 & 26 & 0.572 & 1.294 & 1.294 & 1.094 & 1.114 & 1.118 \\
+Waves & Large & 64~KB & 18 of 37 & 60 & 1.023 & 1.337 & 1.337 & 1.144 & 1.144 & 1.148 \\
+Waves & Large & 4~KB & 14 of 37 & 55 & 1.027 & 1.407 & 1.407 & 1.192 & 1.192 & 1.196 \\
+Waves & Small & 64~KB & 31 of 36 & 69 & 1.215 & 1.323 & 1.324 & 1.217 & 1.223 & 1.225 \\
+Waves & Small & 4~KB & 8 of 36 & 30 & 1.221 & 2.165 & 2.165 & 1.358 & 1.361 & 1.363 \\
+\bottomrule
+\end{tabular}

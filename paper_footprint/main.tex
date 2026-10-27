@@ -20,7 +20,7 @@
 \newcommand{\term}[1]{\emph{#1}}
 \newcommand{\code}[1]{\texttt{#1}}
 
-\title{What Exact Memory Footprints of GPU Operations Save\\in Copies Between Host and Device}
+\title{What Exact Memory Footprints of GPU Operations Save\\in Copies and in Unified Memory}
 \author{Nafis Mustakin\\University of California, Riverside}
 \date{October 2026}
 
@@ -48,7 +48,12 @@ cost fitted to the A30, leaving these bytes out speeds up the GPU operations by 
 of the GPU operation time of \code{\numLargeTrMaxName{}}. With the interpreter's safe footprints, the speedups are
 \numSmallHyGeo{}$\times$ and \numLargeHyGeo{}$\times$. The savings come from a few programs, and the gap between
 the interpreter and the oracle comes from writes that happen only if a loaded value says so, which the interpreter
-cannot prove happen in every order.
+cannot prove happen in every order. We then model the same programs on Unified Memory with less device memory than
+their data, running each kernel wave by wave of thread blocks. Prefetching the pages each wave touches and evicting
+the page used farthest ahead speeds the programs up over demand paging by a geometric mean of
+\numUvmWLargeFourHy{}$\times$ on the \numUvmWLargeFourOver{} large programs that can run in less memory, with the
+interpreter's footprints exactly as with the traced ones, while prefetching every buffer a kernel uses gains
+\numUvmWLargeFourBuf{}$\times$.
 \end{abstract}
 
 \section{Introduction}
@@ -76,6 +81,13 @@ footprint of a kernel whose threads race through memory can depend on the order.
 footprints save in copies between host and device, against the footprints that an NVBit~\cite{Villa2019NVBit} tool
 records on the GPU.
 
+Footprints matter more when the program's data does not fit in device memory. With Unified Memory, the GPU moves
+pages between host and device as kernels touch them, and every page a kernel touches that is not on the device
+stops the kernel for a page fault. Irregular programs suffer most from such oversubscription~\cite{Li2019ETC}. A
+runtime system that knew which pages each part of a kernel touches could move them before the kernel needs them, and
+evict the pages that are needed latest. We model this on the same benchmarks, with the footprints of each wave of
+thread blocks, and compare it with demand paging and with prefetching every buffer a kernel uses.
+
 In this work, we make the following contributions:
 \begin{itemize}
 \item We show that the footprint of one interpreted thread order is not safe to act on, because in two GraphBIG
@@ -86,7 +98,10 @@ if it happens in every legal order, and we compute it both during the interprete
 it already records (\secref{sec:union}).
 \item We measure, on \numSmallPrograms{} small and \numLargePrograms{} large benchmarks, the bytes of each copy that
 no operation needs and the GPU time that leaving them out saves, for the traced footprints, the interpreter's
-footprint over every order, and its lockstep footprint (\secref{sec:eval}).
+footprint over every order, and its lockstep footprint (\secref{sec:eval-copies}).
+\item We model the benchmarks on Unified Memory with less device memory than their data, with kernels run wave by
+wave of thread blocks, and measure what prefetching and eviction gain over demand paging with the footprints of
+each wave (\secref{sec:uvm} and \secref{sec:eval-uvm}).
 \end{itemize}
 
 \section{Background}
@@ -158,6 +173,38 @@ of its own, and saves the share of the measured copy time that the model gives, 
 more than the whole copy. We report the time saved as a share of the time of all GPU operations of the program,
 issued one after another.
 
+\section{Footprints for Unified Memory}
+\label{sec:uvm}
+
+We model each program as if its device allocations were managed memory, allocated with
+\code{cudaMallocManaged} rather than \code{cudaMalloc}. A copy to the device becomes a write by the host, so the pages it writes are on the host afterwards, and a copy to
+the host becomes a read by the host, which brings back the pages the device holds. Device memory holds a share of
+the pages that the program's device operations touch, from 25\% to 100\% in steps of 12.5\%, with pages of 64~KB,
+the basic block in which Unified Memory moves data, or of 4~KB.
+
+\paragraph{Waves of thread blocks.} The GPU runs a kernel's blocks as far as they fit at once, so a kernel that
+touches all of the program's pages may touch only part of them at a time. We run each kernel as a sequence of
+\term{waves}. A wave holds as many blocks as the A30 runs at once, in block order, which follows from the threads,
+registers and shared memory of a block and the 56 streaming multiprocessors of the A30. Each wave takes an equal share
+of the kernel's profiled time and touches the pages that its blocks touch in the traced run, which the NVBit tool
+records per block. We simulate a share of memory only if the pages of every wave fit in it, because how a wave
+thrashes when they do not depends on the order of its blocks' accesses, which the footprints do not record.
+
+\paragraph{Policies.} We compare four policies. First, \term{demand paging} moves a page when a wave touches it and
+the page is not on the device, and evicts the least recently used page. Second, \term{buffer prefetching}, as a
+compiler that knows which data structures a kernel uses could do, moves every page of every buffer the kernel
+touches before its first wave, as far as they fit beside the wave's own pages, and evicts the least recently used
+page. Third, \term{interpreter prefetching} moves, before each wave, the pages that the interpreter's blocks of that
+wave touch under any of its four thread orders, and evicts the page whose next use in that footprint is farthest
+away. Fourth, the oracle does the same with the traced footprints. Every policy pays for what the traced run
+actually touches, so a prediction that is wrong costs faults or moves that are not needed.
+
+\paragraph{Costs.} A fault stops the wave, and the faults of a wave are handled in batches of up to 256, each of
+which costs a fixed time of 10, 25 or 50~\textmu s, plus the transfer of each page at the bandwidth of the copy model
+of \secref{sec:copies}. A prefetch pays the transfer only. Evicting a page that the device wrote since it arrived
+copies it back to the host. We report each policy's speedup over demand paging, as a geometric mean over the
+programs and shares of memory, at 25~\textmu s unless we say otherwise.
+
 \section{Evaluation}
 \label{sec:eval}
 
@@ -169,6 +216,9 @@ size is the input size divided by 256, so their kernels do not run and their cop
 copied in. We leave both out of the small input. For each program we compare three footprints: the traced
 footprints, the interpreter's footprint over every order (\secref{sec:union}), and its lockstep footprint. A
 footprint is \term{unsafe} on a program if it marks a unit as not needed that the traced run needs.
+
+\subsection{Copies between host and device}
+\label{sec:eval-copies}
 
 \begin{table*}[tbp]
 \centering
@@ -219,6 +269,57 @@ footprint reaches the traced savings on these programs, because the lockstep run
 footprint is unsafe on \code{bfs-topo-atomic} and \code{connected-comp}, where the order changes which units a
 kernel writes.
 
+\subsection{Unified Memory with less device memory than data}
+\label{sec:eval-uvm}
+
+\begin{table*}[tbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\input{tables/uvm_summary}
+\caption{Unified Memory with each policy: the programs and shares of device memory at which every operation (with
+kernels as whole operations) or every wave fits in less memory than the program's data, and the geometric-mean
+speedup over demand paging of buffer prefetching and of prefetching with the interpreter's and the traced
+footprints, over those shares and when all of the data fits, at 25~\textmu s per batch of faults.}
+\label{tab:uvm-summary}
+\end{table*}
+
+\paragraph{Results.} \tabref{tab:uvm-summary} summarises the results. \textit{Prefetching with the interpreter's
+footprints gains as much over demand paging as prefetching with the traced footprints}: on the large inputs with
+pages of 4~KB, \numUvmWLargeFourHy{}$\times$ for both, and on every input and page size the interpreter falls more
+than 1\% behind the oracle on \numUvmWSmallHyBehind{} configuration only, and the oracle never loses to demand
+paging. Buffer prefetching gains \numUvmWLargeFourBuf{}$\times$ on the same configurations. The gain grows with the
+cost of a fault, from \numUvmWLargeFourHyTen{}$\times$ at 10~\textmu s to \numUvmWLargeFourHyFifty{}$\times$ at
+50~\textmu s. When all of the data fits, prefetching still saves the faults of the first touch of each page, and the
+three policies are within 1\% of each other (\numUvmWLargeFourFitBuf{}$\times$, \numUvmWLargeFourFitHy{}$\times$ and
+\numUvmWLargeFourFitTr{}$\times$).
+
+\paragraph{Where the gain comes from.} The interpreter's prefetching gains in two ways. It moves the pages of a
+wave before the wave starts, so the wave takes no fault, and it evicts the page needed latest, so it moves fewer
+pages: \numUvmWLargeFourHyFewerBytes{} fewer bytes than demand paging over all oversubscribed configurations on the
+large inputs, in \numUvmWLargeFourHyFewerConfigs{} of the \numUvmWLargeFourConfigs{} configurations. Buffer
+prefetching moves pages that the current wave does not touch, and later waves evict them. In \code{gramschm}, whose
+kernels run 768 waves, it moves 101~MB to the device where demand paging moves 0.8~MB, and it is slower than demand
+paging (\tabref{tab:uvm-programs}).
+
+\begin{table}[tbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\input{tables/uvm_programs}
+\caption{The large programs that run in less memory than their data, with pages of 4~KB: their pages, the waves
+of all their kernels, the smallest share of the pages that holds every wave, and each policy's speedup over demand
+paging there.}
+\label{tab:uvm-programs}
+\end{table}
+
+\paragraph{Waves against whole kernels.} With kernels as whole operations, a program can run in less memory only
+if no single kernel touches all of its pages, and on the large inputs with pages of 64~KB that holds for
+\numUvmKLargeOver{} of the \numUvmKLargePrograms{} programs. With waves, \numUvmWLargeOver{} of them can, among them
+single-kernel programs such as \code{2dconv} and \code{3dconv}. No GraphBIG program can, because GraphBIG launches
+its kernels with few blocks of 1{,}024 threads, so each kernel is one wave that touches nearly all of the program's
+pages.
+
 \section{Related work}
 \label{sec:related}
 
@@ -253,6 +354,16 @@ footprint the interpreter now writes during its run includes such a copy. A limi
 each needed range a fixed cost and does not model copies of strided ranges, which means that it may undercount the
 savings on programs whose unneeded units are scattered.
 
+A limitation of the Unified Memory model is that its fault cost and batch size are not measured on the A30, which
+means that the gains of prefetching, which come in part from faults avoided, are shown over a range of fault costs
+rather than for one measured value. A limitation of the waves is that they issue a kernel's blocks in fixed groups
+of equal duration, while the GPU starts a block whenever another finishes, which means that the pages in use at
+once may differ from a wave's. A limitation of the footprints of blocks is that they do not order the accesses
+within a block, which means that a program whose kernels each run one wave, such as every GraphBIG program on the
+large inputs, cannot be modelled in less memory than its data. The model also runs every operation after the
+previous one, so a prefetch does not overlap the kernel before it, as \code{cudaMemPrefetchAsync} on another stream
+could.
+
 \section{Conclusion}
 \label{sec:conclusion}
 
@@ -260,9 +371,11 @@ Exact footprints of GPU operations show that \numSmallTrHtoDUnneeded{} of the by
 on the small inputs, and \numLargeTrHtoDUnneeded{} on the large ones, are never read, and leaving them out saves
 up to \numLargeTrMax{} of the GPU operation time of one program but little in most. The interpreter's footprints are
 safe to act on only when taken over every thread order, at a cost of part of the savings in programs whose writes
-depend on loaded values. We leave for future work the use of the same footprints to prefetch and evict pages of
-Unified Memory when the program's data does not fit in device memory, where irregular programs lose the most to
-demand paging~\cite{Li2019ETC}.
+depend on loaded values. On Unified Memory with less device memory than the program's data, the footprints of each
+wave of thread blocks let a runtime system prefetch and evict pages as well as an oracle would, which gains
+\numUvmWLargeFourHy{}$\times$ over demand paging, where prefetching whole buffers gains little. We leave for future
+work measuring these gains on the GPU, and ordering the accesses within a block, which programs whose kernels run as
+one wave would need.
 
 % TODO: cite the MemPrint paper (paper_gpu) once it has a venue or a report number.
 
