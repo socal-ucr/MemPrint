@@ -35,21 +35,22 @@ A Footprint Model at the Cost of a Native Run}
 
 \begin{abstract}
 A memory-aware scheduler needs to know how much memory a job uses over its run. \memprint{}, a Pin-based
-footprint profiler, measures the pages and bytes a program touches, but its windowed mode costs $12.0\times$ a
-native run at the median of 22 programs and $18.7\times$ to $93.0\times$ on programs that allocate and
-free memory often. The resident set size (RSS) of a native run costs nothing extra and matches the pages a program
-touches on array programs, but it overestimates allocator-heavy programs by a median of 17\% over the whole run,
-and by 99\% on miniVite. We show that the gap has two sources that a program can report about itself cheaply. First, the allocator keeps freed memory resident, and glibc reports the amount through
-\texttt{mallinfo}. Second, RSS counts the pages of shared libraries, which do not grow with the input and are
-shared with other processes. We propose a footprint model that samples, from one thread inside the process every
-5\,ms, the anonymous RSS, the proportional set size (PSS) and glibc's free bytes, and that estimates either the
-program's data footprint (anonymous RSS minus free bytes, plus the runtime's own pages) or its charged footprint
-(PSS minus free bytes). On the 7 allocator-heavy programs, the data estimate reduces the median whole-run error from
-$+17\%$ to $-4\%$ and the median absolute error from 20\% to 9\%, and it reduces miniVite's error from $+99\%$ to
-$-8\%$. Its accuracy matches \memprint{}'s ($-6\%$ signed, 12\% absolute) at a median of $0.99\times$ the run
-time of a plain RSS run (up to $1.21\times$, on darknet), against $34.4\times$ for \memprint{}. On the 16 other programs, it matches RSS. We also test the
-alternatives one at a time. Releasing freed memory to the kernel during the run removes less of the gap,
-language runtime statistics fit only two programs, and per-window referenced pages underestimate by up to 70\%.
+footprint profiler, measures the pages a program touches, but its windowed mode costs $12.0\times$ a native run at
+the median of 22 programs, $18.7\times$ to $93.0\times$ on programs that allocate and free memory often, and up to
+$67.4\times$ on a language model engine. The resident set size (RSS) of a native run costs nothing extra, but it
+overestimates allocator-heavy programs by a median of 16\% over the whole run, and miniVite by 102\%, because the
+allocator keeps freed memory resident and RSS counts shared libraries. We propose a footprint model that samples, from
+one thread inside the process every 5\,ms, the anonymous RSS, the proportional set size, the RSS of mapped data files,
+and the free bytes the allocator reports (glibc, jemalloc or TCMalloc). Its data estimate, anonymous RSS minus free
+bytes plus mapped data files and the runtime's pages, has a median whole-run error of $-4\%$ on the 7 allocator-heavy
+programs of a 23-program corpus ($-7\%$ on miniVite), against $-5\%$ for \memprint{}, at a median of $0.99\times$ the
+run time of a plain RSS run. Transferred from smaller inputs to a held-out larger one, it has a median error of
+$-4\%$, against $+20\%$ for RSS and $-6\%$ for \memprint{}. In a cluster scheduling simulator that reserves memory by
+each job's estimated curve, it gives the lowest mean response time of all estimates that profile the job's own input
+(433 minutes at a load of 0.8, against 515 for the RSS curve and 519 for \memprint{}). Under TCMalloc its median
+error is $-4\%$. Under jemalloc it is $-1\%$ with transparent huge pages disabled and $+35\%$ with them enabled,
+because the kernel backs memory the program touches in part with whole 2\,MiB pages. On llama2.c and llama.cpp, the
+data-file term brings the model from between $-39\%$ and $-92\%$ to between $-28\%$ and $+15\%$ of the truth.
 \end{abstract}
 
 \section{Introduction}
@@ -60,29 +61,33 @@ because a job's peak lasts only part of its run~\cite{KSplus2024,Zacarias2021Acc
 that follows the footprint over time lets a node hold more jobs than a reservation of the peak, but the estimate
 must not fall below what the job uses, or the job runs out of memory.
 
-\memprint{} measures a program's footprint with Pin~\cite{Luk2005Pin}. It records the bytes and pages each
-program touches and the time at which each block is freed. Its windowed mode watches 5\% of the run and costs
-$12.0\times$ a native run at the median on the 22 programs of our corpus that it ran on. However, on the programs where a footprint estimate helps
-the most, those that allocate and free memory throughout their run, the cost rises to $18.7\times$ to
-$93.0\times$, because Pin instruments every memory access and every allocator call.
+\memprint{} measures a program's footprint with Pin~\cite{Luk2005Pin}. It records the bytes and pages each program
+touches and the time at which each block is freed. Its windowed mode watches 5\% of the run and costs $12.0\times$ a
+native run at the median on 22 programs of our corpus. However, on the programs where a footprint estimate helps the
+most, those that allocate and free memory throughout their run, the cost rises to $18.7\times$ to $93.0\times$,
+because Pin instruments every memory access and every allocator call.
 
 The resident set size of a native run is the obvious cheap alternative. On array programs, RSS is the footprint,
-because these programs allocate their arrays once and touch them. On allocator-heavy programs, RSS overestimates
-the footprint over the run by a median of 17\%, and by 99\% on miniVite~\cite{minivite}, because the kernel
-counts memory that the program no longer uses.
+because these programs allocate their arrays once and touch them. On allocator-heavy programs, RSS overestimates the
+footprint over the run by a median of 16\%, and by 102\% on miniVite~\cite{minivite}, because the kernel counts
+memory that the program no longer uses.
 
 In this work, we make the following contributions:
 \begin{itemize}
-\item We identify the two parts of RSS that are not part of the footprint on our corpus, freed memory that
-glibc keeps resident and the pages of shared libraries, and we measure their size per program
-(\secref{sec:background}).
-\item We propose a footprint model that combines RSS, PSS and glibc's free bytes, sampled every 5\,ms from a
-thread inside the process through an \texttt{LD\_PRELOAD} library, with two estimates for two uses
+\item We identify the parts of RSS that are not part of the footprint, freed memory that the allocator keeps
+resident and the pages of shared libraries, and we measure their size per program (\secref{sec:gap}).
+\item We propose a footprint model that combines RSS, PSS, the RSS of mapped data files and the allocator's free
+bytes, sampled every 5\,ms from a thread inside the process through an \texttt{LD\_PRELOAD} library
 (\secref{sec:model}).
-\item We show on 23 programs that the model matches \memprint{}'s accuracy on allocator-heavy programs and
-matches RSS on the others, at a median of $0.99\times$ the run time of a plain RSS run
-(\secref{sec:results}).
-\item We test four other ways to close the gap, each alone, and show why each is less accurate
+\item We show on 23 programs that the model matches \memprint{}'s accuracy on the job's own input and on larger
+inputs predicted from smaller ones, at a median of $0.99\times$ the cost of a plain RSS run
+(\secref{sec:repeat} and \secref{sec:transfer}).
+\item We show in a cluster scheduling simulator that the model's curve gives the lowest response time of all
+estimates of the job's own input (\secref{sec:sched}).
+\item We evaluate the model under jemalloc and TCMalloc and on two language model engines, and we show that
+transparent huge pages are the remaining source of disagreement with a 4\,KiB pages-touched truth
+(\secref{sec:alloc} and \secref{sec:llm}).
+\item We test four other ways to correct RSS, each alone, and show why each is less accurate
 (\secref{sec:options}).
 \end{itemize}
 
@@ -90,111 +95,141 @@ matches RSS on the others, at a median of $0.99\times$ the run time of a plain R
 \label{sec:background}
 
 The RSS of a process is the number of its pages in memory. An anonymous page enters RSS when the program first
-touches it and leaves when the program or its allocator unmaps it or releases it with \texttt{madvise}. A
-file-backed page, such as a page of a shared library's code, enters RSS when any process reads it and stays as long
-as it is mapped and the kernel does not reclaim it. The \term{footprint} we estimate is the set of pages the
-program has touched and not yet freed, plus the pages the runtime needs before the program starts. The truth in
-our evaluation is this footprint as \memprint{} measures it (\secref{sec:method}). RSS differs from it in four
-ways.
+touches it and leaves when the program or its allocator unmaps it or releases it with \texttt{madvise}. A file-backed
+page, such as a page of a shared library's code or of a mapped data file, enters RSS when any process reads it and
+stays as long as it is mapped and the kernel does not reclaim it. The \term{footprint} we estimate is the set of
+pages the program has touched and not yet freed, plus the pages the runtime needs before the program starts. RSS
+differs from the footprint in five ways.
 
 \textbf{Allocator retention.} The C library does not return every freed block to the kernel. glibc's
 \texttt{malloc} serves blocks below a threshold (128\,KiB, raised dynamically up to 32\,MiB) from its arenas, keeps
 freed blocks in free lists for reuse, and releases memory only from the top of the heap when the free space there
-exceeds the trim threshold~\cite{glibcmanual}. Other allocators also release freed memory late or in
+exceeds the trim threshold~\cite{glibcmanual}. jemalloc and TCMalloc also release freed memory late or in
 batches~\cite{Evans2006jemalloc,Hunter2021Temeraire}. A program that frees and allocates memory throughout its run
-therefore holds freed pages in RSS. glibc reports the free bytes of all its arenas through \texttt{mallinfo} (the
-field \texttt{fordblks}).
+therefore holds freed pages in RSS. Each of these allocators reports the bytes it holds free through its own
+interface.
 
-\textbf{Shared libraries.} RSS counts every resident page of every mapped file, including the code of the C
-library, the C++ runtime and, for MPI programs, the MPI library. These pages do not depend on the input, and other
-processes on the node map the same pages. The PSS of a process divides each resident page by the number of
-processes that map it.
+\textbf{Shared libraries.} RSS counts every resident page of every mapped file, including the code of the C library,
+the C++ runtime and, for MPI programs, the MPI library. These pages do not depend on the input, and other processes on
+the node map the same pages. The PSS of a process divides each resident page by the number of processes that map it.
 
-\textbf{Language runtimes with their own allocators.} CPython's object allocator takes 256\,KiB arenas from the
-system and returns an arena only when all its objects are freed. GCC's garbage-collected heap also maps its own
-pages. glibc's statistics do not cover these allocators.
+\textbf{Mapped data files.} A program that maps its input, such as a language model engine that maps its weights,
+holds that input in file-backed pages. These pages are part of the footprint, unlike the pages of libraries.
 
-\textbf{Page granularity.} RSS counts whole pages, and a program may touch part of a page. On our corpus, the pages
-a program touches exceed the bytes it touches by 1\% at the median, so we use the pages as the truth.
+\textbf{Language runtimes with their own allocators.} CPython's object allocator takes 256\,KiB arenas from the system
+and returns an arena only when all its objects are freed. GCC's garbage-collected heap also maps its own pages. The C
+library's statistics do not cover these allocators.
+
+\textbf{Page size.} RSS counts whole pages. On our corpus, the 4\,KiB pages a program touches exceed the bytes it
+touches by 1\% at the median, so we use the pages as the truth. With transparent huge pages~\cite{LinuxTHP}, the
+kernel can back a 2\,MiB aligned range of anonymous memory with one huge page at the first touch, and RSS then counts
+2\,MiB even if the program touches only part of the range~\cite{Kwon2016Ingens,Panwar2019HawkEye}. Our machine
+enables transparent huge pages for all anonymous memory (the \texttt{always} setting).
 
 \section{The footprint model}
 \label{sec:model}
 
-The model estimates a footprint curve from four quantities sampled at the same time inside the process. Let $A(t)$
-be the anonymous RSS, $P(t)$ the PSS, $F(t)$ the bytes free in glibc's arenas, and $B$ the runtime's own pages, the
-smallest RSS of an earlier run of the program, which is measured once per program. The model gives two estimates.
+The model estimates a footprint curve from five quantities sampled at the same time inside the process. Let $A(t)$
+be the anonymous RSS, $P(t)$ the PSS, $M(t)$ the RSS of mapped data files, $F(t)$ the bytes the allocator holds
+free, and $B$ the runtime's own pages, the smallest RSS of an earlier run of the program, which is measured once per
+program. The model gives two estimates.
 
 \textbf{Estimate 1, the data footprint,} is
 \begin{equation}
-\hat{f}_1(t) = \max\bigl(A(t) - F(t),\,0\bigr) + B .
+\hat{f}_1(t) = \max\bigl(A(t) - F(t),\,0\bigr) + M(t) + B .
 \end{equation}
-It counts the anonymous pages the allocator has not freed, and it leaves out file-backed pages. It estimates the
-memory that grows with the input, which is what a scheduler predicts and what our truth measures.
+It counts the anonymous pages the allocator has not freed and the pages of mapped data files, and it leaves out the
+pages of libraries. It estimates the memory that grows with the input, which is what a scheduler predicts and what
+our truth measures.
 
 \textbf{Estimate 2, the charged footprint,} is
 \begin{equation}
 \hat{f}_2(t) = \max\bigl(P(t) - F(t),\,0\bigr) .
 \end{equation}
-PSS is the anonymous RSS plus each file-backed page divided by the number of processes that map it, so the
-estimate charges the job for its share of shared libraries and for all of a library that only it maps. It
+PSS is the anonymous RSS plus each file-backed page divided by the number of processes that map it, so the estimate
+charges the job for its share of shared libraries and data files and for all of a library that only it maps. It
 estimates the memory the job adds to a node.
 
 Both estimates subtract free bytes from resident memory rather than count live allocations. A counter of live
-\texttt{malloc} blocks misses every allocation that does not go through \texttt{malloc}, so an estimate built from
-it falls below the truth whenever a program uses its own allocator. Subtracting free bytes errs the other way. Memory
-that glibc does not know about stays in RSS, so a program whose allocator glibc cannot see gets the RSS estimate,
-which is too high but safe.
+\texttt{malloc} blocks misses every allocation that does not go through \texttt{malloc}, so an estimate built from it
+falls below the truth whenever a program uses its own allocator. Subtracting free bytes errs the other way. Memory
+that the allocator does not report stays in RSS, so a program whose allocator the model cannot see gets the RSS
+estimate, which is too high but safe.
 
-\textbf{Implementation.} A shared library of 100 lines of C, loaded with \texttt{LD\_PRELOAD}, starts one thread in
-its constructor. Every 5\,ms the thread reads \texttt{/proc/self/smaps\_rollup} for the RSS, PSS and anonymous RSS,
-calls \texttt{mallinfo}, and writes one line to a buffered file. The thread does not stop the program's threads,
-and it takes glibc's arena locks only for the duration of \texttt{mallinfo}. The machine runs glibc 2.28, which
-has no \texttt{mallinfo2}, so the free bytes are a 32-bit field that wraps above 4\,GiB. A newer glibc reports them
-in 64 bits. The library removes itself from \texttt{LD\_PRELOAD} so that child processes are not sampled, and a
-program made of several processes would need one output file per process.
+\begin{sloppypar}
+\textbf{Free bytes.} The library looks up the allocator's interface when it starts. With jemalloc (\texttt{mallctl}),
+the free bytes are \texttt{stats.resident} minus \texttt{stats.allocated} minus \texttt{stats.metadata}, after a
+refresh of the statistics through \texttt{epoch}. With TCMalloc (\texttt{MallocExtension\_GetNumericProperty}), they
+are \texttt{generic.heap\_size} minus \texttt{tcmalloc.pageheap\_unmapped\_bytes} minus
+\texttt{generic.current\_allocated\_bytes}. Otherwise they are glibc's \texttt{mallinfo} field \texttt{fordblks}, the
+free bytes of all its arenas. The machine runs glibc 2.28, which has no \texttt{mallinfo2}, so glibc's free bytes are
+a 32-bit field that wraps above 4\,GiB. A newer glibc reports them in 64 bits.
+\end{sloppypar}
+
+\textbf{Mapped data files.} A data file is a file mapping that is not the executable, a shared object (a path that
+contains \texttt{.so}), or the C library's locale and character set data. $M(t)$ is the sum of the RSS of these
+mappings.
+
+\textbf{Implementation.} A shared library of 162 lines of C, loaded with \texttt{LD\_PRELOAD}, starts one thread in
+its constructor. Every 5\,ms the thread reads the process's memory counters, queries the allocator, and writes one line
+to a buffered file. It has two modes. The first reads \texttt{/proc/self/smaps\_rollup}, which gives $A$, $P$ and RSS
+but not $M$. The second reads \texttt{/proc/self/smaps}, one record per mapping, which also gives $M$. On the 23
+corpus programs, $M$ is at most 0.07\,MiB, so we evaluate the corpus with the first mode and the language model
+engines with the second. The thread does not stop the program's threads, and it takes the allocator's locks only for
+the duration of its query. The library removes itself from \texttt{LD\_PRELOAD} so that child processes are not
+sampled, and a program made of several processes would need one output file per process.
 
 \section{Methodology}
 \label{sec:method}
 
 \textbf{Machine.} All runs use a two-socket Intel Xeon E5-2620 v4 (16 cores, 32 threads) with 62\,GiB of memory,
-Linux 4.18 and glibc 2.28. Runs execute one at a time on an otherwise idle machine.
+Linux 4.18 with transparent huge pages enabled, and glibc 2.28. Runs whose time we report execute one at a time on an
+otherwise idle machine.
 
 \textbf{Corpus.} We use the 23 programs of the corpus for which a pages-touched truth exists, each at its largest
-input: PolyBench (2mm, atax, gemm, jacobi-2d), the NAS parallel benchmarks (cg, is, mg), the GAP benchmark suite
-(bfs, cc, pr, sssp)~\cite{beamer2015gap}, the proxy applications HPCCG, Kripke, LULESH, miniFE, miniVite and
-Quicksilver, darknet AlexNet inference, GCC's \texttt{cc1} compiling SQLite, and Lua~\cite{ierusalimschy1996lua},
-CPython, Perl and SQLite running table, JSON, hash and SQL workloads. We call 7 programs
-\term{allocator-heavy}, because they allocate and free memory throughout their run: miniVite, CPython, Lua,
-SQLite, Perl, Quicksilver and \texttt{cc1}. We chose the set before these experiments, from the earlier
-observation that RSS and \memprint{} disagree on these programs and agree on the others. The runs last 0.1 to
-12\,s and peak at 27 to 273\,MiB of RSS.
+input: PolyBench (2mm, atax, gemm, jacobi-2d), the NAS parallel benchmarks (cg, is, mg), the GAP benchmark suite (bfs,
+cc, pr, sssp)~\cite{beamer2015gap}, the proxy applications HPCCG, Kripke, LULESH, miniFE, miniVite and Quicksilver,
+darknet AlexNet inference, GCC's \texttt{cc1} compiling SQLite, and Lua~\cite{ierusalimschy1996lua}, CPython, Perl and
+SQLite running table, JSON, hash and SQL workloads. We call 7 programs \term{allocator-heavy}, because they allocate
+and free memory throughout their run: miniVite, CPython, Lua, SQLite, Perl, Quicksilver and \texttt{cc1}. We chose the
+set before these experiments, from the earlier observation that RSS and \memprint{} disagree on these programs and
+agree on the others. The runs last 0.1 to 12\,s and peak at 27 to 273\,MiB of RSS. Every program except darknet also
+has one or two smaller inputs. Separately, we use llama2.c with three model sizes (15M, 42M and 110M parameters) and
+llama.cpp with a 135M-parameter model generating 32 and 128 tokens.
 
 \textbf{Truth.} The truth is the number of 4\,KiB pages the program touches and has not freed, which Pin measures in
-\memprint{}'s splitter mode with page counting and free tracking, plus the runtime's pages $B$. The truth's time axis
-is Pin's count of memory references. We divide each run into 100 equal steps of progress and take the largest value
-of each curve in each step. The estimates are placed on the same 100 steps by the wall clock of their own run.
+\memprint{}'s splitter mode with page counting and free tracking, plus the runtime's pages $B$. Pin's time axis is
+its count of memory references. We place the truth on the wall clock of a native run through hardware counts of the
+loads and stores that the native run executes in every 5\,ms interval. The truth at a share $f$ of Pin's references is
+placed at the time at which the native run had executed a share $f$ of its references. We divide each run into 100
+equal steps of progress and take the largest value of each curve in each step. The estimates are placed on the same
+100 steps by the wall clock of their own run. The truths under jemalloc and TCMalloc come from Pin runs with the same
+allocator, and they are placed on the wall clock by the counts of the native run with glibc.
 
 \textbf{Metrics.} We report three errors of an estimate $e$ against the truth $t$ over the 100 steps. The signed
-whole-run error is $(\sum e - \sum t)/\sum t$, which is positive when the estimate reserves more memory over the
-run than the program uses. The absolute whole-run error is $\sum |e - t| / \sum t$. The peak error is
-$\max e / \max t - 1$. Each program runs 3 times, and we report the median of each error over the runs. The
-overhead of an estimate is the median wall time of its run over the median wall time of a run under the plain RSS
-sampler of the corpus (\texttt{rss\_sampler.py}, an external process that reads \texttt{smaps\_rollup} every 5\,ms).
+whole-run error is $(\sum e - \sum t)/\sum t$, which is positive when the estimate reserves more memory over the run
+than the program uses. The absolute whole-run error is $\sum |e - t| / \sum t$. The peak error is $\max e / \max t -
+1$. Each program runs 3 times, and we report the median of each error over the runs. The overhead of an estimate is
+the median wall time of its run over the median wall time of a run under the plain RSS sampler of the corpus
+(\texttt{rss\_sampler.py}, an external process that reads \texttt{smaps\_rollup} every 5\,ms and takes 40\,ms to
+start).
 
 \textbf{Baselines.} \emph{RSS} is the RSS curve of the plain sampler's run. \emph{\memprint{}} is the windowed mode
-that watches 5\% of the run (W5), placed on the native wall clock by the hardware counts of loads and stores of a
-native run, plus $B$. Its cost is the wall time of the W5 run and of the counter run over the wall time of an earlier
-plain RSS run. \memprint{} has no W5 curve for darknet, so its rows cover 22 programs.
+that watches 5\% of the run (W5), placed on the native wall clock by the same reference counts as the truth, plus $B$.
+Because the truth and \memprint{} pass through the same clock mapping, \memprint{}'s timing error against the truth
+is smaller than its timing error against the real run. Its cost is the wall time of the W5 run and of the counter run
+over the wall time of an earlier plain RSS run. \memprint{} has no W5 curve for darknet, so its rows cover 22
+programs.
 
-\section{Results}
-\label{sec:results}
+\section{Accuracy on the job's own input}
+\label{sec:repeat}
 
 \begin{table}[t]
 \centering
 \small
-\caption{Medians over programs, each the median of 3 runs. Whole-run errors and peak errors are percentages of
-the truth (pages touched plus the runtime's pages). The 90th percentile of the absolute error and the lowest peak
-error show the worst cases. Overhead is the run time over a plain RSS run ($\times$).}
+\caption{Medians over programs, each the median of 3 runs. Whole-run errors and peak errors are percentages of the
+truth (pages touched plus the runtime's pages, on the native clock). The 90th percentile of the absolute error and
+the lowest peak error show the worst cases. Overhead is the run time over a plain RSS run ($\times$).}
 \label{tab:summary}
 \begin{tabular}{llrrrrrrr}
 \toprule
@@ -227,44 +262,39 @@ Program & sign. & abs. & sign. & abs. & sign. & abs. & sign. & abs. & model & \m
 \end{tabular}
 \end{table}
 
-\textbf{Accuracy on allocator-heavy programs.} The data estimate reduces the median whole-run error of RSS from
-$+17\%$ to $-4\%$ and the median absolute error from 20\% to 9\% (\tabref{tab:summary}). Its accuracy matches
-\memprint{}'s, which has a median signed error of $-6\%$ and a median absolute error of 12\%. Per program
-(\tabref{tab:model}), the data estimate reduces miniVite's error from $+99\%$ to $-8\%$, CPython's from $+30\%$
-to $+1\%$, and Lua's from $+23\%$ to $+1\%$, and its absolute error is at most 14\% on every allocator-heavy
-program. Its peak is within 4\% of the truth's on all 7 programs, with a median of $-2\%$, while the RSS peak is
-10\% too high at the median and 58\% too high on miniVite.
+\textbf{Allocator-heavy programs.} The data estimate reduces the median whole-run error of RSS from $+16\%$ to $-4\%$
+and the median absolute error from 17\% to 8\% (\tabref{tab:summary}). \memprint{} has a median signed error of
+$-5\%$ and a median absolute error of 5\%. Per program (\tabref{tab:model}), the data estimate reduces miniVite's
+error from $+102\%$ to $-7\%$, CPython's from $+25\%$ to $-3\%$, and Lua's from $+20\%$ to $-1\%$, and its absolute
+error is at most 11\% on every allocator-heavy program. Its peak is within 4\% of the truth's on all 7 programs, with a
+median of $-2\%$, while the RSS peak is 10\% too high at the median. \memprint{}'s lowest peak error is $-16\%$, on
+Lua.
 
-\textbf{The charged estimate.} The charged estimate lies above the truth on 5 of the 7 programs, with a median
-signed error of $+7\%$, because it keeps the pages of libraries that only this job maps. On miniVite, these pages
-belong to the MPI and PMIx libraries (\secref{sec:gap}), and the estimate is $+36\%$. Unlike the data estimate,
-the charged estimate counts memory that the truth does not count, so its error against the truth does not measure
-its accuracy as an estimate of a node's memory use.
+\textbf{The charged estimate.} The charged estimate has a median signed error of 0\% on the allocator-heavy programs,
+and it lies above the truth on miniVite ($+37\%$), \texttt{cc1} ($+12\%$) and Quicksilver ($+8\%$), because it keeps
+the pages of libraries that only this job maps. Unlike the data estimate, the charged estimate counts memory that the
+truth does not count, so its error against the truth does not measure its accuracy as an estimate of a node's memory
+use.
 
-\textbf{Programs that RSS already estimates.} On the 16 other programs, the model's estimates match RSS. Their
-median signed errors are $-1\%$ (data) and $-4\%$ (charged), against $0\%$ for RSS
-(\tabref{tab:summary}). The median absolute error is 12\% for the data estimate and 8\% for RSS, but this
-difference comes from run-to-run variation and not from the model. The RSS that the model's own runs record has a
-median absolute error of 11.5\% on the same programs, and the data estimate of the same runs has 12\%.
+\textbf{Other programs.} On the 16 other programs, RSS is already accurate, with a median signed error of $+1\%$ and a
+median absolute error of 2\%. The data estimate has $-1\%$ and 3\%, and \memprint{} has $-1\%$ and 1\%.
 
-\textbf{Errors that every estimate shares.} On 7 of the 16 other programs, every estimate, \memprint{} included,
-has a whole-run error of 10\% or more in the same direction. The GAP programs are overestimated by $+10\%$ to $+35\%$,
-and atax, NPB-IS and NPB-MG are underestimated by $-10\%$ to $-25\%$. The peak errors of the same estimates are
-within 6\%, so the estimates and the truth agree on the amount of memory and disagree on when it is used. The truth
-is on Pin's count of memory references, and the estimates are on the wall clock, so a phase that executes few
-memory references per second, such as GAP's graph construction, takes a larger share of the run on the wall clock.
-The errors therefore measure the difference between the two clocks, and they bound the accuracy any wall-clock
-estimate can show against this truth.
+\textbf{The truth's clock.} An earlier version of this comparison kept the truth on Pin's count of memory references.
+Every estimate then had whole-run errors of 10\% or more in the same direction on 7 of the 16 other programs, from
+$+10\%$ to $+35\%$ on the GAP programs and from $-10\%$ to $-25\%$ on atax, NPB-IS and NPB-MG, with peak errors within
+6\%. A phase that executes few memory references per second, such as GAP's graph construction, takes a smaller share
+of the run on Pin's clock than on the wall clock. Placing the truth on the native wall clock removes these errors, and
+the wall clock is the axis on which a scheduler observes a job.
 
-\textbf{Overhead.} The model's run takes $0.99\times$ the time of a plain RSS run at the median, and $0.96\times$
-to $1.04\times$ on 20 of the 23 programs. The plain RSS run includes the 40\,ms that the external sampler takes to
-start, which explains the ratios of $0.60\times$ for atax and $0.84\times$ for NPB-MG, whose runs last 0.10\,s and
-0.31\,s. darknet runs $1.21\times$ slower under the model in all 3 runs. A thread that sleeps for 0.99\,s between
-samples slows darknet by the same $1.22\times$, so the cost comes from the presence of a second thread in a
-single-threaded program, and not from the sampling. We did not identify which code path the second thread slows
-down. \memprint{}'s W5 run with its
-counter run takes $12.0\times$ a native run at the median, $8.9\times$ on the other programs and $34.4\times$ on
-the allocator-heavy programs, with $93.0\times$ on \texttt{cc1}.
+\textbf{Overhead.} The model's run takes $0.99\times$ the time of a plain RSS run at the median, and $0.96\times$ to
+$1.04\times$ on 20 of the 23 programs. The plain RSS run includes the 40\,ms that the external sampler takes to start,
+which explains the ratios of $0.60\times$ for atax and $0.84\times$ for NPB-MG, whose runs last 0.10\,s and 0.31\,s.
+darknet runs $1.21\times$ slower under the model in all 3 runs. A thread that sleeps for 0.99\,s between samples slows
+darknet by the same $1.22\times$, so the cost comes from the presence of a second thread in a single-threaded program,
+and not from the sampling. We did not identify which code path the second thread slows down. The mode that reads
+\texttt{smaps} takes $0.98\times$ the time of a plain RSS run at the median ($0.60\times$ to $1.18\times$).
+\memprint{}'s W5 run with its counter run takes $12.0\times$ a native run at the median, $8.9\times$ on the other
+programs and $34.4\times$ on the allocator-heavy programs, with $93.0\times$ on \texttt{cc1}.
 
 \subsection{Where the remaining RSS goes}
 \label{sec:gap}
@@ -273,8 +303,8 @@ the allocator-heavy programs, with $93.0\times$ on \texttt{cc1}.
 \centering
 \small
 \caption{Parts of the model's run, each summed over the run as a percentage of the truth's sum (the truth is 100).
-Data is estimate 1. Free is glibc's free bytes. File RSS and file PSS are the RSS and PSS of file-backed pages
-(RSS minus anonymous RSS, and PSS minus anonymous RSS). Median of 3 runs.}
+Data is estimate 1. Free is glibc's free bytes. File RSS and file PSS are the RSS and PSS of file-backed pages (RSS
+minus anonymous RSS, and PSS minus anonymous RSS). Median of 3 runs.}
 \label{tab:components}
 \begin{tabular}{lrrrr}
 \toprule
@@ -286,26 +316,224 @@ Program & Data (\%) & Free (\%) & File RSS (\%) & File PSS (\%) \\
 \end{table}
 
 \tabref{tab:components} shows the size of each part of the model's run against the truth. On the allocator-heavy
-programs, glibc holds free memory equal to 7\% to 38\% of the truth on 5 of the 7 programs, and file-backed pages
-make up 7\% to 87\% of the truth. On the other programs, both parts are small, at a median of 1\% and 5\%.
+programs, glibc holds free memory equal to 6\% to 39\% of the truth on 5 of the 7 programs, and file-backed pages make
+up 6\% to 88\% of the truth. On the other programs, both parts are small, at a median of 1\% and 6\%.
 
-miniVite has the largest share of both parts. glibc's free bytes amount to 38\% of the truth, and file-backed pages
-amount to 87\%. A sample of \texttt{/proc/pid/smaps} in the middle of a run shows where the file-backed pages are.
-The MPI library holds 2348\,KiB, PMIx 2096\,KiB, the C library 1496\,KiB and the C++ runtime 1356\,KiB, against a
-truth of 9.7\,MiB on average over the run. The PSS of the C library is 77\,KiB and that of the C++ runtime 199\,KiB,
-because other processes map the same pages, but the PSS of the MPI and PMIx libraries equals their RSS, because only
-miniVite maps them. Subtracting glibc's free bytes alone therefore reduces miniVite's error only from $+99\%$ to
-$+64\%$ (\secref{sec:options}), and removing the file-backed pages reduces it to $-8\%$.
+miniVite has the largest share of both parts. glibc's free bytes amount to 39\% of the truth, and file-backed pages
+amount to 88\%. A sample of \texttt{/proc/pid/smaps} in the middle of a run shows where the file-backed pages are. The
+MPI library holds 2348\,KiB, PMIx 2096\,KiB, the C library 1496\,KiB and the C++ runtime 1356\,KiB, against a truth of
+9.7\,MiB on average over the run. The PSS of the C library is 77\,KiB and that of the C++ runtime 199\,KiB, because
+other processes map the same pages, but the PSS of the MPI and PMIx libraries equals their RSS, because only miniVite
+maps them. Subtracting glibc's free bytes alone therefore reduces miniVite's error only from $+105\%$ to $+66\%$
+(\secref{sec:options}), and leaving out the libraries' pages reduces it to $-7\%$.
 
-\section{Other ways to close the gap}
+\section{Transfer to a larger input}
+\label{sec:transfer}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Whole-run error (\% of the truth), signed and absolute, of each estimate predicted for a program's largest
+input from its smaller inputs. The peak is a linear regression of the smaller inputs' peaks on the input size, never
+below the largest of them, and the shape is the largest smaller input's curve. -- marks a program whose smaller inputs
+show nothing above the runtime's pages, for which the scheduler falls back to the user's request.}
+\label{tab:transfer}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Data (1)} & \multicolumn{2}{c}{Shared (2)} & \multicolumn{2}{c}{\memprint{}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+Program & sign. & abs. & sign. & abs. & sign. & abs. & sign. & abs. \\
+\midrule
+\tabinput{tables/transfer.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+A scheduler rarely has a profile of the job's own input, so a footprint model is more useful if a curve measured on
+small inputs predicts the curve of a larger one. We apply one transfer rule, fixed before looking at the results, to
+every estimate. The peak at the largest input is a linear regression of the smaller inputs' peaks on the input
+size~\cite{KSplus2024}, never below the largest peak seen, and the shape is the curve of the largest smaller input,
+scaled to that peak. The largest input is held out, and the model's smaller inputs run once each.
+
+The data estimate transfers as accurately as \memprint{} (\tabref{tab:transfer}). On the allocator-heavy programs, its
+median whole-run error is $-4\%$ (10\% absolute), against $+20\%$ (22\%) for RSS and $-6\%$ (10\%) for \memprint{}. On
+the other programs, it is $-2\%$ (6\%), against $+2\%$ (10\%) for RSS and 0\% (5\%) for \memprint{}.
+
+Three cases show where transfer fails. On \texttt{cc1}, every estimate is 226\% to 351\% too high, because the three
+inputs are different source files whose size predicts the compiler's memory poorly. On NPB-MG, the data estimate is
+67\% too low and RSS 96\% too low, because the only usable smaller input runs for a few milliseconds and the 5\,ms
+sampling misses its peak, while \memprint{} counts every reference and is 15\% too high. On 2mm, gemm and jacobi-2d,
+RSS is 25\% to 35\% too low for the same reason, because the smallest input's run fits in one sample of the external
+sampler, which sees only the runtime. The model's thread starts before \texttt{main} and samples these runs, and its
+error on them is $-10\%$ to $-4\%$. The transfer of a model trained on short runs therefore depends on sampling the
+start of a run, and sampling faster during the first milliseconds of a run would address it.
+
+\section{Scheduling with the model's curves}
+\label{sec:sched}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Scheduling simulation under the pages-touched truth on the native clock: mean response time (minutes) at
+three offered loads, and throughput (jobs per hour), OOM kills and core-hours lost to them at a load of 0.8. Means
+over 3 seeds of 3000 jobs on 32 nodes. Every estimate's margin is the 90th percentile of the margins the other
+programs need (leave one program out), and the user's request takes 10\%. The second block profiles the job's own
+input, and the third transfers from the program's smaller inputs.}
+\label{tab:sched}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{Mean response (min)} & \multicolumn{3}{c}{At load 0.8} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Oracle & 0.6 & 0.8 & 1.0 & jobs/h & kills & lost core-h \\
+\midrule
+\input{tables/grid_pagesnat.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+We place the model's curves in DMSched-Sim, the trace-driven scheduling simulator of the corpus. The simulator replays
+a synthetic job stream with MetaCentrum's shape (3000 jobs, 1 to 16 cores, run times of 5 to 720 minutes) on 32 nodes
+with 32 cores and 128\,GB each and a 1\,TB memory pool. Each job takes the footprint curve of a random corpus program
+with a smaller input, scaled to the job's peak, and the scheduler reserves memory by the oracle's estimate of that
+curve. The reservation divides the run into 20 windows, holds the estimate's largest value in each window, widens each
+window to its neighbours, and adds a margin times the peak. A job whose memory exceeds its reservation is killed, loses
+its work, and is requeued with a reservation 1.5 times larger. Each oracle's margin is calibrated by leaving one
+program out, so a job of program $p$ gets the 90th percentile of the margins the other programs need to never fall
+below their truth.
+
+On the pages truth (\tabref{tab:sched}), the data estimate gives the lowest mean response time of all estimates that
+profile the job's own input, 433 minutes at a load of 0.8, against 515 for the RSS curve, 519 for \memprint{} on the
+native clock and 479 for the exact peak. It also has the highest throughput of these estimates (44.9 jobs per hour)
+and the fewest kills (319). Its calibrated margin is 7\%, against 12\% for \memprint{}, because no program needs a
+margin above 9\% with it. \memprint{} on Pin's own clock gives 1607 minutes, because its curve and the job's footprint
+disagree on when memory is used.
+
+Every transferred estimate except \memprint{} on Pin's clock gives a response time at least twice that of the same
+estimate on the job's own input. \memprint{} on the native clock transfers best (1283 minutes), and the data estimate
+transfers worst (2806 minutes), although its median transfer error equals \memprint{}'s (\secref{sec:transfer}). The
+calibrated margin follows the worst programs, and the data estimate needs a margin of 1.00 on gemm and 2.67 on NPB-MG,
+the programs whose smaller inputs are too short for 5\,ms sampling, so its 90th percentile is 0.53, against 0.23 for
+\memprint{}.
+
+Under the RSS truth, which the kernel charges and OOM-kills on, the RSS curve of an earlier run is the best estimate
+(393 minutes at a load of 0.8), because it measures the truth itself. The data estimate gives 748 minutes, close to
+\memprint{} on the native clock (699 minutes), because it leaves out the retained memory and libraries that the RSS
+truth counts, and its calibrated margin must cover them. The estimate a scheduler should use therefore depends on what
+the node enforces. A limit on RSS calls for the RSS curve, and a limit on the memory the job uses, as in a cluster
+whose allocators return freed memory, calls for the data estimate.
+
+\section{Other allocators and transparent huge pages}
+\label{sec:alloc}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Signed whole-run error (\% of the truth under the same allocator) under jemalloc and TCMalloc, with
+transparent huge pages enabled (the machine's setting) and disabled for the process. \emph{Anon} is the data estimate
+without the allocator's free bytes. Median of 3 runs. Overhead is the run time over a plain RSS run under the same
+allocator.}
+\label{tab:alloc}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{THP enabled} & \multicolumn{3}{c}{THP disabled} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-8}
+Program & RSS & Anon & Data (1) & Shared (2) & RSS & Data (1) & Shared (2) \\
+\midrule
+\tabinput{tables/alloc.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{The corpus under glibc with transparent huge pages enabled and disabled for the process: median signed and
+absolute whole-run error (\% of the truth). The data estimate here comes from the mode that reads \texttt{smaps}.}
+\label{tab:thp}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{RSS} & \multicolumn{4}{c}{Data (1)} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+ & \multicolumn{2}{c}{THP on} & \multicolumn{2}{c}{THP off} & \multicolumn{2}{c}{THP on} & \multicolumn{2}{c}{THP off} \\
+Programs & sign. & abs. & sign. & abs. & sign. & abs. & sign. & abs. \\
+\midrule
+\input{tables/thp.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+We ran the 7 allocator-heavy programs under jemalloc 5 and TCMalloc (gperftools 2.18, \texttt{tcmalloc\_minimal}),
+loaded with \texttt{LD\_PRELOAD}, and measured the truth with Pin under the same allocator (\tabref{tab:alloc}).
+
+\textbf{TCMalloc.} RSS overestimates the footprint by a median of 46\%, more than under glibc, because TCMalloc keeps
+freed spans in its page heap and its caches. The data estimate has a median error of $-4\%$, and it is low on SQLite
+($-22\%$) and miniVite ($-16\%$). Without the allocator's free bytes, the estimate is $+21\%$, so the statistics remove
+most of the gap.
+
+\textbf{jemalloc.} With transparent huge pages enabled, every estimate overestimates jemalloc's footprint, RSS by a
+median of 56\% and the data estimate by 35\%, with $+149\%$ on miniVite. jemalloc places its extents at 2\,MiB aligned
+addresses, so the kernel backs them with huge pages, and a 2\,MiB page counts in full when the program touches 4\,KiB
+of it. In a run of Lua under jemalloc, 45\,MiB of the 65\,MiB of anonymous memory is in huge pages. We disabled
+transparent huge pages for the process with \texttt{prctl(PR\_SET\_THP\_DISABLE)}, which the library calls in its
+constructor on request. The data estimate's median error under jemalloc then drops to $-1\%$, and RSS's to $+26\%$.
+Under TCMalloc and under glibc, disabling transparent huge pages changes the median errors by at most 4 points
+(\tabref{tab:thp}).
+
+The memory that huge pages add is real. A node with transparent huge pages enabled holds the whole 2\,MiB page in
+memory, and the pages-touched truth undercounts it, as \memprint{} would. A scheduler on such a node needs the estimate
+with huge pages, which the model measures and Pin does not, and a scheduler that wants the 4\,KiB footprint can disable
+huge pages for the profiling run. We also checked two other kernel counters that we expected to matter.
+\texttt{LazyFree}, the pages released with \texttt{MADV\_FREE} that stay resident until the kernel reclaims them, was 0
+in the jemalloc runs, and the \texttt{Referenced} bytes of llama2.c's model file equal its RSS.
+
+\section{Language model engines}
+\label{sec:llm}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Signed whole-run error (\% of the pages-touched truth) on the language model engines, median of 3 runs. Data
+(1) without files is $\max(A - F, 0) + B$. The model's overhead is the run time of the mode that reads \texttt{smaps}
+over a plain RSS run, and \memprint{}'s is its W5 and counter runs over a native run ($\times$).}
+\label{tab:llm}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & & \multicolumn{2}{c}{Data (1)} & & & Data (1) & \multicolumn{2}{c}{Overhead ($\times$)} \\
+\cmidrule(lr){3-4}\cmidrule(lr){8-9}
+Engine and input & RSS & no files & with files & Shared (2) & \memprint{} & THP off & model & \memprint{} \\
+\midrule
+\input{tables/llm.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+llama2.c maps its model file and reads the weights from the mapping, and llama.cpp maps its GGUF file and copies part
+of it into buffers it allocates. Without the data-file term, the data estimate is 81\% to 92\% too low on llama2.c and
+39\% to 56\% too low on llama.cpp (\tabref{tab:llm}), because the weights are file-backed pages. With the term, the
+data estimate is within $-1\%$ to $+15\%$ of the truth on llama2.c and on llama.cpp generating 128 tokens. On
+llama2.c, the remaining overestimate comes from transparent huge pages. The engine allocates its key and value caches
+for the whole context of 1024 positions with \texttt{calloc} and fills only the positions it generates, and 45\,MiB of
+its 47.5\,MiB of anonymous memory is in huge pages. With huge pages disabled, the data estimate is within 1\% of the
+truth on all three model sizes.
+
+llama.cpp generating 32 tokens is the exception. Every estimate of the model is 26\% to 28\% too low, against 13\% for
+\memprint{}. The run lasts less than a second, and most of it loads the model, so the estimates and the truth disagree
+on when the model's pages become resident. The model's run costs $0.94\times$ to $1.00\times$ a plain RSS run, and
+\memprint{}'s W5 costs $3.9\times$ to $6.0\times$ on llama2.c and $38.9\times$ to $67.4\times$ on llama.cpp.
+
+\section{Other ways to correct RSS}
 \label{sec:options}
 
 \begin{table}[t]
 \centering
 \small
 \caption{Signed whole-run error (\% of the truth) of each alternative used alone on the allocator-heavy programs,
-median of 3 runs, and its overhead over a plain RSS run ($\times$). Runtime statistics exist only for CPython and
-Lua. These runs keep the file-backed pages in every estimate.}
+median of 3 runs, and its overhead over a plain RSS run ($\times$). Runtime statistics exist only for CPython and Lua.
+These runs keep the file-backed pages in every estimate.}
 \label{tab:options}
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{lrrrrrr}
@@ -317,100 +545,104 @@ Program & RSS & RSS$-$free & trim 5\,ms & trim thr.\ 0 & runtime stats & referen
 \end{tabular}
 \end{table}
 
-Before we settled on the model, we tested four alternatives on the allocator-heavy programs, each on its own
-(\tabref{tab:options}). The first, RSS minus glibc's free bytes, is the first half of the model.
+Before we settled on the model, we tested four alternatives on the allocator-heavy programs under glibc, each on its
+own (\tabref{tab:options}). The first, RSS minus glibc's free bytes, is the first half of the model.
 
-\textbf{Releasing freed memory during the run.} Instead of subtracting free bytes, the program can return them to
-the kernel, so that RSS drops when the program frees memory. We tested two ways. The first calls
-\texttt{malloc\_trim(0)} every 5\,ms from a thread in the process, which releases the free pages inside every
-arena with \texttt{madvise}. The second sets glibc's trim threshold to 0, which releases free memory at the top of
-the heap after every \texttt{free}. Both reduce the median error less than subtracting free bytes, $+13\%$ and
-$+16\%$ against $+12\%$. A trim threshold of 0 releases only the top of the heap, which explains why it changes
-Lua's and SQLite's errors by less than 4 points. Both alternatives also change the program's allocation behaviour,
-and the trim thread costs up to $1.10\times$ on Perl.
+\textbf{Releasing freed memory during the run.} Instead of subtracting free bytes, the program can return them to the
+kernel, so that RSS drops when the program frees memory. We tested two ways. The first calls \texttt{malloc\_trim(0)}
+every 5\,ms from a thread in the process, which releases the free pages inside every arena with \texttt{madvise}. The
+second sets glibc's trim threshold to 0, which releases free memory at the top of the heap after every \texttt{free}.
+Both reduce the median error less than subtracting free bytes, $+11\%$ and $+14\%$ against $+9\%$. A trim threshold of
+0 releases only the top of the heap, which explains why it changes Lua's error by only 3 points. Both alternatives
+also change the program's allocation behaviour, and the trim thread costs up to $1.10\times$ on Perl.
 
-\textbf{Language runtime statistics.} For CPython, we sampled the free bytes of its object allocator (the arena
-bytes minus the bytes in allocated blocks, from \texttt{sys.\_debugmallocstats}) from a thread started in
+\textbf{Language runtime statistics.} For CPython, we sampled the free bytes of its object allocator (the arena bytes
+minus the bytes in allocated blocks, from \texttt{sys.\_debugmallocstats}) from a thread started in
 \texttt{sitecustomize}. For Lua, we sampled the heap size the garbage collector reports
-(\texttt{collectgarbage("count")}) from a debug hook every $10^6$ virtual machine instructions. CPython's
-whole-run signed error drops to $+9\%$, but its absolute error rises to 44\%, which means that the estimate is too
-low in some parts of the run and too high in others. We did not determine why. Lua's heap count leaves out the
-interpreter's own memory and gives $-18\%$. The statistics exist only for these two programs, and GCC reports its
-heap only at the end of a compilation.
+(\texttt{collectgarbage("count")}) from a debug hook every $10^6$ virtual machine instructions. CPython's whole-run
+signed error drops to $+5\%$, but its absolute error rises, which means that the estimate is too low in some parts of
+the run and too high in others. We did not determine why. Lua's heap count leaves out the interpreter's own memory and
+gives $-19\%$. The statistics exist only for these two programs, and GCC reports its heap only at the end of a
+compilation.
 
 \textbf{Referenced pages per window.} The kernel can clear the referenced bits of a process's pages
-(\texttt{/proc/pid/clear\_refs}), after which \texttt{smaps\_rollup} counts the pages the process has touched since.
-We cleared the bits 20 times per run and took the pages referenced in each window as the footprint of that window,
-in the manner of a working set~\cite{denning1968}. The estimate falls below the truth by up to 70\% (miniVite),
-69\% (\texttt{cc1}) and 56\% (Quicksilver), because a page that the program holds but does not touch within a
-window is not counted. A scheduler that reserved this estimate would run these programs out of memory.
+(\texttt{/proc/pid/clear\_refs}), after which \texttt{smaps\_rollup} counts the pages the process has touched since. We
+cleared the bits 20 times per run and took the pages referenced in each window as the footprint of that window, in the
+manner of a working set~\cite{denning1968}. The estimate falls below the truth by up to 70\% (miniVite), 68\%
+(\texttt{cc1}) and 55\% (Quicksilver), because a page that the program holds but does not touch within a window is not
+counted. A scheduler that reserved this estimate would run these programs out of memory.
 
 \section{Limitations}
 \label{sec:limits}
 
-A limitation of the free-byte correction is that it reads only glibc's statistics, which leaves the memory of
-other allocators in the estimate. A program linked with jemalloc or TCMalloc needs that allocator's own
-statistics~\cite{Evans2006jemalloc,Hunter2021Temeraire}, and the arenas of CPython's object allocator and GCC's
-garbage-collected heap stay in the estimate as RSS. On our corpus, the data estimate is nevertheless within 7\% of
-the truth on CPython and \texttt{cc1}, and it is unclear whether this result holds for inputs on which these
-allocators retain more memory.
+A limitation of the free-byte correction is that it reads only the statistics of glibc, jemalloc and TCMalloc, which
+leaves the memory of other allocators in the estimate. The arenas of CPython's object allocator and GCC's
+garbage-collected heap stay in the estimate as RSS. On our corpus, the data estimate is nevertheless within 5\% of the
+truth on CPython and \texttt{cc1}, and it is unclear whether this result holds for inputs on which these allocators
+retain more memory.
 
-A limitation of the data estimate is that it leaves out all file-backed pages, which is wrong for a program whose
-data is a mapped file. A language model server that maps its weights, for example, holds most of its footprint in
-file-backed pages. The charged estimate counts these pages, and we leave a rule that separates a program's data
-files from its libraries for future work.
+A limitation of the data-file rule is that it classifies mappings by path, which counts any mapped file that is not a
+shared object as data. A program that maps a large file it uses as code, or a library without \texttt{.so} in its
+name, would have that file counted.
 
-A limitation of the free-byte correction is also that some free bytes may not be resident, such as the untouched
-part of the top of the heap, which makes the data estimate lower than the truth. The data estimate is below the
-truth on 4 of the 7 allocator-heavy programs, by $-4\%$ to $-8\%$ over the run, and its peak is at most 4\% low, so
-a scheduler that uses it needs a headroom of a few percent.
+A limitation of the free-byte correction is also that some free bytes may not be resident, such as the untouched part
+of the top of the heap, which makes the data estimate lower than the truth. The data estimate is below the truth on 6
+of the 7 allocator-heavy programs under glibc, by 1\% to 9\% over the run, and on SQLite under TCMalloc by 22\%, so a
+scheduler that uses it needs a margin.
 
-A limitation of the sampling thread is that it adds a second thread to a single-threaded program, which slows
-darknet by $1.21\times$ (\secref{sec:results}). Sampling from an external process avoids the thread, but glibc's
-statistics can be read only inside the process, and we leave a design without a thread for future work.
+A limitation of the sampling thread is that it adds a second thread to a single-threaded program, which slows darknet
+by $1.21\times$ (\secref{sec:repeat}). Sampling from an external process avoids the thread, but the allocator's
+statistics can be read only inside the process. A second limitation of the thread is its 5\,ms interval, which misses
+the curve of runs shorter than a few tens of milliseconds and limits the model's transfer from the smallest inputs
+(\secref{sec:transfer} and \secref{sec:sched}).
 
-The evaluation covers a single machine, short runs of 0.1 to 12\,s, single-process programs, and estimates of the
-same input as the run. It does not test whether the model's curve from a small input transfers to a larger input, or
-how a scheduler performs with the model's estimates, and we leave both for future work. The truth's clock of
-memory references also limits the accuracy that any wall-clock estimate can show (\secref{sec:results}).
+The evaluation covers a single machine, short runs of 0.1 to 12\,s and single-process programs. The truth's clock
+mapping passes through the native run's reference counts, which also place \memprint{}'s curve, so \memprint{}'s timing
+accuracy is overstated against the truth. The truths under jemalloc and TCMalloc use the clock of the native run under
+glibc.
 
 \section{Related work}
 \label{sec:related}
 
-\textbf{Footprint measurement.} Valgrind's Massif and DHAT~\cite{Nethercote2007Valgrind,dhat} and \memprint{}
-measure the heap or the touched memory of every allocation by instrumenting the program. Our model reads counters that the kernel and glibc already keep. Unlike \memprint{}, it
-does not attribute memory to allocation sites or show which bytes of a block the program touches.
+\textbf{Footprint measurement.} Valgrind's Massif and DHAT~\cite{Nethercote2007Valgrind,dhat} and \memprint{} measure
+the heap or the touched memory of every allocation by instrumenting the program. Our model reads counters that the
+kernel and the allocator already keep. Unlike \memprint{}, it does not attribute memory to allocation sites or show
+which bytes of a block the program touches.
 
-\textbf{Page access sampling.} DAMON~\cite{park2019damon} and Thermostat~\cite{agarwal2017thermostat} sample
-the accessed bits of pages to find cold memory, and PEBS sampling~\cite{roca_nonell2020pebs} records the addresses
-of sampled loads. These methods measure which pages a program uses within a period of time, which is the
-working set~\cite{denning1968} and not the footprint. Our referenced-page alternative (\secref{sec:options}) shows
-that the working set of a window falls far below the footprint on allocator-heavy programs.
+\textbf{Page access sampling.} DAMON~\cite{park2019damon} and Thermostat~\cite{agarwal2017thermostat} sample the
+accessed bits of pages to find cold memory, and PEBS sampling~\cite{roca_nonell2020pebs} records the addresses of
+sampled loads. These methods measure which pages a program uses within a period of time, which is the working
+set~\cite{denning1968} and not the footprint. Our referenced-page alternative (\secref{sec:options}) shows that the
+working set of a window falls far below the footprint on allocator-heavy programs.
 
-\textbf{Memory prediction for scheduling.} KS+~\cite{KSplus2024} predicts a workflow task's memory over time from
-the RSS of earlier runs, and Zacarias et al.~\cite{Zacarias2021Accurate,Zacarias2023Dynamic} predict the memory of
-HPC jobs from earlier runs. Pond~\cite{Li2023Pond} predicts how much of a virtual machine's memory goes untouched.
-These systems learn from RSS or from allocated memory, and our model gives them a training signal without the
-allocator's retained memory and the job's shared libraries at the same cost as RSS.
+\textbf{Memory prediction for scheduling.} KS+~\cite{KSplus2024} predicts a workflow task's memory over time from the
+RSS of earlier runs, and Zacarias et al.~\cite{Zacarias2021Accurate,Zacarias2023Dynamic} predict the memory of HPC jobs
+from earlier runs. Pond~\cite{Li2023Pond} predicts how much of a virtual machine's memory goes untouched. These systems
+learn from RSS or from allocated memory, and our model gives them a training signal without the allocator's retained
+memory and the job's shared libraries at the same cost as RSS.
 
-\textbf{Allocators that return memory.} Mesh~\cite{Powers2019Mesh} compacts the heap to return fragmented memory
-to the kernel, and TCMalloc's Temeraire~\cite{Hunter2021Temeraire} releases free huge pages. These allocators reduce
-the gap between RSS and the footprint by changing the program, whereas our model measures the gap without changing
-the program's allocations.
+\textbf{Allocators and huge pages.} Mesh~\cite{Powers2019Mesh} compacts the heap to return fragmented memory to the
+kernel, and TCMalloc's Temeraire~\cite{Hunter2021Temeraire} releases free huge pages. Ingens~\cite{Kwon2016Ingens} and
+HawkEye~\cite{Panwar2019HawkEye} limit the memory that huge pages waste on partly used ranges. These systems reduce the
+gap between RSS and the footprint by changing the system, whereas our model measures the gap without changing the
+program's allocations.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-RSS overestimates the footprint of programs that allocate and free memory throughout their run, because glibc keeps
-freed memory resident and because RSS counts shared libraries. A model that subtracts glibc's free bytes from the
-anonymous RSS and adds the runtime's own pages reduces the median whole-run error on these programs from $+17\%$ to
-$-4\%$, which matches \memprint{}'s accuracy, at a median of $0.99\times$ the run time of a plain RSS run instead
-of $34.4\times$. On array programs, it matches RSS. Pin-based profiling is therefore needed for attributing memory to
-code and for allocators that glibc cannot see, and not for the footprint curve a scheduler uses.
+RSS overestimates the footprint of programs that allocate and free memory throughout their run, because the allocator
+keeps freed memory resident and because RSS counts shared libraries. A model that subtracts the allocator's free bytes
+from the anonymous RSS and adds mapped data files and the runtime's pages reduces the median whole-run error on these
+programs from $+16\%$ to $-4\%$, which matches \memprint{}'s accuracy on the job's own input and on larger inputs, at a
+median of $0.99\times$ the run time of a plain RSS run instead of $34.4\times$. In a scheduling simulation, its curve
+gives the lowest response time of the estimates that profile the job's own input. Pin-based profiling remains needed
+for attributing memory to code, for allocators the model cannot query, for the curves of runs too short to sample, and
+for the 4\,KiB footprint of programs whose memory the kernel backs with huge pages.
 
-\textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library, \texttt{run\_model.sh} and
-\texttt{run\_options.sh} run the experiments, and \texttt{compute.py} produces every table. The runs are in
-\texttt{\textasciitilde/memprint-data/2026-10-26-rsscurve/opts}.
+\textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library. \texttt{run\_model.sh},
+\texttt{run\_transfer.sh}, \texttt{run\_options.sh}, \texttt{run\_alloc.sh} and \texttt{run\_llm.sh} run the
+experiments, \texttt{grid.py} builds the simulator's corpus and runs the scheduling grid, and \texttt{compute.py}
+produces every table. The runs are in \texttt{\textasciitilde/memprint-data/2026-10-26-rsscurve}.
 
 \bibliographystyle{plain}
 \bibliography{references}

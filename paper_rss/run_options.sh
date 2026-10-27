@@ -3,7 +3,7 @@
 # one run at a time (paper_rss/compute.py: options). Writes $D/runs/<prog>/<rep>/{base,opt1,opt2a,opt2b,opt3,opt4}.csv
 # and $D/done.txt. opt3 exists for python (pymalloc statistics) and lua (collectgarbage("count")) only.
 HERE=$(cd "$(dirname "$0")" && pwd); S=$HERE/../scripts; D=${OUT:-$HOME/memprint-data/2026-10-26-rsscurve/opts}
-gcc -O2 -shared -fPIC -o $D/mprshim.so $HERE/tools/mprshim.c -lpthread || exit 1
+gcc -O2 -shared -fPIC -o $D/mprshim.so $HERE/tools/mprshim.c -lpthread -ldl || exit 1
 for rep in 1 2 3; do
 grep -E "^(miniVite 32768|lua 1|python 1|perl 1|sqlite 1|cc1 large|quicksilver 100000) " $D/../list.txt | \
 while read -r prog input threads cwd cmd; do

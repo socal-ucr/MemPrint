@@ -34,7 +34,7 @@ def _rebased(g):
     return real.rebase({m: h.sort_values("k").bytes.to_numpy() for m, h in g.groupby("method")})
 
 
-def transfer(curves):
+def transfer(curves, sources=SOURCES):
     """For each program with a smaller input, every source's curve at its largest input predicted from its smaller
     ones (method + "X"): the peak from a linear regression on the input size (as KS+ predicts its segments; with one
     smaller input, in proportion to the size), never below the largest peak seen; the shape is the largest smaller
@@ -47,7 +47,7 @@ def transfer(curves):
             continue
         target, train = inputs[-1], inputs[:-1]
         by = {i: _rebased(g[g.input == i]) for i in train}
-        for m in SOURCES:
+        for m in sources:
             have = [i for i in train if m in by[i]]
             if not have:
                 continue

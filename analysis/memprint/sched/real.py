@@ -10,8 +10,9 @@
   job's peak, so each estimator keeps its own over- or under-estimate.
 
 Truths (scenario): "rss", the resident set (what the kernel charges and OOM-kills on); "bytes", bytes
-touched (MemPrint's definition: what a page-perfect system would need); and "rssmpr", the resident set of the
-program run with libmpr serving its allocations by MemPrint's reservations (resize/).
+touched (MemPrint's definition: what a page-perfect system would need); "pages", the pages touched; and
+"rssmpr", the resident set of the program run with libmpr serving its allocations by MemPrint's reservations
+(resize/).
 """
 
 import numpy as np
@@ -73,7 +74,11 @@ TRUTHS = {"rss": ("rss", "rssbase"), "bytes": ("truth", None), "rssmpr": ("rssmp
           # the RSS without the resident code (executable mappings: program and libraries): what grows with the
           # job's data. Not rebased: that run's sampler also reads smaps, so its first sample can come after the
           # program has allocated its data (2mm), and the code is the part that does not grow
-          "rssdata": ("rssdata", None)}
+          "rssdata": ("rssdata", None),
+          # the 4 KB pages touched and not freed (Pin, -footprint pages): bytes touched at page granularity
+          "pages": ("pages", None),
+          # the same on the native wall clock (through the native run's memory references, as W5nat)
+          "pagesnat": ("pagesnat", None)}
 
 
 def rebase(info):

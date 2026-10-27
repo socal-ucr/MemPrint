@@ -128,7 +128,11 @@ EARLIER = {"rss-peak-rep": ("peak", "rssrep1", None), "rss-curve-rep": ("curve",
            "hybrid-rep": ("curve", "W5nat", "rssrep1"),
            "rss-peak-x": ("peak", "rssrep1X", None), "rss-curve-x": ("curve", "rssrep1X", None),
            "memprint-W5-x": ("curve", "W5X", None), "memprint-W5nat-x": ("curve", "W5natX", None),
-           "hybrid-x": ("curve", "W5natX", "rssrep1X")}
+           "hybrid-x": ("curve", "W5natX", "rssrep1X"),
+           # the RSS footprint model (paper_rss): model1, anonymous RSS - glibc's free bytes (the data footprint);
+           # model2, PSS - free bytes above its run's smallest (the charged footprint)
+           "model1-rep": ("curve", "model1", None), "model2-rep": ("curve", "model2", None),
+           "model1-x": ("curve", "model1X", None), "model2-x": ("curve", "model2X", None)}
 
 
 def _earlier(kind, method, level):
