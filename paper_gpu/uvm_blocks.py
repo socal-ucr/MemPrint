@@ -16,6 +16,11 @@ decides before each wave:
                 any of its four schedules (schedule_*/NAME_blocks.npz; a kernel with a reference to an unknown
                 object may touch every allocation); evict the page whose next predicted use is farthest away
     truth       the same with the traced blocks: an oracle
+    hybrid_min, truth_min
+                the same, prefetching only runs of at least uvm_costs.min_run contiguous pages
+
+Costs are uvm_costs.Measured (costs "measured") or, one row per --fault-us, uvm_costs.Assumed (costs "assumed"), as
+in uvm_oversub.py; a wave's faults stall it as the faults of one kernel would.
 
 A share is simulated only if every wave's pages fit (thrashing inside a wave depends on the order of its
 blocks' accesses, which is not modelled). Writes data/uvm_blocks{,_large}{,_4k}.csv.
@@ -35,11 +40,12 @@ sys.path.insert(0, str(HERE))
 import benchmarks as B  # noqa: E402
 import simulate_blocks as SB  # noqa: E402
 from copy_savings import H2D, D2H, UNIT, fit  # noqa: E402
+from uvm_costs import Assumed, Measured, runs  # noqa: E402
 from memprint.static.kdeps import R, W, RM, WM, align_ends  # noqa: E402
 from memprint.static.kdeps_score import _same as same_op  # noqa: E402
 
 DATA = HERE / "data"
-POLICIES = ("demand", "buffer", "hybrid", "truth")
+POLICIES = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min")
 
 
 def wave_pages(per_alloc, slots, nb, page_units, sizes, rbits, wbits):
@@ -107,10 +113,13 @@ def interp_waves(name, hdir, tev, slots_nb, page_units, sizes):
     return out
 
 
-def simulate(steps, policy, capacity, fault_ns, batch, page_bytes, model):
+def simulate(steps, policy, capacity, costs):
     """steps: [(kind, actual (rd, wr), predicted pages, kernel buffers' pages or None, duration ns)], kind 'h2d',
-    'd2h' or 'dev'. Returns (time, stall, faults, bytes to the device, bytes to the host)."""
-    h2d_ns, d2h_ns = model[H2D][1] * page_bytes, model[D2H][1] * page_bytes
+    'd2h' or 'dev'; costs: uvm_costs.Measured or Assumed. Returns (time, stall, faults, bytes to the device, bytes
+    to the host)."""
+    page_bytes, d2h_ns = costs.page_bytes, costs.d2h_ns
+    footprints = policy.split("_")[0] in ("hybrid", "truth")
+    min_run = costs.min_run if policy.endswith("_min") else 1
     lru, dirty = OrderedDict(), set()
     time = stall = faults = up = down = 0
     uses = defaultdict(list)
@@ -128,7 +137,7 @@ def simulate(steps, policy, capacity, fault_ns, batch, page_bytes, model):
 
     def evict(now, keep):
         nonlocal time, stall, down
-        if policy in ("hybrid", "truth"):
+        if footprints:
             victim = max((p for p in lru if p not in keep), key=lambda p: (next_use(p, now), p not in dirty),
                          default=None)
         else:
@@ -136,11 +145,11 @@ def simulate(steps, policy, capacity, fault_ns, batch, page_bytes, model):
         if victim is None:
             return False
         del lru[victim]
-        if victim in dirty:
-            dirty.discard(victim)
+        if victim in dirty or costs.writeback_clean:
             down += page_bytes
             time += d2h_ns
             stall += d2h_ns
+        dirty.discard(victim)
         return True
 
     def bring(p, now, keep):
@@ -156,36 +165,35 @@ def simulate(steps, policy, capacity, fault_ns, batch, page_bytes, model):
         touched = rd | wr
         if kind != "dev":                                               # host writes or reads managed pages
             back = [p for p in touched if p in lru]
+            moved = [p for p in back if p in dirty or kind == "h2d" or costs.writeback_clean]
             for p in back:
                 del lru[p]
-                if p in dirty or kind == "h2d":
-                    down += page_bytes
-                    time += d2h_ns
-                    stall += d2h_ns
                 dirty.discard(p)
+            down += len(moved) * page_bytes
             if back:
-                time += fault_ns
-                stall += fault_ns
+                t = costs.host_fault(len(moved))
+                time += t
+                stall += t
             continue
         want = set()
         if policy == "buffer" and bufs is not None:
             want = bufs
-        elif policy in ("hybrid", "truth"):
+        elif footprints:
             want = pred or set()
-        moved = 0
-        for p in sorted(p for p in want if p not in lru):               # as far as it fits beside the
-            if not bring(p, i, touched | want):                         # wave's own pages
-                break
-            moved += 1
+        moved = []
+        for p in [p for r in runs(p for p in want if p not in lru) if len(r) >= min_run for p in r]:
+            if not bring(p, i, touched | want):                         # as far as it fits beside the
+                break                                                   # wave's own pages
+            moved.append(p)
         if moved:
-            t = moved * h2d_ns + model[H2D][0]
+            t = costs.prefetch([len(r) for r in runs(moved)])
             time += t
             stall += t
         missing = [p for p in touched if p not in lru]
         if missing:
             n = len(missing)
             faults += n
-            t = math.ceil(n / batch) * fault_ns + n * h2d_ns
+            t = costs.fault(n)
             time += t
             stall += t
             for p in missing:
@@ -198,7 +206,7 @@ def simulate(steps, policy, capacity, fault_ns, batch, page_bytes, model):
     return time, stall, faults, up, down
 
 
-def program(name, fractions, fault_us, batch, page_kb, model):
+def program(name, fractions, cost_models, page_kb):
     w = B.workdir(B.BENCH[name])
     page_bytes = page_kb * 1024
     pu = page_bytes // UNIT
@@ -255,12 +263,13 @@ def program(name, fractions, fault_us, batch, page_kb, model):
         if cap < largest:
             rows.append({**base, "status": f"a wave needs {largest} pages"})
             continue
-        for fu in fault_us:
+        for costs in cost_models:
             for policy in POLICIES:
-                steps = [(k, a, preds[policy][j] if policy in preds else None, b, d)
+                src = policy.split("_")[0]
+                steps = [(k, a, preds[src][j] if src in preds else None, b, d)
                          for j, (k, a, _, b, d) in enumerate(steps_actual)]
-                t, s, n, up, down = simulate(steps, policy, cap, fu * 1000, batch, page_bytes, model)
-                rows.append({**base, "status": "ok", "fault_us": fu, "policy": policy, "resident_ns": resident,
+                t, s, n, up, down = simulate(steps, policy, cap, costs)
+                rows.append({**base, "status": "ok", "costs": costs.name, "fault_us": costs.fault_us, "policy": policy, "resident_ns": resident,
                              "explicit_ns": explicit, "time_ns": int(t), "stall_ns": int(s), "faults": n,
                              "to_device_bytes": up, "to_host_bytes": down,
                              "unmatched_kernels": sum(1 for i in slots_nb if i not in hy)})
@@ -272,7 +281,7 @@ def main():
     ap.add_argument("--only", default=None)
     ap.add_argument("--page", type=int, default=64, help="page size in KB")
     ap.add_argument("--fractions", default="0.25,0.375,0.5,0.625,0.75,0.875,1.0")
-    ap.add_argument("--fault-us", default="10,25,50", help="cost of a batch of faults in microseconds")
+    ap.add_argument("--fault-us", default="10,25,50", help="assumed cost of a batch of faults in microseconds")
     ap.add_argument("--batch", type=int, default=256, help="faults handled in one batch")
     args = ap.parse_args()
     names = args.only.split(",") if args.only else [
@@ -280,12 +289,13 @@ def main():
         and (B.workdir(B.BENCH[n]) / "hybrid" / "schedule_lockstep" / f"{n}_blocks.npz").exists()]
     model = fit()
     fractions = [float(x) for x in args.fractions.split(",")]
-    fault_us = [float(x) for x in args.fault_us.split(",")]
+    cost_models = [Measured(args.page, model)] + [Assumed(args.page, model, float(x), args.batch)
+                                                  for x in args.fault_us.split(",")]
     rows = []
     for n in names:
-        r = program(n, fractions, fault_us, args.batch, args.page, model)
+        r = program(n, fractions, cost_models, args.page)
         rows += r
-        ok = [x for x in r if x.get("status") == "ok" and x["fault_us"] == 25]
+        ok = [x for x in r if x.get("status") == "ok" and x["costs"] == "measured"]
         lo = min((x["fraction"] for x in ok), default=None)
         print(n, f"waves {r[0].get('waves')} pages {r[0].get('pages')} largest wave {r[0].get('largest_wave')}",
               {x["policy"]: round(x["time_ns"] / x["explicit_ns"], 2) for x in ok if x["fraction"] == lo},

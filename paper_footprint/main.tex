@@ -49,11 +49,15 @@ of the GPU operation time of \code{\numLargeTrMaxName{}}. With the interpreter's
 \numSmallHyGeo{}$\times$ and \numLargeHyGeo{}$\times$. The savings come from a few programs, and the gap between
 the interpreter and the oracle comes from writes that happen only if a loaded value says so, which the interpreter
 cannot prove happen in every order. We then model the same programs on Unified Memory with less device memory than
-their data, running each kernel wave by wave of thread blocks. Prefetching the pages each wave touches and evicting
-the page used farthest ahead speeds the programs up over demand paging by a geometric mean of
-\numUvmWLargeFourHy{}$\times$ on the \numUvmWLargeFourOver{} large programs that can run in less memory, with the
-interpreter's footprints exactly as with the traced ones, while prefetching every buffer a kernel uses gains
-\numUvmWLargeFourBuf{}$\times$.
+their data, running each kernel wave by wave of thread blocks, with the costs of page faults and prefetches that we
+measure on the A30. A prefetch call costs \numUvmPrefetchCallUs{}~\textmu s, so prefetching every page a wave
+touches is slower than demand paging (\numUvmWLargeFourHy{}$\times$ on the large inputs). Prefetching only runs of
+contiguous pages long enough to repay the call, and evicting the page used farthest ahead, speeds the
+\numUvmWLargeFourOver{} large programs that can run in less memory up by a geometric mean of
+\numUvmWLargeFourHyMin{}$\times$ over demand paging, with the interpreter's footprints exactly as with the traced
+ones. On the A30 itself, the interpreter's plans for prefetching before each kernel are identical to the traced
+ones, and prefetching runs speeds unmodified programs up by \numHwHalfHyMinAll{}$\times$ to
+\numHwHalfTrMinAll{}$\times$ at half of their memory, across repeated measurements of the same plans.
 \end{abstract}
 
 \section{Introduction}
@@ -86,7 +90,9 @@ pages between host and device as kernels touch them, and every page a kernel tou
 stops the kernel for a page fault. Irregular programs suffer most from such oversubscription~\cite{Li2019ETC}. A
 runtime system that knew which pages each part of a kernel touches could move them before the kernel needs them, and
 evict the pages that are needed latest. We model this on the same benchmarks, with the footprints of each wave of
-thread blocks, and compare it with demand paging and with prefetching every buffer a kernel uses.
+thread blocks and with fault and prefetch costs measured on the A30, and compare it with demand paging and with
+prefetching every buffer a kernel uses. We then run the programs on the A30 with Unified Memory and prefetch plans
+before each kernel.
 
 In this work, we make the following contributions:
 \begin{itemize}
@@ -101,7 +107,9 @@ no operation needs and the GPU time that leaving them out saves, for the traced 
 footprint over every order, and its lockstep footprint (\secref{sec:eval-copies}).
 \item We model the benchmarks on Unified Memory with less device memory than their data, with kernels run wave by
 wave of thread blocks, and measure what prefetching and eviction gain over demand paging with the footprints of
-each wave (\secref{sec:uvm} and \secref{sec:eval-uvm}).
+each wave, under fault and prefetch costs measured on the A30 (\secref{sec:uvm} and \secref{sec:eval-uvm}).
+\item We run \numHwPrograms{} unmodified programs on the A30 with Unified Memory and prefetch plans from each
+footprint, and compare the measured speedups with the model's (\secref{sec:eval-hw}).
 \end{itemize}
 
 \section{Background}
@@ -199,14 +207,29 @@ compiler that knows which data structures a kernel uses could do, moves every pa
 touches before its first wave, as far as they fit beside the wave's own pages, and evicts the least recently used
 page. Third, \term{interpreter prefetching} moves, before each wave, the pages that the interpreter's blocks of that
 wave touch under any of its four thread orders, and evicts the page whose next use in that footprint is farthest
-away. Fourth, the oracle does the same with the traced footprints. Every policy pays for what the traced run
-actually touches, so a prediction that is wrong costs faults or moves that are not needed.
+away. Fourth, the oracle does the same with the traced footprints. Because a prefetch call has a fixed cost, the
+interpreter and the oracle also each have a \term{runs} variant, which prefetches only runs of at least
+\numUvmMinRun{} contiguous pages of 64~KB, or \numUvmMinRunFour{} of 4~KB, and leaves shorter runs to demand paging.
+These lengths are the shortest runs for which one prefetch call costs less than faulting on the same pages, at the
+costs below. Every policy pays for what the traced run actually touches, so a prediction that is wrong costs faults
+or moves that are not needed.
 
-\paragraph{Costs.} A fault stops the wave, and the faults of a wave are handled in batches of up to 256, each of
-which costs a fixed time of 10, 25 or 50~\textmu s, plus the transfer of each page at the bandwidth of the copy model
-of \secref{sec:copies}. A prefetch pays the transfer only. Evicting a page that the device wrote since it arrived
-copies it back to the host. We report each policy's speedup over demand paging, as a geometric mean over the
-programs and shares of memory, at 25~\textmu s unless we say otherwise.
+\paragraph{Costs.} We measure the costs of Unified Memory on the A30 with two microbenchmarks. In the first, a
+kernel touches one word in each block of a managed buffer whose pages are on the host. Faulting on one 64~KB block
+stalls the kernel for \numUvmFaultOneUs{}~\textmu s, and each further block up to 16~MB adds about
+\numUvmFaultPerBlockUs{}~\textmu s. With a stride of 4~KB, each further page adds about
+\numUvmFaultPerPageFourUs{}~\textmu s. In the second, the host moves blocks to the device with
+\code{cudaMemPrefetchAsync}, either in one call or in one call per block. A call costs \numUvmPrefetchCallUs{}~\textmu
+s, and the data then moves at \numUvmPrefetchGBs{}~GB/s. The model charges the faults of a wave the measured stall
+for that many pages, and a prefetch one call per contiguous run of pages plus the transfer. A managed page is held
+in one memory at a time, so evicting a page, or touching it from the host, always moves it.
+
+For comparison, we also report the costs that we assumed before measuring them. Under the \term{assumed costs}, the
+faults of a wave are handled in batches of up to 256, each of which costs a fixed time of 10, 25 or 50~\textmu s
+plus the transfer of each page at the bandwidth of the copy model of \secref{sec:copies}, a prefetch costs the fixed
+cost of one copy plus the transfers, and only a page that the device wrote is copied back when it is evicted. We
+report each policy's speedup over demand paging, as a geometric mean over the programs and shares of memory, under
+the measured costs unless we say otherwise, and under the assumed costs at 25~\textmu s.
 
 \section{Evaluation}
 \label{sec:eval}
@@ -282,39 +305,39 @@ kernel writes.
 \input{tables/uvm_summary}
 \caption{Unified Memory with each policy: the programs and shares of device memory at which every operation (with
 kernels as whole operations) or every wave fits in less memory than the program's data, and the geometric-mean
-speedup over demand paging of buffer prefetching and of prefetching with the interpreter's and the traced
-footprints, over those shares and when all of the data fits, at 25~\textmu s per batch of faults.}
+speedup over demand paging of buffer prefetching, of prefetching every page with the interpreter's and the traced
+footprints, and of prefetching only long runs of pages with them, under the costs measured on the A30, and of buffer
+and interpreter prefetching under the assumed costs at 25~\textmu s per batch of faults.}
 \label{tab:uvm-summary}
 \end{table*}
 
-\paragraph{Results.} \tabref{tab:uvm-summary} summarises the results. \textit{Prefetching with the interpreter's
-footprints gains as much over demand paging as prefetching with the traced footprints}: on the large inputs with
-pages of 4~KB, \numUvmWLargeFourHy{}$\times$ for both, and on every input and page size the interpreter falls more
-than 1\% behind the oracle on \numUvmWSmallHyBehind{} configuration only, and the oracle never loses to demand
-paging. Buffer prefetching gains \numUvmWLargeFourBuf{}$\times$ on the same configurations. The gain grows with the
-cost of a fault, from \numUvmWLargeFourHyTen{}$\times$ at 10~\textmu s to \numUvmWLargeFourHyFifty{}$\times$ at
-50~\textmu s. When all of the data fits, prefetching still saves the faults of the first touch of each page, and the
-three policies are within 1\% of each other (\numUvmWLargeFourFitBuf{}$\times$, \numUvmWLargeFourFitHy{}$\times$ and
-\numUvmWLargeFourFitTr{}$\times$).
+\paragraph{Results.} \tabref{tab:uvm-summary} summarises the results. \textit{Under the measured costs, prefetching
+only long runs of pages with the interpreter's footprints gains as much over demand paging as with the traced
+footprints}, \numUvmWLargeFourHyMin{}$\times$ on the large inputs with pages of 4~KB and
+\numUvmWLargeHyMin{}$\times$ with pages of 64~KB, and on no input or page size does the interpreter fall more than
+1\% behind the oracle in any configuration. Prefetching every page that a footprint names is slower than demand
+paging on the large inputs with pages of 4~KB (\numUvmWLargeFourHy{}$\times$, for both footprints), because many
+waves touch short runs of pages, and a prefetch call for each run costs more than the faults it avoids. Buffer
+prefetching gains \numUvmWLargeFourBuf{}$\times$ on the same configurations. When all of the data fits,
+prefetching runs still saves part of the faults of the first touch of each page (\numUvmWLargeFourFitHyMin{}$\times$
+with the interpreter's footprints).
 
-\paragraph{Where the gain comes from.} The interpreter's prefetching gains in two ways. It moves the pages of a
-wave before the wave starts, so the wave takes no fault, and it evicts the page needed latest, so it moves fewer
-pages: \numUvmWLargeFourHyFewerBytes{} fewer bytes than demand paging over all oversubscribed configurations on the
-large inputs, in \numUvmWLargeFourHyFewerConfigs{} of the \numUvmWLargeFourConfigs{} configurations. Buffer
-prefetching moves pages that the current wave does not touch, and later waves evict them. In \code{gramschm}, whose
-kernels run 768 waves, it moves 101~MB to the device where demand paging moves 0.8~MB, and it is slower than demand
-paging (\tabref{tab:uvm-programs}).
+\paragraph{Measured against assumed costs.} The assumed costs overstated what footprints gain. Under them, the
+interpreter's prefetching of every page gains \numUvmWLargeFourAssumedHy{}$\times$ on the large inputs with pages of
+4~KB, against \numUvmWLargeFourHyMin{}$\times$ for the best policy under the measured costs. The assumed costs charge
+a prefetch about 1~\textmu s, where a call costs \numUvmPrefetchCallUs{}~\textmu s on the A30, and they let the
+device drop a page it did not write, where the A30 moves every evicted page back to the host.
 
-\begin{table}[tbp]
-\centering
-\scriptsize
-\setlength{\tabcolsep}{3pt}
-\input{tables/uvm_programs}
-\caption{The large programs that run in less memory than their data, with pages of 4~KB: their pages, the waves
-of all their kernels, the smallest share of the pages that holds every wave, and each policy's speedup over demand
-paging there.}
-\label{tab:uvm-programs}
-\end{table}
+\paragraph{Where the gain comes from.} Prefetching runs gains in two ways. It moves long runs of a wave's pages
+before the wave starts, so the wave takes fewer faults, and it evicts the page needed latest, so it moves fewer
+pages: \numUvmWLargeFourHyMinFewerBytes{} fewer bytes than demand paging over all oversubscribed configurations on
+the large inputs with pages of 4~KB. Buffer prefetching moves pages that the current wave does not touch, and later
+waves evict them. In \code{gramschm}, whose kernels run 768 waves, it moves 96~MB to the device at 75\% of the
+memory where demand paging moves 0.8~MB. Prefetching runs loses to demand paging by more than 1\% in
+\numUvmWLargeFourHyMinLoses{} of the \numUvmWLargeFourConfigs{} configurations, all of \code{3dconv} and
+\code{hotspot}, where it prefetches nothing and takes the same faults as demand paging. In these programs,
+evicting the page used farthest ahead evicts pages that no later kernel uses, and the A30 must move each of them
+back to the host, while least-recently-used eviction leaves some of them on the device until the program ends.
 
 \paragraph{Waves against whole kernels.} With kernels as whole operations, a program can run in less memory only
 if no single kernel touches all of its pages, and on the large inputs with pages of 64~KB that holds for
@@ -322,6 +345,63 @@ if no single kernel touches all of its pages, and on the large inputs with pages
 single-kernel programs such as \code{2dconv} and \code{3dconv}. No GraphBIG program can, because GraphBIG launches
 its kernels with few blocks of 1{,}024 threads, so each kernel is one wave that touches nearly all of the program's
 pages.
+
+\subsection{Unified Memory on the A30}
+\label{sec:eval-hw}
+
+\paragraph{Setup.} We run \numHwPrograms{} of the large programs on the A30 with Unified Memory, unmodified. We
+build each program with the shared CUDA runtime and preload a library into it. The library replaces
+\code{cudaMalloc} with \code{cudaMallocManaged}, and a copy between host and device with a copy by the host. At the
+first allocation, it allocates all free device memory except a share of the 64~KB blocks that the program's device
+operations touch, so that the managed pages have only that share. Before each kernel launch, it prefetches the
+blocks of a plan with \code{cudaMemPrefetchAsync}, one call per contiguous run, and after the launch it waits for the
+kernel. For each kernel, a plan holds the blocks that a policy wants and that the plan believes are not on the
+device, estimating the driver's eviction as least recently used. The driver decides what to evict, so the plans test
+prefetching only, and only before a whole kernel, because the host cannot prefetch between the waves of a kernel
+without changes to the kernel. We run each program at 100\%, 75\% and 50\% of its blocks, \numHwReps{} times, and
+report the median of the time spent in kernels, prefetches and copies. The median coefficient of variation over the
+repetitions is \numHwCv{}.
+
+\begin{table}[tbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\input{tables/uvm_hw}
+\caption{The programs on the A30 with Unified Memory, at the smallest share of their 64~KB blocks at which every
+operation fits ($^*$ where none below 100\% does): the time with demand paging, each plan's speedup over it, and the
+speedup that the kernel-level model gives for the interpreter's runs. A dash marks a plan whose runs all failed, or
+a share the model does not simulate.}
+\label{tab:uvm-hw}
+\end{table}
+
+\paragraph{Results.} \textit{At blocks of 64~KB, the interpreter's plans are identical to the traced plans}, in all
+\numHwPlansSame{} of the \numHwPlanConfigs{} combinations of program and share, both for prefetching every block and
+for prefetching runs. On the A30, the two footprints therefore differ only by the variation between runs, which is
+large under oversubscription. The time of one plan differs between repetitions by up to \numHwSpreadMax{}$\times$,
+in \code{\numHwSpreadName{}}. At half of the memory, prefetching runs speeds the programs up over demand paging by a
+geometric mean of \numHwHalfHyMinAll{}$\times$ and \numHwHalfTrMinAll{}$\times$ in the two sets of runs of the same
+plans, and buffer prefetching by \numHwHalfBufAll{}$\times$ (\tabref{tab:uvm-hw}). At 75\%, prefetching runs gains
+\numHwThreeQHyMinAll{}$\times$ and \numHwThreeQTrMinAll{}$\times$, prefetching every block
+\numHwThreeQHyAll{}$\times$ and \numHwThreeQTrAll{}$\times$, and buffer prefetching \numHwThreeQBufAll{}$\times$. When
+all of the data fits, the geometric mean of every plan is within 4\% of demand paging. The gains are concentrated in
+\code{pathfinder}, \code{hotspot} and \code{gemm}. In \code{bfs}, prefetching every block gains 1.86$\times$ and
+prefetching runs 1.03$\times$, because its kernels touch short runs that the runs plans leave to faults, which
+indicates that the cost of a call we measured overstates the cost of prefetching these runs on the A30.
+
+\paragraph{Against the model.} Most of these shares hold less than one kernel's pages, which the model does not
+simulate. On the \numHwModelConfigs{} oversubscribed configurations that both cover, the kernel-level model
+predicts \numHwModelHyMin{}$\times$ for prefetching runs, and the A30 measures \numHwMeasuredHyMin{}$\times$ and
+\numHwMeasuredTrMin{}$\times$ in the two sets of runs.
+The model predicts that prefetching every page loses (\numHwModelHy{}$\times$) where the A30 gains
+\numHwMeasuredHy{}$\times$, and both find buffer prefetching far slower than demand paging
+(\numHwModelBuf{}$\times$ and \numHwMeasuredBuf{}$\times$), mostly from \code{3dconv}, whose buffer plan
+prefetches 1~GB where the footprints name 16~MB.
+
+\paragraph{Failures.} At half of its memory, one kernel of \code{backprop} touches 140 blocks with room for 74. Of
+the \numHwRuns{} runs, \numHwFailRuns{} failed, all of them of \code{backprop} at this share, with an illegal memory
+access in the kernel. The failure is not caused by prefetching. When we run the program repeatedly, it fails in
+every second run under every plan, demand paging included, and it does not fail at 75\% or 100\% of its
+memory.
 
 \section{Related work}
 \label{sec:related}
@@ -357,9 +437,13 @@ footprint the interpreter now writes during its run includes such a copy. A limi
 each needed range a fixed cost and does not model copies of strided ranges, which means that it may undercount the
 savings on programs whose unneeded units are scattered.
 
-A limitation of the Unified Memory model is that its fault cost and batch size are not measured on the A30, which
-means that the gains of prefetching, which come in part from faults avoided, are shown over a range of fault costs
-rather than for one measured value. A limitation of the waves is that they issue a kernel's blocks in fixed groups
+A limitation of the measured costs is that they come from microbenchmarks that touch or prefetch one buffer in
+order, which means that they may not hold for the scattered pages of a real kernel, and on \code{bfs} prefetching short
+runs gains more on the A30 than the measured cost of a call predicts. A limitation of the hardware runs is that the host can
+prefetch only before a kernel, which means that the policies that prefetch wave by wave, which gain the most in the
+model, are not tested on the A30, and testing them would need changes to the kernels or to the driver. A limitation
+of the plans is that they estimate the driver's eviction as least recently used, which means that a plan may skip
+blocks the driver has evicted or prefetch blocks still on the device. A limitation of the waves is that they issue a kernel's blocks in fixed groups
 of equal duration, while the GPU starts a block whenever another finishes, which means that the pages in use at
 once may differ from a wave's. A limitation of the footprints of blocks is that they do not order the accesses
 within a block, which means that a program whose kernels each run one wave, such as every GraphBIG program on the
@@ -374,11 +458,14 @@ Exact footprints of GPU operations show that \numSmallTrHtoDUnneeded{} of the by
 on the small inputs, and \numLargeTrHtoDUnneeded{} on the large ones, are never read, and leaving them out saves
 up to \numLargeTrMax{} of the GPU operation time of one program but little in most. The interpreter's footprints are
 safe to act on only when taken over every thread order, at a cost of part of the savings in programs whose writes
-depend on loaded values. On Unified Memory with less device memory than the program's data, the footprints of each
-wave of thread blocks let a runtime system prefetch and evict pages as well as an oracle would, which gains
-\numUvmWLargeFourHy{}$\times$ over demand paging, where prefetching whole buffers gains little. We leave for future
-work measuring these gains on the GPU, and ordering the accesses within a block, which programs whose kernels run as
-one wave would need.
+depend on loaded values. On Unified Memory with less device memory than the program's data, a prefetch call on the A30 costs
+more than the faults on a few pages, so a footprint pays off only for long runs of contiguous pages. Prefetching
+such runs wave by wave with the interpreter's footprints gains \numUvmWLargeFourHyMin{}$\times$ over demand paging in
+the model, as much as an oracle, and prefetching them before each kernel gains \numHwHalfHyMinAll{}$\times$ to
+\numHwHalfTrMinAll{}$\times$ on the A30 at half of the memory, with plans identical to the oracle's, where
+prefetching whole buffers loses. We leave for future work prefetching wave by wave
+on the GPU, which needs support in the kernel or the driver, and ordering the accesses within a block, which
+programs whose kernels run as one wave would need.
 
 % TODO: cite the MemPrint paper (paper_gpu) once it has a venue or a report number.
 

@@ -10,14 +10,19 @@ a synchronisation after each launch) with four plans, prefetching before each ke
     buffer      every allocation the kernel touches
     hybrid      the 64 KB blocks of the hybrid interpreter's footprint over every schedule (NAME_access_all.csv)
     truth       the 64 KB blocks of the traced footprint
+    hybrid_min, truth_min
+                the same, but only runs of at least uvm_costs.min_run contiguous blocks (a shorter run costs more
+                as a prefetch call than as faults)
 
 each only as far as the plan believes them not on the device (a prefetch of resident pages is not free). The
 driver decides what to evict. Writes data/uvm_hw{,_large}.csv: per program, share, plan and repetition, the
-time in prefetches and kernels, in copies, and the bytes prefetched.
+time in prefetches and kernels, in copies, and the bytes prefetched. With --plans-only, writes
+data/uvm_hw_plans{,_large}.csv instead: per program, share and plan, the prefetch calls, bytes and a digest.
 """
 
 import argparse
 import csv
+import hashlib
 import os
 import subprocess
 import sys
@@ -30,12 +35,13 @@ import benchmarks as B  # noqa: E402
 from copy_savings import H2D, D2H, UNIT, accesses  # noqa: E402
 from memprint.static.kdeps import align_ends  # noqa: E402
 from memprint.static.kdeps_score import _same as same_op  # noqa: E402
+from uvm_costs import min_run  # noqa: E402
 
 DATA = HERE / "data"
 SCRATCH = Path(os.environ.get("PAPER_GPU_SCRATCH", "/tmp/nmustakin-memprint")) / "uvm_hw"
 SHIM = SCRATCH / "uvm_shim.so"
 BLOCK = 64 * 1024
-PLANS = ("demand", "buffer", "hybrid", "truth")
+PLANS = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min")
 
 
 def build_shim():
@@ -88,7 +94,7 @@ def plans(name, w, capacity_blocks):
     iev = [e for e in csv.DictReader(open(w / "hybrid" / f"{name}_events.csv")) if e["kind"] != "host"]
     iacc = accesses(w / "hybrid" / f"{name}_access_all.csv")
     to_i = {t: int(iev[k]["index"]) for t, k in align_ends(tev, iev, lambda y, x: same_op(x, y)).items()}
-    out = {}
+    out, shortest = {}, min_run(BLOCK // 1024)
     for plan in PLANS:
         rows, resident, launch = [], OrderedDict(), 0
 
@@ -106,19 +112,24 @@ def plans(name, w, capacity_blocks):
                     resident.pop(x, None)
                 continue
             if e["kind"] == "kernel":
-                if plan == "buffer":
+                src = plan.split("_")[0]
+                if src == "buffer":
                     want = {(a, x) for a, _ in touched for x in range(-(-sizes[a] // BLOCK))}
-                elif plan == "truth":
+                elif src == "truth":
                     want = touched
-                elif plan == "hybrid" and i in to_i:
+                elif src == "hybrid" and i in to_i:
                     want = {(a, x) for a, xs in blocks_of(iacc.get(to_i[i], [])).items() for x in xs}
                 else:
                     want = set()
                 new = sorted(x for x in want if x not in resident)
+                sent = []
                 for a in sorted({a for a, _ in new}):
                     for off, n in ranges([x for b, x in new if b == a]):
+                        if plan.endswith("_min") and n < shortest * BLOCK:
+                            continue
                         rows.append((launch, a, off, n))
-                enter(new)
+                        sent += [(a, x) for x in range(off // BLOCK, (off + n) // BLOCK)]
+                enter(sent)
                 launch += 1
             enter(touched)
         out[plan] = rows
@@ -165,20 +176,40 @@ def run(name, fractions, reps):
     return out
 
 
+def plan_summary(name, fractions):
+    """Per share and plan: the prefetch calls, the bytes and a digest of the plan (equal plans, equal digests)."""
+    w = B.workdir(B.BENCH[name])
+    n_blocks, _ = footprint_of(w)
+    out = []
+    for frac in fractions:
+        for p, rows in plans(name, w, max(1, int(frac * n_blocks))).items():
+            out.append({"name": name, "fraction": frac, "plan": p, "calls": len(rows),
+                        "bytes": sum(n for *_, n in rows),
+                        "digest": hashlib.sha1(repr(rows).encode()).hexdigest()[:12]})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", required=True)
-    ap.add_argument("--fractions", default="1.0,0.5")
+    ap.add_argument("--fractions", default="1.0,0.75,0.5")
     ap.add_argument("--reps", type=int, default=3)
+    ap.add_argument("--plans-only", action="store_true",
+                    help="only describe the plans, in data/uvm_hw_plans{,_large}.csv")
     args = ap.parse_args()
-    build_shim()
+    fractions = [float(x) for x in args.fractions.split(",")]
     rows = []
-    for n in args.only.split(","):
-        rows += run(n, [float(x) for x in args.fractions.split(",")], args.reps)
+    if args.plans_only:
+        for n in args.only.split(","):
+            rows += plan_summary(n, fractions)
+    else:
+        build_shim()
+        for n in args.only.split(","):
+            rows += run(n, fractions, args.reps)
     cols = []
     for r in rows:
         cols += [k for k in r if k not in cols]
-    path = DATA / f"uvm_hw{B.SUFFIX}.csv"
+    path = DATA / f"uvm_hw{'_plans' if args.plans_only else ''}{B.SUFFIX}.csv"
     with open(path, "w", newline="") as f:
         wr = csv.DictWriter(f, cols)
         wr.writeheader()

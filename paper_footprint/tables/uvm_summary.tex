@@ -1,13 +1,13 @@
-\begin{tabular}{lllrrrrrrrr}
+\begin{tabular}{lllrrrrrrrrr}
 \toprule
- & & & & & \multicolumn{3}{c}{Oversubscribed} & \multicolumn{3}{c}{All data fits} \\
-\cmidrule(lr){6-8} \cmidrule(lr){9-11}
-Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & Buffers & \shortstack{Inter-\\preter} & Traced \\
+ & & & & & \multicolumn{5}{c}{Measured costs} & \multicolumn{2}{c}{Assumed costs} \\
+\cmidrule(lr){6-10} \cmidrule(lr){11-12}
+Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & \shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & Buffers & \shortstack{Inter-\\preter} \\
 \midrule
-Kernels & Large & 64~KB & 9 of 37 & 26 & 0.572 & 1.294 & 1.294 & 1.094 & 1.114 & 1.118 \\
-Waves & Large & 64~KB & 18 of 37 & 60 & 1.023 & 1.337 & 1.337 & 1.144 & 1.144 & 1.148 \\
-Waves & Large & 4~KB & 14 of 37 & 55 & 1.027 & 1.407 & 1.407 & 1.192 & 1.192 & 1.196 \\
-Waves & Small & 64~KB & 31 of 36 & 69 & 1.215 & 1.323 & 1.324 & 1.217 & 1.223 & 1.225 \\
-Waves & Small & 4~KB & 8 of 36 & 30 & 1.221 & 2.165 & 2.165 & 1.358 & 1.361 & 1.363 \\
+Kernels & Large & 64~KB & 9 of 37 & 26 & 0.348 & 0.913 & 0.913 & 1.120 & 1.120 & 0.572 & 1.294 \\
+Waves & Large & 64~KB & 18 of 37 & 60 & 0.960 & 1.002 & 1.002 & 1.158 & 1.158 & 1.023 & 1.337 \\
+Waves & Large & 4~KB & 14 of 37 & 55 & 1.029 & 0.929 & 0.929 & 1.249 & 1.249 & 1.027 & 1.407 \\
+Waves & Small & 64~KB & 31 of 36 & 69 & 0.861 & 0.895 & 0.897 & 1.073 & 1.073 & 1.215 & 1.323 \\
+Waves & Small & 4~KB & 8 of 36 & 30 & 0.818 & 0.675 & 0.675 & 1.177 & 1.177 & 1.221 & 2.165 \\
 \bottomrule
 \end{tabular}

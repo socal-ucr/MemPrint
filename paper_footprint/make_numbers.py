@@ -1,6 +1,6 @@
 """Numbers and tables for paper_footprint/main.tex, from paper_gpu/data/copy_savings{,_large}.csv
-(paper_gpu/copy_savings.py) and paper_gpu/data/uvm*.csv (uvm_oversub.py, uvm_blocks.py). Writes numbers.tex and
-tables/*.tex here; writes nothing in paper_gpu.
+(paper_gpu/copy_savings.py) and paper_gpu/data/uvm*.csv (uvm_oversub.py, uvm_blocks.py, uvm_hw.py). Writes
+numbers.tex and tables/*.tex here; writes nothing in paper_gpu.
 
     python paper_footprint/make_numbers.py
 """
@@ -20,6 +20,7 @@ SIZES = (("small", "Small", "copy_savings.csv"), ("large", "Large", "copy_saving
 VARIANTS = (("", "Tr", "Traced"), ("_hy", "Hy", "Interpreter, all orders"), ("_lock", "Lock", "Interpreter, lockstep"))
 sys.path.insert(0, os.path.join(HERE, "..", "paper_gpu"))
 from copy_savings import fit  # noqa: E402
+import uvm_costs  # noqa: E402
 
 
 def load(size, f):
@@ -137,7 +138,8 @@ UVM = (("KLarge", "uvm_large.csv", "large", "Kernels", "Large", "64~KB"),
        ("WLargeFour", "uvm_blocks_large_4k.csv", "large", "Waves", "Large", "4~KB"),
        ("WSmall", "uvm_blocks.csv", "small", "Waves", "Small", "64~KB"),
        ("WSmallFour", "uvm_blocks_4k.csv", "small", "Waves", "Small", "4~KB"))
-UVM_POLICIES = (("buffer", "Buf"), ("hybrid", "Hy"), ("truth", "Tr"))
+UVM_POLICIES = (("buffer", "Buf"), ("hybrid", "Hy"), ("truth", "Tr"), ("hybrid_min", "HyMin"),
+                ("truth_min", "TrMin"))
 
 
 def uvm_load(f, size):
@@ -145,40 +147,47 @@ def uvm_load(f, size):
     return d[~d.name.isin(DEGENERATE.get(size, ()))].reset_index(drop=True)
 
 
-def uvm_speedups(d, fault_us, oversubscribed=True):
+def uvm_speedups(d, costs="measured", fault_us=25, oversubscribed=True):
     """Per (program, share of memory), each policy's speedup over demand paging."""
-    ok = d[(d.status == "ok") & (d.fault_us == fault_us)]
+    ok = d[(d.status == "ok") & (d.costs == costs)]
+    if costs == "assumed":
+        ok = ok[ok.fault_us.astype(float) == fault_us]
     ok = ok[ok.fraction < 1.0] if oversubscribed else ok[ok.fraction == 1.0]
     t = ok.pivot_table(index=["name", "fraction"], columns="policy", values="time_ns")
     return pd.DataFrame({p: t["demand"] / t[p] for p, _ in UVM_POLICIES})
 
 
 def uvm_numbers():
-    n = {}
+    n = {"UvmFaultOneUs": f"{uvm_costs.fault_ns(1) / 1000:.0f}",
+         "UvmFaultSixteenUs": f"{uvm_costs.fault_ns(16) / 1000:.0f}",
+         "UvmFaultPerBlockUs": f"{(uvm_costs.fault_ns(256) - uvm_costs.fault_ns(1)) / 255 / 1000:.0f}",
+         "UvmFaultPerPageFourUs": f"{(uvm_costs.fault_ns(256, 4) - uvm_costs.fault_ns(1, 4)) / 255 / 1000:.1f}",
+         "UvmPrefetchCallUs": f"{uvm_costs._prefetch()[0] / 1000:.0f}",
+         "UvmPrefetchGBs": f"{1 / uvm_costs._prefetch()[1]:.1f}",
+         "UvmMinRun": str(uvm_costs.min_run(64)), "UvmMinRunFour": str(uvm_costs.min_run(4))}
     for key, f, size, *_ in UVM:
         d = uvm_load(f, size)
         n[f"Uvm{key}Programs"] = d.name.nunique()
-        for fu in (10, 25, 50):
-            s = uvm_speedups(d, fu)
-            F = {10: "Ten", 25: "", 50: "Fifty"}[fu]
-            if fu == 25:
-                n[f"Uvm{key}Over"] = s.index.get_level_values(0).nunique()
-                n[f"Uvm{key}Configs"] = len(s)
-                n[f"Uvm{key}HyBehind"] = int((s.hybrid < 0.99 * s.truth).sum())
-                n[f"Uvm{key}TrLoses"] = int((s.truth < 0.999).sum())
-                ok = d[(d.status == "ok") & (d.fault_us == fu) & (d.fraction < 1.0)]
-                moved = (ok.to_device_bytes + ok.to_host_bytes).groupby([ok.name, ok.fraction, ok.policy]).sum()
-                mv = moved.unstack("policy")
-                n[f"Uvm{key}HyFewerBytes"] = f"{100 * (1 - mv.hybrid.sum() / mv.demand.sum()):.0f}\\%"
-                n[f"Uvm{key}HyFewerConfigs"] = int((mv.hybrid < 0.999 * mv.demand).sum())
-                fit = uvm_speedups(d, fu, oversubscribed=False)
-                for p, P in UVM_POLICIES:
-                    n[f"Uvm{key}Fit{P}"] = f"{geo_speedup_of(fit[p]):.3f}"
-            for p, P in UVM_POLICIES:
-                n[f"Uvm{key}{P}{F}"] = f"{geo_speedup_of(s[p]):.3f}"
+        s = uvm_speedups(d)
+        n[f"Uvm{key}Over"] = s.index.get_level_values(0).nunique()
+        n[f"Uvm{key}Configs"] = len(s)
+        for p, P in UVM_POLICIES:
+            n[f"Uvm{key}{P}"] = f"{geo_speedup_of(s[p]):.3f}"
+        n[f"Uvm{key}HyMinBehind"] = int((s.hybrid_min < 0.99 * s.truth_min).sum())
+        n[f"Uvm{key}HyMinLoses"] = int((s.hybrid_min < 0.99).sum())
+        fit = uvm_speedups(d, oversubscribed=False)
+        n[f"Uvm{key}FitHyMin"] = f"{geo_speedup_of(fit.hybrid_min):.3f}"
+        for fu, F in ((10, "Ten"), (25, ""), (50, "Fifty")):
+            a = uvm_speedups(d, "assumed", fu)
+            n[f"Uvm{key}AssumedHy{F}"] = f"{geo_speedup_of(a.hybrid):.3f}"
+            n[f"Uvm{key}AssumedBuf{F}"] = f"{geo_speedup_of(a.buffer):.3f}"
+        ok = d[(d.status == "ok") & (d.costs == "measured") & (d.fraction < 1.0)]
+        mv = (ok.to_device_bytes + ok.to_host_bytes).groupby([ok.name, ok.fraction, ok.policy]).sum().unstack("policy")
+        n[f"Uvm{key}HyMinFewerBytes"] = f"{100 * (1 - mv.hybrid_min.sum() / mv.demand.sum()):.0f}\\%"
     d = uvm_load("uvm_blocks_large_4k.csv", "large")
     g = d[d.name.str.startswith("graphbig") & (d.status == "ok")]
     n["UvmGraphOver"] = int((g.fraction < 1.0).sum())
+    n.update(hw_numbers())
     return n
 
 
@@ -191,31 +200,98 @@ def uvm_summary_table(n):
     for key, _, _, model, size, page in UVM:
         cells = [model, size, page, f"{n[f'Uvm{key}Over']} of {n[f'Uvm{key}Programs']}", str(n[f"Uvm{key}Configs"])]
         cells += [n[f"Uvm{key}{P}"] for _, P in UVM_POLICIES]
-        cells += [n[f"Uvm{key}Fit{P}"] for _, P in UVM_POLICIES]
+        cells += [n[f"Uvm{key}AssumedBuf"], n[f"Uvm{key}AssumedHy"]]
         rows.append(" & ".join(cells) + r" \\")
-    head = (r"\begin{tabular}{lllrrrrrrrr}" "\n" r"\toprule" "\n"
-            r" & & & & & \multicolumn{3}{c}{Oversubscribed} & \multicolumn{3}{c}{All data fits} \\" "\n"
-            r"\cmidrule(lr){6-8} \cmidrule(lr){9-11}" "\n"
+    head = (r"\begin{tabular}{lllrrrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & & & & & \multicolumn{5}{c}{Measured costs} & \multicolumn{2}{c}{Assumed costs} \\" "\n"
+            r"\cmidrule(lr){6-10} \cmidrule(lr){11-12}" "\n"
             r"Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & "
-            r"Buffers & \shortstack{Inter-\\preter} & Traced \\" "\n" r"\midrule" "\n")
+            r"\shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & Buffers & \shortstack{Inter-\\preter} \\"
+            "\n" r"\midrule" "\n")
     write("uvm_summary.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
-def uvm_program_table():
-    """Large inputs, 4 KB pages, wave by wave: each oversubscribed program at the smallest share that fits."""
-    d = uvm_load("uvm_blocks_large_4k.csv", "large")
-    s = uvm_speedups(d, 25).reset_index()
-    first = s.sort_values("fraction").groupby("name").first().sort_values("hybrid", ascending=False)
-    info = d.groupby("name")[["pages", "waves"]].first()
+# ---------------------------------------------------------------- the A30 (uvm_hw.py)
+
+HW_PLANS = (("buffer", "Buf"), ("hybrid", "Hy"), ("truth", "Tr"), ("hybrid_min", "HyMin"), ("truth_min", "TrMin"))
+
+
+def hw_load():
+    """Per (program, share, plan): the median time over the repetitions that ran (rc 0), with the number that failed,
+    and whether the kernel-level model simulates the share (every operation's pages fit)."""
+    d = pd.read_csv(os.path.join(DATA, "uvm_hw_large.csv"))
+    d["t"] = d.gpu_ns + d.copy_ns
+    fails = d[d.rc != 0].groupby(["name", "fraction"]).size()
+    m = d[d.rc == 0].groupby(["name", "fraction", "plan"]).t.median().unstack("plan")
+    model = uvm_load("uvm_large.csv", "large")
+    fits = set(map(tuple, model[model.status == "ok"][["name", "fraction"]].drop_duplicates().values))
+    m["fits"] = [i in fits for i in m.index]
+    return d, m, fails
+
+
+def hw_numbers():
+    d, m, fails = hw_load()
+    n = {"HwPrograms": d.name.nunique(), "HwReps": d.rep.nunique(),
+         "HwFailRuns": int((d.rc != 0).sum()), "HwRuns": len(d),
+         "HwFailProgram": short(fails.index[0][0]) if len(fails) else "none"}
+    t = d[d.rc == 0]
+    cv = t.groupby(["name", "fraction", "plan"]).t.agg(lambda s: s.std() / s.mean())
+    n["HwCv"] = f"{100 * cv.median():.0f}\\%"
+    spread = t.groupby(["name", "fraction", "plan"]).t.agg(lambda s: s.max() / s.min())
+    n["HwSpreadMax"] = f"{spread.max():.2f}"
+    n["HwSpreadName"] = short(spread.idxmax()[0])
+    plans = pd.read_csv(os.path.join(DATA, "uvm_hw_plans_large.csv"))
+    dg = plans.pivot_table(index=["name", "fraction"], columns="plan", values="digest", aggfunc="first")
+    n["HwPlanConfigs"] = len(dg)
+    n["HwPlansSame"] = int(((dg.hybrid == dg.truth) & (dg.hybrid_min == dg.truth_min)).sum())
+    for frac, F in ((1.0, "Full"), (0.75, "ThreeQ"), (0.5, "Half")):
+        x = m.xs(frac, level="fraction")
+        fit = x[x.fits]
+        n[f"Hw{F}Fits"] = len(fit)
+        for p, P in HW_PLANS:
+            n[f"Hw{F}{P}"] = f"{geo_speedup_of((fit.demand / fit[p]).dropna()):.3f}"
+            n[f"Hw{F}{P}All"] = f"{geo_speedup_of((x.demand / x[p]).dropna()):.3f}"
+    # the kernel-level model with the measured costs against the A30, where both have the share
+    model = uvm_load("uvm_large.csv", "large")
+    model = model[(model.status == "ok") & (model.costs == "measured")]
+    mt = model.pivot_table(index=["name", "fraction"], columns="policy", values="time_ns")
+    both = m[m.fits & (m.index.get_level_values(1) < 1.0)].index.intersection(mt.index)
+    n["HwModelConfigs"] = len(both)
+    for p, P in HW_PLANS:
+        hw = (m.loc[both, "demand"] / m.loc[both, p]).dropna()
+        md = (mt.loc[hw.index, "demand"] / mt.loc[hw.index, p])
+        n[f"HwModel{P}"] = f"{geo_speedup_of(md):.3f}"
+        n[f"HwMeasured{P}"] = f"{geo_speedup_of(hw):.3f}"
+    return n
+
+
+def hw_table():
+    """Per program, at the smallest share at which the kernel-level model holds every operation (or 50% if none
+    below 100%), the A30's time with demand paging and each plan's speedup, with the model's for the interpreter's
+    runs plan."""
+    d, m, _ = hw_load()
+    model = uvm_load("uvm_large.csv", "large")
+    model = model[(model.status == "ok") & (model.costs == "measured")]
+    mt = model.pivot_table(index=["name", "fraction"], columns="policy", values="time_ns")
     rows = []
-    for name, r in first.iterrows():
-        rows.append(" & ".join([r"\texttt{" + short(name) + "}", d[d.name == name].suite.iloc[0].replace("-GPU", ""),
-                                f"{int(info.loc[name, 'pages']):,}", str(int(info.loc[name, "waves"])),
-                                f"{100 * r.fraction:.1f}\\%", f"{r.buffer:.2f}", f"{r.hybrid:.2f}",
-                                f"{r.truth:.2f}"]) + r" \\")
-    head = (r"\begin{tabular}{llrrrrrr}" "\n" r"\toprule" "\n"
-            r"Program & Suite & Pages & Waves & Memory & Buffers & Interpreter & Traced \\" "\n" r"\midrule" "\n")
-    write("uvm_programs.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
+    for name in sorted(m.index.get_level_values(0).unique(), key=short):
+        x = m.loc[name]
+        over = x[x.fits & (x.index < 1.0)]
+        frac = over.index.min() if len(over) else 0.5
+        r = x.loc[frac]
+        cells = [r"\texttt{" + short(name) + "}", f"{100 * frac:.0f}\\%" + ("" if r.fits else r"$^*$"),
+                 f"{r.demand / 1e6:.1f}"]
+        cells += ["---" if pd.isna(r[p]) else f"{r.demand / r[p]:.2f}" for p, _ in HW_PLANS]
+        cells.append(f"{mt.loc[(name, frac), 'demand'] / mt.loc[(name, frac), 'hybrid_min']:.2f}"
+                     if (name, frac) in mt.index else "---")
+        rows.append(" & ".join(cells) + r" \\")
+    head = (r"\begin{tabular}{llrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & & & \multicolumn{5}{c}{Speedup on the A30} & Model \\" "\n"
+            r"\cmidrule(lr){4-8} \cmidrule(lr){9-9}" "\n"
+            r"Program & Memory & \shortstack{Demand\\(ms)} & Buffers & \shortstack{Inter-\\preter} & Traced & "
+            r"\shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & \shortstack{Inter-\\preter, runs} \\"
+            "\n" r"\midrule" "\n")
+    write("uvm_hw.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
 
 def write(name, body):
@@ -236,7 +312,7 @@ def main():
     summary_table(n)
     program_table()
     uvm_summary_table(n)
-    uvm_program_table()
+    hw_table()
 
 
 if __name__ == "__main__":

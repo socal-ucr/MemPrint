@@ -16,15 +16,21 @@ policy's footprints only decide what it prefetches and evicts:
                 (NAME_access_all.csv) says it touches; evict the page whose next use in that footprint is
                 farthest away (a page no later operation uses first)
     truth       the same with the traced footprints: an oracle
+    hybrid_min, truth_min
+                the same, but prefetch only runs of at least uvm_costs.min_run contiguous pages (shorter runs cost
+                more as a prefetch call than as faults)
 
-Costs: a kernel's own time is its profiled time (sim_ops.csv); a page fault stalls it, with one --fault-us per
-batch of up to --batch faults plus the page's transfer; a prefetch pays the transfer only (one call per kernel);
-evicting a page the device wrote since it arrived copies it back. Only shares at which every operation's pages
-fit are simulated: thrashing within one kernel depends on the order of its accesses, which the footprints do not
-record (such rows only say how many pages the largest operation needs). Transfers use the copy model of
+Costs (uvm_costs.py): a kernel's own time is its profiled time (sim_ops.csv). With the measured costs (costs
+"measured"), the pages a kernel faults on stall it as long as faultbench measured for that many pages, a prefetch
+costs prefetchbench's fit per call (one call per contiguous run of pages) and per byte, and a page leaving the
+device is always copied back. With the first model's assumptions (costs "assumed", one row per --fault-us), a
+fault batch of up to --batch faults costs --fault-us plus the pages' transfers, a prefetch one fixed copy cost
+plus the transfers, and only evicting a page the device wrote since it arrived copies it back. Only shares at
+which every operation's pages fit are simulated: thrashing within one kernel depends on the order of its
+accesses, which the footprints do not record (such rows only say how many pages the largest operation needs). Transfers use the copy model of
 copy_savings.py (fitted on the profiled copies). Footprints of the interpreter's events are matched to the trace's
 as copy_savings.py does; a traced event without a match gets no prefetch.
-Writes data/uvm{,_large}.csv: per program, fraction, fault cost and policy, the time, the stall, the faults and
+Writes data/uvm{,_large}.csv: per program, fraction, costs and policy, the time, the stall, the faults and
 the bytes moved each way, with the time of the device operations alone (resident_ns) and of the program as
 written, copies included (explicit_ns).
 """
@@ -40,10 +46,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import benchmarks as B  # noqa: E402
 from copy_savings import H2D, D2H, UNIT, accesses, fit  # noqa: E402
+from uvm_costs import Assumed, Measured, runs  # noqa: E402
 from memprint.static.kdeps import align_ends  # noqa: E402
 
 DATA = HERE / "data"
-POLICIES = ("demand", "buffer", "hybrid", "truth")
+POLICIES = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min")
 
 
 def pages(acc, page_units, write_bit=2):
@@ -70,14 +77,16 @@ class Device:
         self.lru.move_to_end(p)
 
 
-def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, fault_ns, batch, page_bytes, model):
-    """(time ns, stall ns, faults, bytes to the device, bytes to the host) of one run."""
-    h2d_ns = model[H2D][1] * page_bytes                                  # a page's transfer, each way
-    d2h_ns = model[D2H][1] * page_bytes
+def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, costs):
+    """(time ns, stall ns, faults, bytes to the device, bytes to the host) of one run, charged by costs
+    (uvm_costs.Measured or Assumed)."""
+    page_bytes = costs.page_bytes
+    footprints = policy.split("_")[0] in ("hybrid", "truth")
+    min_run = costs.min_run if policy.endswith("_min") else 1
     dev = Device(capacity)
     time = stall = faults = to_dev = to_host = 0
     uses = defaultdict(list)                                             # page -> events whose prediction uses it
-    if policy in ("hybrid", "truth"):
+    if footprints:
         for e in sorted(predicted):
             rd, wr = predicted[e]
             for p in rd | wr:
@@ -93,7 +102,7 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, faul
 
     def evict(now, keep, protect, thrash):
         nonlocal to_host, stall, time
-        if policy in ("hybrid", "truth"):
+        if footprints:
             victim = max((p for p in dev.lru if p not in keep), key=lambda p: (next_use(p, now), p not in dev.dirty),
                          default=None)
         else:
@@ -103,11 +112,11 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, faul
         if victim is None:                                               # least recently used first
             return False
         del dev.lru[victim]
-        if victim in dev.dirty:
-            dev.dirty.discard(victim)
+        if victim in dev.dirty or costs.writeback_clean:
             to_host += page_bytes
-            time += d2h_ns
-            stall += d2h_ns
+            time += costs.d2h_ns
+            stall += costs.d2h_ns
+        dev.dirty.discard(victim)
         return True
 
     def bring(p, now, keep, thrash=True):
@@ -125,16 +134,15 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, faul
         touched = rd | wr
         if e["name"] in (H2D, D2H):                                      # host writes or reads managed pages
             back = [p for p in touched if p in dev.lru]
+            moved = [p for p in back if p in dev.dirty or e["name"] == H2D or costs.writeback_clean]
             for p in back:                                               # they move to the host
                 del dev.lru[p]
-                if p in dev.dirty or e["name"] == H2D:
-                    to_host += page_bytes
-                    time += d2h_ns
-                    stall += d2h_ns
                 dev.dirty.discard(p)
-            if back:
-                time += fault_ns                                         # the host faults them back in a batch
-                stall += fault_ns
+            to_host += len(moved) * page_bytes
+            if back:                                                     # the host faults them back
+                t = costs.host_fault(len(moved))
+                time += t
+                stall += t
             continue
         keep = set(touched)
         if policy != "demand":                                           # prefetch before the operation
@@ -145,21 +153,22 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, faul
             else:
                 prd, pwr = predicted.get(i, (set(), set()))
                 want = prd | pwr
-            want = sorted(p for p in want if p not in dev.lru)[:max(0, dev.capacity)]
-            moved = 0
+            want = [p for r in runs(p for p in want if p not in dev.lru) if len(r) >= min_run for p in r]
+            want = want[:max(0, dev.capacity)]
+            moved = []
             for p in want:                                               # not past what fits beside the
                 if not bring(p, i, keep | set(want), thrash=False):      # operation's own pages
                     break
-                moved += 1
+                moved.append(p)
             if moved:
-                t = moved * h2d_ns + model[H2D][0]
+                t = costs.prefetch([len(r) for r in runs(moved)])
                 time += t
                 stall += t
         missing = [p for p in touched if p not in dev.lru]
-        if missing:                                                      # faults, in batches
+        if missing:                                                      # faults
             n = len(missing)
             faults += n
-            t = math.ceil(n / batch) * fault_ns + n * h2d_ns
+            t = costs.fault(n)
             time += t
             stall += t
             for p in missing:
@@ -174,7 +183,7 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, faul
     return time, stall, faults, to_dev, to_host
 
 
-def program(name, fractions, fault_us, batch, page_kb, model):
+def program(name, fractions, cost_models, page_kb):
     w = B.workdir(B.BENCH[name])
     tdir, hdir = w / "truth", w / "hybrid"
     page_bytes = page_kb * 1024
@@ -208,13 +217,14 @@ def program(name, fractions, fault_us, batch, page_kb, model):
                          "pages": len(total), "fraction": f, "capacity": cap,                   # accesses, which
                          "status": f"an operation needs {largest} pages"})                     # is not modelled
             continue
-        for fu in fault_us:
+        for costs in cost_models:
             for policy in POLICIES:
-                pred = {"hybrid": hybrid, "truth": {i: actual[i] for i in device if i in actual}}.get(policy, {})
-                t, s, n, up, down = simulate(tev, ops, actual, pred, alloc_pages, policy, cap, fu * 1000, batch,
-                                             page_bytes, model)
+                pred = {"hybrid": hybrid, "truth": {i: actual[i] for i in device if i in actual}}.get(
+                    policy.split("_")[0], {})
+                t, s, n, up, down = simulate(tev, ops, actual, pred, alloc_pages, policy, cap, costs)
                 rows.append({"name": name, "suite": B.BENCH[name]["suite"], "status": "ok", "page_kb": page_kb,
-                             "pages": len(total), "fraction": f, "capacity": cap, "fault_us": fu, "policy": policy,
+                             "pages": len(total), "fraction": f, "capacity": cap, "costs": costs.name,
+                             "fault_us": costs.fault_us, "policy": policy,
                              "resident_ns": resident, "explicit_ns": explicit, "time_ns": int(t), "stall_ns": int(s), "faults": n,
                              "to_device_bytes": up, "to_host_bytes": down, "unmatched": len(device - set(to_interp))})
     return rows
@@ -224,8 +234,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default=None)
     ap.add_argument("--page", type=int, default=64, help="page size in KB (data/uvm{,_large}_4k.csv if not 64)")
-    ap.add_argument("--fractions", default="0.25,0.5,0.75,1.0")
-    ap.add_argument("--fault-us", default="10,25,50", help="cost of a batch of faults in microseconds")
+    ap.add_argument("--fractions", default="0.25,0.375,0.5,0.625,0.75,0.875,1.0")
+    ap.add_argument("--fault-us", default="10,25,50", help="assumed cost of a batch of faults in microseconds")
     ap.add_argument("--batch", type=int, default=256, help="faults handled in one batch")
     args = ap.parse_args()
     names = args.only.split(",") if args.only else [
@@ -234,11 +244,12 @@ def main():
         and (B.workdir(B.BENCH[n]) / "sim_ops.csv").exists()]
     model = fit()
     fractions = [float(x) for x in args.fractions.split(",")]
-    fault_us = [float(x) for x in args.fault_us.split(",")]
+    cost_models = [Measured(args.page, model)] + [Assumed(args.page, model, float(x), args.batch)
+                                                  for x in args.fault_us.split(",")]
     rows = []
     for n in names:
-        rows += program(n, fractions, fault_us, args.batch, args.page, model)
-        r = [x for x in rows if x["name"] == n and x.get("fraction") == 0.5 and x.get("fault_us") == 25]
+        rows += program(n, fractions, cost_models, args.page)
+        r = [x for x in rows if x["name"] == n and x.get("fraction") == 0.5 and x.get("costs") == "measured"]
         print(n, {x["policy"]: round(x["time_ns"] / x["resident_ns"], 2) for x in r} or rows[-1].get("status"),
               flush=True)
     cols = []
