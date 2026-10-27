@@ -1,0 +1,193 @@
+@inproceedings{Luk2005Pin,
+author = {Luk, Chi-Keung and Cohn, Robert and Muth, Robert and Patil, Harish and Klauser, Artur and Lowney, Geoff and Wallace, Steven and Reddi, Vijay Janapa and Hazelwood, Kim},
+title = {Pin: building customized program analysis tools with dynamic instrumentation},
+year = {2005},
+isbn = {1595930566},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1065010.1065034},
+doi = {10.1145/1065010.1065034},
+abstract = {Robust and powerful software instrumentation tools are essential for program analysis tasks such as profiling, performance evaluation, and bug detection. To meet this need, we have developed a new instrumentation system called Pin. Our goals are to provide easy-to-use, portable, transparent, and efficient instrumentation. Instrumentation tools (called Pintools) are written in C/C++ using Pin's rich API. Pin follows the model of ATOM, allowing the tool writer to analyze an application at the instruction level without the need for detailed knowledge of the underlying instruction set. The API is designed to be architecture independent whenever possible, making Pintools source compatible across different architectures. However, a Pintool can access architecture-specific details when necessary. Instrumentation with Pin is mostly transparent as the application and Pintool observe the application's original, uninstrumented behavior. Pin uses dynamic compilation to instrument executables while they are running. For efficiency, Pin uses several techniques, including inlining, register re-allocation, liveness analysis, and instruction scheduling to optimize instrumentation. This fully automated approach delivers significantly better instrumentation performance than similar tools. For example, Pin is 3.3x faster than Valgrind and 2x faster than DynamoRIO for basic-block counting. To illustrate Pin's versatility, we describe two Pintools in daily use to analyze production software. Pin is publicly available for Linux platforms on four architectures: IA32 (32-bit x86), EM64T (64-bit x86), Itanium®, and ARM. In the ten months since Pin 2 was released in July 2004, there have been over 3000 downloads from its website.},
+booktitle = {Proceedings of the 2005 ACM SIGPLAN Conference on Programming Language Design and Implementation},
+pages = {190–200},
+numpages = {11},
+keywords = {program analysis tools, instrumentation, dynamic compilation},
+location = {Chicago, IL, USA},
+series = {PLDI '05}
+}
+
+@inproceedings{Nethercote2007Valgrind,
+author = {Nethercote, Nicholas and Seward, Julian},
+title = {Valgrind: a framework for heavyweight dynamic binary instrumentation},
+year = {2007},
+isbn = {9781595936332},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1250734.1250746},
+doi = {10.1145/1250734.1250746},
+abstract = {Dynamic binary instrumentation (DBI) frameworks make it easy to build dynamic binary analysis (DBA) tools such as checkers and profilers. Much of the focus on DBI frameworks has been on performance; little attention has been paid to their capabilities. As a result, we believe the potential of DBI has not been fully exploited.In this paper we describe Valgrind, a DBI framework designed for building heavyweight DBA tools. We focus on its unique support for shadow values-a powerful but previously little-studied and difficult-to-implement DBA technique, which requires a tool to shadow every register and memory value with another value that describes it. This support accounts for several crucial design features that distinguish Valgrind from other DBI frameworks. Because of these features, lightweight tools built with Valgrind run comparatively slowly, but Valgrind can be used to build more interesting, heavyweight tools that are difficult or impossible to build with other DBI frameworks such as Pin and DynamoRIO.},
+booktitle = {Proceedings of the 28th ACM SIGPLAN Conference on Programming Language Design and Implementation},
+pages = {89–100},
+numpages = {12},
+keywords = {Memcheck, Valgrind, dynamic binary analysis, dynamic binary instrumentation, shadow values},
+location = {San Diego, California, USA},
+series = {PLDI '07}
+}
+
+@inproceedings{minivite,
+  author    = {Ghosh, Sayan and Halappanavar, Mahantesh and Tumeo, Antonino and Kalyanaraman, Ananth and Gebremedhin, Assefaw H.},
+  title     = {{miniVite}: A Graph Analytics Benchmarking Tool for Massively Parallel Systems},
+  booktitle = {Proceedings of the IEEE/ACM Performance Modeling, Benchmarking and Simulation of High Performance Computer Systems Workshop (PMBS)},
+  year      = {2018}
+}
+
+@inproceedings{Zacarias2021Accurate,
+  author    = {Felippe Vieira Zacarias and Paul Carpenter and Vinicius Petrucci},
+  title     = {Memory Demands in Disaggregated {HPC}: How Accurate Do We Need to Be?},
+  booktitle = {International Workshop on Performance Modeling, Benchmarking and Simulation of High Performance Computer Systems (PMBS)},
+  year      = {2021}
+}
+
+@inproceedings{Zacarias2023Dynamic,
+  author    = {Felippe Vieira Zacarias and Paul Carpenter and Vinicius Petrucci},
+  title     = {Dynamic Memory Provisioning on Disaggregated {HPC} Systems},
+  booktitle = {Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC-W)},
+  year      = {2023}
+}
+
+@inproceedings{Boezennec2024,
+  author    = {Robin Boezennec and others},
+  title     = {Allocation Strategies for Disaggregated Memory in {HPC} Systems},
+  booktitle = {IEEE International Conference on High Performance Computing, Data, and Analytics (HiPC)},
+  year      = {2024}
+}
+
+@inproceedings{Li2023Pond,
+  author    = {Huaicheng Li and others},
+  title     = {Pond: {CXL}-Based Memory Pooling Systems for Cloud Platforms},
+  booktitle = {International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS)},
+  year      = {2023}
+}
+
+@inproceedings{Peng2020Underutilization,
+  author    = {Ivy Peng and others},
+  title     = {On the Memory Underutilization: Exploring Disaggregated Memory on {HPC} Systems},
+  booktitle = {International Symposium on Computer Architecture and High Performance Computing (SBAC-PAD)},
+  year      = {2020}
+}
+
+@inproceedings{KSplus2024,
+  author    = {Jonathan Bader and Ansgar L{\"o}{\ss}er and Lauritz Thamsen and Bj{\"o}rn Scheuermann and Odej Kao},
+  title     = {{KS+}: Predicting Workflow Task Memory Usage Over Time},
+  booktitle = {IEEE 20th International Conference on e-Science},
+  year      = {2024},
+  doi       = {10.1109/e-Science62913.2024.10678686}
+}
+
+@inproceedings{Powers2019Mesh,
+  author    = {Bobby Powers and David Tench and Emery D. Berger and Andrew McGregor},
+  title     = {Mesh: Compacting Memory Management for {C/C++} Applications},
+  booktitle = {Proceedings of the 40th ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI)},
+  year      = {2019}
+}
+
+@inproceedings{Evans2006jemalloc,
+  author    = {Jason Evans},
+  title     = {A Scalable Concurrent malloc(3) Implementation for {FreeBSD}},
+  booktitle = {BSDCan},
+  year      = {2006}
+}
+
+@manual{LinuxOvercommit,
+  title        = {Overcommit Accounting},
+  organization = {The Linux Kernel Documentation},
+  note         = {Documentation/mm/overcommit-accounting.rst}
+}
+
+@manual{LinuxPagemap,
+  title        = {Examining Process Page Tables},
+  organization = {The Linux Kernel Documentation},
+  note         = {Documentation/admin-guide/mm/pagemap.rst}
+}
+
+@inproceedings{Hunter2021Temeraire,
+  author    = {A. H. Hunter and Chris Kennelly and Paul Turner and Darryl Gove and Tipp Moseley and Parthasarathy Ranganathan},
+  title     = {Beyond malloc Efficiency to Fleet Efficiency: A Hugepage-Aware Memory Allocator},
+  booktitle = {Proceedings of the 15th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  pages     = {257--273},
+  year      = {2021}
+}
+
+@inproceedings{roca_nonell2020pebs,
+author = {Nonell, Aleix Roca and Gerofi, Balazs and Bautista-Gomez, Leonardo and Martinet, Dominique and Querol, Vicen\c{c} Beltran and Ishikawa, Yutaka},
+title = {On the Applicability of PEBS based Online Memory Access Tracking for Heterogeneous Memory Management at Scale},
+year = {2018},
+isbn = {9781450361132},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3286475.3286477},
+doi = {10.1145/3286475.3286477},
+abstract = {Operating systems have historically had to manage only a single type of memory device. The imminent availability of heterogeneous memory devices based on emerging memory technologies confronts the classic single memory model and opens a new spectrum of possibilities for memory management. Transparent data movement between different memory devices based on access patterns of applications is a desired feature to make optimal use of such devices and to hide the complexity of memory management to the end user. However, capturing memory access patterns of an application at runtime comes at a cost, which is particularly challenging for large-scale parallel applications that may be sensitive to system noise.In this work, we focus on the access pattern profiling phase prior to the actual memory relocation. We study the feasibility of using Intel's Processor Event-Based Sampling (PEBS) feature to record memory accesses by sampling at runtime and study the overhead at scale. We have implemented a custom PEBS driver in the IHK/-McKernel lightweight multi-kernel operating system, one of whose advantages is minimal system interference due to the lightweight kernel's simple design compared to other OS kernels such as Linux. We present the PEBS overhead of a set of scientific applications and show the access patterns identified in noise sensitive HPC applications. Our results show that clear access patterns can be captured with a 10\% overhead in the worst-case and 1\% in the best case when running on up to 128k CPU cores (2,048 Intel Xeon Phi Knights Landing nodes). We conclude that online memory access profiling using PEBS at large-scale is promising for memory management in heterogeneous memory environments.},
+booktitle = {Proceedings of the Workshop on Memory Centric High Performance Computing},
+pages = {50–57},
+numpages = {8},
+keywords = {heterogeneous memory, high-performance computing, operating systems},
+location = {Dallas, TX, USA},
+series = {MCHPC'18}
+}
+
+@article{denning1968,
+  author  = {Denning, Peter J.},
+  title   = {The Working Set Model for Program Behavior},
+  journal = {Communications of the ACM},
+  volume  = {11},
+  number  = {5},
+  pages   = {323--333},
+  year    = {1968}
+}
+
+@inproceedings{agarwal2017thermostat,
+  author    = {Agarwal, Neha and Wenisch, Thomas F.},
+  title     = {Thermostat: Application-transparent Page Management for Two-tiered Main Memory},
+  booktitle = {Proceedings of the 22nd International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS)},
+  pages     = {631--644},
+  year      = {2017}
+}
+
+@inproceedings{park2019damon,
+  author    = {Park, SeongJae and Lee, Yunjae and Yeom, Heon Y.},
+  title     = {Profiling Dynamic Data Access Patterns with Controlled Overhead and Quality},
+  booktitle = {Proceedings of the 20th International Middleware Conference Industrial Track},
+  pages     = {1--7},
+  year      = {2019}
+}
+
+@manual{glibcmanual,
+  title        = {The {GNU C} Library Reference Manual},
+  organization = {Free Software Foundation},
+  note         = {Section ``Memory Allocation Tunables'' (\texttt{M\_MMAP\_THRESHOLD}), \url{https://www.gnu.org/software/libc/manual/}},
+  year         = {2024}
+}
+
+@manual{dhat,
+  title        = {{DHAT}: a dynamic heap analysis tool},
+  author       = {Nicholas Nethercote and Julian Seward},
+  note         = {Valgrind user manual, \url{https://valgrind.org/docs/manual/dh-manual.html}}
+}
+
+@article{beamer2015gap,
+  title        = {The {GAP} Benchmark Suite},
+  author       = {Scott Beamer and Krste Asanovi{\'c} and David Patterson},
+  journal      = {arXiv preprint arXiv:1508.03619},
+  year         = {2015}
+}
+
+@article{ierusalimschy1996lua,
+  title        = {{Lua}---An Extensible Extension Language},
+  author       = {Roberto Ierusalimschy and Luiz Henrique de Figueiredo and Waldemar Celes},
+  journal      = {Software: Practice and Experience},
+  volume       = {26},
+  number       = {6},
+  pages        = {635--652},
+  year         = {1996}
+}
