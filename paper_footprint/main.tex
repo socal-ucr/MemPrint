@@ -176,11 +176,14 @@ issued one after another.
 \section{Footprints for Unified Memory}
 \label{sec:uvm}
 
-We model each program as if its device allocations were managed memory, allocated with
-\code{cudaMallocManaged} rather than \code{cudaMalloc}. A copy to the device becomes a write by the host, so the pages it writes are on the host afterwards, and a copy to
-the host becomes a read by the host, which brings back the pages the device holds. Device memory holds a share of
-the pages that the program's device operations touch, from 25\% to 100\% in steps of 12.5\%, with pages of 64~KB,
-the basic block in which Unified Memory moves data, or of 4~KB.
+\begin{sloppypar}
+We model each program as if \code{cudaMallocManaged} allocated its device memory, rather than
+\code{cudaMalloc}, so that its device allocations are managed memory. A copy to the device becomes a write by the
+host, so the pages it writes are on the host afterwards, and a copy to the host becomes a read by the host, which
+brings back the pages the device holds. Device memory holds a share of the pages that the program's device
+operations touch, from 25\% to 100\% in steps of 12.5\%, with pages of 64~KB, the basic block in which Unified
+Memory moves data, or of 4~KB.
+\end{sloppypar}
 
 \paragraph{Waves of thread blocks.} The GPU runs a kernel's blocks as far as they fit at once, so a kernel that
 touches all of the program's pages may touch only part of them at a time. We run each kernel as a sequence of
