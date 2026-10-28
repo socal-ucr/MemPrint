@@ -89,6 +89,9 @@ transparent huge pages are the remaining source of disagreement with a 4\,KiB pa
 (\secref{sec:alloc} and \secref{sec:llm}).
 \item We test four other ways to correct RSS, each alone, and show why each is less accurate
 (\secref{sec:options}).
+\item We use the model at run time in libmpr, our allocation-resizing runtime, to return glibc's free memory to the
+kernel from \texttt{free}, which lowers the time-averaged RSS of the allocator-heavy programs by 4.4\% at a median
+run time of $1.01\times$ (\secref{sec:trim}).
 \end{itemize}
 
 \section{Background: what RSS counts}
@@ -572,6 +575,108 @@ manner of a working set~\cite{denning1968}. The estimate falls below the truth b
 (\texttt{cc1}) and 55\% (Quicksilver), because a page that the program holds but does not touch within a window is not
 counted. A scheduler that reserved this estimate would run these programs out of memory.
 
+\section{Returning free memory at run time}
+\label{sec:trim}
+
+The model's free bytes are memory that the program has freed and that the allocator keeps resident. A runtime that
+reads the same statistics can return this memory to the kernel while the program runs, which lowers the RSS and the
+memory that a system must provision for the job. We added the model to libmpr, the runtime of our allocation-resizing
+study, which serves each allocation of at least 64\,KiB from a per-site reservation that \memprint{} profiles and
+commits only the predicted part of the block. libmpr leaves smaller blocks to glibc, so these blocks hold the free
+bytes that the model subtracts.
+
+\textbf{Mechanism.} With a share $s$ set (\texttt{MPR\_TRIM}), libmpr compares glibc's resident free bytes with
+$\max(s \cdot A, 1\,\mathrm{MB})$, where $A$ is the anonymous RSS that the kernel keeps as a counter in
+\texttt{/proc/self/status}, and it calls \texttt{malloc\_trim(0)} when the free bytes exceed this threshold.
+\texttt{malloc\_trim} releases the whole pages inside every free chunk of every arena with \texttt{madvise}. glibc
+counts the released bytes as free after the trim, because they are free but no longer resident, so libmpr keeps the
+free bytes at the last trim apart as released, and it lowers this count when the free bytes fall below it, which
+means that the program has reused released memory. The resident free bytes are then the free bytes minus the
+released bytes.
+
+libmpr makes this check from \texttt{free}, which it already intercepts, and not from a thread. A second thread
+turns off the paths that glibc takes in a single-threaded process, in which \texttt{stdio} and \texttt{malloc} skip
+their locks. With a monitoring thread that never trims, darknet, which parses its files one character at a time,
+runs $1.23\times$ slower, and with the check in \texttt{free} it runs at $0.96\times$. The resident free bytes grow
+only by the bytes that the program frees, so \texttt{free} counts these bytes and makes the next check only after the
+program has freed the distance between the resident free bytes and the threshold, and at least 1\,MB. A program that
+frees memory in a short burst is therefore trimmed at the end of the burst and not at the next tick of a timer. A
+thread is still available for the monitor that writes the model's estimate every 5\,ms, and it trims as well.
+
+\textbf{Methodology.} We ran the 29 workloads of the resizing study: the 23 programs at their largest inputs, with
+miniVite built with the resizing compiler pass, and six configurations of llama2.c and llama.cpp. Each workload ran
+under six builds, glibc, libmpr with the reservations of its own input and libmpr with reservations profiled on
+other inputs, each without and with trimming at $s = 0.1$, three times each, with RSS sampled every 20\,ms. Four
+workloads ran at a time on the 32-core machine, which adds about 5\% of noise to each run time. Every run produced
+the output of the glibc run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Memory summed over the workloads under each build, mean of 3 runs: the peak RSS and the time-averaged RSS
+(MB), RSS integrated over the run (GB\,s), and the time-averaged reservation of dynamic provisioning, which holds the
+request for the first sixth of the run and then each sixth's largest RSS (MB). Trimming at $s = 0.1$, from
+\texttt{free}.}
+\label{tab:trim-totals}
+\setlength{\tabcolsep}{4pt}
+\input{tables/trim_totals.tex}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{The workloads on which trimming happened (more than one trim in a run): time-averaged RSS (MB), run time
+over the glibc run's, and the trims per run, mean of 3 runs. On the other 17 workloads, libmpr made at most one
+trim per run.}
+\label{tab:trim}
+\setlength{\tabcolsep}{4pt}
+\input{tables/trim.tex}
+\end{table}
+
+\textbf{Memory.} Trimming lowers the time-averaged RSS of the allocator-heavy programs from 360 to 344\,MB in total
+(4.4\%), and that of all 29 workloads from 3{,}600 to 3{,}524\,MB under glibc (2.1\%) and from 2{,}979 to
+2{,}959\,MB under libmpr (0.7\%) (\tabref{tab:trim-totals}). The largest reductions are on miniVite (23 to 18\,MB),
+Lua (45 to 39\,MB), CPython (52 to 48\,MB) and llama.cpp under glibc (203 to 178\,MB at 32 tokens)
+(\tabref{tab:trim}). Under libmpr, llama.cpp gains less from trimming, because libmpr already serves its large
+buffers and glibc holds less free memory. Trimming does not lower the summed peak RSS, 4{,}590 against 4{,}597\,MB,
+because the peak of most programs comes before they free memory.
+
+Trimming returns less memory than the model subtracts on some programs, because \texttt{malloc\_trim} can release
+only whole pages inside free chunks. Perl holds 6.9\,MB of free bytes on average over its run, but trimming lowers
+its time-averaged RSS by 0.3\,MB, which means that Perl's free bytes lie in chunks smaller than a page or in pages
+that also hold live data. On Lua, trimming returns 6.1 of 8.3\,MB of free bytes, and on miniVite 4.8\,MB, as much as
+the 4.4\,MB of free bytes of its build without the pass. On \texttt{cc1},
+GCC's garbage-collected heap keeps its own free pages, and libmpr made no trim.
+
+\textbf{Overhead.} The median run time with trimming is $1.01\times$ the glibc run's, and $1.02\times$ under libmpr
+against $1.00\times$ for libmpr alone. The highest ratios are $1.10\times$, on SQLite under libmpr with 24 trims per
+run and on llama.cpp at 32 tokens under glibc, but libmpr without trimming reaches $1.11\times$ on Perl, so these
+differences are within the noise of our runs. The RSS integrated over the run does not fall with
+trimming, 17.1 against 17.3\,GB\,s over all workloads, because the run times vary more than the RSS falls.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Cluster simulation of the resizing study (DMSched-Sim, 3{,}000 jobs, the RSS as the job's truth): throughput
+and mean response time of each policy without and with trimming, mean of 3 seeds. The standard deviation of the
+response over seeds is about 200\,min for the dynamic policies.}
+\label{tab:trim-grid}
+\setlength{\tabcolsep}{4pt}
+\input{tables/trim_grid.tex}
+\end{table}
+
+\textbf{Cluster.} We repeated the cluster simulation of the resizing study with the trimmed builds, in which each job
+is one of the 29 workloads and its demand over time is its RSS (\tabref{tab:trim-grid}). A job that holds its request
+for the whole run gains nothing from trimming, because the request does not change. Under dynamic provisioning, which
+resizes the reservation to the RSS of each interval, trimming lowers the mean response time at load 0.8 from 1{,}129
+to 1{,}041\,min with a look-back policy and raises the throughput from 21.6 to 22.4 jobs per hour. With libmpr, the
+throughput rises from 25.0 to 25.3 jobs per hour when the job holds its request. These differences are smaller than
+the variation over seeds, and with libmpr and look-back dynamic provisioning at load 1.2, trimming lowers the
+throughput from 25.2 to 24.5. The simulation does not charge the run time of trimming. We conclude that trimming
+returns a few megabytes per allocator-heavy program at no measurable cost, but that on this corpus it does not change
+how many jobs a cluster runs, because libmpr's reservations on the large blocks account for most of the memory that
+the jobs request and do not use.
+
 \section{Limitations}
 \label{sec:limits}
 
@@ -592,7 +697,8 @@ scheduler that uses it needs a margin.
 
 A limitation of the sampling thread is that it adds a second thread to a single-threaded program, which slows darknet
 by $1.21\times$ (\secref{sec:repeat}). Sampling from an external process avoids the thread, but the allocator's
-statistics can be read only inside the process. A second limitation of the thread is its 5\,ms interval, which misses
+statistics can be read only inside the process. libmpr's trimming avoids the thread by checking from \texttt{free}
+(\secref{sec:trim}), but a monitor cannot, because it must sample while the program allocates without freeing. A second limitation of the thread is its 5\,ms interval, which misses
 the curve of runs shorter than a few tens of milliseconds and limits the model's transfer from the smallest inputs
 (\secref{sec:transfer} and \secref{sec:sched}).
 
@@ -637,7 +743,10 @@ programs from $+16\%$ to $-4\%$, which matches \memprint{}'s accuracy on the job
 median of $0.99\times$ the run time of a plain RSS run instead of $34.4\times$. In a scheduling simulation, its curve
 gives the lowest response time of the estimates that profile the job's own input. Pin-based profiling remains needed
 for attributing memory to code, for allocators the model cannot query, for the curves of runs too short to sample, and
-for the 4\,KiB footprint of programs whose memory the kernel backs with huge pages.
+for the 4\,KiB footprint of programs whose memory the kernel backs with huge pages. Used at run time, the same
+statistics let a runtime return the allocator's free memory to the kernel, which lowers the RSS of allocator-heavy
+programs by a few percent at no measurable cost, but which does not change the throughput of a cluster that already
+resizes the large allocations.
 
 \textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library. \texttt{run\_model.sh},
 \texttt{run\_transfer.sh}, \texttt{run\_options.sh}, \texttt{run\_alloc.sh} and \texttt{run\_llm.sh} run the

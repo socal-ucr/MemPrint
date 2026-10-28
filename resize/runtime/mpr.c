@@ -32,6 +32,24 @@
      MPR_ZERO=0               do not skip zeroing (default 1: memset(p, 0, n) over a runtime block
                               leaves the pages the program has never touched alone; they are
                               zero already, and writing zeros would make them resident)
+     MPR_TRIM=<share>         return glibc's free pages to the kernel (malloc_trim(0)) when its resident free bytes
+                              exceed this share of the process's anonymous memory and MPR_TRIM_MIN bytes (default
+                              1 MB): the small blocks libmpr leaves to glibc, which RSS counts after the program
+                              has freed them (the footprint model of paper_rss: data = anonymous - free)
+                              Without MPR_MONITOR, free() makes the check (no thread), once the program has freed
+                              as many bytes as separate the resident free bytes from the threshold, and at least
+                              MPR_TRIM_EVERY (default 1 MB)
+     MPR_TRIM_REPORT=<file>   at exit: "checks,trims,released_bytes"
+     MPR_MONITOR=<file>       from a thread, every MPR_INTERVAL seconds (default 0.005) write "seconds,rss_bytes,anon_bytes,
+                              file_bytes,free_bytes,released_bytes,data_bytes,trims": RSS, its anonymous and file
+                              parts (/proc/self/status), glibc's free bytes (mallinfo2, else mallinfo), the free
+                              bytes trimming has released, and the data estimate anon - (free - released). Only
+                              the first process writes it (child processes trim but do not monitor)
+
+   glibc counts the bytes malloc_trim releases as free all the same (they are free, no longer resident), so the
+   monitor keeps them apart: released is the free bytes at the last trim, lowered when the free bytes fall below it
+   (the program has reused them). free - released is the resident free bytes, approximately: a trim leaves the
+   partial pages of free chunks resident, and a reuse may take resident free bytes before released ones.
 
    A site is the id the MemPrintResize pass passes (key "id:0x..."), or in a preloaded run the
    caller's return address as "image+0xaddress", the address in the image file: the key MemPrint's
@@ -909,9 +927,19 @@ void *reallocarray(void *ptr, size_t n, size_t size)
     return realloc_at(ptr, total, RET, 0, 0);
 }
 
+static int trim_inline;           /* MPR_TRIM without a monitor: trimming from free() (below) */
+static void trim_freed(size_t n);
+
 void free(void *ptr)
 {
-    if (!ours_free(ptr)) __libc_free(ptr);
+    if (ours_free(ptr)) return;
+    if (trim_inline && ptr) {
+        size_t n = malloc_usable_size(ptr);
+        __libc_free(ptr);
+        trim_freed(n);
+        return;
+    }
+    __libc_free(ptr);
 }
 
 void *memalign(size_t align, size_t size) { return alloc_at(size, RET, 0, 0, align, 0); }
@@ -1263,6 +1291,128 @@ int pthread_join(pthread_t t, void **ret)
     return r;
 }
 
+/* MPR_TRIM, MPR_MONITOR: glibc's free bytes against the anonymous memory, from one thread */
+static double trim_share = -1, monitor_interval = 0.005;
+static size_t trim_min = 1 << 20;
+static FILE *monitor;
+
+struct mallinfo2_ { size_t arena, ordblks, smblks, hblks, hblkhd, usmblks, fsmblks, uordblks, fordblks, keepcost; };
+
+static size_t glibc_free(void)
+{
+    static struct mallinfo2_ (*mi2)(void);
+    static int looked;
+    if (!looked) mi2 = (struct mallinfo2_ (*)(void))dlsym(RTLD_DEFAULT, "mallinfo2"), looked = 1;
+    if (mi2) return mi2().fordblks;
+    return (unsigned)mallinfo().fordblks; /* 32 bits before glibc 2.33 */
+}
+
+/* RssAnon and RssFile of /proc/self/status, in bytes (kept by the kernel as counters: no page walk) */
+static void rss_parts(size_t *anon, size_t *file)
+{
+    char buf[4096];
+    unsigned long kb;
+    *anon = *file = 0;
+    int fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    ssize_t n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    buf[n > 0 ? n : 0] = 0;
+    const char *p;
+    if ((p = strstr(buf, "RssAnon:")) && sscanf(p, "RssAnon: %lu", &kb) == 1) *anon = kb << 10;
+    if ((p = strstr(buf, "RssFile:")) && sscanf(p, "RssFile: %lu", &kb) == 1) *file = kb << 10;
+}
+
+/* One check: trim when the resident free bytes pass the threshold; then the monitor's row. One caller at a time
+   (the monitor thread, or the free() that finds the check due). */
+static size_t released;
+static uint64_t trims, checks, t0_us;
+static size_t trim_every = 1 << 20;
+static atomic_size_t next_check = 1 << 20; /* inline: the bytes free() returns before the next check */
+
+static void trim_check(void)
+{
+    size_t anon, file, f = glibc_free();
+    rss_parts(&anon, &file);
+    checks++;
+    if (f < released) released = f; /* the program has reused released bytes */
+    if (trim_share >= 0 && f - released > trim_min && f - released > trim_share * anon) {
+        malloc_trim(0);
+        trims++;
+        released = f = glibc_free();
+        rss_parts(&anon, &file);
+    }
+    /* the resident free bytes grow by at most what the program frees: no trim is due before it has freed the
+       distance to the threshold */
+    double thr = trim_share * anon > trim_min ? trim_share * anon : trim_min, rf = f - released;
+    atomic_store(&next_check, thr - rf > trim_every ? (size_t)(thr - rf) : trim_every);
+    if (monitor) {
+        size_t data = anon > f - released ? anon - (f - released) : 0;
+        fprintf(monitor, "%.4f,%zu,%zu,%zu,%zu,%zu,%zu,%lu\n", (now_us() - t0_us) * 1e-6, anon + file, anon, file, f,
+                released, data, (unsigned long)trims);
+    }
+}
+
+static void *monitor_loop(void *arg)
+{
+    (void)arg;
+    struct timespec d = {(time_t)monitor_interval, (long)((monitor_interval - (time_t)monitor_interval) * 1e9)};
+    for (;;) {
+        trim_check();
+        nanosleep(&d, NULL);
+    }
+    return NULL;
+}
+
+/* MPR_TRIM without MPR_MONITOR: no thread (a second thread turns off glibc's single-thread paths, the locking of
+   stdio and malloc: darknet, which reads its files a character at a time, runs 1.2x slower with one idle thread).
+   free() counts the bytes it returns to glibc and checks once they reach next_check (at least MPR_TRIM_EVERY,
+   default 1 MB): memory becomes free to trim only when the program frees it. */
+static atomic_size_t freed_since;
+static atomic_flag checking = ATOMIC_FLAG_INIT;
+
+static void trim_freed(size_t n)
+{
+    if (atomic_fetch_add_explicit(&freed_since, n, memory_order_relaxed) + n < atomic_load_explicit(&next_check,
+                                                                                                    memory_order_relaxed))
+        return;
+    if (atomic_flag_test_and_set(&checking)) return;
+    atomic_store_explicit(&freed_since, 0, memory_order_relaxed);
+    trim_check();
+    atomic_flag_clear(&checking);
+}
+
+static void start_monitor(void)
+{
+    static char buf[1 << 16];
+    const char *v;
+    if ((v = getenv("MPR_TRIM")) && *v) trim_share = strtod(v, NULL);
+    if ((v = getenv("MPR_TRIM_MIN"))) trim_min = strtoull(v, NULL, 10);
+    if ((v = getenv("MPR_INTERVAL"))) monitor_interval = strtod(v, NULL);
+    if ((v = getenv("MPR_TRIM_EVERY"))) trim_every = next_check = strtoull(v, NULL, 10);
+    t0_us = now_us();
+    if ((v = getenv("MPR_MONITOR")) && *v && (monitor = fopen(v, "w"))) {
+        unsetenv("MPR_MONITOR"); /* child processes: not into the same file */
+        setvbuf(monitor, buf, _IOFBF, sizeof buf);
+        fprintf(monitor, "seconds,rss_bytes,anon_bytes,file_bytes,free_bytes,released_bytes,data_bytes,trims\n");
+    }
+    if (trim_share < 0 && !monitor) return;
+    if (!monitor) { /* trimming alone: from free(), no thread */
+        trim_inline = 1;
+        return;
+    }
+    /* glibc's own pthread_create: the thread's stack is not one libmpr serves (MPR_STACKS) */
+    int (*create)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *) =
+        (int (*)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *))dlsym(RTLD_NEXT, "pthread_create");
+    pthread_attr_t a;
+    pthread_t t;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&a, 1 << 16);
+    if (create && create(&t, &a, monitor_loop, NULL)) monitor = NULL;
+    pthread_attr_destroy(&a);
+}
+
 __attribute__((constructor)) static void init(void)
 {
     const char *v;
@@ -1304,6 +1454,7 @@ __attribute__((constructor)) static void init(void)
     else if (__mpr_embedded_reservations)
         load_embedded(__mpr_embedded_reservations);
     ready = 1;
+    start_monitor();
 }
 
 static int image_line(struct dl_phdr_info *info, size_t size, void *arg)
@@ -1326,6 +1477,18 @@ static int image_line(struct dl_phdr_info *info, size_t size, void *arg)
 
 __attribute__((destructor)) static void fini(void)
 {
+    if (monitor) fflush(monitor);
+    const char *tr = getenv("MPR_TRIM_REPORT");
+    if (tr && trim_share >= 0) {
+        int fd = open(tr, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        char line[128];
+        int n = snprintf(line, sizeof line, "checks,trims,released_bytes\n%lu,%lu,%zu\n", (unsigned long)checks,
+                         (unsigned long)trims, released);
+        if (fd >= 0) {
+            if (write(fd, line, (size_t)n) < 0) { /* (nothing to do) */ }
+            close(fd);
+        }
+    }
     if (profile_fd >= 0) {
         pthread_mutex_lock(&lock);
         uint64_t end = now_us() - start_us;

@@ -26,6 +26,11 @@ The truth (what the job must be given, or it is OOM-killed) is its RSS ("rss") o
                        growth does not fit), memory committed one minute at a time
   mpr+zacarias-past    the same on the libmpr build
   mprh, mprh+zacarias  the libmpr build with a held-out profile (from the program's other inputs or models)
+  trim+zacarias[-past] glibc build with libmpr's MPR_TRIM (glibc's free pages returned to the kernel when they
+                       exceed 10% of the anonymous memory), dynamic provisioning; trim alone holds the request
+  mprt, mprt+zacarias[-past]  the libmpr build (own profile) with MPR_TRIM
+The trim builds need the runs of scripts/trim_eval.sh: RESIZE_RUNS=<its runs directory> reads every build from there
+(base, trim, self, selftrim, heldout, heldouttrim), else the resize study's runs (no trim builds).
 
 --inflate o sets every glibc-build request to (1 + o) times the program's allocation, as a user who over-requests
 would (Zacarias et al. study +60%); the libmpr builds take their requests from the profile, not from the user, so
@@ -55,6 +60,8 @@ from .run import steady
 from .sim import Sim
 
 RESIZE = os.path.expanduser("~/memprint-data/2026-10-12-resize")
+RUNS = os.environ.get("RESIZE_RUNS")   # scripts/trim_eval.sh's runs: every build, the trim builds among them
+BUILDS = ("mprh", "mprt", "mpr", "trim")
 SCHED = os.path.expanduser("~/memprint-data/2026-10-13-sched-llm")
 LLM = {"llamacpp-135m-n32": ("llamacpp", "135m-n32"), "llamacpp-135m-n128": ("llamacpp", "135m-n128"),
        "llamacpp-360m-n64": ("llamacpp", "360m-n64"), "llama2c-15M": ("llama2c", "15M"),
@@ -90,6 +97,12 @@ def overhead_tables():
 
 POLICIES = ["exact", "request", "pond", "zacarias", "zacarias-past", "ksplus", "mpr-exact", "mpr", "mpr+zacarias",
             "mpr+zacarias-past", "mpr+pond", "mprh", "mprh+zacarias"]
+TRIM_POLICIES = ["trim", "trim+zacarias", "trim+zacarias-past", "mprt", "mprt+zacarias", "mprt+zacarias-past"]
+
+
+def build_of(policy):
+    """The build a policy runs: glibc (None) or one of BUILDS."""
+    return next((b for b in BUILDS if policy in (b, b + "-exact") or policy.startswith(b + "+")), None)
 
 
 def _curve(t, col, base):
@@ -109,16 +122,24 @@ def workloads():
     cases = [(n, d, b, n, big[n]) for n, d, b in cases if n != "miniVite"]
     cases.append(("miniVite (pass)", f"{RESIZE}/runs/minivite-v4/", "none", "miniVite", "32768"))
     cases += [(n, f"{RESIZE}/runs/ml/{n}/", "base", p, i) for n, (p, i) in LLM.items()]
+    if RUNS:
+        cases = [(n, f"{RUNS}/{'minivite' if n == 'miniVite (pass)' else n}/", "base", p, i) for n, _, _, p, i in cases]
     out = {}
     for name, d, base_label, prog, inp in cases:
-        g = [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/{base_label}-[0-9].csv")) if os.path.getsize(f)]
-        m = [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/self-[0-9].csv")) if os.path.getsize(f)]
-        h = [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/heldout-[0-9].csv")) if os.path.getsize(f)]
+        load = lambda label: [pd.read_csv(f) for f in sorted(glob.glob(f"{d}/{label}-[0-9].csv")) if os.path.getsize(f)]
+        g, m, h = load(base_label), load("self"), load("heldout")
         if not g or not m:
             continue
         b = g[0].rss_bytes.min()
         cv = lambda runs: [(_curve(t, "rss_bytes", b), _curve(t, "commit_bytes", b)) for t in runs]
         out[name] = dict(prog=prog, input=inp, glibc=cv(g), mpr=cv(m), mprh=cv(h) or cv(m))
+        if RUNS:   # a build whose runs never trimmed is the build without trimming (its runs differ by the monitor
+            # thread's slowdown alone, which would pass for a saving on the progress axis: darknet)
+            trims = lambda label: np.median([pd.read_csv(f).trims.iloc[-1] for f in
+                                             glob.glob(f"{d}/{label}-[0-9].trims") + glob.glob(f"{d}/{label}-[0-9].monitor.csv")]
+                                            or [0])
+            out[name].update(trim=cv(load("trim")) if trims("trim") > 0 else cv(g),
+                             mprt=cv(load("selftrim")) if trims("selftrim") > 0 else cv(m))
     return out
 
 
@@ -157,6 +178,13 @@ class Setup:
             hrss, hcom = w["mprh"][min(k, len(w["mprh"]) - 1)]
             req = np.maximum(rss, com).max()
             s = r.req_gb / max(req, 1e-12)   # GB per byte of the program's own scale
+            extra = {}
+            for bld in ("trim", "mprt"):   # (RESIZE_RUNS only)
+                if bld in w:
+                    trss, tcom = w[bld][min(k, len(w[bld]) - 1)]
+                    tothers = [x for j, x in enumerate(w[bld]) if j != min(k, len(w[bld]) - 1)] or w[bld]
+                    extra.update({f"{bld}_request": np.maximum(trss, tcom).max() * s, f"{bld}_um": untouched(tothers)})
+                    extra[f"{bld}_truth"] = (np.maximum(trss, tcom) if truth == "strict" else trss) * s
             pick = (lambda a, c: np.maximum(a, c)) if truth == "strict" else (lambda a, c: a)
             others = [x for j, x in enumerate(w["glibc"]) if j != k] or w["glibc"]
             mothers = [x for j, x in enumerate(w["mpr"]) if j != min(k, len(w["mpr"]) - 1)] or w["mpr"]
@@ -167,7 +195,11 @@ class Setup:
                         mpr_request=np.maximum(mrss, mcom).max() * s, mprh_request=np.maximum(hrss, hcom).max() * s,
                         glibc_truth=pick(rss, com) * s, mpr_truth=pick(mrss, mcom) * s, mprh_truth=pick(hrss, hcom) * s,
                         # Pond's history sees the user's request: the untouched share includes the over-request
-                        um=1 - (1 - um) / (1 + inflate), mpr_um=untouched(mothers), mprh_um=untouched(hothers))
+                        um=1 - (1 - um) / (1 + inflate), mpr_um=untouched(mothers), mprh_um=untouched(hothers),
+                        **extra)
+            if "trim_request" in info:   # the glibc build with trimming: the user's request all the same (or its own
+                # peak, when its run happens to peak above the glibc run's: run-to-run noise, not the user's choice)
+                info["trim_request"], info["trim_um"] = max(info["request"], info["trim_request"]), info["um"]
             jobs.append(Job(id=i, arrival=r.arrival, cores=int(r.procs), base=int(r.base),
                             resident=info["glibc_truth"], info=info, shape=name))
         gbmin = sum(at_slots(j.resident, j.base).sum() for j in jobs)
@@ -186,8 +218,8 @@ class Setup:
         for j0 in sorted(jobs, key=lambda j: (j.arrival, j.id)):
             j = copy(j0)
             i = j.info
-            mpr = policy.startswith("mpr")
-            build = "mprh" if policy.startswith("mprh") else "mpr" if mpr else None
+            build = build_of(policy)
+            mpr = build in ("mpr", "mprh", "mprt")
             if cost and mpr and policy != "mpr-exact" and j.shape not in profiled:
                 # the workload's first job is its profiling run: the glibc build under the profiler
                 profiled.add(j.shape)

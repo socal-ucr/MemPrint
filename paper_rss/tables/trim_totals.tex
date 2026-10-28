@@ -1,0 +1,15 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Allocator-heavy (7)} & \multicolumn{4}{c}{All (29)} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+Build & Peak & Mean & RSS$\times$time & Dynamic & Peak & Mean & RSS$\times$time & Dynamic \\
+ & (MB) & (MB) & (GB\,s) & (MB) & (MB) & (MB) & (GB\,s) & (MB) \\
+\midrule
+glibc & 544 & 360 & 0.9 & 478 & 4{,}590 & 3{,}600 & 17.1 & 4{,}390 \\
+glibc + trim & 534 & 344 & 0.9 & 466 & 4{,}597 & 3{,}524 & 17.3 & 4{,}354 \\
+libmpr & 539 & 361 & 1.0 & 474 & 3{,}764 & 2{,}979 & 15.4 & 3{,}549 \\
+libmpr + trim & 530 & 345 & 0.9 & 466 & 3{,}749 & 2{,}959 & 15.6 & 3{,}532 \\
+libmpr, held-out profile & 543 & 363 & 1.0 & 478 & 3{,}776 & 2{,}988 & 15.9 & 3{,}601 \\
+libmpr, held-out + trim & 533 & 344 & 0.9 & 465 & 3{,}766 & 2{,}959 & 15.8 & 3{,}588 \\
+\bottomrule
+\end{tabular}

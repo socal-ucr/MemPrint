@@ -29,6 +29,23 @@ else
     echo "    FAIL MPR_PROFILE: $got"; failed=1
 fi
 
+# MPR_TRIM: glibc's freed small blocks go back to the kernel; MPR_MONITOR: the data estimate stays with what is left
+cc -O1 -o "$WORK/test_trim" "$HERE/test_trim.c"
+read -r _ before <<< "$(LD_PRELOAD="$WORK/libmpr.so" "$WORK/test_trim")"
+read -r _ after <<< "$(LD_PRELOAD="$WORK/libmpr.so" MPR_TRIM=0.1 MPR_MONITOR="$WORK/monitor.csv" "$WORK/test_trim")"
+data=$(tail -1 "$WORK/monitor.csv" | awk -F, '{print int($7 / 1048576)}')
+if (( before > 150 && after < 20 && data < 20 )); then
+    echo "    ok   MPR_TRIM: anonymous memory $before -> $after MB after freeing 99% of the small blocks, data estimate $data MB"
+else
+    echo "    FAIL MPR_TRIM: anonymous memory $before -> $after MB, data estimate $data MB"; failed=1
+fi
+read -r _ inline <<< "$(LD_PRELOAD="$WORK/libmpr.so" MPR_TRIM=0.1 "$WORK/test_trim")"
+if (( inline < 20 )); then
+    echo "    ok   MPR_TRIM from free() (no monitor thread): anonymous memory $before -> $inline MB"
+else
+    echo "    FAIL MPR_TRIM from free(): anonymous memory $before -> $inline MB"; failed=1
+fi
+
 echo "pass"
 LLVM_BIN=${LLVM_BIN:-$HOME/llvm-project/build/bin}
 cmake -S "$HERE/../pass" -B "$WORK/pass" -DLLVM_DIR="$(dirname "$LLVM_BIN")/lib/cmake/llvm" -DCMAKE_BUILD_TYPE=Release \

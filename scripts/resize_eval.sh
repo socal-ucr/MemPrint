@@ -4,7 +4,10 @@
 # config: base (glibc), mpr (libmpr with the reservations), mprall (libmpr serving every large block),
 #         mprscaled (reservations x MPR_SCALE, default 0.1: deliberate under-prediction),
 #         mprnz (mpr without skipping the zeroing of untouched pages, MPR_ZERO=0), linked (a program built
-#         with the pass, which links libmpr: only the reservations; - or /dev/null for none).
+#         with the pass, which links libmpr: only the reservations; - or /dev/null for none); trim, mprtrim,
+#         linkedtrim: glibc (libmpr with no reservations and its own thread stacks off), mpr and linked, each with
+#         MPR_TRIM (share MPR_TRIM, default 0.1; <label>.trims: its checks and trims), from free(), or with
+#         MONITOR=1 from libmpr's monitor thread (<label>.monitor.csv).
 # Writes <out dir>/<config>.csv (rss_sampler --commit), .out (the program's output), .report (libmpr's
 # per-site telemetry) and appends "label peak_rss peak_commit seconds result_hash status" to <out dir>/summary.txt
 # (label: the config unless given). The grep pattern ALL takes every output line except those that report
@@ -27,6 +30,10 @@ case $config in
   linked) env=(MPR_RESERVATIONS="$res" MPR_REPORT="$out/$label.report") ;; # a build with the pass (libmpr linked)
   mprnz) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_ZERO=0 MPR_REPORT="$out/$label.report") ;;
   mprscaled) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_SCALE="${MPR_SCALE:-0.1}" MPR_REPORT="$out/$label.report") ;;
+  *trim) mon=(MPR_TRIM_REPORT="$out/$label.trims"); [[ ${MONITOR:-0} == 1 ]] && mon+=(MPR_MONITOR="$out/$label.monitor.csv") ;;&
+  trim) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS=/dev/null MPR_STACKS=0 MPR_TRIM="${MPR_TRIM:-0.1}" "${mon[@]}") ;;
+  mprtrim) env=(LD_PRELOAD="$LIBMPR" MPR_RESERVATIONS="$res" MPR_REPORT="$out/$label.report" MPR_TRIM="${MPR_TRIM:-0.1}" "${mon[@]}") ;;
+  linkedtrim) env=(MPR_RESERVATIONS="$res" MPR_REPORT="$out/$label.report" MPR_TRIM="${MPR_TRIM:-0.1}" "${mon[@]}") ;;
   *) echo "unknown config $config" >&2; exit 2 ;;
 esac
 cd "$cwd" || exit 1

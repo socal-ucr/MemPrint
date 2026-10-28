@@ -1,0 +1,21 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Time-averaged RSS (MB)} & \multicolumn{2}{c}{Run time ($\times$ glibc)} & \multicolumn{2}{c}{Trims} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9}
+Workload & glibc & +trim & libmpr & +trim & +trim & libmpr+trim & glibc & libmpr \\
+\midrule
+miniVite (pass) & 23 & 18 & 20 & 19 & 1.03 & 1.05 & 10 & 7 \\
+python & 52 & 48 & 53 & 48 & 1.01 & 1.01 & 9 & 9 \\
+lua & 45 & 39 & 47 & 39 & 0.98 & 1.07 & 39 & 38 \\
+sqlite & 42 & 41 & 43 & 41 & 1.06 & 1.10 & 26 & 24 \\
+perl & 52 & 51 & 52 & 52 & 1.09 & 1.07 & 7 & 6 \\
+quicksilver & 53 & 52 & 52 & 52 & 1.01 & 0.99 & 20 & 3 \\
+\midrule
+gap-sssp & 66 & 67 & 67 & 69 & 1.00 & 1.05 & 4 & 1 \\
+llamacpp-135m-n128 & 294 & 291 & 141 & 140 & 1.05 & 1.05 & 20 & 18 \\
+llamacpp-135m-n32 & 203 & 178 & 94 & 89 & 1.10 & 1.00 & 20 & 18 \\
+llamacpp-360m-n64 & 624 & 583 & 335 & 335 & 0.97 & 0.99 & 20 & 18 \\
+lulesh & 96 & 95 & 95 & 93 & 1.01 & 1.06 & 116 & 96 \\
+minife & 260 & 259 & 260 & 259 & 1.03 & 1.00 & 12 & 3 \\
+\bottomrule
+\end{tabular}
