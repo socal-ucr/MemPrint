@@ -258,7 +258,9 @@ programs.
 \small
 \caption{Medians over programs, each the median of 3 runs. Whole-run errors and peak errors are percentages of the
 truth (pages touched plus the runtime's pages, on the native clock). The 90th percentile of the absolute error and
-the lowest peak error show the worst cases. Overhead is the run time over a plain RSS run ($\times$).}
+the lowest peak error show the worst cases. Overhead is the run time over a plain RSS run ($\times$). Data
+$\hat f_1$ is the data footprint, $\max(A - F, 0) + M + B$, and Charged $\hat f_2$ is the charged footprint,
+$\max(P - F, 0)$ (\secref{sec:model}).}
 \label{tab:summary}
 \begin{tabular}{llrrrrrrr}
 \toprule
@@ -281,7 +283,7 @@ darknet.}
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lrrrrrrrrrr}
 \toprule
- & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Data (1)} & \multicolumn{2}{c}{Shared (2)} &
+ & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Data $\hat f_1$} & \multicolumn{2}{c}{Charged $\hat f_2$} &
  \multicolumn{2}{c}{\memprint{}} & \multicolumn{2}{c}{Overhead ($\times$)} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-11}
 Program & sign. & abs. & sign. & abs. & sign. & abs. & sign. & abs. & model & \memprint{} \\
@@ -370,7 +372,7 @@ show nothing above the runtime's pages, for which the scheduler falls back to th
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{lrrrrrrrr}
 \toprule
- & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Data (1)} & \multicolumn{2}{c}{Shared (2)} & \multicolumn{2}{c}{\memprint{}} \\
+ & \multicolumn{2}{c}{RSS} & \multicolumn{2}{c}{Data $\hat f_1$} & \multicolumn{2}{c}{Charged $\hat f_2$} & \multicolumn{2}{c}{\memprint{}} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
 Program & sign. & abs. & sign. & abs. & sign. & abs. & sign. & abs. \\
 \midrule
@@ -469,7 +471,7 @@ allocator.}
 \toprule
  & \multicolumn{4}{c}{THP enabled} & \multicolumn{3}{c}{THP disabled} \\
 \cmidrule(lr){2-5}\cmidrule(lr){6-8}
-Program & RSS & Anon & Data (1) & Shared (2) & RSS & Data (1) & Shared (2) \\
+Program & RSS & Anon & Data $\hat f_1$ & Charged $\hat f_2$ & RSS & Data $\hat f_1$ & Charged $\hat f_2$ \\
 \midrule
 \tabinput{tables/alloc.tex}
 \bottomrule
@@ -484,7 +486,7 @@ absolute whole-run error (\% of the truth). The data estimate here comes from th
 \label{tab:thp}
 \begin{tabular}{lrrrrrrrr}
 \toprule
- & \multicolumn{4}{c}{RSS} & \multicolumn{4}{c}{Data (1)} \\
+ & \multicolumn{4}{c}{RSS} & \multicolumn{4}{c}{Data $\hat f_1$} \\
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
  & \multicolumn{2}{c}{THP on} & \multicolumn{2}{c}{THP off} & \multicolumn{2}{c}{THP on} & \multicolumn{2}{c}{THP off} \\
 Programs & sign. & abs. & sign. & abs. & sign. & abs. & sign. & abs. \\
@@ -525,15 +527,15 @@ in the jemalloc runs, and the \texttt{Referenced} bytes of llama2.c's model file
 \centering
 \small
 \caption{Signed whole-run error (\% of the pages-touched truth) on the language model engines, median of 3 runs. Data
-(1) without files is $\max(A - F, 0) + B$. The model's overhead is the run time of the mode that reads \texttt{smaps}
+$\hat f_1$ without files is $\max(A - F, 0) + B$. The model's overhead is the run time of the mode that reads \texttt{smaps}
 over a plain RSS run, and \memprint{}'s is its W5 and counter runs over a native run ($\times$).}
 \label{tab:llm}
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lrrrrrrrr}
 \toprule
- & & \multicolumn{2}{c}{Data (1)} & & & Data (1) & \multicolumn{2}{c}{Overhead ($\times$)} \\
+ & & \multicolumn{2}{c}{Data $\hat f_1$} & & & Data $\hat f_1$ & \multicolumn{2}{c}{Overhead ($\times$)} \\
 \cmidrule(lr){3-4}\cmidrule(lr){8-9}
-Engine and input & RSS & no files & with files & Shared (2) & \memprint{} & THP off & model & \memprint{} \\
+Engine and input & RSS & no files & with files & Charged $\hat f_2$ & \memprint{} & THP off & model & \memprint{} \\
 \midrule
 \input{tables/llm.tex}
 \bottomrule

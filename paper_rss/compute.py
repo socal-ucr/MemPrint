@@ -19,7 +19,7 @@ O = f"{D}/opts"
 PAGES = os.path.expanduser("~/memprint-data/2026-10-12-resize/corpus-pages")
 HERE = os.path.dirname(os.path.abspath(__file__))
 HEAVY = ["miniVite", "python", "lua", "sqlite", "perl", "quicksilver", "cc1"]
-MODELS = {"rss": "RSS", "est1": "Data (1)", "est2": "Shared (2)", "memprint": r"\memprint{}"}
+MODELS = {"rss": "RSS", "est1": r"Data $\hat f_1$", "est2": r"Charged $\hat f_2$", "memprint": r"\memprint{}"}
 
 
 def inputs():
@@ -257,10 +257,10 @@ def files_overhead():
 GRID = [("exact", "Exact curve (truth)"), ("exact-peak", "Exact peak"), ("request", "User request"),
         ("ksplus", "KS+"), None,
         ("rss-peak-rep", "RSS peak"), ("rss-curve-rep", "RSS curve"), ("memprint-W5", r"\memprint{} W5"),
-        ("memprint-W5nat", r"\memprint{} W5, native clock"), ("model1-rep", "Data (1)"), ("model2-rep", "Shared (2)"),
+        ("memprint-W5nat", r"\memprint{} W5, native clock"), ("model1-rep", r"Data $\hat f_1$"), ("model2-rep", r"Charged $\hat f_2$"),
         None,
         ("rss-peak-x", "RSS peak"), ("rss-curve-x", "RSS curve"), ("memprint-W5-x", r"\memprint{} W5"),
-        ("memprint-W5nat-x", r"\memprint{} W5, native clock"), ("model1-x", "Data (1)"), ("model2-x", "Shared (2)")]
+        ("memprint-W5nat-x", r"\memprint{} W5, native clock"), ("model1-x", r"Data $\hat f_1$"), ("model2-x", r"Charged $\hat f_2$")]
 
 
 def grid(scenario):
