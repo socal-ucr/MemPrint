@@ -4,6 +4,7 @@
 # held-out reservations, each without and with MPR_TRIM, 3 runs each, into $OUT/<workload>/summary.txt.
 # The reservations are the resize study's (runs/corpus, runs/minivite-v4, runs/ml); libmpr is $LIBMPR (default
 # libmpr-v8.so), and the pass-built miniVite is a copy of build/minivite-v4 whose rpath names build/mv8.
+# BUILDS="trim selftrim" runs only those labels (default: all six).
 set -u
 R=$HOME/memprint-data/2026-10-12-resize; C=$HOME/memprint-data/2026-10-11-sched/corpus
 OUT=${OUT:-$HOME/memprint-data/2026-10-27-rsstrim/runs}
@@ -41,12 +42,13 @@ case $name in
     spec="$cwd $stdin $pattern $cmd" ;;
 esac
 cp "$S/res-self.txt" "$S/res-heldout.txt" "$O/"
+want() { [[ " ${BUILDS:-base trim self selftrim heldout heldouttrim} " == *" $1 "* ]]; }
 for rep in 1 2 3; do
-    $EVAL "$O" $plain /dev/null "$spec" base-$rep
-    $EVAL "$O" $glibc /dev/null "$spec" trim-$rep
-    $EVAL "$O" $mpr "$O/res-self.txt" "$spec" self-$rep
-    $EVAL "$O" $mprt "$O/res-self.txt" "$spec" selftrim-$rep
-    $EVAL "$O" $mpr "$O/res-heldout.txt" "$spec" heldout-$rep
-    $EVAL "$O" $mprt "$O/res-heldout.txt" "$spec" heldouttrim-$rep
+    want base && $EVAL "$O" $plain /dev/null "$spec" base-$rep
+    want trim && $EVAL "$O" $glibc /dev/null "$spec" trim-$rep
+    want self && $EVAL "$O" $mpr "$O/res-self.txt" "$spec" self-$rep
+    want selftrim && $EVAL "$O" $mprt "$O/res-self.txt" "$spec" selftrim-$rep
+    want heldout && $EVAL "$O" $mpr "$O/res-heldout.txt" "$spec" heldout-$rep
+    want heldouttrim && $EVAL "$O" $mprt "$O/res-heldout.txt" "$spec" heldouttrim-$rep
 done
 echo "$name" >> "$OUT/done.txt"
