@@ -101,10 +101,21 @@ to lowering it and reserving less than the request (\secref{sec:space}).
 \section{Background: what RSS counts}
 \label{sec:background}
 
-The RSS of a process is the number of its pages in memory. An anonymous page enters RSS when the program first
-touches it and leaves when the program or its allocator unmaps it or releases it with \texttt{madvise}. A file-backed
-page, such as a page of a shared library's code or of a mapped data file, enters RSS when any process reads it and
-stays as long as it is mapped and the kernel does not reclaim it. The \term{footprint} we estimate is the set of
+The RSS of a process is the number of its pages in memory, which the kernel counts in three parts that
+\texttt{/proc/pid/status} reports as \texttt{RssAnon}, \texttt{RssFile} and \texttt{RssShmem}:
+\begin{equation}
+\mathrm{RSS} = \mathrm{RSS}_{\mathrm{anon}} + \mathrm{RSS}_{\mathrm{file}} + \mathrm{RSS}_{\mathrm{shmem}} .
+\end{equation}
+An \term{anonymous} page is a page that no file backs. The heap, the stacks and the memory that \texttt{mmap} returns
+with \texttt{MAP\_ANONYMOUS} are anonymous, which covers every block that \texttt{malloc} serves. The kernel fills an
+anonymous page with zeros when the program first touches it, and if the kernel needs the page for something else, it
+can only move the contents to swap. The \term{anonymous RSS}, $\mathrm{RSS}_{\mathrm{anon}}$, counts the anonymous pages
+of the process that are in memory. An anonymous page enters RSS when the program first touches it and leaves when the
+program or its allocator unmaps it or releases it with \texttt{madvise}. A \term{file-backed} page holds part of a
+file, such as a page of a shared library's code or of a mapped data file. It enters RSS when any process reads it and
+stays as long as it is mapped and the kernel does not reclaim it, which the kernel can do at any time by dropping the
+page and reading it from the file again later. $\mathrm{RSS}_{\mathrm{shmem}}$ counts shared memory, such as
+\texttt{/dev/shm} files and shared anonymous mappings, which none of our programs use. The \term{footprint} we estimate is the set of
 pages the program has touched and not yet freed, plus the pages the runtime needs before the program starts. RSS
 differs from the footprint in five ways.
 
@@ -118,7 +129,18 @@ interface.
 
 \textbf{Shared libraries.} RSS counts every resident page of every mapped file, including the code of the C library,
 the C++ runtime and, for MPI programs, the MPI library. These pages do not depend on the input, and other processes on
-the node map the same pages. The PSS of a process divides each resident page by the number of processes that map it.
+the node map the same pages. The \term{proportional set size} (PSS) of a process charges the process for each of its
+resident pages in proportion to how many processes map that page. For a process whose resident pages form the set
+$R$, with a page size of $s$ bytes,
+\begin{equation}
+\mathrm{PSS} = \sum_{p \in R} \frac{s}{n_p} ,
+\end{equation}
+where $n_p$ is the number of processes that map page $p$. The kernel computes this sum over the page tables of the
+process when a program reads \texttt{/proc/pid/smaps} or \texttt{smaps\_rollup}, which is why PSS costs more to read
+than the counters of \texttt{/proc/pid/status}. A page that only this process maps counts in full ($n_p = 1$), so
+the anonymous pages of a process that does not share memory with its parent or children count in full, and PSS is
+$\mathrm{RSS}_{\mathrm{anon}}$ plus each resident file-backed page divided by the number of processes that map it. The
+PSS of all processes on a node sums to the memory of the resident pages they map, whereas their RSS counts each shared page once per process.
 
 \textbf{Mapped data files.} A program that maps its input, such as a language model engine that maps its weights,
 holds that input in file-backed pages. These pages are part of the footprint, unlike the pages of libraries.
