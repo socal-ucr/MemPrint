@@ -1,15 +1,30 @@
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{llrrrrr}
 \toprule
- & \multicolumn{4}{c}{Load 0.8} & \multicolumn{4}{c}{Load 1.2} \\
-\cmidrule(lr){2-5} \cmidrule(lr){6-9}
- & \multicolumn{2}{c}{Jobs/h} & \multicolumn{2}{c}{Response (min)} & \multicolumn{2}{c}{Jobs/h} & \multicolumn{2}{c}{Response (min)} \\
-Policy & no trim & trim & no trim & trim & no trim & trim & no trim & trim \\
+ & & \multicolumn{2}{c}{Load 0.8} & \multicolumn{2}{c}{Load 1.2} & Seeds with \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+Policy & Memory & Jobs/h & Resp.\ (min) & Jobs/h & Resp.\ (min) & more jobs/h \\
 \midrule
-Request held & 21.7 & 21.7 & 1{,}844 & 1{,}842 & 21.7 & 21.7 & 2{,}421 & 2{,}438 \\
-Dynamic provisioning & 21.5 & 20.9 & 1{,}149 & 1{,}109 & 21.0 & 21.4 & 1{,}768 & 1{,}629 \\
-Dynamic, look-back & 21.6 & 22.4 & 1{,}129 & 1{,}041 & 21.8 & 22.2 & 1{,}605 & 1{,}557 \\
-libmpr & 25.0 & 25.3 & 1{,}246 & 1{,}194 & 25.1 & 25.4 & 1{,}817 & 1{,}797 \\
-libmpr + dynamic & 23.1 & 24.4 & 775 & 705 & 23.2 & 24.2 & 1{,}340 & 1{,}350 \\
-libmpr + dynamic, look-back & 24.1 & 24.4 & 741 & 708 & 25.2 & 24.5 & 1{,}242 & 1{,}279 \\
+Request held & glibc's & 21.7 & 1{,}844 & 21.7 & 2{,}421 &  \\
+ & trimmed & 21.7 & 1{,}842 & 21.7 & 2{,}438 & 4 of 6 \\
+\addlinespace
+Dynamic provisioning & glibc's & 21.5 & 1{,}149 & 21.0 & 1{,}768 &  \\
+ & trimmed & 20.9 & 1{,}109 & 21.4 & 1{,}629 & 1 of 6 \\
+ & bound & 21.7 & 1{,}027 & 21.8 & 1{,}615 & 6 of 6 \\
+\addlinespace
+Dynamic, look-back & glibc's & 21.6 & 1{,}129 & 21.8 & 1{,}605 &  \\
+ & trimmed & 22.4 & 1{,}041 & 22.2 & 1{,}557 & 4 of 6 \\
+ & bound & 22.5 & 989 & 23.2 & 1{,}459 & 6 of 6 \\
+\addlinespace
+libmpr & glibc's & 25.0 & 1{,}246 & 25.1 & 1{,}817 &  \\
+ & trimmed & 25.3 & 1{,}194 & 25.4 & 1{,}797 & 6 of 6 \\
+ & bound & 25.7 & 1{,}158 & 25.8 & 1{,}755 & 6 of 6 \\
+\addlinespace
+libmpr + dynamic & glibc's & 23.1 & 775 & 23.2 & 1{,}340 &  \\
+ & trimmed & 24.4 & 705 & 24.2 & 1{,}350 & 5 of 6 \\
+ & bound & 24.2 & 682 & 25.7 & 1{,}126 & 6 of 6 \\
+\addlinespace
+libmpr + dynamic, look-back & glibc's & 24.1 & 741 & 25.2 & 1{,}242 &  \\
+ & trimmed & 24.4 & 708 & 24.5 & 1{,}279 & 3 of 6 \\
+ & bound & 26.4 & 559 & 26.1 & 1{,}161 & 5 of 6 \\
 \bottomrule
 \end{tabular}

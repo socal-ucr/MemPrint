@@ -118,31 +118,83 @@ def tables(df, out):
     return m
 
 
-def grid_table(out, path=os.path.expanduser("~/memprint-data/2026-10-27-rsstrim/grid.csv")):
-    """The cluster simulation (sched.resize_cluster with RESIZE_RUNS): throughput (jobs/h) and mean response (min) of
-    each policy without and with trimming, RSS truth, mean of 3 seeds."""
-    if not os.path.exists(path):
+DATA = os.path.expanduser("~/memprint-data/2026-10-27-rsstrim")
+
+
+def grid_table(out, paths=(f"{DATA}/grid.csv", f"{DATA}/grid_est.csv")):
+    """The cluster simulation (sched.resize_cluster with RESIZE_RUNS, and RESIZE_EST_RUNS for the bound): throughput
+    (jobs/h) and mean response (min) of each policy without trimming, with trimming and at the bound, RSS truth, mean
+    of 3 seeds; the bound's change against no trimming on each seed and load."""
+    if not all(os.path.exists(p) for p in paths):
         return
-    g = pd.read_csv(path)
-    t = g[g.truth == "rss"].groupby(["policy", "load"])[["throughput", "steady_response"]].mean()
-    pairs = [("request", "trim", "Request held"), ("zacarias", "trim+zacarias", "Dynamic provisioning"),
-             ("zacarias-past", "trim+zacarias-past", "Dynamic, look-back"), ("mpr", "mprt", "libmpr"),
-             ("mpr+zacarias", "mprt+zacarias", "libmpr + dynamic"),
-             ("mpr+zacarias-past", "mprt+zacarias-past", "libmpr + dynamic, look-back")]
-    lines = [r"\begin{tabular}{lrrrrrrrr}", r"\toprule",
-             r" & \multicolumn{4}{c}{Load 0.8} & \multicolumn{4}{c}{Load 1.2} \\",
-             r"\cmidrule(lr){2-5} \cmidrule(lr){6-9}",
-             r" & \multicolumn{2}{c}{Jobs/h} & \multicolumn{2}{c}{Response (min)} & \multicolumn{2}{c}{Jobs/h} "
-             r"& \multicolumn{2}{c}{Response (min)} \\",
-             r"Policy & no trim & trim & no trim & trim & no trim & trim & no trim & trim \\", r"\midrule"]
-    for a, b, lab in pairs:
-        cells = [lab]
-        for load in (0.8, 1.2):
-            cells += [f"{t.loc[(p, load), 'throughput']:.1f}" for p in (a, b)]
-            cells += [n0(t.loc[(p, load), "steady_response"]) for p in (a, b)]
-        lines.append(" & ".join(cells) + r" \\")
+    g = pd.concat([pd.read_csv(p) for p in paths])
+    g = g[g.truth == "rss"]
+    t = g.groupby(["policy", "load"])[["throughput", "steady_response"]].mean()
+    paired = g.pivot_table(index=["load", "seed"], columns="policy", values="throughput")
+    rows = [("request", "trim", None, "Request held"), ("zacarias", "trim+zacarias", "est+zacarias", "Dynamic provisioning"),
+            ("zacarias-past", "trim+zacarias-past", "est+zacarias-past", "Dynamic, look-back"),
+            ("mpr", "mprt", "mpre", "libmpr"), ("mpr+zacarias", "mprt+zacarias", "mpre+zacarias", "libmpr + dynamic"),
+            ("mpr+zacarias-past", "mprt+zacarias-past", "mpre+zacarias-past", "libmpr + dynamic, look-back")]
+    lines = [r"\begin{tabular}{llrrrrr}", r"\toprule",
+             r" & & \multicolumn{2}{c}{Load 0.8} & \multicolumn{2}{c}{Load 1.2} & Seeds with \\",
+             r"\cmidrule(lr){3-4} \cmidrule(lr){5-6}",
+             r"Policy & Memory & Jobs/h & Resp.\ (min) & Jobs/h & Resp.\ (min) & more jobs/h \\", r"\midrule"]
+    for i, (a, b, c, lab) in enumerate(rows):
+        if i:
+            lines.append(r"\addlinespace")
+        for p, mem in ((a, "glibc's"), (b, "trimmed"), (c, "bound")):
+            if p is None:
+                continue
+            cells = [lab if p == a else "", mem]
+            for load in (0.8, 1.2):
+                cells += [f"{t.loc[(p, load), 'throughput']:.1f}", n0(t.loc[(p, load), "steady_response"])]
+            d = paired[p] - paired[a]
+            cells.append("" if p == a else f"{(d > 0).sum()} of {len(d)}")
+            lines.append(" & ".join(cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     open(f"{out}/tables/trim_grid.tex", "w").write("\n".join(lines) + "\n")
+
+
+def share_table(out):
+    """MPR_TRIM's share s on glibc (the trim build of each share's runs; the untrimmed runs from the s = 0.1 runs,
+    as the sweep's libmpr builds also trimmed): the trims per run summed over the allocator-heavy programs, the
+    time-averaged RSS (MB) summed over the allocator-heavy programs and over all, and the run time over glibc's in the
+    same set of runs (median and largest)."""
+    global RUNS
+    sets = [("none", "runs"), ("0.02", "runs_s0.02"), ("0.1", "runs"), ("0.3", "runs_s0.3")]
+    lines = [r"\begin{tabular}{lrrrrr}", r"\toprule",
+             r" & Trims & \multicolumn{2}{c}{Time-averaged RSS (MB)} & \multicolumn{2}{c}{Run time ($\times$ glibc)} \\",
+             r"\cmidrule(lr){3-4} \cmidrule(lr){5-6}",
+             r"Share $s$ & per run & Alloc.-heavy & All & Median & Largest \\", r"\midrule"]
+    for share, d in sets:
+        RUNS = f"{DATA}/{d}"
+        m = collect().groupby(["workload", "build"])[["mean_rss", "secs", "trims"]].mean().unstack()
+        b = "base" if share == "none" else "trim"
+        heavy = [x for x in HEAVY if x in m.index]
+        r = m[("secs", b)] / m[("secs", "base")]
+        cells = [share, n0(m.loc[heavy, ("trims", b)].sum()), n0(m.loc[heavy, ("mean_rss", b)].sum()),
+                 n0(m[("mean_rss", b)].sum()), f"{r.median():.2f}", f"{r.max():.2f}"]
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    open(f"{out}/tables/trim_share.tex", "w").write("\n".join(lines) + "\n")
+
+
+def bound_numbers():
+    """On the simulator's curves (less the runtime's pages): time-averaged and peak RSS (MB) summed over the
+    allocator-heavy programs and over all, under glibc, trimmed and at the bound, for glibc and libmpr."""
+    os.environ.setdefault("RESIZE_RUNS", f"{DATA}/runs")
+    os.environ.setdefault("RESIZE_EST_RUNS", f"{DATA}/runs_free")
+    sys.path.insert(0, os.path.join(HERE, "..", "analysis"))
+    from memprint.sched import resize_cluster
+    w = resize_cluster.workloads()
+    heavy = ["miniVite (pass)" if x == "minivite" else x for x in HEAVY]
+    rows = []
+    for k in ("glibc", "trim", "est", "mpr", "mprt", "mpre"):
+        for grp, names in (("heavy", heavy), ("all", list(w))):
+            rows.append(dict(build=k, group=grp,
+                             mean=sum(np.mean([c[0].mean() for c in w[n][k]]) for n in names) / MB,
+                             peak=sum(np.mean([c[0].max() for c in w[n][k]]) for n in names) / MB))
+    return pd.DataFrame(rows).pivot(index="build", columns="group").round(0)
 
 
 if __name__ == "__main__":
@@ -152,6 +204,8 @@ if __name__ == "__main__":
     df.to_csv(f"{HERE}/data/trim.csv", index=False)
     m = tables(df, HERE)
     grid_table(HERE)
+    share_table(HERE)
+    print(bound_numbers())
     pd.set_option("display.width", 200)
     print(m.pivot(index="workload", columns="build", values="mean_rss").round(1))
     bad = df[(df.status != 0) | ~df.same_output]

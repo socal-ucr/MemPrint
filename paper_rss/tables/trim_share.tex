@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrr}
+\toprule
+ & Trims & \multicolumn{2}{c}{Time-averaged RSS (MB)} & \multicolumn{2}{c}{Run time ($\times$ glibc)} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+Share $s$ & per run & Alloc.-heavy & All & Median & Largest \\
+\midrule
+none & 0 & 360 & 3{,}600 & 1.00 & 1.00 \\
+0.02 & 321 & 342 & 3{,}550 & 1.01 & 1.09 \\
+0.1 & 111 & 344 & 3{,}524 & 1.01 & 1.10 \\
+0.3 & 38 & 350 & 3{,}555 & 1.00 & 1.08 \\
+\bottomrule
+\end{tabular}

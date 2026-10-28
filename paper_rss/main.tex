@@ -6,6 +6,8 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \usepackage{xcolor}
 \usepackage{listings}
 \usepackage[hidelinks]{hyperref}
@@ -91,7 +93,9 @@ transparent huge pages are the remaining source of disagreement with a 4\,KiB pa
 (\secref{sec:options}).
 \item We use the model at run time in libmpr, our allocation-resizing runtime, to return glibc's free memory to the
 kernel from \texttt{free}, which lowers the time-averaged RSS of the allocator-heavy programs by 4.4\% at a median
-run time of $1.01\times$ (\secref{sec:trim}).
+run time of $1.01\times$, half of what returning every free byte would give (\secref{sec:trim}).
+\item We compare the costs and effects of the approaches to the gap between RSS and the footprint, from estimating it
+to lowering it and reserving less than the request (\secref{sec:space}).
 \end{itemize}
 
 \section{Background: what RSS counts}
@@ -657,25 +661,139 @@ trimming, 17.1 against 17.3\,GB\,s over all workloads, because the run times var
 \begin{table}[t]
 \centering
 \small
+\caption{Trimming under glibc at three shares $s$: the trims per run summed over the allocator-heavy programs, the
+time-averaged RSS summed over the allocator-heavy programs and over all 29 workloads (MB), and the run time over the
+glibc run's in the same set of runs ($\times$), median and largest over the workloads, mean of 3 runs. The untrimmed
+row and the row at $s = 0.1$ come from the same runs.}
+\label{tab:trim-share}
+\setlength{\tabcolsep}{4pt}
+\input{tables/trim_share.tex}
+\end{table}
+
+\textbf{Share.} We repeated the glibc runs with trimming at $s = 0.02$ and $s = 0.3$ (\tabref{tab:trim-share}). At
+$s = 0.02$, libmpr trims 2.9 times as often as at $s = 0.1$, 321 against 111 trims per run on the allocator-heavy
+programs, but the time-averaged RSS of these programs stays at 342 against 344\,MB. At $s = 0.3$, it trims 38 times
+and the RSS falls by half as much, to 350\,MB. The memory that trimming returns is therefore limited by the whole free
+pages that glibc holds and not by how often libmpr checks, and $s = 0.1$ returns nearly all of them. The total over
+all 29 workloads varies by 30\,MB between the sets of runs without a trend in $s$, because llama.cpp's RSS varies
+from run to run. The largest run time is $1.09\times$ on Perl at $s = 0.02$, with 40 trims per run.
+
+\textbf{Returning every free byte.} To bound what any allocator could gain by returning its free memory, we also
+subtracted all of glibc's free bytes from the RSS of the untrimmed runs, which is the RSS that an allocator would
+hold if it returned every free byte to the kernel at once, as a compacting allocator such as Mesh~\cite{Powers2019Mesh}
+aims to do. The free bytes come from libmpr's monitor in separate runs without trimming, placed on the same steps of
+progress. glibc's \texttt{mallinfo} counts the free bytes of the main arena only, so the bound misses the free memory
+of the arenas of other threads, which \texttt{malloc\_trim} releases. On llama.cpp, the bound is therefore above the
+trimmed RSS, and we take the smaller of the two at each step. On the simulator's curves, from which the runtime's
+pages are removed, the time-averaged RSS of the allocator-heavy programs falls from 352\,MB under glibc to 335\,MB
+with trimming and to 318\,MB at the bound, and their summed peak RSS falls from 537 to 526 and 514\,MB. Trimming
+therefore returns about half of the free memory, and the other half lies in free chunks smaller than a page or in
+pages that also hold live data, most of it Perl's (51 against 44\,MB at the bound).
+
+\begin{table}[t]
+\centering
+\small
 \caption{Cluster simulation of the resizing study (DMSched-Sim, 3{,}000 jobs, the RSS as the job's truth): throughput
-and mean response time of each policy without and with trimming, mean of 3 seeds. The standard deviation of the
-response over seeds is about 200\,min for the dynamic policies.}
+and mean response time of each policy with glibc's RSS, with trimming at $s = 0.1$ and at the bound of returning
+every free byte, mean of 3 seeds, and the number of the 6 seed and load pairs on which the throughput is higher than
+with glibc's RSS. The standard deviation of the response over seeds is about 200\,min for the dynamic policies.}
 \label{tab:trim-grid}
 \setlength{\tabcolsep}{4pt}
 \input{tables/trim_grid.tex}
 \end{table}
 
-\textbf{Cluster.} We repeated the cluster simulation of the resizing study with the trimmed builds, in which each job
-is one of the 29 workloads and its demand over time is its RSS (\tabref{tab:trim-grid}). A job that holds its request
-for the whole run gains nothing from trimming, because the request does not change. Under dynamic provisioning, which
-resizes the reservation to the RSS of each interval, trimming lowers the mean response time at load 0.8 from 1{,}129
-to 1{,}041\,min with a look-back policy and raises the throughput from 21.6 to 22.4 jobs per hour. With libmpr, the
-throughput rises from 25.0 to 25.3 jobs per hour when the job holds its request. These differences are smaller than
-the variation over seeds, and with libmpr and look-back dynamic provisioning at load 1.2, trimming lowers the
-throughput from 25.2 to 24.5. The simulation does not charge the run time of trimming. We conclude that trimming
-returns a few megabytes per allocator-heavy program at no measurable cost, but that on this corpus it does not change
-how many jobs a cluster runs, because libmpr's reservations on the large blocks account for most of the memory that
-the jobs request and do not use.
+\textbf{Cluster.} We repeated the cluster simulation of the resizing study with the trimmed builds and with the
+bound, in which each job is one of the 29 workloads and its demand over time is its RSS (\tabref{tab:trim-grid}). A
+job that holds its request for the whole run gains nothing from trimming, because the request does not change. Under
+dynamic provisioning with a look-back policy, which resizes the reservation to the RSS of the previous interval,
+trimming lowers the mean response time at load 0.8 from 1{,}129 to 1{,}041\,min, and the bound lowers it to
+989\,min. With libmpr, trimming raises the throughput on every seed and load, but only from 25.0 to 25.3 jobs per hour
+at load 0.8, and with libmpr and look-back dynamic provisioning, trimming raises it on 3 of 6, and the mean moves from 24.1
+to 24.4 at load 0.8 and from 25.2 to 24.5 at load 1.2. The bound raises the throughput of every dynamic policy on every seed
+and load except one, and with libmpr and look-back dynamic provisioning from 24.1 to 26.4 jobs per hour and the
+response from 741 to 559\,min at load 0.8. The simulation does not charge the run time of trimming, and the bound has
+no run time, because no allocator we ran achieves it.
+
+We conclude that trimming returns a few megabytes per allocator-heavy program at no measurable cost, but that on
+this corpus its effect on the cluster is within the variation over seeds, because libmpr's reservations on the large
+blocks account for most of the memory that the jobs request and do not use. An allocator that returned the free
+memory in chunks smaller than a page would raise the throughput of a cluster that already resizes the large blocks and the reservations by 0.9
+to 2.3 jobs per hour.
+
+\section{Costs and effects of the approaches}
+\label{sec:space}
+
+\begin{table}[!htbp]
+\centering
+\footnotesize
+\caption{The approaches to the gap between RSS and the footprint that we measured, in this paper and in the resizing
+study, grouped by where they act. One-time cost: paid once per program and input or model, as a run time over the
+native run's ($\times$). Cost per run: the run time of every production run over glibc's ($\times$), median and the
+largest we observed. Effect: on the 7 allocator-heavy programs unless stated (whole-run error against the truth, or
+memory), and in the cluster simulation at load 0.8 (jobs per hour and mean response time).}
+\label{tab:space}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{L{3.1cm}L{2.2cm}L{2.2cm}L{4.3cm}L{3.6cm}}
+\toprule
+Approach & One-time cost & Cost per run & Effect & Limit \\
+\midrule
+\multicolumn{5}{l}{\emph{Estimate the footprint for the scheduler (the job's memory does not change)}} \\
+RSS of a native run & $1.00\times$ & none & $+16\%$ whole-run error & counts free memory and libraries \\
+\memprint{} W5 (Pin) & $12.0\times$, $18.7\times$ to $93.0\times$ & none & $-5\%$; per-site attribution & Pin's cost
+on allocator-heavy programs \\
+Data estimate (\secref{sec:model}) & $0.99\times$, $1.21\times$ darknet & none & $-4\%$; $-4\%$ transferred;
+433 against 515\,min for the RSS curve (\secref{sec:sched}) & glibc, jemalloc or TCMalloc only; THP; runs of a few ms \\
+Runtime statistics & $0.96\times$ & none & $+5\%$ CPython, $-19\%$ Lua & two programs \\
+Referenced pages & $1.02\times$ & none & $-24\%$, $-70\%$ miniVite & below the footprint: unsafe \\
+\addlinespace
+\multicolumn{5}{l}{\emph{Lower the memory the job holds (the runtime changes)}} \\
+glibc trim threshold 0 & none & $1.02\times$ & RSS error $+17\%$ to $+14\%$ & top of the heap only \\
+\texttt{malloc\_trim}, thread every 5\,ms & none & $1.03\times$, $1.23\times$ darknet & RSS error $+17\%$ to $+11\%$ &
+second thread slows single-threaded programs \\
+\texttt{malloc\_trim} from \texttt{free} (\secref{sec:trim}) & none & $1.01\times$, $1.10\times$ & time-averaged RSS
+$-4.4\%$, peak unchanged; jobs/h $+0.3$ with libmpr & whole free pages only \\
+Every free byte returned (bound) & none & not measured & time-averaged RSS $-9.7\%$, peak $-4.3\%$; jobs/h $+0.7$
+with libmpr, $+2.3$ with libmpr and look-back & needs an allocator that compacts \\
+libmpr reservations & Pin $217\times$ median, or libmpr's profile, one native run & $0.92\times$ to $1.03\times$ & 23
+programs: peak commit $-10.7\%$, RSS unchanged; 29 workloads: jobs/h 21.7 to 25.0 & blocks of 64\,KiB or more \\
+libmpr \texttt{MAP\_NORESERVE} stacks & none & $0.87\times$ to $1.13\times$ & commit $-8$ to $-34$\,MB per multithreaded program &
+commit only \\
+\addlinespace
+\multicolumn{5}{l}{\emph{Reserve less than the request (the scheduler changes)}} \\
+Dynamic provisioning, look-back & none & resizes and restarts, not charged here & response 1{,}844 to 1{,}129\,min & a
+job restarts when its growth does not fit \\
+libmpr and look-back & as libmpr & as both & response 741\,min; 559\,min at the bound & \\
+Exact curve (upper bound) & --- & --- & 30.5 jobs/h, 630\,min; 34.3 and 340\,min with libmpr & needs the future \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The approaches that we measured fall into three groups, which differ in what they change and in when they cost
+(\tabref{tab:space}). The first group estimates the footprint for a scheduler and leaves the job's memory unchanged.
+Its cost is paid once per program and input, and a production run costs nothing. The second group lowers the memory
+that the job holds, by returning free memory to the kernel or by committing only the predicted part of each large
+block. Its cost is paid on every run, and libmpr's reservations also need a profile. The third group changes the
+scheduler, which reserves less than the request and resizes the reservation while the job runs, at the cost of
+resizes and of restarts when a growth does not fit.
+
+\textbf{Estimating the footprint.} The data estimate gives \memprint{}'s accuracy at the cost of a native run, and
+the other cheap estimates are either less accurate (RSS, the trim alternatives) or below the footprint (referenced
+pages), which a scheduler cannot use without a margin. Pin remains the only route to a per-site profile, and
+\memprint{} costs $12.0\times$ at the median.
+
+\textbf{Lowering the memory.} Each approach in this group acts on a different part of the waste. libmpr's
+reservations act on the large blocks that the program requests and does not touch, which is where most of the
+request's waste lies on this corpus: they raise the throughput from 21.7 to 25.0 jobs per hour without changing RSS.
+Trimming acts on the small blocks that the program has freed. From \texttt{free}, it costs $1.01\times$ at the median
+and returns half of the free memory, and the other half needs an allocator that can return memory in chunks smaller
+than a page. The cost of such an allocator is the open question of this group. Mesh reports its own costs, and we did
+not run it.
+
+\textbf{Reserving less.} Dynamic provisioning gains the most in response time, 1{,}844 to 1{,}129\,min, and its
+costs are those of the cluster, resizes and restarts, and not of the job. The approaches combine. libmpr with
+look-back dynamic provisioning gives 741\,min, and the bound on returning free memory lowers it to 559\,min, which is
+below the 630\,min of the exact curve without libmpr. The exact curve with libmpr, 340\,min, is the limit that a
+predicted curve would approach.
 
 \section{Limitations}
 \label{sec:limits}
@@ -746,7 +864,8 @@ for attributing memory to code, for allocators the model cannot query, for the c
 for the 4\,KiB footprint of programs whose memory the kernel backs with huge pages. Used at run time, the same
 statistics let a runtime return the allocator's free memory to the kernel, which lowers the RSS of allocator-heavy
 programs by a few percent at no measurable cost, but which does not change the throughput of a cluster that already
-resizes the large allocations.
+resizes the large allocations. glibc returns only whole free pages, which is half of the free memory, and an allocator
+that returned the rest would raise that cluster's throughput by 0.9 to 2.3 jobs per hour.
 
 \textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library. \texttt{run\_model.sh},
 \texttt{run\_transfer.sh}, \texttt{run\_options.sh}, \texttt{run\_alloc.sh} and \texttt{run\_llm.sh} run the
