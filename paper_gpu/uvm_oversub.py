@@ -19,6 +19,12 @@ policy's footprints only decide what it prefetches and evicts:
     hybrid_min, truth_min
                 the same, but prefetch only runs of at least uvm_costs.min_run contiguous pages (shorter runs cost
                 more as a prefetch call than as faults)
+    range, range_min
+                as truth and truth_min, but each allocation's pages from the first the operation touches to the
+                last (uvm_cheap.span: what a bounds analysis gives without the interpreter)
+    history, history_min
+                prefetch what uvm_cheap.History predicts from the same kernel's earlier launches (a memset's
+                pages are known); LRU eviction
 
 Costs (uvm_costs.py): a kernel's own time is its profiled time (sim_ops.csv). With the measured costs (costs
 "measured"), the pages a kernel faults on stall it as long as faultbench measured for that many pages, a prefetch
@@ -46,11 +52,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import benchmarks as B  # noqa: E402
 from copy_savings import H2D, D2H, UNIT, accesses, fit  # noqa: E402
+from uvm_cheap import History, span  # noqa: E402
 from uvm_costs import Assumed, Measured, runs  # noqa: E402
 from memprint.static.kdeps import align_ends  # noqa: E402
 
 DATA = HERE / "data"
-POLICIES = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min")
+POLICIES = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min", "range", "range_min", "history",
+            "history_min")
 
 
 def pages(acc, page_units, write_bit=2):
@@ -81,7 +89,7 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, cost
     """(time ns, stall ns, faults, bytes to the device, bytes to the host) of one run, charged by costs
     (uvm_costs.Measured or Assumed)."""
     page_bytes = costs.page_bytes
-    footprints = policy.split("_")[0] in ("hybrid", "truth")
+    footprints = policy.split("_")[0] in ("hybrid", "truth", "range")
     min_run = costs.min_run if policy.endswith("_min") else 1
     dev = Device(capacity)
     time = stall = faults = to_dev = to_host = 0
@@ -183,7 +191,7 @@ def simulate(events, ops, actual, predicted, alloc_pages, policy, capacity, cost
     return time, stall, faults, to_dev, to_host
 
 
-def program(name, fractions, cost_models, page_kb):
+def program(name, fractions, cost_models, page_kb, policies=POLICIES):
     w = B.workdir(B.BENCH[name])
     tdir, hdir = w / "truth", w / "hybrid"
     page_bytes = page_kb * 1024
@@ -209,6 +217,17 @@ def program(name, fractions, cost_models, page_kb):
     largest = max((len(actual[i][0] | actual[i][1]) for i in device if i in actual), default=0)
     resident = sum(int(ops[i]["dur_ns"]) for i in device)
     explicit = sum(int(o["dur_ns"]) for o in ops.values())             # the program as written, with its copies
+    truth = {i: actual[i] for i in device if i in actual}
+    ranged = {i: (span(rd | wr), set()) for i, (rd, wr) in truth.items()}
+    hist, history = History({a: len(ps) for a, ps in alloc_pages.items()}), {}
+    for i, e in enumerate(tev):
+        if i not in truth:
+            continue
+        if e["kind"] == "kernel":
+            history[i] = (hist.predict(e["name"]), set())
+            hist.record(e["name"], truth[i][0] | truth[i][1])
+        else:
+            history[i] = truth[i]
     rows = []
     for f in fractions:
         cap = max(1, math.ceil(f * len(total)))
@@ -218,8 +237,8 @@ def program(name, fractions, cost_models, page_kb):
                          "status": f"an operation needs {largest} pages"})                     # is not modelled
             continue
         for costs in cost_models:
-            for policy in POLICIES:
-                pred = {"hybrid": hybrid, "truth": {i: actual[i] for i in device if i in actual}}.get(
+            for policy in policies:
+                pred = {"hybrid": hybrid, "truth": truth, "range": ranged, "history": history}.get(
                     policy.split("_")[0], {})
                 t, s, n, up, down = simulate(tev, ops, actual, pred, alloc_pages, policy, cap, costs)
                 rows.append({"name": name, "suite": B.BENCH[name]["suite"], "status": "ok", "page_kb": page_kb,
@@ -237,6 +256,8 @@ def main():
     ap.add_argument("--fractions", default="0.25,0.375,0.5,0.625,0.75,0.875,1.0")
     ap.add_argument("--fault-us", default="10,25,50", help="assumed cost of a batch of faults in microseconds")
     ap.add_argument("--batch", type=int, default=256, help="faults handled in one batch")
+    ap.add_argument("--policies", default=",".join(POLICIES))
+    ap.add_argument("--tag", default="", help="appended to the file name")
     args = ap.parse_args()
     names = args.only.split(",") if args.only else [
         n for n in B.BENCH if (B.workdir(B.BENCH[n]) / "truth" / "truth_access.csv").exists()
@@ -245,17 +266,17 @@ def main():
     model = fit()
     fractions = [float(x) for x in args.fractions.split(",")]
     cost_models = [Measured(args.page, model)] + [Assumed(args.page, model, float(x), args.batch)
-                                                  for x in args.fault_us.split(",")]
+                                                  for x in args.fault_us.split(",") if x]
     rows = []
     for n in names:
-        rows += program(n, fractions, cost_models, args.page)
+        rows += program(n, fractions, cost_models, args.page, args.policies.split(","))
         r = [x for x in rows if x["name"] == n and x.get("fraction") == 0.5 and x.get("costs") == "measured"]
         print(n, {x["policy"]: round(x["time_ns"] / x["resident_ns"], 2) for x in r} or rows[-1].get("status"),
               flush=True)
     cols = []
     for r in rows:
         cols += [k for k in r if k not in cols]
-    path = DATA / f"uvm{B.SUFFIX}{'' if args.page == 64 else f'_{args.page}k'}.csv"
+    path = DATA / f"uvm{B.SUFFIX}{'' if args.page == 64 else f'_{args.page}k'}{args.tag}.csv"
     with open(path, "w", newline="") as f:
         wr = csv.DictWriter(f, cols)
         wr.writeheader()

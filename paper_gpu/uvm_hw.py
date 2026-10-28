@@ -13,6 +13,9 @@ a synchronisation after each launch) with four plans, prefetching before each ke
     hybrid_min, truth_min
                 the same, but only runs of at least uvm_costs.min_run contiguous blocks (a shorter run costs more
                 as a prefetch call than as faults)
+    range, history, range_min, history_min
+                without the interpreter (uvm_cheap.py): each allocation's blocks from the first the kernel touches
+                to the last, or what the same kernel's earlier launches predict
 
 each only as far as the plan believes them not on the device (a prefetch of resident pages is not free). The
 driver decides what to evict. Writes data/uvm_hw{,_large}.csv: per program, share, plan and repetition, the
@@ -35,13 +38,15 @@ import benchmarks as B  # noqa: E402
 from copy_savings import H2D, D2H, UNIT, accesses  # noqa: E402
 from memprint.static.kdeps import align_ends  # noqa: E402
 from memprint.static.kdeps_score import _same as same_op  # noqa: E402
+from uvm_cheap import History, span  # noqa: E402
 from uvm_costs import min_run  # noqa: E402
 
 DATA = HERE / "data"
 SCRATCH = Path(os.environ.get("PAPER_GPU_SCRATCH", "/tmp/nmustakin-memprint")) / "uvm_hw"
 SHIM = SCRATCH / "uvm_shim.so"
 BLOCK = 64 * 1024
-PLANS = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min")
+PLANS = ("demand", "buffer", "hybrid", "truth", "hybrid_min", "truth_min", "range", "history", "range_min",
+         "history_min")
 
 
 def build_shim():
@@ -84,7 +89,7 @@ def ranges(blocks):
     return out
 
 
-def plans(name, w, capacity_blocks):
+def plans(name, w, capacity_blocks, plans_wanted=None):
     """{plan: [(launch, alloc, offset, bytes)]}: before each kernel, the 64 KB blocks a plan wants that are not on
     the device as far as the plan can tell (blocks leave it when the host touches them in a copy, or by LRU at
     capacity_blocks, as an estimate of the driver's eviction; a block a kernel touches is on the device after it)."""
@@ -95,8 +100,9 @@ def plans(name, w, capacity_blocks):
     iacc = accesses(w / "hybrid" / f"{name}_access_all.csv")
     to_i = {t: int(iev[k]["index"]) for t, k in align_ends(tev, iev, lambda y, x: same_op(x, y)).items()}
     out, shortest = {}, min_run(BLOCK // 1024)
-    for plan in PLANS:
+    for plan in plans_wanted or PLANS:
         rows, resident, launch = [], OrderedDict(), 0
+        hist = History({a: -(-n // BLOCK) for a, n in sizes.items()})
 
         def enter(blocks):
             for x in blocks:
@@ -117,6 +123,11 @@ def plans(name, w, capacity_blocks):
                     want = {(a, x) for a, _ in touched for x in range(-(-sizes[a] // BLOCK))}
                 elif src == "truth":
                     want = touched
+                elif src == "range":
+                    want = span(touched)
+                elif src == "history":
+                    want = hist.predict(e["name"])
+                    hist.record(e["name"], touched)
                 elif src == "hybrid" and i in to_i:
                     want = {(a, x) for a, xs in blocks_of(iacc.get(to_i[i], [])).items() for x in xs}
                 else:
@@ -147,7 +158,7 @@ def footprint_of(w):
     return len(touched), sum(1 for _ in csv.DictReader(open(w / "truth" / "truth_allocs.csv")))
 
 
-def run(name, fractions, reps):
+def run(name, fractions, reps, wanted=PLANS):
     b = B.BENCH[name]
     w = B.workdir(b)
     exe = build(b, w)
@@ -157,11 +168,11 @@ def run(name, fractions, reps):
     out = []
     for frac in fractions:
         keep = int(frac * footprint)
-        for p, rows in plans(name, w, max(1, int(frac * n_blocks))).items():
+        for p, rows in plans(name, w, max(1, int(frac * n_blocks)), wanted).items():
             with open(d / f"plan_{p}.txt", "w") as f:
                 f.writelines(f"{k} {a} {off} {n}\n" for k, a, off, n in rows)
         for rep in range(reps):
-            for p in PLANS:
+            for p in wanted:
                 res = d / f"out_{p}.txt"
                 res.unlink(missing_ok=True)
                 env = dict(os.environ, LD_PRELOAD=str(SHIM), UVM_DEVICE_BYTES=str(keep), UVM_OUT=str(res),
@@ -176,13 +187,13 @@ def run(name, fractions, reps):
     return out
 
 
-def plan_summary(name, fractions):
+def plan_summary(name, fractions, wanted=PLANS):
     """Per share and plan: the prefetch calls, the bytes and a digest of the plan (equal plans, equal digests)."""
     w = B.workdir(B.BENCH[name])
     n_blocks, _ = footprint_of(w)
     out = []
     for frac in fractions:
-        for p, rows in plans(name, w, max(1, int(frac * n_blocks))).items():
+        for p, rows in plans(name, w, max(1, int(frac * n_blocks)), wanted).items():
             out.append({"name": name, "fraction": frac, "plan": p, "calls": len(rows),
                         "bytes": sum(n for *_, n in rows),
                         "digest": hashlib.sha1(repr(rows).encode()).hexdigest()[:12]})
@@ -196,20 +207,22 @@ def main():
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--plans-only", action="store_true",
                     help="only describe the plans, in data/uvm_hw_plans{,_large}.csv")
+    ap.add_argument("--plans", default=",".join(PLANS))
+    ap.add_argument("--tag", default="", help="appended to the file name")
     args = ap.parse_args()
     fractions = [float(x) for x in args.fractions.split(",")]
     rows = []
     if args.plans_only:
         for n in args.only.split(","):
-            rows += plan_summary(n, fractions)
+            rows += plan_summary(n, fractions, args.plans.split(","))
     else:
         build_shim()
         for n in args.only.split(","):
-            rows += run(n, fractions, args.reps)
+            rows += run(n, fractions, args.reps, args.plans.split(","))
     cols = []
     for r in rows:
         cols += [k for k in r if k not in cols]
-    path = DATA / f"uvm_hw{'_plans' if args.plans_only else ''}{B.SUFFIX}.csv"
+    path = DATA / f"uvm_hw{'_plans' if args.plans_only else ''}{B.SUFFIX}{args.tag}.csv"
     with open(path, "w", newline="") as f:
         wr = csv.DictWriter(f, cols)
         wr.writeheader()

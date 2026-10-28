@@ -1,0 +1,638 @@
+name,suite,page_kb,pages,fraction,capacity,status,costs,fault_us,policy,resident_ns,explicit_ns,time_ns,stall_ns,faults,to_device_bytes,to_host_bytes,unmatched
+rodinia-bfs,Rodinia,64,28,0.25,7,an operation needs 27 pages,,,,,,,,,,,
+rodinia-bfs,Rodinia,64,28,0.375,11,an operation needs 27 pages,,,,,,,,,,,
+rodinia-bfs,Rodinia,64,28,0.5,14,an operation needs 27 pages,,,,,,,,,,,
+rodinia-bfs,Rodinia,64,28,0.625,18,an operation needs 27 pages,,,,,,,,,,,
+rodinia-bfs,Rodinia,64,28,0.75,21,an operation needs 27 pages,,,,,,,,,,,
+rodinia-bfs,Rodinia,64,28,0.875,25,an operation needs 27 pages,,,,,,,,,,,
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,demand,195457,433635,2509857,2314400,43,2818048,1310720,0
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,truth,195457,433635,3223423,3027966,0,2818048,1310720,0
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,truth_min,195457,433635,2509857,2314400,43,2818048,1310720,0
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,range,195457,433635,2691823,2496366,0,2818048,1310720,0
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,range_min,195457,433635,2499031,2303574,34,2818048,1310720,0
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,history,195457,433635,2797851,2602394,24,2883584,1376256,0
+rodinia-bfs,Rodinia,64,28,1.0,28,ok,measured,,history_min,195457,433635,2509857,2314400,43,2818048,1310720,0
+rodinia-gaussian,Rodinia,64,5,0.25,2,an operation needs 5 pages,,,,,,,,,,,
+rodinia-gaussian,Rodinia,64,5,0.375,2,an operation needs 5 pages,,,,,,,,,,,
+rodinia-gaussian,Rodinia,64,5,0.5,3,an operation needs 5 pages,,,,,,,,,,,
+rodinia-gaussian,Rodinia,64,5,0.625,4,an operation needs 5 pages,,,,,,,,,,,
+rodinia-gaussian,Rodinia,64,5,0.75,4,an operation needs 5 pages,,,,,,,,,,,
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,demand,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,truth,1303944,1351304,1654613,350669,0,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,truth_min,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,range,1303944,1351304,1654613,350669,0,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,range_min,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,history,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,0.875,5,ok,measured,,history_min,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,demand,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,truth,1303944,1351304,1654613,350669,0,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,truth_min,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,range,1303944,1351304,1654613,350669,0,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,range_min,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,history,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-gaussian,Rodinia,64,5,1.0,5,ok,measured,,history_min,1303944,1351304,1619544,315600,5,327680,327680,0
+rodinia-nw,Rodinia,64,130,0.25,33,an operation needs 130 pages,,,,,,,,,,,
+rodinia-nw,Rodinia,64,130,0.375,49,an operation needs 130 pages,,,,,,,,,,,
+rodinia-nw,Rodinia,64,130,0.5,65,an operation needs 130 pages,,,,,,,,,,,
+rodinia-nw,Rodinia,64,130,0.625,82,an operation needs 130 pages,,,,,,,,,,,
+rodinia-nw,Rodinia,64,130,0.75,98,an operation needs 130 pages,,,,,,,,,,,
+rodinia-nw,Rodinia,64,130,0.875,114,an operation needs 130 pages,,,,,,,,,,,
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,demand,1080067,4289493,5880077,4800010,130,8519680,4259840,0
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,truth,1080067,4289493,8869537,7789470,0,8519680,4259840,0
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,truth_min,1080067,4289493,5880077,4800010,130,8519680,4259840,0
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,range,1080067,4289493,8869537,7789470,0,8519680,4259840,0
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,range_min,1080067,4289493,5880077,4800010,130,8519680,4259840,0
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,history,1080067,4289493,5880077,4800010,130,8519680,4259840,0
+rodinia-nw,Rodinia,64,130,1.0,130,ok,measured,,history_min,1080067,4289493,5880077,4800010,130,8519680,4259840,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,demand,209218,8733524,12057724,11848506,619,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,truth,209218,8733524,7701355,7492137,0,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,truth_min,209218,8733524,7701355,7492137,0,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,range,209218,8733524,7701355,7492137,0,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,range_min,209218,8733524,7701355,7492137,0,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,history,209218,8733524,9471744,9262526,259,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.25,155,ok,measured,,history_min,209218,8733524,9471744,9262526,259,40566784,30867456,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,demand,209218,8733524,11487506,11278288,619,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,truth,209218,8733524,7131137,6921919,0,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,truth_min,209218,8733524,7131137,6921919,0,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,range,209218,8733524,7131137,6921919,0,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,range_min,209218,8733524,7131137,6921919,0,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,history,209218,8733524,8901525,8692307,259,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.375,233,ok,measured,,history_min,209218,8733524,8901525,8692307,259,40566784,25755648,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,demand,209218,8733524,10924599,10715381,619,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,truth,209218,8733524,6568229,6359011,0,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,truth_min,209218,8733524,6568229,6359011,0,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,range,209218,8733524,6568229,6359011,0,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,range_min,209218,8733524,6568229,6359011,0,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,history,209218,8733524,8338618,8129400,259,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.5,310,ok,measured,,history_min,209218,8733524,8338618,8129400,259,40566784,20709376,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,demand,209218,8733524,10361691,10152473,619,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,truth,209218,8733524,6005321,5796103,0,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,truth_min,209218,8733524,6005321,5796103,0,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,range,209218,8733524,6005321,5796103,0,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,range_min,209218,8733524,6005321,5796103,0,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,history,209218,8733524,7775710,7566492,259,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.625,387,ok,measured,,history_min,209218,8733524,7775710,7566492,259,40566784,15663104,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,demand,209218,8733524,9791473,9582255,619,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,truth,209218,8733524,5435103,5225885,0,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,truth_min,209218,8733524,5435103,5225885,0,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,range,209218,8733524,5435103,5225885,0,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,range_min,209218,8733524,5435103,5225885,0,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,history,209218,8733524,7205492,6996274,259,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.75,465,ok,measured,,history_min,209218,8733524,7205492,6996274,259,40566784,10551296,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,demand,209218,8733524,9228565,9019347,619,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,truth,209218,8733524,4872195,4662977,0,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,truth_min,209218,8733524,4872195,4662977,0,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,range,209218,8733524,4872195,4662977,0,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,range_min,209218,8733524,4872195,4662977,0,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,history,209218,8733524,6642584,6433366,259,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,0.875,542,ok,measured,,history_min,209218,8733524,6642584,6433366,259,40566784,5505024,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,demand,209218,8733524,8665657,8456439,619,40566784,458752,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,truth,209218,8733524,4309288,4100070,0,40566784,458752,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,truth_min,209218,8733524,4309288,4100070,0,40566784,458752,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,range,209218,8733524,4309288,4100070,0,40566784,458752,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,range_min,209218,8733524,4309288,4100070,0,40566784,458752,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,history,209218,8733524,6079677,5870459,259,40566784,458752,0
+rodinia-pathfinder,Rodinia,64,619,1.0,619,ok,measured,,history_min,209218,8733524,6079677,5870459,259,40566784,458752,0
+rodinia-hotspot,Rodinia,64,48,0.25,12,an operation needs 48 pages,,,,,,,,,,,
+rodinia-hotspot,Rodinia,64,48,0.375,18,an operation needs 48 pages,,,,,,,,,,,
+rodinia-hotspot,Rodinia,64,48,0.5,24,an operation needs 48 pages,,,,,,,,,,,
+rodinia-hotspot,Rodinia,64,48,0.625,30,an operation needs 48 pages,,,,,,,,,,,
+rodinia-hotspot,Rodinia,64,48,0.75,36,an operation needs 48 pages,,,,,,,,,,,
+rodinia-hotspot,Rodinia,64,48,0.875,42,an operation needs 48 pages,,,,,,,,,,,
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,demand,21281,291522,889731,868450,48,3145728,1048576,0
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,truth,21281,291522,676779,655498,0,3145728,1048576,0
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,truth_min,21281,291522,676779,655498,0,3145728,1048576,0
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,range,21281,291522,676779,655498,0,3145728,1048576,0
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,range_min,21281,291522,676779,655498,0,3145728,1048576,0
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,history,21281,291522,889731,868450,48,3145728,1048576,0
+rodinia-hotspot,Rodinia,64,48,1.0,48,ok,measured,,history_min,21281,291522,889731,868450,48,3145728,1048576,0
+rodinia-lud,Rodinia,64,4,0.25,1,an operation needs 4 pages,,,,,,,,,,,
+rodinia-lud,Rodinia,64,4,0.375,2,an operation needs 4 pages,,,,,,,,,,,
+rodinia-lud,Rodinia,64,4,0.5,2,an operation needs 4 pages,,,,,,,,,,,
+rodinia-lud,Rodinia,64,4,0.625,3,an operation needs 4 pages,,,,,,,,,,,
+rodinia-lud,Rodinia,64,4,0.75,3,an operation needs 4 pages,,,,,,,,,,,
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,demand,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,truth,765444,812645,971608,206164,0,262144,262144,0
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,truth_min,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,range,765444,812645,971608,206164,0,262144,262144,0
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,range_min,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,history,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,0.875,4,ok,measured,,history_min,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,demand,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,truth,765444,812645,971608,206164,0,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,truth_min,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,range,765444,812645,971608,206164,0,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,range_min,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,history,765444,812645,978494,213050,4,262144,262144,0
+rodinia-lud,Rodinia,64,4,1.0,4,ok,measured,,history_min,765444,812645,978494,213050,4,262144,262144,0
+rodinia-backprop,Rodinia,64,148,0.25,37,an operation needs 144 pages,,,,,,,,,,,
+rodinia-backprop,Rodinia,64,148,0.375,56,an operation needs 144 pages,,,,,,,,,,,
+rodinia-backprop,Rodinia,64,148,0.5,74,an operation needs 144 pages,,,,,,,,,,,
+rodinia-backprop,Rodinia,64,148,0.625,93,an operation needs 144 pages,,,,,,,,,,,
+rodinia-backprop,Rodinia,64,148,0.75,111,an operation needs 144 pages,,,,,,,,,,,
+rodinia-backprop,Rodinia,64,148,0.875,130,an operation needs 144 pages,,,,,,,,,,,
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,demand,59264,3139536,4926042,4866778,217,14221312,9633792,0
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,truth,59264,3139536,3601089,3541825,0,14221312,9633792,0
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,truth_min,59264,3139536,3598358,3539094,10,14221312,9633792,0
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,range,59264,3139536,3601089,3541825,0,14221312,9633792,0
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,range_min,59264,3139536,3598358,3539094,10,14221312,9633792,0
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,history,59264,3139536,4926042,4866778,217,14221312,9633792,0
+rodinia-backprop,Rodinia,64,148,1.0,148,ok,measured,,history_min,59264,3139536,4926042,4866778,217,14221312,9633792,0
+rodinia-srad,Rodinia,64,96,0.25,24,an operation needs 96 pages,,,,,,,,,,,
+rodinia-srad,Rodinia,64,96,0.375,36,an operation needs 96 pages,,,,,,,,,,,
+rodinia-srad,Rodinia,64,96,0.5,48,an operation needs 96 pages,,,,,,,,,,,
+rodinia-srad,Rodinia,64,96,0.625,60,an operation needs 96 pages,,,,,,,,,,,
+rodinia-srad,Rodinia,64,96,0.75,72,an operation needs 96 pages,,,,,,,,,,,
+rodinia-srad,Rodinia,64,96,0.875,84,an operation needs 96 pages,,,,,,,,,,,
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,demand,62305,414786,2024455,1962150,112,7340032,2097152,0
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,truth,62305,414786,1515668,1453363,0,7340032,2097152,0
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,truth_min,62305,414786,1515668,1453363,0,7340032,2097152,0
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,range,62305,414786,1515668,1453363,0,7340032,2097152,0
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,range_min,62305,414786,1515668,1453363,0,7340032,2097152,0
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,history,62305,414786,1938421,1876116,96,7340032,2097152,0
+rodinia-srad,Rodinia,64,96,1.0,96,ok,measured,,history_min,62305,414786,1938421,1876116,96,7340032,2097152,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,0.25,5,an operation needs 19 pages,,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,0.375,8,an operation needs 19 pages,,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,0.5,10,an operation needs 19 pages,,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,0.625,13,an operation needs 19 pages,,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,0.75,15,an operation needs 19 pages,,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,0.875,18,an operation needs 19 pages,,,,,,,,,,,
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,demand,382018,502242,1184318,802300,24,1572864,393216,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,truth,382018,502242,1326149,944131,0,1572864,393216,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,truth_min,382018,502242,1145706,763688,9,1572864,393216,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,range,382018,502242,1326149,944131,0,1572864,393216,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,range_min,382018,502242,1145706,763688,9,1572864,393216,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,history,382018,502242,1381411,999393,21,1638400,458752,0
+graphbig-bfs-topo-thread-centric,GraphBIG,64,20,1.0,20,ok,measured,,history_min,382018,502242,1184318,802300,24,1572864,393216,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,0.25,5,an operation needs 20 pages,,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,64,20,0.375,8,an operation needs 20 pages,,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,64,20,0.5,10,an operation needs 20 pages,,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,64,20,0.625,13,an operation needs 20 pages,,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,64,20,0.75,15,an operation needs 20 pages,,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,64,20,0.875,18,an operation needs 20 pages,,,,,,,,,,,
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,demand,1023910,1141159,1735285,711375,23,1507328,327680,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,truth,1023910,1141159,1763881,739971,0,1507328,327680,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,truth_min,1023910,1141159,1678676,654766,7,1507328,327680,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,range,1023910,1141159,1763881,739971,0,1507328,327680,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,range_min,1023910,1141159,1678676,654766,7,1507328,327680,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,history,1023910,1141159,1844599,820689,21,1572864,393216,0
+graphbig-bfs-topo-atomic,GraphBIG,64,20,1.0,20,ok,measured,,history_min,1023910,1141159,1735285,711375,23,1507328,327680,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,0.25,6,an operation needs 22 pages,,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,0.375,9,an operation needs 22 pages,,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,0.5,12,an operation needs 22 pages,,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,0.625,15,an operation needs 22 pages,,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,0.75,18,an operation needs 22 pages,,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,0.875,21,an operation needs 22 pages,,,,,,,,,,,
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,demand,544035,672387,1799878,1255843,32,2097152,786432,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,truth,544035,672387,2241603,1697568,0,2097152,786432,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,truth_min,544035,672387,1755323,1211288,17,2097152,786432,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,range,544035,672387,2241603,1697568,0,2097152,786432,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,range_min,544035,672387,1755323,1211288,17,2097152,786432,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,history,544035,672387,2064397,1520362,24,2097152,786432,0
+graphbig-bfs-data-thread-centric,GraphBIG,64,23,1.0,23,ok,measured,,history_min,544035,672387,1799878,1255843,32,2097152,786432,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,0.25,8,an operation needs 28 pages,,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,0.375,12,an operation needs 28 pages,,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,0.5,15,an operation needs 28 pages,,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,0.625,19,an operation needs 28 pages,,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,0.75,23,an operation needs 28 pages,,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,0.875,27,an operation needs 28 pages,,,,,,,,,,,
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,demand,306819,474820,1431981,1125162,35,2293760,458752,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,truth,306819,474820,1610538,1303719,0,2293760,458752,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,truth_min,306819,474820,1344677,1037858,13,2293760,458752,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,range,306819,474820,1610538,1303719,0,2293760,458752,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,range_min,306819,474820,1344677,1037858,13,2293760,458752,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,history,306819,474820,1542200,1235381,32,2359296,524288,0
+graphbig-sssp-topo-thread-centric,GraphBIG,64,30,1.0,30,ok,measured,,history_min,306819,474820,1431981,1125162,35,2293760,458752,0
+graphbig-connected-comp,GraphBIG,64,39,0.25,10,an operation needs 37 pages,,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,64,39,0.375,15,an operation needs 37 pages,,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,64,39,0.5,20,an operation needs 37 pages,,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,64,39,0.625,25,an operation needs 37 pages,,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,64,39,0.75,30,an operation needs 37 pages,,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,64,39,0.875,35,an operation needs 37 pages,,,,,,,,,,,
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,demand,449314,594307,2177720,1728406,49,3211264,786432,24
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,truth,449314,594307,2198472,1749158,0,3211264,786432,24
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,truth_min,449314,594307,2071046,1621732,17,3211264,786432,24
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,range,449314,594307,2198472,1749158,0,3211264,786432,24
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,range_min,449314,594307,2071046,1621732,17,3211264,786432,24
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,history,449314,594307,2294272,1844958,39,3276800,851968,24
+graphbig-connected-comp,GraphBIG,64,39,1.0,39,ok,measured,,history_min,449314,594307,2177720,1728406,49,3211264,786432,24
+graphbig-kcore,GraphBIG,64,5,0.25,2,an operation needs 5 pages,,,,,,,,,,,
+graphbig-kcore,GraphBIG,64,5,0.375,2,an operation needs 5 pages,,,,,,,,,,,
+graphbig-kcore,GraphBIG,64,5,0.5,3,an operation needs 5 pages,,,,,,,,,,,
+graphbig-kcore,GraphBIG,64,5,0.625,4,an operation needs 5 pages,,,,,,,,,,,
+graphbig-kcore,GraphBIG,64,5,0.75,4,an operation needs 5 pages,,,,,,,,,,,
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,demand,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,truth,10080,120161,286076,275996,0,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,truth_min,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,range,10080,120161,286076,275996,0,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,range_min,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,history,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,0.875,5,ok,measured,,history_min,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,demand,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,truth,10080,120161,286076,275996,0,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,truth_min,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,range,10080,120161,286076,275996,0,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,range_min,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,history,10080,120161,161930,151850,5,327680,65536,0
+graphbig-kcore,GraphBIG,64,5,1.0,5,ok,measured,,history_min,10080,120161,161930,151850,5,327680,65536,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,0.25,6,an operation needs 21 pages,,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,0.375,8,an operation needs 21 pages,,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,0.5,11,an operation needs 21 pages,,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,0.625,14,an operation needs 21 pages,,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,0.75,16,an operation needs 21 pages,,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,0.875,19,an operation needs 21 pages,,,,,,,,,,,
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,demand,4435958,4765849,11596633,7160675,84,5505024,4259840,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,truth,4435958,4765849,11680417,7244459,0,5505024,4259840,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,truth_min,4435958,4765849,11540024,7104066,68,5505024,4259840,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,range,4435958,4765849,11680417,7244459,0,5505024,4259840,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,range_min,4435958,4765849,11540024,7104066,68,5505024,4259840,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,history,4435958,4765849,11761135,7325177,21,5570560,4325376,0
+graphbig-gc-topo-thread-centric,GraphBIG,64,21,1.0,21,ok,measured,,history_min,4435958,4765849,11596633,7160675,84,5505024,4259840,0
+graphbig-degree-centr,GraphBIG,64,19,0.25,5,an operation needs 19 pages,,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,64,19,0.375,8,an operation needs 19 pages,,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,64,19,0.5,10,an operation needs 19 pages,,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,64,19,0.625,12,an operation needs 19 pages,,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,64,19,0.75,15,an operation needs 19 pages,,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,64,19,0.875,17,an operation needs 19 pages,,,,,,,,,,,
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,demand,178017,279234,541304,363287,19,1245184,65536,0
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,truth,178017,279234,487970,309953,0,1245184,65536,0
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,truth_min,178017,279234,488483,310466,3,1245184,65536,0
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,range,178017,279234,487970,309953,0,1245184,65536,0
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,range_min,178017,279234,488483,310466,3,1245184,65536,0
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,history,178017,279234,541304,363287,19,1245184,65536,0
+graphbig-degree-centr,GraphBIG,64,19,1.0,19,ok,measured,,history_min,178017,279234,541304,363287,19,1245184,65536,0
+graphbig-triangle-count,GraphBIG,64,20,0.25,5,an operation needs 19 pages,,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,64,20,0.375,8,an operation needs 19 pages,,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,64,20,0.5,10,an operation needs 19 pages,,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,64,20,0.625,13,an operation needs 19 pages,,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,64,20,0.75,15,an operation needs 19 pages,,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,64,20,0.875,18,an operation needs 19 pages,,,,,,,,,,,
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,demand,41617621,41722517,42087508,469887,20,1310720,131072,0
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,truth,41617621,41722517,42035078,417457,0,1310720,131072,0
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,truth_min,41617621,41722517,42034687,417066,4,1310720,131072,0
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,range,41617621,41722517,42035078,417457,0,1310720,131072,0
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,range_min,41617621,41722517,42034687,417066,4,1310720,131072,0
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,history,41617621,41722517,42087508,469887,20,1310720,131072,0
+graphbig-triangle-count,GraphBIG,64,20,1.0,20,ok,measured,,history_min,41617621,41722517,42087508,469887,20,1310720,131072,0
+polybench-2dconv,PolyBench-GPU,64,128,0.25,32,an operation needs 128 pages,,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,64,128,0.375,48,an operation needs 128 pages,,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,64,128,0.5,64,an operation needs 128 pages,,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,64,128,0.625,80,an operation needs 128 pages,,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,64,128,0.75,96,an operation needs 128 pages,,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,64,128,0.875,112,an operation needs 128 pages,,,,,,,,,,,
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,demand,16256,2271597,2570156,2553900,128,8388608,4194304,0
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,truth,16256,2271597,1690621,1674365,0,8388608,4194304,0
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,truth_min,16256,2271597,1690621,1674365,0,8388608,4194304,0
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,range,16256,2271597,1690621,1674365,0,8388608,4194304,0
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,range_min,16256,2271597,1690621,1674365,0,8388608,4194304,0
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,history,16256,2271597,2570156,2553900,128,8388608,4194304,0
+polybench-2dconv,PolyBench-GPU,64,128,1.0,128,ok,measured,,history_min,16256,2271597,2570156,2553900,128,8388608,4194304,0
+polybench-2mm,PolyBench-GPU,64,20,0.25,5,an operation needs 12 pages,,,,,,,,,,,
+polybench-2mm,PolyBench-GPU,64,20,0.375,8,an operation needs 12 pages,,,,,,,,,,,
+polybench-2mm,PolyBench-GPU,64,20,0.5,10,an operation needs 12 pages,,,,,,,,,,,
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,demand,265664,410178,721337,455673,20,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,truth,265664,410178,762022,496358,0,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,truth_min,265664,410178,721337,455673,20,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,range,265664,410178,762022,496358,0,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,range_min,265664,410178,721337,455673,20,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,history,265664,410178,721337,455673,20,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.625,13,ok,measured,,history_min,265664,410178,721337,455673,20,1310720,720896,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,demand,265664,410178,706716,441052,20,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,truth,265664,410178,747401,481737,0,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,truth_min,265664,410178,706716,441052,20,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,range,265664,410178,747401,481737,0,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,range_min,265664,410178,706716,441052,20,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,history,265664,410178,706716,441052,20,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.75,15,ok,measured,,history_min,265664,410178,706716,441052,20,1310720,589824,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,demand,265664,410178,684784,419120,20,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,truth,265664,410178,725470,459806,0,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,truth_min,265664,410178,684784,419120,20,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,range,265664,410178,725470,459806,0,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,range_min,265664,410178,684784,419120,20,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,history,265664,410178,684784,419120,20,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,0.875,18,ok,measured,,history_min,265664,410178,684784,419120,20,1310720,393216,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,demand,265664,410178,670164,404500,20,1310720,262144,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,truth,265664,410178,710849,445185,0,1310720,262144,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,truth_min,265664,410178,670164,404500,20,1310720,262144,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,range,265664,410178,710849,445185,0,1310720,262144,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,range_min,265664,410178,670164,404500,20,1310720,262144,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,history,265664,410178,670164,404500,20,1310720,262144,0
+polybench-2mm,PolyBench-GPU,64,20,1.0,20,ok,measured,,history_min,265664,410178,670164,404500,20,1310720,262144,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,demand,473059,7099305,10076108,9603049,254,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,truth,473059,7099305,16324043,15850984,0,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,truth_min,473059,7099305,10426198,9953139,254,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,range,473059,7099305,16324043,15850984,0,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,range_min,473059,7099305,10426198,9953139,254,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,history,473059,7099305,15892878,15419819,6,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.25,64,ok,measured,,history_min,473059,7099305,10076108,9603049,254,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,demand,473059,7099305,10030081,9557022,254,16646144,13434880,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,truth,473059,7099305,16534077,16061018,0,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,truth_min,473059,7099305,10636233,10163174,254,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,range,473059,7099305,16534077,16061018,0,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,range_min,473059,7099305,10636233,10163174,254,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,history,473059,7099305,15846852,15373793,6,16646144,13434880,0
+polybench-3dconv,PolyBench-GPU,64,254,0.375,96,ok,measured,,history_min,473059,7099305,10030081,9557022,254,16646144,13434880,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,demand,473059,7099305,9988806,9515747,254,16646144,12451840,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,truth,473059,7099305,16744891,16271832,0,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,truth_min,473059,7099305,10847047,10373988,254,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,range,473059,7099305,16744891,16271832,0,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,range_min,473059,7099305,10847047,10373988,254,16646144,16449536,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,history,473059,7099305,15805577,15332518,6,16646144,12451840,0
+polybench-3dconv,PolyBench-GPU,64,254,0.5,127,ok,measured,,history_min,473059,7099305,9988806,9515747,254,16646144,12451840,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,demand,473059,7099305,9978119,9505060,254,16646144,11403264,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,truth,473059,7099305,16539177,16066118,0,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,truth_min,473059,7099305,10641333,10168274,254,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,range,473059,7099305,16539177,16066118,0,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,range_min,473059,7099305,10641333,10168274,254,16646144,14483456,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,history,473059,7099305,15794890,15321831,6,16646144,11403264,0
+polybench-3dconv,PolyBench-GPU,64,254,0.625,159,ok,measured,,history_min,473059,7099305,9978119,9505060,254,16646144,11403264,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,demand,473059,7099305,9969958,9496899,254,16646144,10354688,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,truth,473059,7099305,16305242,15832183,0,16646144,12386304,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,truth_min,473059,7099305,10407397,9934338,254,16646144,12386304,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,range,473059,7099305,16305242,15832183,0,16646144,12386304,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,range_min,473059,7099305,10407397,9934338,254,16646144,12386304,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,history,473059,7099305,15786729,15313670,6,16646144,10354688,0
+polybench-3dconv,PolyBench-GPU,64,254,0.75,191,ok,measured,,history_min,473059,7099305,9969958,9496899,254,16646144,10354688,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,demand,473059,7099305,9947687,9474628,254,16646144,9240576,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,truth,473059,7099305,16071306,15598247,0,16646144,10289152,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,truth_min,473059,7099305,10173462,9700403,254,16646144,10289152,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,range,473059,7099305,16071306,15598247,0,16646144,10289152,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,range_min,473059,7099305,10173462,9700403,254,16646144,10289152,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,history,473059,7099305,15764457,15291398,6,16646144,9240576,0
+polybench-3dconv,PolyBench-GPU,64,254,0.875,223,ok,measured,,history_min,473059,7099305,9947687,9474628,254,16646144,9240576,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,demand,473059,7099305,9946837,9473778,254,16646144,8257536,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,truth,473059,7099305,15844681,15371622,0,16646144,8257536,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,truth_min,473059,7099305,9946837,9473778,254,16646144,8257536,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,range,473059,7099305,15844681,15371622,0,16646144,8257536,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,range_min,473059,7099305,9946837,9473778,254,16646144,8257536,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,history,473059,7099305,15763607,15290548,6,16646144,8257536,0
+polybench-3dconv,PolyBench-GPU,64,254,1.0,254,ok,measured,,history_min,473059,7099305,9946837,9473778,254,16646144,8257536,0
+polybench-3mm,PolyBench-GPU,64,7,0.25,2,an operation needs 3 pages,,,,,,,,,,,
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,demand,133312,188768,432164,298852,8,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,truth,133312,188768,656802,523490,0,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,truth_min,133312,188768,432164,298852,8,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,range,133312,188768,656802,523490,0,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,range_min,133312,188768,432164,298852,8,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,history,133312,188768,432164,298852,8,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.375,3,ok,measured,,history_min,133312,188768,432164,298852,8,524288,393216,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,demand,133312,188768,424853,291541,8,524288,327680,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,truth,133312,188768,587976,454664,0,458752,262144,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,truth_min,133312,188768,409343,276031,7,458752,262144,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,range,133312,188768,587976,454664,0,458752,262144,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,range_min,133312,188768,409343,276031,7,458752,262144,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,history,133312,188768,424853,291541,8,524288,327680,0
+polybench-3mm,PolyBench-GPU,64,7,0.5,4,ok,measured,,history_min,133312,188768,424853,291541,8,524288,327680,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,demand,133312,188768,402032,268720,7,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,truth,133312,188768,580666,447354,0,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,truth_min,133312,188768,402032,268720,7,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,range,133312,188768,580666,447354,0,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,range_min,133312,188768,402032,268720,7,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,history,133312,188768,402032,268720,7,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.625,5,ok,measured,,history_min,133312,188768,402032,268720,7,458752,196608,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,demand,133312,188768,394722,261410,7,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,truth,133312,188768,573355,440043,0,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,truth_min,133312,188768,394722,261410,7,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,range,133312,188768,573355,440043,0,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,range_min,133312,188768,394722,261410,7,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,history,133312,188768,394722,261410,7,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.75,6,ok,measured,,history_min,133312,188768,394722,261410,7,458752,131072,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,demand,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,truth,133312,188768,566045,432733,0,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,truth_min,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,range,133312,188768,566045,432733,0,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,range_min,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,history,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,0.875,7,ok,measured,,history_min,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,demand,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,truth,133312,188768,566045,432733,0,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,truth_min,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,range,133312,188768,566045,432733,0,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,range_min,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,history,133312,188768,387412,254100,7,458752,65536,0
+polybench-3mm,PolyBench-GPU,64,7,1.0,7,ok,measured,,history_min,133312,188768,387412,254100,7,458752,65536,0
+polybench-atax,PolyBench-GPU,64,1027,0.25,257,an operation needs 1026 pages,,,,,,,,,,,
+polybench-atax,PolyBench-GPU,64,1027,0.375,386,an operation needs 1026 pages,,,,,,,,,,,
+polybench-atax,PolyBench-GPU,64,1027,0.5,514,an operation needs 1026 pages,,,,,,,,,,,
+polybench-atax,PolyBench-GPU,64,1027,0.625,642,an operation needs 1026 pages,,,,,,,,,,,
+polybench-atax,PolyBench-GPU,64,1027,0.75,771,an operation needs 1026 pages,,,,,,,,,,,
+polybench-atax,PolyBench-GPU,64,1027,0.875,899,an operation needs 1026 pages,,,,,,,,,,,
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,demand,6358277,20177623,17820391,11462114,1027,67305472,65536,0
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,truth,6358277,20177623,12641006,6282729,0,67305472,65536,0
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,truth_min,6358277,20177623,12593192,6234915,3,67305472,65536,0
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,range,6358277,20177623,12641006,6282729,0,67305472,65536,0
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,range_min,6358277,20177623,12593192,6234915,3,67305472,65536,0
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,history,6358277,20177623,17820391,11462114,1027,67305472,65536,0
+polybench-atax,PolyBench-GPU,64,1027,1.0,1027,ok,measured,,history_min,6358277,20177623,17820391,11462114,1027,67305472,65536,0
+polybench-bicg,PolyBench-GPU,64,1028,0.25,257,an operation needs 1026 pages,,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,64,1028,0.375,386,an operation needs 1026 pages,,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,64,1028,0.5,514,an operation needs 1026 pages,,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,64,1028,0.625,643,an operation needs 1026 pages,,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,64,1028,0.75,771,an operation needs 1026 pages,,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,64,1028,0.875,900,an operation needs 1026 pages,,,,,,,,,,,
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,demand,3966711,18001290,15490325,11523614,1028,67371008,131072,0
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,truth,3966711,18001290,10356945,6390234,0,67371008,131072,0
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,truth_min,3966711,18001290,10263126,6296415,4,67371008,131072,0
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,range,3966711,18001290,10356945,6390234,0,67371008,131072,0
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,range_min,3966711,18001290,10263126,6296415,4,67371008,131072,0
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,history,3966711,18001290,15490325,11523614,1028,67371008,131072,0
+polybench-bicg,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,history_min,3966711,18001290,15490325,11523614,1028,67371008,131072,0
+polybench-corr,PolyBench-GPU,64,34,0.25,9,an operation needs 32 pages,,,,,,,,,,,
+polybench-corr,PolyBench-GPU,64,34,0.375,13,an operation needs 32 pages,,,,,,,,,,,
+polybench-corr,PolyBench-GPU,64,34,0.5,17,an operation needs 32 pages,,,,,,,,,,,
+polybench-corr,PolyBench-GPU,64,34,0.625,22,an operation needs 32 pages,,,,,,,,,,,
+polybench-corr,PolyBench-GPU,64,34,0.75,26,an operation needs 32 pages,,,,,,,,,,,
+polybench-corr,PolyBench-GPU,64,34,0.875,30,an operation needs 32 pages,,,,,,,,,,,
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,demand,120334052,120601957,121128470,794418,34,2228224,1048576,0
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,truth,120334052,120601957,120997368,663316,0,2228224,1048576,0
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,truth_min,120334052,120601957,120995559,661507,2,2228224,1048576,0
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,range,120334052,120601957,120997368,663316,0,2228224,1048576,0
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,range_min,120334052,120601957,120995559,661507,2,2228224,1048576,0
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,history,120334052,120601957,121128470,794418,34,2228224,1048576,0
+polybench-corr,PolyBench-GPU,64,34,1.0,34,ok,measured,,history_min,120334052,120601957,121128470,794418,34,2228224,1048576,0
+polybench-covar,PolyBench-GPU,64,33,0.25,9,an operation needs 32 pages,,,,,,,,,,,
+polybench-covar,PolyBench-GPU,64,33,0.375,13,an operation needs 32 pages,,,,,,,,,,,
+polybench-covar,PolyBench-GPU,64,33,0.5,17,an operation needs 32 pages,,,,,,,,,,,
+polybench-covar,PolyBench-GPU,64,33,0.625,21,an operation needs 32 pages,,,,,,,,,,,
+polybench-covar,PolyBench-GPU,64,33,0.75,25,an operation needs 32 pages,,,,,,,,,,,
+polybench-covar,PolyBench-GPU,64,33,0.875,29,an operation needs 32 pages,,,,,,,,,,,
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,demand,120547522,120813667,121246865,699343,33,2162688,1048576,0
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,truth,120547522,120813667,121114859,567337,0,2162688,1048576,0
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,truth_min,120547522,120813667,121113954,566432,1,2162688,1048576,0
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,range,120547522,120813667,121114859,567337,0,2162688,1048576,0
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,range_min,120547522,120813667,121113954,566432,1,2162688,1048576,0
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,history,120547522,120813667,121246865,699343,33,2162688,1048576,0
+polybench-covar,PolyBench-GPU,64,33,1.0,33,ok,measured,,history_min,120547522,120813667,121246865,699343,33,2162688,1048576,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,0.25,7,an operation needs 27 pages,,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,64,28,0.375,11,an operation needs 27 pages,,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,64,28,0.5,14,an operation needs 27 pages,,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,64,28,0.625,18,an operation needs 27 pages,,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,64,28,0.75,21,an operation needs 27 pages,,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,64,28,0.875,25,an operation needs 27 pages,,,,,,,,,,,
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,demand,145248,349952,711529,566281,28,1835008,589824,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,truth,145248,349952,650850,505602,0,1835008,589824,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,truth_min,145248,349952,649945,504697,1,1835008,589824,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,range,145248,349952,650850,505602,0,1835008,589824,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,range_min,145248,349952,649945,504697,1,1835008,589824,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,history,145248,349952,711529,566281,28,1835008,589824,0
+polybench-fdtd-2d,PolyBench-GPU,64,28,1.0,28,ok,measured,,history_min,145248,349952,711529,566281,28,1835008,589824,0
+polybench-gemm,PolyBench-GPU,64,48,0.25,12,an operation needs 48 pages,,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,64,48,0.375,18,an operation needs 48 pages,,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,64,48,0.5,24,an operation needs 48 pages,,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,64,48,0.625,30,an operation needs 48 pages,,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,64,48,0.75,36,an operation needs 48 pages,,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,64,48,0.875,42,an operation needs 48 pages,,,,,,,,,,,
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,demand,899877,1252837,1768327,868450,48,3145728,1048576,0
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,truth,899877,1252837,1555375,655498,0,3145728,1048576,0
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,truth_min,899877,1252837,1555375,655498,0,3145728,1048576,0
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,range,899877,1252837,1555375,655498,0,3145728,1048576,0
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,range_min,899877,1252837,1555375,655498,0,3145728,1048576,0
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,history,899877,1252837,1768327,868450,48,3145728,1048576,0
+polybench-gemm,PolyBench-GPU,64,48,1.0,48,ok,measured,,history_min,899877,1252837,1768327,868450,48,3145728,1048576,0
+polybench-gesummv,PolyBench-GPU,64,2051,0.25,513,an operation needs 2051 pages,,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,64,2051,0.375,770,an operation needs 2051 pages,,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,64,2051,0.5,1026,an operation needs 2051 pages,,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,64,2051,0.625,1282,an operation needs 2051 pages,,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,64,2051,0.75,1539,an operation needs 2051 pages,,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,64,2051,0.875,1795,an operation needs 2051 pages,,,,,,,,,,,
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,demand,2875601,30163795,20238976,17363375,2051,134414336,65536,0
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,truth,2875601,30163795,15225146,12349545,0,134414336,65536,0
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,truth_min,2875601,30163795,15136282,12260681,3,134414336,65536,0
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,range,2875601,30163795,15225146,12349545,0,134414336,65536,0
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,range_min,2875601,30163795,15136282,12260681,3,134414336,65536,0
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,history,2875601,30163795,20238976,17363375,2051,134414336,65536,0
+polybench-gesummv,PolyBench-GPU,64,2051,1.0,2051,ok,measured,,history_min,2875601,30163795,20238976,17363375,2051,134414336,65536,0
+polybench-gramschm,PolyBench-GPU,64,12,0.25,3,an operation needs 9 pages,,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,64,12,0.375,5,an operation needs 9 pages,,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,64,12,0.5,6,an operation needs 9 pages,,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,64,12,0.625,8,an operation needs 9 pages,,,,,,,,,,,
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,demand,34070403,34118115,34644005,573602,14,917504,589824,0
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,truth,34070403,34118115,34538827,468424,0,786432,458752,0
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,truth_min,34070403,34118115,34522784,452381,12,786432,458752,0
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,range,34070403,34118115,34538827,468424,0,786432,458752,0
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,range_min,34070403,34118115,34522784,452381,12,786432,458752,0
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,history,34070403,34118115,34891875,821472,12,1179648,851968,0
+polybench-gramschm,PolyBench-GPU,64,12,0.75,9,ok,measured,,history_min,34070403,34118115,34644005,573602,14,917504,589824,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,demand,34070403,34118115,34508163,437760,12,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,truth,34070403,34118115,34524206,453803,0,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,truth_min,34070403,34118115,34508163,437760,12,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,range,34070403,34118115,34524206,453803,0,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,range_min,34070403,34118115,34508163,437760,12,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,history,34070403,34118115,34509972,439569,10,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,0.875,11,ok,measured,,history_min,34070403,34118115,34508163,437760,12,786432,327680,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,demand,34070403,34118115,34500853,430450,12,786432,262144,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,truth,34070403,34118115,34516895,446492,0,786432,262144,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,truth_min,34070403,34118115,34500853,430450,12,786432,262144,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,range,34070403,34118115,34516895,446492,0,786432,262144,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,range_min,34070403,34118115,34500853,430450,12,786432,262144,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,history,34070403,34118115,34502662,432259,10,786432,262144,0
+polybench-gramschm,PolyBench-GPU,64,12,1.0,12,ok,measured,,history_min,34070403,34118115,34500853,430450,12,786432,262144,0
+polybench-jacobi1d,PolyBench-GPU,64,8,0.25,2,an operation needs 8 pages,,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,64,8,0.375,3,an operation needs 8 pages,,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,64,8,0.5,4,an operation needs 8 pages,,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,64,8,0.625,5,an operation needs 8 pages,,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,64,8,0.75,6,an operation needs 8 pages,,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,64,8,0.875,7,an operation needs 8 pages,,,,,,,,,,,
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,demand,70560,165665,378760,308200,8,524288,524288,0
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,truth,70560,165665,386234,315674,0,524288,524288,0
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,truth_min,70560,165665,378760,308200,8,524288,524288,0
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,range,70560,165665,386234,315674,0,524288,524288,0
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,range_min,70560,165665,378760,308200,8,524288,524288,0
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,history,70560,165665,378760,308200,8,524288,524288,0
+polybench-jacobi1d,PolyBench-GPU,64,8,1.0,8,ok,measured,,history_min,70560,165665,378760,308200,8,524288,524288,0
+polybench-jacobi2d,PolyBench-GPU,64,123,0.25,31,an operation needs 123 pages,,,,,,,,,,,
+polybench-jacobi2d,PolyBench-GPU,64,123,0.375,47,an operation needs 123 pages,,,,,,,,,,,
+polybench-jacobi2d,PolyBench-GPU,64,123,0.5,62,an operation needs 123 pages,,,,,,,,,,,
+polybench-jacobi2d,PolyBench-GPU,64,123,0.625,77,an operation needs 123 pages,,,,,,,,,,,
+polybench-jacobi2d,PolyBench-GPU,64,123,0.75,93,an operation needs 123 pages,,,,,,,,,,,
+polybench-jacobi2d,PolyBench-GPU,64,123,0.875,108,an operation needs 123 pages,,,,,,,,,,,
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,demand,539331,5552802,3790154,3250823,123,8060928,8060928,0
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,truth,539331,5552802,2951787,2412456,0,8060928,8060928,0
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,truth_min,539331,5552802,2951787,2412456,0,8060928,8060928,0
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,range,539331,5552802,2951787,2412456,0,8060928,8060928,0
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,range_min,539331,5552802,2951787,2412456,0,8060928,8060928,0
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,history,539331,5552802,3790154,3250823,123,8060928,8060928,0
+polybench-jacobi2d,PolyBench-GPU,64,123,1.0,123,ok,measured,,history_min,539331,5552802,3790154,3250823,123,8060928,8060928,0
+polybench-lu,PolyBench-GPU,64,4,0.25,1,an operation needs 4 pages,,,,,,,,,,,
+polybench-lu,PolyBench-GPU,64,4,0.375,2,an operation needs 4 pages,,,,,,,,,,,
+polybench-lu,PolyBench-GPU,64,4,0.5,2,an operation needs 4 pages,,,,,,,,,,,
+polybench-lu,PolyBench-GPU,64,4,0.625,3,an operation needs 4 pages,,,,,,,,,,,
+polybench-lu,PolyBench-GPU,64,4,0.75,3,an operation needs 4 pages,,,,,,,,,,,
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,demand,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,truth,1464051,1511731,1670215,206164,0,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,truth_min,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,range,1464051,1511731,1670215,206164,0,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,range_min,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,history,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,0.875,4,ok,measured,,history_min,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,demand,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,truth,1464051,1511731,1670215,206164,0,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,truth_min,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,range,1464051,1511731,1670215,206164,0,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,range_min,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,history,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-lu,PolyBench-GPU,64,4,1.0,4,ok,measured,,history_min,1464051,1511731,1677101,213050,4,262144,262144,0
+polybench-mvt,PolyBench-GPU,64,1028,0.25,257,an operation needs 1026 pages,,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,64,1028,0.375,386,an operation needs 1026 pages,,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,64,1028,0.5,514,an operation needs 1026 pages,,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,64,1028,0.625,643,an operation needs 1026 pages,,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,64,1028,0.75,771,an operation needs 1026 pages,,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,64,1028,0.875,900,an operation needs 1026 pages,,,,,,,,,,,
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,demand,6337926,20256794,17861540,11523614,1028,67371008,131072,0
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,truth,6337926,20256794,12728160,6390234,0,67371008,131072,0
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,truth_min,6337926,20256794,12634341,6296415,4,67371008,131072,0
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,range,6337926,20256794,12728160,6390234,0,67371008,131072,0
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,range_min,6337926,20256794,12634341,6296415,4,67371008,131072,0
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,history,6337926,20256794,17861540,11523614,1028,67371008,131072,0
+polybench-mvt,PolyBench-GPU,64,1028,1.0,1028,ok,measured,,history_min,6337926,20256794,17861540,11523614,1028,67371008,131072,0
+polybench-syr2k,PolyBench-GPU,64,48,0.25,12,an operation needs 48 pages,,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,64,48,0.375,18,an operation needs 48 pages,,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,64,48,0.5,24,an operation needs 48 pages,,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,64,48,0.625,30,an operation needs 48 pages,,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,64,48,0.75,36,an operation needs 48 pages,,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,64,48,0.875,42,an operation needs 48 pages,,,,,,,,,,,
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,demand,5841858,6194722,6710308,868450,48,3145728,1048576,0
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,truth,5841858,6194722,6497356,655498,0,3145728,1048576,0
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,truth_min,5841858,6194722,6497356,655498,0,3145728,1048576,0
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,range,5841858,6194722,6497356,655498,0,3145728,1048576,0
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,range_min,5841858,6194722,6497356,655498,0,3145728,1048576,0
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,history,5841858,6194722,6710308,868450,48,3145728,1048576,0
+polybench-syr2k,PolyBench-GPU,64,48,1.0,48,ok,measured,,history_min,5841858,6194722,6710308,868450,48,3145728,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,0.25,8,an operation needs 32 pages,,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,64,32,0.375,12,an operation needs 32 pages,,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,64,32,0.5,16,an operation needs 32 pages,,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,64,32,0.625,20,an operation needs 32 pages,,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,64,32,0.75,24,an operation needs 32 pages,,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,64,32,0.875,28,an operation needs 32 pages,,,,,,,,,,,
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,demand,2992209,3255506,3675309,683100,32,2097152,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,truth,2992209,3255506,3505341,513132,0,2097152,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,truth_min,2992209,3255506,3505341,513132,0,2097152,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,range,2992209,3255506,3505341,513132,0,2097152,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,range_min,2992209,3255506,3505341,513132,0,2097152,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,history,2992209,3255506,3675309,683100,32,2097152,1048576,0
+polybench-syrk,PolyBench-GPU,64,32,1.0,32,ok,measured,,history_min,2992209,3255506,3675309,683100,32,2097152,1048576,0
+polybench-gemver,PolyBench-GPU,64,72,0.25,18,an operation needs 68 pages,,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,64,72,0.375,27,an operation needs 68 pages,,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,64,72,0.5,36,an operation needs 68 pages,,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,64,72,0.625,45,an operation needs 68 pages,,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,64,72,0.75,54,an operation needs 68 pages,,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,64,72,0.875,63,an operation needs 68 pages,,,,,,,,,,,
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,demand,724420,1510153,1786613,1062193,72,4718592,65536,0
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,truth,724420,1510153,1635840,911420,0,4718592,65536,0
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,truth_min,724420,1510153,1415252,690832,8,4718592,65536,0
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,range,724420,1510153,1635840,911420,0,4718592,65536,0
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,range_min,724420,1510153,1415252,690832,8,4718592,65536,0
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,history,724420,1510153,1786613,1062193,72,4718592,65536,0
+polybench-gemver,PolyBench-GPU,64,72,1.0,72,ok,measured,,history_min,724420,1510153,1786613,1062193,72,4718592,65536,0
+polybench-adi,PolyBench-GPU,64,12,0.25,3,an operation needs 12 pages,,,,,,,,,,,
+polybench-adi,PolyBench-GPU,64,12,0.375,5,an operation needs 12 pages,,,,,,,,,,,
+polybench-adi,PolyBench-GPU,64,12,0.5,6,an operation needs 12 pages,,,,,,,,,,,
+polybench-adi,PolyBench-GPU,64,12,0.625,8,an operation needs 12 pages,,,,,,,,,,,
+polybench-adi,PolyBench-GPU,64,12,0.75,9,an operation needs 12 pages,,,,,,,,,,,
+polybench-adi,PolyBench-GPU,64,12,0.875,11,an operation needs 12 pages,,,,,,,,,,,
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,demand,2536587,2656044,2890887,354300,12,786432,524288,0
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,truth,2536587,2656044,2924098,387511,0,786432,524288,0
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,truth_min,2536587,2656044,2890887,354300,12,786432,524288,0
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,range,2536587,2656044,2924098,387511,0,786432,524288,0
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,range_min,2536587,2656044,2890887,354300,12,786432,524288,0
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,history,2536587,2656044,2890887,354300,12,786432,524288,0
+polybench-adi,PolyBench-GPU,64,12,1.0,12,ok,measured,,history_min,2536587,2656044,2890887,354300,12,786432,524288,0
