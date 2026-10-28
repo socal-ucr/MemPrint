@@ -46,3 +46,36 @@ class History:
 
     def record(self, key, pages):
         self.seen[key] = (self.seen.get(key, []) + [set(pages)])[-2:]
+
+
+if __name__ == "__main__":
+    # data/uvm_span_gaps{,_large}.csv: per program and page size, the pages the kernels touch (per launch and
+    # allocation) and the pages inside their spans that they do not touch
+    import csv
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import benchmarks as B
+    from copy_savings import H2D, D2H, UNIT, accesses
+    rows = []
+    for name in sys.argv[1].split(","):
+        w = B.workdir(B.BENCH[name])
+        tev = list(csv.DictReader(open(w / "truth" / "truth_events.csv")))
+        tacc = accesses(w / "truth" / "truth_access.csv")
+        for kb in (64, 4):
+            pu = kb * 1024 // UNIT
+            touched = gaps = 0
+            for i, e in enumerate(tev):
+                if e["kind"] != "kernel" or e["name"] in (H2D, D2H):
+                    continue
+                pages = {(a, p) for a, lo, hi, _ in tacc.get(i, []) if hi > lo
+                         for p in range(lo // pu, (hi - 1) // pu + 1)}
+                touched += len(pages)
+                gaps += len(span(pages)) - len(pages)
+            rows.append({"name": name, "page_kb": kb, "touched": touched, "gaps": gaps})
+    path = Path(__file__).resolve().parent / "data" / f"uvm_span_gaps{B.SUFFIX}.csv"
+    with open(path, "w", newline="") as f:
+        wr = csv.DictWriter(f, list(rows[0]))
+        wr.writeheader()
+        wr.writerows(rows)
+    print("wrote", path)

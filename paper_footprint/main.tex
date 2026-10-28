@@ -57,7 +57,12 @@ contiguous pages long enough to repay the call, and evicting the page used farth
 \numUvmWLargeFourHyMin{}$\times$ over demand paging, with the interpreter's footprints exactly as with the traced
 ones. On the A30 itself, the interpreter's plans for prefetching before each kernel are identical to the traced
 ones, and prefetching runs speeds unmodified programs up by \numHwHalfHyMinAll{}$\times$ to
-\numHwHalfTrMinAll{}$\times$ at half of their memory, across repeated measurements of the same plans.
+\numHwHalfTrMinAll{}$\times$ at half of their memory, across repeated measurements of the same plans. However, these
+plans do not need exact footprints. Except in the breadth-first searches, the pages a kernel touches in each buffer
+form one contiguous range, so prefetching the pages between the first and the last that a wave touches in each
+buffer, which a bounds analysis of the indices or one recorded run could give, gains as much as the footprints in
+every configuration of the model, and its plans are identical to the traced plans on the A30 in
+\numHwRangeSame{} of \numHwPlanConfigs{} combinations of program and share of memory.
 \end{abstract}
 
 \section{Introduction}
@@ -92,7 +97,9 @@ runtime system that knew which pages each part of a kernel touches could move th
 evict the pages that are needed latest. We model this on the same benchmarks, with the footprints of each wave of
 thread blocks and with fault and prefetch costs measured on the A30, and compare it with demand paging and with
 prefetching every buffer a kernel uses. We then run the programs on the A30 with Unified Memory and prefetch plans
-before each kernel.
+before each kernel. Finally, we ask whether such plans need exact footprints at all, by comparing them with plans
+that take only the first and last page each wave touches in each buffer, and with plans that repeat the pages of a
+kernel's previous launch.
 
 In this work, we make the following contributions:
 \begin{itemize}
@@ -110,6 +117,9 @@ wave of thread blocks, and measure what prefetching and eviction gain over deman
 each wave, under fault and prefetch costs measured on the A30 (\secref{sec:uvm} and \secref{sec:eval-uvm}).
 \item We run \numHwPrograms{} unmodified programs on the A30 with Unified Memory and prefetch plans from each
 footprint, and compare the measured speedups with the model's (\secref{sec:eval-hw}).
+\item We show that for Unified Memory the first and last page that a wave touches in each buffer are enough on
+these benchmarks, because plans built from them gain as much as plans built from exact footprints, while plans
+that repeat a kernel's previous launch gain less (\secref{sec:eval-uvm} and \secref{sec:eval-hw}).
 \end{itemize}
 
 \section{Background}
@@ -214,6 +224,17 @@ These lengths are the shortest runs for which one prefetch call costs less than 
 costs below. Every policy pays for what the traced run actually touches, so a prediction that is wrong costs faults
 or moves that are not needed.
 
+\paragraph{Plans without the interpreter.} We also compare two policies that need no interpreter. First,
+\term{range prefetching} moves, before each wave, every page of each buffer from the first page that the wave
+touches in it to the last, and evicts as interpreter prefetching does. For a kernel whose indices follow a stride,
+an index analysis such as CODA's~\cite{Kim2018CODA} gives these ranges before the program runs, and for any kernel,
+the lowest and highest address that one recorded run touches in each buffer give them for that input. We take them
+from the traced footprints. Second, \term{history prefetching} moves the pages that the same wave of the same kernel
+touched at its previous launch, shifted in each buffer by as many pages as the first page moved between the two
+launches before, and evicts the least recently used page. A runtime system can record these pages while the program
+runs, so history prefetching uses nothing but the program's past, and it prefetches nothing at a kernel's first
+launch. Both policies also have a runs variant.
+
 \paragraph{Costs.} We measure the costs of Unified Memory on the A30 with two microbenchmarks. In the first, a
 kernel touches one word in each block of a managed buffer whose pages are on the host. Faulting on one 64~KB block
 stalls the kernel for \numUvmFaultOneUs{}~\textmu s, and each further block up to 16~MB adds about
@@ -301,13 +322,14 @@ kernel writes.
 \begin{table*}[tbp]
 \centering
 \scriptsize
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{2.5pt}
 \input{tables/uvm_summary}
 \caption{Unified Memory with each policy: the programs and shares of device memory at which every operation (with
 kernels as whole operations) or every wave fits in less memory than the program's data, and the geometric-mean
 speedup over demand paging of buffer prefetching, of prefetching every page with the interpreter's and the traced
-footprints, and of prefetching only long runs of pages with them, under the costs measured on the A30, and of buffer
-and interpreter prefetching under the assumed costs at 25~\textmu s per batch of faults.}
+footprints, of prefetching only long runs of pages with them, and of prefetching only long runs with the ranges of
+pages and with the history of earlier launches, under the costs measured on the A30, and of buffer and interpreter
+prefetching under the assumed costs at 25~\textmu s per batch of faults.}
 \label{tab:uvm-summary}
 \end{table*}
 
@@ -345,6 +367,25 @@ if no single kernel touches all of its pages, and on the large inputs with pages
 single-kernel programs such as \code{2dconv} and \code{3dconv}. No GraphBIG program can, because GraphBIG launches
 its kernels with few blocks of 1{,}024 threads, so each kernel is one wave that touches nearly all of the program's
 pages.
+
+\paragraph{Plans without the interpreter.} \textit{Prefetching runs within the first and last page of each buffer
+gains as much as prefetching runs with the footprints, in every configuration of the model}
+(\tabref{tab:uvm-summary}), and in no configuration does it fall more than 1\% behind the traced footprints. Of the
+\numUvmGapSpanPrograms{} programs that we run on the A30, the pages a kernel touches in each buffer form one
+contiguous range of 64~KB pages in all but \code{bfs}, where \numUvmGapBfsSixtyFour{} of the pages inside the ranges
+are not touched. With pages of 4~KB, the ranges of \code{bfs} and of GraphBIG's \code{bfs-topo-thread-centric} leave
+\numUvmGapBfsFour{} and \numUvmGapGraphBfsFour{} of their pages untouched. Neither program can run in less memory
+than its data in any model of the large inputs, however, so the model does not test what these gaps cost. On the
+large inputs with pages of 4~KB, range prefetching gains more than the footprints
+(\numUvmWLargeFourRangeMin{}$\times$ against \numUvmWLargeFourTrMin{}$\times$), in \numUvmWLargeFourRangeMinAhead{}
+configurations, one of them of \code{\numUvmRangeAheadOther{}} and the rest of \code{pathfinder}. In \code{pathfinder}, it gains
+\numUvmPathRangeMinLo{}$\times$ to \numUvmPathRangeMinHi{}$\times$ where the footprints gain
+\numUvmPathTrMinLo{}$\times$ to \numUvmPathTrMinHi{}$\times$, and both move the same bytes. The pages of one wave
+leave gaps of 4~KB pages that later waves touch, and the range moves these pages early, in fewer and longer calls,
+where the footprints leave them to faults. History prefetching gains less, \numUvmWLargeFourHistMin{}$\times$ on
+the same configurations and \numUvmKLargeHistMin{}$\times$ with kernels as whole operations, because it
+prefetches nothing at a kernel's first launch, and programs such as \code{2dconv}, \code{gemm} and \code{hotspot}
+launch each of their kernels once.
 
 \subsection{Unified Memory on the A30}
 \label{sec:eval-hw}
@@ -388,6 +429,21 @@ all of the data fits, the geometric mean of every plan is within 4\% of demand p
 prefetching runs 1.03$\times$, because its kernels touch short runs that the runs plans leave to faults, which
 indicates that the cost of a call we measured overstates the cost of prefetching these runs on the A30.
 
+\paragraph{Plans without the interpreter.} We run the range and history plans for runs in a third set of runs,
+together with demand paging and the traced plans for runs, \numHwCheapReps{} times each. The median coefficient of
+variation over the repetitions is \numHwCheapCv{}. At blocks of 64~KB, the range plans are identical to the traced
+plans in \numHwRangeSame{} of the \numHwPlanConfigs{} combinations of program and share, all but those of
+\code{\numHwRangeDiffer{}}, so on the A30 they can differ from the traced plans only in \code{\numHwRangeDiffer{}}
+and by the variation between runs. That variation is large at half of the memory. Over the
+\numHwCheapHalfPrograms{} programs that ran, the traced plans gain \numHwCheapHalfTrMin{}$\times$ and the range
+plans \numHwCheapHalfRangeMin{}$\times$, and most of the difference comes from \code{jacobi2d}, whose identical
+plans gain \numHwCheapJacobiTrMin{}$\times$ and \numHwCheapJacobiRangeMin{}$\times$. At 75\% of the memory the two
+gain \numHwCheapThreeQTrMin{}$\times$ and \numHwCheapThreeQRangeMin{}$\times$. The history plans are identical to
+the traced plans in \numHwHistSame{} combinations, and gain \numHwCheapHalfHistMin{}$\times$ at half of the memory
+and \numHwCheapThreeQHistMin{}$\times$ at 75\%. In \code{hotspot}, which launches its kernel once, the history
+plan prefetches nothing and gains \numHwCheapHotspotHistMin{}$\times$ at half of the memory, where the traced plan
+gains \numHwCheapHotspotTrMin{}$\times$.
+
 \paragraph{Against the model.} Most of these shares hold less than one kernel's pages, which the model does not
 simulate. On the \numHwModelConfigs{} oversubscribed configurations that both cover, the kernel-level model
 predicts \numHwModelHyMin{}$\times$ for prefetching runs, and the A30 measures \numHwMeasuredHyMin{}$\times$ and
@@ -401,7 +457,8 @@ prefetches 1~GB where the footprints name 16~MB.
 the \numHwRuns{} runs, \numHwFailRuns{} failed, all of them of \code{backprop} at this share, with an illegal memory
 access in the kernel. The failure is not caused by prefetching. When we run the program repeatedly, it fails in
 every second run under every plan, demand paging included, and it does not fail at 75\% or 100\% of its
-memory.
+memory. In the third set, \numHwCheapFailRuns{} of the \numHwCheapRuns{} runs failed, all of them of \code{backprop}
+at the same share.
 
 \section{Related work}
 \label{sec:related}
@@ -411,12 +468,15 @@ and computes the stride between the data of consecutive thread blocks at launch,
 memory of the GPU that runs it. LADM~\cite{Khairy2020LADM} extends this index analysis to hierarchical access
 patterns and jointly places data and schedules thread blocks on systems of several GPUs. Unlike our footprints,
 both describe the accesses of a thread block by a stride, and do not determine accesses whose indices are loaded
-from memory.
+from memory. Our range prefetching (\secref{sec:eval-uvm}) indicates that for prefetching in Unified Memory, such
+bounds are as useful as exact footprints on the regular programs of our benchmarks.
 
 \paragraph{Footprints for Unified Memory.} SUV~\cite{B2024SUV} uses compiler-inferred access information to place
 data structures in host or device memory and to prefetch at kernel boundaries, at the granularity of data
 structures rather than bytes. MSched~\cite{Shen2025MSched} predicts the pages a kernel will touch from its launch
 arguments, from the history of earlier runs, and migrates them ahead of time when several programs share a GPU.
+Our history prefetching predicts from earlier launches within one run, without launch arguments, and therefore has
+nothing to predict from at a kernel's first launch.
 ETC~\cite{Li2019ETC} manages memory oversubscription without footprints, by overlapping eviction with execution and
 by reducing thrashing, and finds that irregular programs suffer most from it.
 
@@ -451,6 +511,14 @@ large inputs, cannot be modelled in less memory than its data. The model also ru
 previous one, so a prefetch does not overlap the kernel before it, as \code{cudaMemPrefetchAsync} on another stream
 could.
 
+A limitation of the range plans is that we take the ranges from the traced footprints rather than from an index
+analysis or a recorded run, which means that we do not measure what obtaining them costs, and for a kernel whose
+indices are loaded from memory, ranges recorded on one input may not hold on another. A limitation of the
+comparison between ranges and footprints is that the only programs whose ranges have gaps, the two breadth-first
+searches, never run in less memory than their data in the model, which means that our results do not show what
+exact footprints gain over ranges for irregular programs. We also compare ranges with footprints only for Unified
+Memory, and not for the copies of \secref{sec:eval-copies}, where a range would leave out only the units outside it.
+
 \section{Conclusion}
 \label{sec:conclusion}
 
@@ -463,9 +531,12 @@ more than the faults on a few pages, so a footprint pays off only for long runs 
 such runs wave by wave with the interpreter's footprints gains \numUvmWLargeFourHyMin{}$\times$ over demand paging in
 the model, as much as an oracle, and prefetching them before each kernel gains \numHwHalfHyMinAll{}$\times$ to
 \numHwHalfTrMinAll{}$\times$ on the A30 at half of the memory, with plans identical to the oracle's, where
-prefetching whole buffers loses. We leave for future work prefetching wave by wave
-on the GPU, which needs support in the kernel or the driver, and ordering the accesses within a block, which
-programs whose kernels run as one wave would need.
+prefetching whole buffers loses. However, the first and last page that each wave touches in each buffer give the
+same gains on these benchmarks, so for prefetching in Unified Memory the value of exact footprints remains to be
+shown on irregular programs that run in less memory than their data. We leave for future work prefetching wave by
+wave on the GPU, which needs support in the kernel or the driver, ordering the accesses within a block, which
+programs whose kernels run as one wave would need, and irregular inputs large enough to oversubscribe the device
+with more than one wave per kernel.
 
 % TODO: cite the MemPrint paper (paper_gpu) once it has a venue or a report number.
 

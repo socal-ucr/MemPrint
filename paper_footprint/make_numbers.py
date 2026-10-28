@@ -140,6 +140,7 @@ UVM = (("KLarge", "uvm_large.csv", "large", "Kernels", "Large", "64~KB"),
        ("WSmallFour", "uvm_blocks_4k.csv", "small", "Waves", "Small", "4~KB"))
 UVM_POLICIES = (("buffer", "Buf"), ("hybrid", "Hy"), ("truth", "Tr"), ("hybrid_min", "HyMin"),
                 ("truth_min", "TrMin"))
+CHEAP_POLICIES = (("range", "Range"), ("range_min", "RangeMin"), ("history", "Hist"), ("history_min", "HistMin"))
 
 
 def uvm_load(f, size):
@@ -154,7 +155,7 @@ def uvm_speedups(d, costs="measured", fault_us=25, oversubscribed=True):
         ok = ok[ok.fault_us.astype(float) == fault_us]
     ok = ok[ok.fraction < 1.0] if oversubscribed else ok[ok.fraction == 1.0]
     t = ok.pivot_table(index=["name", "fraction"], columns="policy", values="time_ns")
-    return pd.DataFrame({p: t["demand"] / t[p] for p, _ in UVM_POLICIES})
+    return pd.DataFrame({p: t["demand"] / t[p] for p in t.columns if p != "demand"})
 
 
 def uvm_numbers():
@@ -184,6 +185,28 @@ def uvm_numbers():
         ok = d[(d.status == "ok") & (d.costs == "measured") & (d.fraction < 1.0)]
         mv = (ok.to_device_bytes + ok.to_host_bytes).groupby([ok.name, ok.fraction, ok.policy]).sum().unstack("policy")
         n[f"Uvm{key}HyMinFewerBytes"] = f"{100 * (1 - mv.hybrid_min.sum() / mv.demand.sum()):.0f}\\%"
+        # plans without the interpreter (uvm_cheap.py), from the runs of the same model with only these policies
+        c = uvm_speedups(uvm_load(f.replace(".csv", "_cheap.csv"), size))
+        assert np.allclose(c.truth_min.sort_index(), s.truth_min.sort_index()), key
+        for p, P in CHEAP_POLICIES:
+            n[f"Uvm{key}{P}"] = f"{geo_speedup_of(c[p]):.3f}"
+        n[f"Uvm{key}RangeMinBehind"] = int((c.range_min < 0.99 * c.truth_min).sum())
+        n[f"Uvm{key}RangeMinAhead"] = int((c.range_min > 1.01 * c.truth_min).sum())
+        if key == "WLargeFour":
+            path = c.loc["rodinia-pathfinder"]
+            n["UvmPathTrMinLo"], n["UvmPathTrMinHi"] = f"{path.truth_min.min():.2f}", f"{path.truth_min.max():.2f}"
+            n["UvmPathRangeMinLo"], n["UvmPathRangeMinHi"] = (f"{path.range_min.min():.2f}",
+                                                              f"{path.range_min.max():.2f}")
+            n["UvmRangeAheadOther"] = short(sorted({x for x, _ in c.index[c.range_min > 1.01 * c.truth_min]}
+                                                   - {"rodinia-pathfinder"})[0])
+    gaps = pd.read_csv(os.path.join(DATA, "uvm_span_gaps_large.csv"))
+    gaps = gaps[gaps.gaps > 0].set_index(["name", "page_kb"])
+    n["UvmGapProgramsSixtyFour"] = len(gaps.xs(64, level="page_kb"))
+    n["UvmGapProgramsFour"] = len(gaps.xs(4, level="page_kb"))
+    n["UvmGapSpanPrograms"] = pd.read_csv(os.path.join(DATA, "uvm_span_gaps_large.csv")).name.nunique()
+    for (name, kb), r in gaps.iterrows():
+        k = {"rodinia-bfs": "Bfs", "graphbig-bfs-topo-thread-centric": "GraphBfs"}[name]
+        n[f"UvmGap{k}{'Four' if kb == 4 else 'SixtyFour'}"] = f"{100 * r.gaps / r.touched:.0f}\\%"
     d = uvm_load("uvm_blocks_large_4k.csv", "large")
     g = d[d.name.str.startswith("graphbig") & (d.status == "ok")]
     n["UvmGraphOver"] = int((g.fraction < 1.0).sum())
@@ -200,13 +223,15 @@ def uvm_summary_table(n):
     for key, _, _, model, size, page in UVM:
         cells = [model, size, page, f"{n[f'Uvm{key}Over']} of {n[f'Uvm{key}Programs']}", str(n[f"Uvm{key}Configs"])]
         cells += [n[f"Uvm{key}{P}"] for _, P in UVM_POLICIES]
+        cells += [n[f"Uvm{key}RangeMin"], n[f"Uvm{key}HistMin"]]
         cells += [n[f"Uvm{key}AssumedBuf"], n[f"Uvm{key}AssumedHy"]]
         rows.append(" & ".join(cells) + r" \\")
-    head = (r"\begin{tabular}{lllrrrrrrrrr}" "\n" r"\toprule" "\n"
-            r" & & & & & \multicolumn{5}{c}{Measured costs} & \multicolumn{2}{c}{Assumed costs} \\" "\n"
-            r"\cmidrule(lr){6-10} \cmidrule(lr){11-12}" "\n"
+    head = (r"\begin{tabular}{lllrrrrrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & & & & & \multicolumn{7}{c}{Measured costs} & \multicolumn{2}{c}{Assumed costs} \\" "\n"
+            r"\cmidrule(lr){6-12} \cmidrule(lr){13-14}" "\n"
             r"Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & "
-            r"\shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & Buffers & \shortstack{Inter-\\preter} \\"
+            r"\shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & \shortstack{Ranges,\\runs} & "
+            r"\shortstack{History,\\runs} & Buffers & \shortstack{Inter-\\preter} \\"
             "\n" r"\midrule" "\n")
     write("uvm_summary.tex", head + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 
@@ -262,6 +287,28 @@ def hw_numbers():
         md = (mt.loc[hw.index, "demand"] / mt.loc[hw.index, p])
         n[f"HwModel{P}"] = f"{geo_speedup_of(md):.3f}"
         n[f"HwMeasured{P}"] = f"{geo_speedup_of(hw):.3f}"
+    # a third set of runs: plans without the interpreter (uvm_hw.py --tag _cheap), at a lower load of the host
+    c = pd.read_csv(os.path.join(DATA, "uvm_hw_large_cheap.csv"))
+    c["t"] = c.gpu_ns + c.copy_ns
+    n.update({"HwCheapReps": c.rep.nunique(), "HwCheapRuns": len(c), "HwCheapFailRuns": int((c.rc != 0).sum())})
+    ct = c[c.rc == 0]
+    n["HwCheapCv"] = f"{100 * ct.groupby(['name', 'fraction', 'plan']).t.agg(lambda s: s.std() / s.mean()).median():.0f}\\%"
+    cm = ct.groupby(["name", "fraction", "plan"]).t.median().unstack("plan")
+    for frac, F in ((1.0, "Full"), (0.75, "ThreeQ"), (0.5, "Half")):
+        x = cm.xs(frac, level="fraction").dropna(subset=["demand", "truth_min", "range_min", "history_min"])
+        n[f"HwCheap{F}Programs"] = len(x)
+        for p, P in (("truth_min", "TrMin"), ("range_min", "RangeMin"), ("history_min", "HistMin")):
+            n[f"HwCheap{F}{P}"] = f"{geo_speedup_of(x.demand / x[p]):.3f}"
+    half = cm.xs(0.5, level="fraction")
+    n["HwCheapJacobiTrMin"] = f"{half.loc['polybench-jacobi2d', 'demand'] / half.loc['polybench-jacobi2d', 'truth_min']:.2f}"
+    n["HwCheapJacobiRangeMin"] = f"{half.loc['polybench-jacobi2d', 'demand'] / half.loc['polybench-jacobi2d', 'range_min']:.2f}"
+    n["HwCheapHotspotTrMin"] = f"{half.loc['rodinia-hotspot', 'demand'] / half.loc['rodinia-hotspot', 'truth_min']:.2f}"
+    n["HwCheapHotspotHistMin"] = f"{half.loc['rodinia-hotspot', 'demand'] / half.loc['rodinia-hotspot', 'history_min']:.2f}"
+    cp = pd.read_csv(os.path.join(DATA, "uvm_hw_plans_large_cheap.csv"))
+    dg = cp.pivot_table(index=["name", "fraction"], columns="plan", values="digest", aggfunc="first")
+    n["HwRangeSame"] = int(((dg.range == dg.truth) & (dg.range_min == dg.truth_min)).sum())
+    n["HwRangeDiffer"] = short(sorted(set(dg.index[dg.range_min != dg.truth_min].get_level_values(0)))[0])
+    n["HwHistSame"] = int((dg.history_min == dg.truth_min).sum())
     return n
 
 

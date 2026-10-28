@@ -1,13 +1,13 @@
-\begin{tabular}{lllrrrrrrrrr}
+\begin{tabular}{lllrrrrrrrrrrr}
 \toprule
- & & & & & \multicolumn{5}{c}{Measured costs} & \multicolumn{2}{c}{Assumed costs} \\
-\cmidrule(lr){6-10} \cmidrule(lr){11-12}
-Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & \shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & Buffers & \shortstack{Inter-\\preter} \\
+ & & & & & \multicolumn{7}{c}{Measured costs} & \multicolumn{2}{c}{Assumed costs} \\
+\cmidrule(lr){6-12} \cmidrule(lr){13-14}
+Model & Inputs & Page & Programs & Shares & Buffers & \shortstack{Inter-\\preter} & Traced & \shortstack{Inter-\\preter, runs} & \shortstack{Traced,\\runs} & \shortstack{Ranges,\\runs} & \shortstack{History,\\runs} & Buffers & \shortstack{Inter-\\preter} \\
 \midrule
-Kernels & Large & 64~KB & 9 of 37 & 26 & 0.348 & 0.913 & 0.913 & 1.120 & 1.120 & 0.572 & 1.294 \\
-Waves & Large & 64~KB & 18 of 37 & 60 & 0.960 & 1.002 & 1.002 & 1.158 & 1.158 & 1.023 & 1.337 \\
-Waves & Large & 4~KB & 14 of 37 & 55 & 1.029 & 0.929 & 0.929 & 1.249 & 1.249 & 1.027 & 1.407 \\
-Waves & Small & 64~KB & 31 of 36 & 69 & 0.861 & 0.895 & 0.897 & 1.073 & 1.073 & 1.215 & 1.323 \\
-Waves & Small & 4~KB & 8 of 36 & 30 & 0.818 & 0.675 & 0.675 & 1.177 & 1.177 & 1.221 & 2.165 \\
+Kernels & Large & 64~KB & 9 of 37 & 26 & 0.348 & 0.913 & 0.913 & 1.120 & 1.120 & 1.120 & 1.067 & 0.572 & 1.294 \\
+Waves & Large & 64~KB & 18 of 37 & 60 & 0.960 & 1.002 & 1.002 & 1.158 & 1.158 & 1.158 & 1.034 & 1.023 & 1.337 \\
+Waves & Large & 4~KB & 14 of 37 & 55 & 1.029 & 0.929 & 0.929 & 1.249 & 1.249 & 1.329 & 1.064 & 1.027 & 1.407 \\
+Waves & Small & 64~KB & 31 of 36 & 69 & 0.861 & 0.895 & 0.897 & 1.073 & 1.073 & 1.073 & 1.005 & 1.215 & 1.323 \\
+Waves & Small & 4~KB & 8 of 36 & 30 & 0.818 & 0.675 & 0.675 & 1.177 & 1.177 & 1.177 & 1.089 & 1.221 & 2.165 \\
 \bottomrule
 \end{tabular}
