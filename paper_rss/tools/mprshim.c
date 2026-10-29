@@ -95,11 +95,10 @@ static void smaps(unsigned long v[6]) {
     if (f) fclose(f);
 }
 
-static void *loop(void *arg) {
-    (void)arg;
-    struct timespec d = {(time_t)interval, (long)((interval - (time_t)interval) * 1e9)};
+/* One sample (or, in the trim mode, one trim). */
+static void sample(void) {
     long page = sysconf(_SC_PAGESIZE);
-    for (;;) {
+    {
         if (trim) {
             malloc_trim(0);
         } else if (files) {
@@ -125,12 +124,21 @@ static void *loop(void *arg) {
                 fprintf(out, "%.4f,%lu,%lu,%lu\n", now(), res * page, (res - shared) * page, free_bytes());
             if (f) fclose(f);
         }
+    }
+}
+
+static void *loop(void *arg) {
+    (void)arg;
+    struct timespec d = {(time_t)interval, (long)((interval - (time_t)interval) * 1e9)};
+    for (;;) {
+        sample();
         nanosleep(&d, NULL);
     }
     return NULL;
 }
 
-static void flush(void) { if (out) fflush(out); }
+/* At exit, one last sample: a run shorter than the interval still has its final state. */
+static void flush(void) { if (out) { sample(); fflush(out); } }
 
 __attribute__((constructor)) static void start(void) {
     const char *mode = getenv("MPR_MODE"), *path = getenv("MPR_OUT"), *iv = getenv("MPR_INT");
