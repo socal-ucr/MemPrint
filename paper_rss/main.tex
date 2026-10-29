@@ -759,8 +759,10 @@ is the median of their peak RSS minus their largest data estimate, the pages of 
 learned $R$ as the median of the truth minus $P$ over the other programs, which absorbed the interpreter's own errors
 on those programs and gave $R = -15$\,MB, and we replaced it with the definition above after seeing that result.
 
-The interpreter runs 11 of the 23 corpus programs at the largest input: the four PolyBench kernels, GAP's bfs, cc, pr
-and sssp at scale 18, HPCCG, LULESH and NPB MG. NPB IS and CG at class A are out of reach, because their inputs come
+The interpreter runs 10 of the 23 corpus programs at the largest input: the four PolyBench kernels, GAP's bfs, cc, pr
+and sssp at scale 18, LULESH at $s = 60$ and NPB MG. HPCCG at $64^3$ exceeds the interpreter's recursion depth, with a
+limit of 200{,}000 frames and a 512\,MB stack, although it ran at the companion study's $28^3$. NPB IS and CG at class
+A are out of reach, because their inputs come
 from a chain of random-number calls that the interpreter runs one at a time, 4\,hours already at class W. The other
 programs (the interpreters, \texttt{cc1}, darknet, miniVite, Kripke, MiniFE and Quicksilver) use libraries, MPI or
 input files that it does not run. GAP's spectra are the companion study's, for one trial against the corpus's four or
@@ -770,14 +772,16 @@ On the four PolyBench kernels, the prediction with no run is within 0.1\% to 1.1
 as close as the model's own run, because these programs allocate their arrays once and touch them, so the bytes that
 the interpreter counts are the pages in use. $R$ is 1.7 to 1.9\,MB. On GAP, it is 40\% to 45\% too high: the
 interpreter counts every byte that the run touches, and GAP's graph builder fills temporary edge lists that it frees
-before the kernel runs, as LULESH does with its temporary arrays (\secref{sec:general}). On NPB MG, it is 10.5\% low,
+before the kernel runs. LULESH is 57\% too high for the same reason, because it allocates and frees its temporary
+arrays of 8 values per element in every step (\secref{sec:general}). On NPB MG, it is 10.5\% low,
 the interpreter's own error on MG. Because a C++ prediction has no timeline, it holds the peak over the whole run,
-which reserves 194\% to 206\% too much on GAP over the run, whose footprint is low for most of it; atax's timeline gives
+which reserves 194\% to 206\% too much on GAP and 147\% on LULESH over the run, whose footprint is low for most of it;
+atax's timeline gives
 $+18\%$ against $+35\%$ for its own peak held flat. The allocator term $r$ is 0.4\% to 0.5\%, because the other
 programs of this set allocate their arrays once, and the RSS prediction is 5\% to 7\% above the RSS on PolyBench, the
 pages of libraries that these kernels do not load.
 
-The interpreter costs 1 to 944 times the native run, against $0.99\times$ for the model's own run. A prediction
+The interpreter costs 1 to 1{,}340 times the native run, 1.9\,hours for LULESH, against $0.99\times$ for the model's own run. A prediction
 with no run is therefore useful where the scheduler must place a job before it can run it at all, and only for array
 programs whose source the interpreter can execute. For every other program, the model's own run, or its transfer from
 two smaller runs, is cheaper and more accurate.
@@ -995,8 +999,8 @@ Data estimate (\secref{sec:model}) & $0.99\times$, $1.21\times$ darknet & none &
 433 against 515\,min for the RSS curve (\secref{sec:sched}) & glibc, jemalloc or TCMalloc only; THP; runs of a few ms \\
 Data estimate, $B$ from the same run (\secref{sec:general}) & $0.99\times$ & none & $+0.6\%$ (all 23); 2.0\% on the
 blind programs & miniVite $+30\%$ (its libraries) \\
-Prediction from source, no run (\secref{sec:general}) & interpreter, $1\times$ to $944\times$ & none & peak within
-1.1\% on PolyBench, $+45\%$ on GAP & array programs it can run; counts freed bytes \\
+Prediction from source, no run (\secref{sec:general}) & interpreter, $1\times$ to $1{,}340\times$ & none & peak within
+1.1\% on PolyBench, $+45\%$ on GAP, $+57\%$ LULESH & array programs it can run; counts freed bytes \\
 Borrowed growth (\secref{sec:general}) & one smaller run & none & no better than $\beta = 1$ & \\
 Runtime statistics & $0.96\times$ & none & $+5\%$ CPython, $-19\%$ Lua & two programs \\
 Referenced pages & $1.02\times$ & none & $-24\%$, $-70\%$ miniVite & below the footprint: unsafe \\
