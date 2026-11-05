@@ -772,7 +772,7 @@ in them has a median error of 0.44\,MB, against 1.32\,MB for the median of the o
 features alone carry most of this, because $r$ and $R'$ separate the programs that a language interpreter runs, and
 the programs that link large libraries, from the rest. The embeddings correlate with $r$ and $R'$ more weakly, and
 not with $\beta$ ($-0.12$ to $0.05$, none significant). Neither the memory code nor the larger model changes this:
-Qwen3-Embedding-8B on the memory code has $\rho = 0.02$ on $\beta$. An embedding's nearest program is almost always of
+Qwen3-Embedding-8B has $\rho = 0.03$ on $\beta$ on the whole code and 0.02 on the memory code. An embedding's nearest program is almost always of
 the same suite (GAP, NPB or PolyBench), so an embedding finds the program's family, but not how its memory grows with
 the input.
 
