@@ -96,7 +96,8 @@ kernel from \texttt{free}, which lowers the time-averaged RSS of the allocator-h
 run time of $1.01\times$, half of what returning every free byte would give (\secref{sec:trim}).
 \item We show that the model needs no earlier run of a job, that it is within a median of 2.0\% of the truth on the
 blind programs of a companion study~\cite{memprintstatic}, that borrowing the growth of similar programs does not
-beat proportional growth, and that the companion study's interpreter predicts array programs with no run at all
+beat proportional growth, that code embeddings do not capture growth either, and that the companion study's
+interpreter predicts array programs with no run at all
 (\secref{sec:general}).
 \item We compare the costs and effects of the approaches to the gap between RSS and the footprint, from estimating it
 to lowering it and reserving less than the request (\secref{sec:space}).
@@ -725,6 +726,66 @@ which determines its correction factor directly, whereas the shape of a footprin
 footprint grows with the input. The transfer from two smaller inputs of the same program (\secref{sec:transfer}) has
 a median of 3.9\% and is the better use of two cheap runs.
 
+\subsection{Similarity of the code instead of the run}
+
+\begin{table}[!htbp]
+\centering
+\small
+\caption{Code similarity and the model's terms, over the 22 programs with code of their own (all but \texttt{cc1}).
+$\rho$: Spearman correlation over program pairs of the code distance and the difference in the term (Mantel test,
+10{,}000 permutations; in parentheses when $p \ge 0.05$). $R'$: median absolute error (MB) of the term taken from the
+nearest program, each program held out in turn. Borrowed $\beta$: the absolute whole-run error (\% of the truth) of
+the prediction of \tabref{tab:borrow} from the largest smaller input, with $\beta$ from the nearest program, for the
+21 programs with a smaller input: median, 90th percentile and the number within 10\%. Memory code: the lines that
+allocate, free or grow memory, with 10 lines on each side.}
+\label{tab:similar}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{$\rho$} & $R'$ & \multicolumn{3}{c}{Borrowed $\beta$ (\%)} \\
+\cmidrule(lr){2-5}\cmidrule(lr){7-9}
+Space & $B$ & $r$ & $R'$ & $\beta$ & (MB) & median & q90 & $\le 10\%$ \\
+\midrule
+\input{tables/similar.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+A program that has not run can still be compared with known programs by its code, without the companion study's
+interpreter. We test whether programs with similar code have similar terms: the runtime's pages $B$, the allocator's
+free share $r$, the pages of libraries $R'$ (\secref{sec:general}) and the growth exponent $\beta$. The code is the
+program's sources, or the script for the four programs run by an interpreter (\texttt{paper\_rss/similar\_src.py}).
+We compare two kinds of code space. The first is 21 static features, counted on the code and the executable without
+running either: the lines of code, the rates of allocations, frees, reallocations, growing containers, node-based
+containers, vectors, smart pointers, OpenMP pragmas and MPI calls, the share of allocations inside a loop, and the
+executable's text, data and bss sizes, its shared libraries and their total size. The second is the code embeddings
+of four open models for code retrieval, run locally: gte-modernbert-base, bge-code-v1, Qodo-Embed-1-1.5B and
+Qwen3-Embedding-8B. Each model embeds the code in windows of 512 tokens, and a program's embedding is the mean of its
+windows. Because most of a program's code computes rather than allocates, we also embed only its memory code, the lines
+that match the allocation patterns of the static features with 10 lines on each side, a median of 16\% of the
+compiled programs' code (2\% for NPB, which allocates its arrays statically, to 48\% for miniVite) (\texttt{paper\_rss/similar.py}, \texttt{similar\_embed.py}). We chose the features, the
+models and the memory code after the borrowing results, so this comparison is exploratory.
+
+The static features predict the terms better than every embedding (\tabref{tab:similar}). Their distance correlates
+with the difference in $r$ ($\rho = 0.67$), $R'$ (0.54) and $\beta$ (0.56), and taking $R'$ from the nearest program
+in them has a median error of 0.44\,MB, against 1.32\,MB for the median of the other programs. The executable's
+features alone carry most of this, because $r$ and $R'$ separate the programs that a language interpreter runs, and
+the programs that link large libraries, from the rest. The embeddings correlate with $r$ and $R'$ more weakly, and
+not with $\beta$ ($-0.12$ to $0.05$, none significant). Neither the memory code nor the larger model changes this:
+Qwen3-Embedding-8B on the memory code has $\rho = 0.02$ on $\beta$. An embedding's nearest program is almost always of
+the same suite (GAP, NPB or PolyBench), so an embedding finds the program's family, but not how its memory grows with
+the input.
+
+Borrowing $\beta$ from the nearest program in the static features reduces the 90th percentile of the whole-run error
+from 45\% to 20\% to 24\%, but not the median, 4.3\% to 5.7\% against 3.8\% for $\beta = 1$. The change in the 90th
+percentile comes from one program: miniVite, which grows more slowly than its input ($\beta = 0.78$), borrows
+Quicksilver's $\beta$ of 0.65, and its error falls from $+45\%$ to $+17\%$. With all static features, MiniFE borrows
+the same $\beta$ and its error grows from $+3\%$ to $-24\%$. The two largest errors, atax ($-94\%$) and NPB MG
+($-67\%$), are the same for every $\beta$. The program's own $\beta$
+has a 90th percentile of 26\%, above the static features' 20\% to 24\%, which also shows that the difference rests
+on a few programs. Code similarity thus has a measurable relation to the terms, but over 22 programs it does not
+predict $\beta$ more accurately than $\beta = 1$, and the model's own run at the job's input remains more accurate.
+
 \subsection{A prediction with no run of the program}
 
 \begin{table}[!htbp]
@@ -1127,7 +1188,9 @@ resizes the large allocations. glibc returns only whole free pages, which is hal
 that returned the rest would raise that cluster's throughput by 0.9 to 2.3 jobs per hour. The model needs no training on the program: it takes the runtime's pages from the job's own run, it measures the
 companion study's blind programs within a median of 2.0\%, and for a program that cannot be run before it is
 scheduled, the interpreter's footprint plus the runtime's pages of other programs predicts array programs within
-1.1\% of the peak, but programs that free memory need the model's own run.
+1.1\% of the peak, but programs that free memory need the model's own run. Static features of the code and the
+executable relate to the model's terms, and four code embeddings, up to 8B parameters, do not relate to how the
+footprint grows with the input.
 
 \textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library. \texttt{run\_model.sh},
 \texttt{run\_transfer.sh}, \texttt{run\_options.sh}, \texttt{run\_alloc.sh} and \texttt{run\_llm.sh} run the

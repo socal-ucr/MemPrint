@@ -1,7 +1,7 @@
 """Tables of the generalisation section: B from the job's own run (inrun_base.py), paper_generalization's blind
-configurations (blind/score.py) and borrowing the growth of known programs (borrow.py).
+configurations (blind/score.py), borrowing the growth of known programs (borrow.py) and code similarity (similar.py).
 
-    ~/environments/memfp/bin/python paper_rss/general.py   ->  paper_rss/tables/{inrun,blind,blind_splits,borrow}.tex
+    ~/environments/memfp/bin/python paper_rss/general.py   ->  paper_rss/tables/{inrun,blind,blind_splits,borrow,similar}.tex
 """
 import os
 
@@ -82,7 +82,46 @@ def borrow():
     open(f"{T}/borrow.tex", "w").write("\n".join(lines) + "\n")
 
 
+def similar():
+    """tables/similar.tex: per space, the Mantel rho of code distance and each term's difference (in parentheses when
+    p >= 0.05), the median LOPO error of R' from the nearest program (MB), and the median, 90th percentile and count
+    within 10% of the absolute signed whole-run error with beta from the nearest program (as tables/borrow.tex)."""
+    mt = pd.read_csv(f"{HERE}/data/similar_mantel.csv").set_index(["space", "term"])
+    lo = pd.read_csv(f"{HERE}/data/similar_lopo.csv")
+    lo["a"] = lo.whole_signed.abs()
+    rho = lambda sp, t: "" if (sp, t) not in mt.index else (
+        lambda r, p: (f"{r:.2f}" if p < 0.05 else f"({r:.2f})").replace("-", "$-$"))(*mt.loc[(sp, t), ["rho", "p"]])
+    def row(lab, sp, m):
+        cells = [lab] + [rho(sp, t) for t in ("B", "r", "Rp", "beta")]
+        rp = lo[(lo.term == "Rp") & (lo.method == m)].err
+        cells.append(f"{rp.median():.2f}" if len(rp) else "")
+        b = lo[(lo.term == "beta") & (lo.method == m)].a
+        cells += [f"{b.median():.1f}", f"{b.quantile(0.9):.0f}", f"{(b <= 10).sum()}"] if len(b) else ["--"] * 3
+        return " & ".join(cells) + r" \\"
+    base = lo[(lo.term == "beta") & (lo.method == "proportional")].a
+    rp = lo[(lo.term == "Rp") & (lo.method == "median")].err
+    lines = [" & ".join([r"Median of the others; $\beta = 1$"] + ["--"] * 4 + [f"{rp.median():.2f}",
+             f"{base.median():.1f}", f"{base.quantile(0.9):.0f}", f"{(base <= 10).sum()}"]) + r" \\"]
+    lines.append(r"\midrule")
+    spaces = [("static", "Static features, all"), ("static_src", "\\quad source only"),
+              ("static_bin", "\\quad executable only"), ("descriptor", "Run descriptor (\\tabref{tab:borrow})"),
+              ("gte", "gte-modernbert (149M)"), ("bgecode", "bge-code-v1 (1.5B)"), ("qodo", "Qodo-Embed-1 (1.5B)"),
+              ("qwen3", "Qwen3-Embedding (8B)")]
+    for sp, lab in spaces:
+        if (lo.method == f"{sp}:nearest").any():
+            lines.append(row(lab, sp, f"{sp}:nearest"))
+    lines.append(r"\midrule")
+    for sp, lab in spaces[4:]:
+        if (lo.method == f"{sp}_mem:nearest").any():
+            lines.append(row(lab + ", memory code", f"{sp}_mem", f"{sp}_mem:nearest"))
+    b = lo[(lo.term == "beta") & (lo.method == "own_beta")].a
+    lines += [r"\midrule", " & ".join([r"The program's own $\beta$"] + [""] * 5 +
+                                        [f"{b.median():.1f}", f"{b.quantile(0.9):.0f}", f"{(b <= 10).sum()}"]) + r" \\"]
+    open(f"{T}/similar.tex", "w").write("\n".join(lines) + "\n")
+
+
 if __name__ == "__main__":
     inrun()
     blind()
     borrow()
+    similar()
