@@ -130,3 +130,26 @@ containers (per-site requested and touched bytes, commit).
 A compiler pass that instruments loads and stores into a per-page shadow (one bit per 4 KiB page per block of less
 than 64 KiB, as sanitizers keep shadow memory), giving per-site touched pages at compile-time cost. Compared with
 Pin's `-sites` profiles on the same programs: profile agreement per site and run time.
+
+## Amendments after the runs (2026-11-06)
+
+Scope (user): Ch. 2 and Ch. 3 as above; Ch. 5 and 6 skipped. All Ch. 2 numbers use bytes touched as the truth, and
+M7's measurements replace the published overheads (same machine).
+
+### M2 found (scan: `m2_runs.csv`, one row per sampler run, empirical interval = i x run references / bin `CountObs`)
+- Every table behind the published predictions (`tools/traces/<workload>`, read by `tools/preprocess_fixed_split.py`)
+  is splitter output, labelled exactly. No published prediction used sampler bins.
+- The published sampler's runs are only in `workloads/miniVite/traces` (`Sampled_*`): the 50-bin runs (s=50, r=5)
+  are labelled i x 10 and sample 1 in i x 5 (label 2x the bin interval); the 100-bin runs (s=100, r=10) are exact.
+  Older tools' runs (`Buffered_*` with bins) are exact in gemm_prev, mvt-1000 and correlation-recentOld and labelled
+  5x to 10x too small in correlation-old and miniVite_fileInput; none of them feeds a published number.
+- The published overheads are the s=50, r=5 runs of `overhead_sampler_miniVite_SI.csv`, plotted by
+  `tools/plot_PIN_overhead.py` at `SI x 10` (the label). The chapter's "42.1 s at 1 in 500" is i=50 at 8192 vertices
+  (42.12 s), whose bins sample about 1 in 250 and whose instrumentation fires on 1 in 50 references. 52.2 and 46.1
+  are not in these logs.
+
+### M7b (added): overheads at matched bin intervals
+M7 ran i = 500, 1000, 2500 as the plan states, which is not what the published numbers measured. `run.sh m7b`
+times each sampler at bin interval k = 500, 1000, 2500: the published sampler with s=100, r=10, i=k/10 (exact
+label) and with the published s=50, r=5, i=k/5; the current bootstrap (s=100, r=10, i=k/10) and disjoint (s=20,
+i=k/20); native; 5 interleaved rounds. Reported: median per configuration (`m7_k.csv`).

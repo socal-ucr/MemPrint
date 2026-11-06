@@ -89,5 +89,19 @@ part_m7() {   # interleaved, 5 rounds
         t splitter "$PIN_ROOT/pin" -t "$TOOL" -mode splitter -outdir "$OUT/m7/x" -- "$bin" "${ARGS[@]}"
     done; }
 
+part_m7b() {   # M7 at matched bin intervals k (M2: the published label i*s/r is not the bin interval), 5 rounds
+    mkdir -p "$OUT/m7/x"; build_of minivite miniVite 8192 || return 1; bin=$BIN; f=$OUT/m7/timing_k.csv
+    [[ -f $f ]] || echo "round,config,seconds" > "$f"
+    for round in 1 2 3 4 5; do
+        t() { local c=$1; shift; echo "$round,$c,$(time_cmd "$@")" >> "$f"; }
+        t native "$bin" "${ARGS[@]}"
+        for k in 500 1000 2500; do   # bin interval about i*r for the published sampler and boot, i*s for disj
+            t published-$k "$PIN_ROOT/pin" -t "$OLD" -i $((k / 10)) -s 100 -r 10 -o "$OUT/m7/x/old" -- "$bin" "${ARGS[@]}"
+            t published50-$k "$PIN_ROOT/pin" -t "$OLD" -i $((k / 5)) -s 50 -r 5 -o "$OUT/m7/x/old" -- "$bin" "${ARGS[@]}"
+            t boot-$k "$PIN_ROOT/pin" -t "$TOOL" -mode sampler -i $((k / 10)) -s 100 -r 10 -outdir "$OUT/m7/x" -- "$bin" "${ARGS[@]}"
+            t disj-$k "$PIN_ROOT/pin" -t "$TOOL" -mode sampler -i $((k / 20)) -s 20 -disjoint 1 -outdir "$OUT/m7/x" -- "$bin" "${ARGS[@]}"
+        done
+    done; }
+
 for part in ${@:-m4 m5 m3 r1 m6}; do echo "== $part $(date)"; part_$part; done
 echo all-done

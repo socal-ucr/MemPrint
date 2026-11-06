@@ -8,7 +8,8 @@ Parts:
     m4     miniVite truths under three definitions and its six test MAPEs -> $OUT/m4.csv
     m3     sampler bins against splitter bins, the decision rule -> $OUT/m3_runs.csv, m3_mape.csv
     m6     Massif and DHAT peaks against the bytes truth and MemPrint -> $OUT/m6.csv
-    m7     median wall time per configuration -> $OUT/m7.csv
+    m7     median wall time per configuration -> $OUT/m7.csv (and m7_k.csv for the matched-interval rerun)
+    r1     the resident-memory model on MemPrint's inputs, scored as paper_rss's blind test -> $OUT/r1.csv, r1_splits.csv
 """
 import glob
 import json
@@ -176,11 +177,51 @@ def m6():
 
 
 def m7():
-    t = pd.read_csv(f"{OUT}/m7/timing.csv")
-    m = t.groupby("config").seconds.agg(["median", "min", "max", "count"])
-    m["slowdown"] = m["median"] / m.loc["native", "median"]
-    m.to_csv(f"{OUT}/m7.csv")
-    print(m.sort_values("median").round(3).to_string())
+    for src, dst in (("timing.csv", "m7.csv"), ("timing_k.csv", "m7_k.csv")):
+        if not os.path.exists(f"{OUT}/m7/{src}"):
+            continue
+        t = pd.read_csv(f"{OUT}/m7/{src}")
+        m = t.groupby("config").seconds.agg(["median", "min", "max", "count"])
+        m["slowdown"] = m["median"] / m.loc["native", "median"]
+        m.to_csv(f"{OUT}/{dst}")
+        print(src)
+        print(m.sort_values("median").round(3).to_string())
+
+
+def r1():
+    """(a) the largest anon - free of the run, median of 3; (b) (a) + R, R the median of truth - (a) over the other
+    workloads' configs (paper_rss/blind/score.py)."""
+    import numpy as np
+    rows = []
+    for w in WORKLOADS:
+        a = pd.read_csv(f"{FINAL}/{w}_allData.csv")
+        p = prepare(a)
+        for c in p.configs:
+            peaks = []
+            for rep in (1, 2, 3):
+                r = pd.read_csv(f"{OUT}/r1/{w}/{c}/{rep}/pss1.csv")
+                peaks.append((r.anon_bytes - r.free_bytes).clip(lower=0).max())
+            rows.append(dict(workload=w, config=str(c), truth=p.truth[c], measured=float(np.median(peaks)),
+                             split="EXTRA" if c == p.last_config else "INTER" if c == p.middle_config else ""))
+    m = pd.DataFrame(rows)
+    m["R"] = [float((m[m.workload != w].truth - m[m.workload != w].measured).median()) for w in m.workload]
+    m["err_a"] = 100 * (m.measured - m.truth) / m.truth
+    m["err_b"] = 100 * (m.measured + m.R - m.truth) / m.truth
+    m.to_csv(f"{OUT}/r1.csv", index=False)
+    s = m[m.split != ""].copy()
+    fits = pd.read_csv(f"{FINAL}/fits.csv")
+    l2o = fits[fits.subset == "L2O"].set_index(["workload", "split"]).test_mape_train_si
+    sam = pd.read_csv(f"{OUT}/m3_mape.csv")
+    sam = sam[(sam.sampler == "boot") & (sam.basis == "train_si") & (sam.subset == "L2O")]
+    sam = sam.groupby(["workload", "split"]).sampler_mape.mean()
+    s["memprint_splitter"] = [l2o.get((r.workload, r.split)) for r in s.itertuples()]
+    s["memprint_sampler"] = [sam.get((r.workload, r.split)) for r in s.itertuples()]
+    s.to_csv(f"{OUT}/r1_splits.csv", index=False)
+    pd.set_option("display.width", 200)
+    print(s.round(2).to_string(index=False))
+    s["abs_a"], s["abs_b"] = s.err_a.abs(), s.err_b.abs()
+    print(s.groupby("split")[["abs_a", "abs_b", "memprint_splitter", "memprint_sampler"]].agg(["mean", "median"]).round(2))
+    print("all configs, median |err| a, b:", round(m.err_a.abs().median(), 2), round(m.err_b.abs().median(), 2))
 
 
 if __name__ == "__main__":
