@@ -25,13 +25,14 @@ def truths():
     return t
 
 
-def measured():
+def measured(runs=RUNS, name="{rep}.csv"):
+    """The median over 3 runs of the data estimate's peak; a run is <runs>/<prog>/<config>/<name>."""
     rows = []
     for prog in SIZE:
-        for cfg in sorted(os.listdir(f"{RUNS}/{prog}")):
+        for cfg in sorted(os.listdir(f"{runs}/{prog}")):
             peaks = []
             for rep in (1, 2, 3):
-                r = pd.read_csv(f"{RUNS}/{prog}/{cfg}/{rep}.csv")
+                r = pd.read_csv(f"{runs}/{prog}/{cfg}/" + name.format(rep=rep))
                 peaks.append((r.anon_bytes - r.free_bytes).clip(lower=0).max())
             rows.append(dict(program=prog, config=cfg, measured=float(np.median(peaks)), size=SIZE[prog](cfg)))
     return pd.DataFrame(rows)
@@ -51,8 +52,9 @@ def transfer(m, prog, target, floor_smaller=False):
     return max(peak, y[x < xt].max() if floor_smaller and (x < xt).any() else y.max())
 
 
-def main():
-    m = measured().merge(truths(), on=["program", "config"], how="left")
+def score(m):
+    """The whole-run errors and the EXTRA and INTER splits of measured() runs."""
+    m = m.merge(truths(), on=["program", "config"], how="left")
     # R: the median of truth - measured over the other programs' configurations
     m["R"] = [float((m[(m.program != p) & m.truth.notna()].truth - m[(m.program != p) & m.truth.notna()].measured).median())
               for p in m.program]
@@ -71,8 +73,12 @@ def main():
                                err=100 * (pred - row.truth) / row.truth,
                                err_posthoc=100 * (post - row.truth) / row.truth, measured_err=row.err_b,
                                static_error=row.static_error))
+    return m, pd.DataFrame(splits)
+
+
+def main():
+    m, s = score(measured())
     m.to_csv(f"{HERE}/scores.csv", index=False)
-    s = pd.DataFrame(splits)
     s.to_csv(f"{HERE}/splits.csv", index=False)
     pd.set_option("display.width", 200)
     print(m.round(2).to_string(index=False))

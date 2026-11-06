@@ -82,13 +82,13 @@ resident and the pages of shared libraries, and we measure their size per progra
 bytes, sampled every 5\,ms from a thread inside the process through an \texttt{LD\_PRELOAD} library
 (\secref{sec:model}).
 \item We show on 23 programs that the model matches \memprint{}'s accuracy on the job's own input and on larger
-inputs predicted from smaller ones, at a median of $0.99\times$ the cost of a plain RSS run
-(\secref{sec:repeat} and \secref{sec:transfer}).
+inputs predicted from smaller ones, at a median of $0.99\times$ the cost of a plain RSS run, and that sampling every 1\,ms at the same cost corrects
+the transfer from runs of a few milliseconds (\secref{sec:repeat} and \secref{sec:transfer}).
 \item We show in a cluster scheduling simulator that the model's curve gives the lowest response time of all
 estimates of the job's own input (\secref{sec:sched}).
 \item We evaluate the model under jemalloc and TCMalloc and on two language model engines, and we show that
-transparent huge pages are the remaining source of disagreement with a 4\,KiB pages-touched truth
-(\secref{sec:alloc} and \secref{sec:llm}).
+transparent huge pages are the remaining source of disagreement with a 4\,KiB pages-touched truth, which no
+interface without privileges can resolve inside a huge page (\secref{sec:alloc} and \secref{sec:llm}).
 \item We test four other ways to correct RSS, each alone, and show why each is less accurate
 (\secref{sec:options}).
 \item We use the model at run time in libmpr, our allocation-resizing runtime, to return glibc's free memory to the
@@ -402,8 +402,46 @@ inputs are different source files whose size predicts the compiler's memory poor
 sampling misses its peak, while \memprint{} counts every reference and is 15\% too high. On 2mm, gemm and jacobi-2d,
 RSS is 25\% to 35\% too low for the same reason, because the smallest input's run fits in one sample of the external
 sampler, which sees only the runtime. The model's thread starts before \texttt{main} and samples these runs, and its
-error on them is $-10\%$ to $-4\%$. The transfer of a model trained on short runs therefore depends on sampling the
-start of a run, and sampling faster during the first milliseconds of a run would address it.
+error on them is $-10\%$ to $-4\%$. The transfer of a model trained on short runs therefore depends on how often it
+samples the start of a run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The model under four samplers: \texttt{smaps\_rollup} every 5\,ms (the model's) and every 1\,ms, the RSS
+counters of \texttt{/proc/self/status} every 100\,$\mu$s, and a sample after every 256 page faults. Transfer as in
+\tabref{tab:transfer}, rebuilt from each sampler's runs of the smaller inputs; blind configurations as in
+\tabref{tab:blind} and \tabref{tab:blind-splits}, variant (b). Run time at the largest inputs, 3 runs interleaved with
+runs of the program alone.}
+\label{tab:sampling}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lrrrr}
+\toprule
+ & \texttt{smaps} 5\,ms & \texttt{smaps} 1\,ms & \texttt{status} 100\,$\mu$s & faults \\
+\midrule
+\tabinput{tables/sampling.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Sampling short runs faster.} We tested three faster samplers, with a protocol committed before the runs
+(\texttt{paper\_rss/sampling/PROTOCOL.md}), and rebuilt the transfer from each (\tabref{tab:sampling}). The first reads
+\texttt{smaps\_rollup} every 1\,ms instead of every 5\,ms. The second reads the process's RSS counters from
+\texttt{/proc/self/status} every 100\,$\mu$s, and glibc's free bytes every 1\,ms. The third samples on memory growth.
+A software page-fault event on each CPU (\texttt{perf\_event\_open}, inherited by the program's threads) wakes the
+sampling thread after every 256 page faults, and the thread also samples every 5\,ms. Each sampler ran 3 times on every
+smaller input. Sampling \texttt{smaps\_rollup} every 1\,ms reduces NPB-MG's error from $-50\%$ (in these runs, against
+$-67\%$ in \tabref{tab:transfer}) to $+1\%$ and gemm's from $-9\%$ to $-3\%$, and it gives the lowest median error over
+the 23 programs, 2.1\% against 2.8\%. The two samplers that read \texttt{/proc/self/status} also correct NPB-MG, but
+they are worse than the 5\,ms sampler on gemm ($-20\%$ and $-23\%$) and 2mm, because the kernel's RSS counters lag the
+page tables on short runs. On Linux 4.18, each thread's changes to these counters are cached and added to the process's
+counters in batches, and the peak RSS that the kernel reports (\texttt{VmHWM}) is taken from the same counters. In a
+test that touches 128\,KiB without huge pages, \texttt{RssAnon} did not change, while \texttt{smaps} counted the
+128\,KiB. On atax at its smallest input, a run of a few milliseconds, \texttt{smaps\_rollup} reads 1.98\,MB at the
+peak, and \texttt{VmHWM} is 1.04\,MB. The page tables, which \texttt{smaps\_rollup} walks, are therefore the reference
+for runs this short, and \texttt{VmHWM} is not. All four samplers cost $1.03\times$ to $1.04\times$ the run time of the
+program alone at the median, and the sampling thread's cost on darknet, $1.25\times$ to $1.27\times$, is the same for
+every sampler (\secref{sec:repeat}).
 
 \section{Scheduling with the model's curves}
 \label{sec:sched}
@@ -524,6 +562,24 @@ with huge pages, which the model measures and Pin does not, and a scheduler that
 huge pages for the profiling run. We also checked two other kernel counters that we expected to matter.
 \texttt{LazyFree}, the pages released with \texttt{MADV\_FREE} that stay resident until the kernel reclaims them, was 0
 in the jemalloc runs, and the \texttt{Referenced} bytes of llama2.c's model file equal its RSS.
+
+\textbf{How much huge pages add.} From the runs of \tabref{tab:alloc}, \tabref{tab:thp} and \secref{sec:llm}, we
+divided each program's peak anonymous RSS with transparent huge pages enabled by its peak with them disabled. Under
+glibc, the ratio is within 1.02 on 21 of the 23 programs, and huge pages add at most 2.6\,MiB, with $1.16\times$ on
+miniVite and $1.04\times$ on Quicksilver. Under TCMalloc, the median ratio is 1.02. Under jemalloc, it is 1.17 (14.8\,MiB),
+with $2.09\times$ on miniVite (29.5\,MiB). llama2.c's 42M and 110M models have ratios of $4.9\times$ and $5.2\times$,
+24 and 47\,MiB of anonymous memory, but their RSS grows only $1.15\times$ and $1.14\times$, because the mapped model
+file dominates it.
+
+\textbf{Which 4\,KiB pages were touched.} A scheduler that wants the 4\,KiB footprint on a node with huge pages needs
+to know which 4\,KiB pages of each huge page the program touched. We mapped 64\,MiB, touched one 4\,KiB page in each
+2\,MiB, and read the interfaces that need no privileges (\texttt{paper\_rss/sampling/thp\_test.c}). With huge pages
+enabled, \texttt{smaps} reports 64\,MiB of \texttt{Rss} and of \texttt{AnonHugePages}, and \texttt{mincore} reports
+all 16{,}384 pages of the range as resident. With \texttt{MADV\_NOHUGEPAGE} on the range, or with huge pages disabled
+for the process, all three report 128\,KiB. \texttt{/proc/pid/pagemap} gives page frame numbers only to a process with
+\texttt{CAP\_SYS\_ADMIN}, and the idle page tracking of \texttt{/sys/kernel/mm/page\_idle} needs root. Without
+privileges, the 4\,KiB footprint under huge pages is therefore measurable only by preventing huge pages in the
+profiling run, with \texttt{MADV\_NOHUGEPAGE} or \texttt{PR\_SET\_THP\_DISABLE}.
 
 \section{Language model engines}
 \label{sec:llm}
@@ -675,7 +731,10 @@ $+347\%$ and $+254\%$. The rule was written for extrapolation, and with the floo
 configurations only, which we decided after seeing these results, the middle configurations are within $+0.8\%$ and
 $-3.3\%$. NPB has only classes S and W with a truth, so W is predicted from S alone in proportion to the size, which
 gives $+3\%$ on CG, $+17\%$ on IS and $+26\%$ on MG. A measured footprint is therefore more accurate than a transferred
-one whenever the job can be run under the model, and the transfer needs more than one smaller input.
+one whenever the job can be run under the model, and the transfer needs more than one smaller input. Under the
+samplers that read \texttt{/proc/self/status}, the extrapolations of NPB IS and MG are $-7\%$ to $+27\%$
+(\tabref{tab:sampling}), but the configurations below 1\,MB have larger errors, up to $+36\%$ on LULESH at $s = 5$
+and $-22\%$ on HPCCG at $10^3$, against $-9\%$ and $-1\%$ for \texttt{smaps\_rollup} every 1\,ms.
 
 \subsection{Borrowing the growth of other programs}
 
@@ -1058,6 +1117,9 @@ RSS of a native run & $1.00\times$ & none & $+16\%$ whole-run error & counts fre
 on allocator-heavy programs \\
 Data estimate (\secref{sec:model}) & $0.99\times$, $1.21\times$ darknet & none & $-4\%$; $-4\%$ transferred;
 433 against 515\,min for the RSS curve (\secref{sec:sched}) & glibc, jemalloc or TCMalloc only; THP; runs of a few ms \\
+Data estimate, \texttt{smaps} every 1\,ms (\secref{sec:transfer}) & $1.03\times$ the program alone, $1.25\times$ darknet & none &
+transferred: median $|$error$|$ 2.1\% against 2.8\% (all 23), NPB-MG $-50\%$ to $+1\%$ & atax $-33\%$; faster
+\texttt{status} counters lag \\
 Data estimate, $B$ from the same run (\secref{sec:general}) & $0.99\times$ & none & $+0.6\%$ (all 23); 2.0\% on the
 blind programs & miniVite $+30\%$ (its libraries) \\
 Prediction from source, no run (\secref{sec:general}) & interpreter, $1\times$ to $1{,}340\times$ & none & peak within
@@ -1121,8 +1183,14 @@ predicted curve would approach.
 A limitation of the free-byte correction is that it reads only the statistics of glibc, jemalloc and TCMalloc, which
 leaves the memory of other allocators in the estimate. The arenas of CPython's object allocator and GCC's
 garbage-collected heap stay in the estimate as RSS. On our corpus, the data estimate is nevertheless within 5\% of the
-truth on CPython and \texttt{cc1}, and it is unclear whether this result holds for inputs on which these allocators
-retain more memory.
+truth on CPython and \texttt{cc1}. Routing CPython's objects through glibc (\texttt{PYTHONMALLOC=malloc}) does not make
+the estimate more accurate, and it changes the program. Under this setting, the data estimate's whole-run error is
+$-2.5\%$ against a truth traced under the same setting, against $-2.9\%$ without it, while the truth's peak rises by
+15\%, the run's peak RSS by 7\%, and its run time by $1.56\times$. On \texttt{cc1}, we counted GCC's own mappings by
+interposing \texttt{mmap} and \texttt{munmap} in the sampling library. They hold 99\,MB of the 114\,MB of anonymous
+memory at the peak, where glibc's free bytes are 2.8\,MB. GCC's statistics at the end of the compilation
+(\texttt{-fmem-report}) show 12\,MB of the 94\,MB of its garbage-collected heap unused (13\%), which the data estimate
+counts as data. It is unclear whether the 5\% result holds for inputs on which these allocators retain more memory.
 
 A limitation of the data-file rule is that it classifies mappings by path, which counts any mapped file that is not a
 shared object as data. A program that maps a large file it uses as code, or a library without \texttt{.so} in its
@@ -1138,7 +1206,9 @@ by $1.21\times$ (\secref{sec:repeat}). Sampling from an external process avoids 
 statistics can be read only inside the process. libmpr's trimming avoids the thread by checking from \texttt{free}
 (\secref{sec:trim}), but a monitor cannot, because it must sample while the program allocates without freeing. A second limitation of the thread is its 5\,ms interval, which misses
 the curve of runs shorter than a few tens of milliseconds and limits the model's transfer from the smallest inputs
-(\secref{sec:transfer} and \secref{sec:sched}).
+(\secref{sec:transfer} and \secref{sec:sched}). Sampling \texttt{smaps\_rollup} every 1\,ms at the same cost corrects
+NPB-MG's transfer, but atax's transfer stays $-33\%$, and the kernel's cheaper RSS counters lag the page tables on runs
+of a few milliseconds (\tabref{tab:sampling}).
 
 The evaluation covers a single machine, short runs of 0.1 to 12\,s and single-process programs. The truth's clock
 mapping passes through the native run's reference counts, which also place \memprint{}'s curve, so \memprint{}'s timing
