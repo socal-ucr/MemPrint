@@ -22,6 +22,8 @@
 #   --bins N                splitter bins per interval
 #   --snapshot N            also write a footprint timeline every N memory references
 #   --track-frees           remove freed (free/realloc/munmap) memory from the footprints
+#   --exclude-alloc         leave the allocator's own references out (implied by --track-frees)
+#   --disjoint              sampler: one bin per sampled reference (disjoint 1-in-(i*s) bins)
 #   --footprint DEF         bytes (bytes touched) or starts (largest access per start address);
 #                           default: bytes with --track-frees or --window, else starts
 #   --stop N                stop tracing after N memory references (partial trace)
@@ -57,6 +59,8 @@ while [[ $# -gt 0 ]]; do
         --bins) SPLIT_KNOBS+=(-bins "$2"); shift ;;
         --snapshot) EXTRA_KNOBS+=(-snapshot "$2"); shift ;;
         --track-frees) EXTRA_KNOBS+=(-track_frees 1) ;;
+        --exclude-alloc) EXTRA_KNOBS+=(-exclude_alloc 1) ;;
+        --disjoint) EXTRA_KNOBS+=(-disjoint 1) ;;
         --footprint) EXTRA_KNOBS+=(-footprint "$2"); shift ;;
         --stop) EXTRA_KNOBS+=(-stop "$2"); shift ;;
         --window) EXTRA_KNOBS+=(-window "$2"); shift ;;

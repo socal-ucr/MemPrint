@@ -167,6 +167,9 @@ KNOB< UINT32 > KnobSamplingInterval(KNOB_MODE_WRITEONCE, "pintool", "i", "100",
 KNOB< UINT32 > KnobNumSplits(KNOB_MODE_WRITEONCE, "pintool", "s", "100",
                              "sampler: number of bootstrap bins; spatial: number of hash buckets");
 KNOB< UINT32 > KnobSampleReplication(KNOB_MODE_WRITEONCE, "pintool", "r", "10", "sampler: replication factor (lambda = s/r)");
+KNOB< BOOL > KnobDisjoint(KNOB_MODE_WRITEONCE, "pintool", "disjoint", "0",
+                          "sampler: put each sampled reference in exactly one of the -s bins (no bootstrap), so the bins "
+                          "are disjoint 1-in-(i*s) subsamples, distributed as the splitter's bins at interval i*s (-r unused)");
 KNOB< string > KnobIntervals(KNOB_MODE_WRITEONCE, "pintool", "intervals",
                              "100,250,500,750,1000,2500,5000,7500,10000,25000,50000,75000,100000",
                              "splitter: comma-separated sampling intervals");
@@ -177,6 +180,9 @@ KNOB< string > KnobName(KNOB_MODE_WRITEONCE, "pintool", "name", "",
 KNOB< string > KnobSeed(KNOB_MODE_WRITEONCE, "pintool", "seed", "", "RNG seed base (default: process id)");
 KNOB< BOOL > KnobTrackFrees(KNOB_MODE_WRITEONCE, "pintool", "track_frees", "0",
                             "remove freed (free/realloc/munmap) address ranges from the footprints");
+KNOB< BOOL > KnobExcludeAlloc(KNOB_MODE_WRITEONCE, "pintool", "exclude_alloc", "0",
+                              "leave the allocator's own references (chunk headers, free lists) out of the footprints "
+                              "without tracking frees (always on with -track_frees or -window)");
 KNOB< UINT64 > KnobSnapshot(KNOB_MODE_WRITEONCE, "pintool", "snapshot", "0",
                             "write a timeline snapshot every N memory references (0: off)");
 KNOB< UINT32 > KnobBufferPages(KNOB_MODE_WRITEONCE, "pintool", "buffer_pages", "0",
@@ -701,6 +707,7 @@ vector< UINT32 > intervals;          // splitter
 vector< UINT64 > intervalThresholds; // splitter: accept a reference into interval k iff lcg < threshold[k]
 UINT32 numBins;                      // bins per interval (splitter) or bootstrap bins (sampler)
 double lambda;                       // sampler
+BOOL disjointBins = FALSE;           // sampler -disjoint: one bin per sampled reference
 UINT64 salt;                         // spatial: per-run hash salt
 UINT64 spatialThreshold;             // spatial: an address is selected iff Mix(address ^ salt) < threshold
 UINT64 sampledBinInterval;           // sampler: effective sampling interval of one bootstrap bin
@@ -2153,6 +2160,9 @@ static VOID FindMallocCode(IMG img)
     mallocCodeLo = lo, mallocCodeHi = hi, haveInternals = internals;
 }
 
+// -exclude_alloc alone: find the allocator's code, so that its references count as time only
+VOID FindAllocatorOnly(IMG img, VOID* v) { FindMallocCode(img); }
+
 VOID ImageLoad(IMG img, VOID* v)
 {
     FindMallocCode(img);
@@ -2374,6 +2384,14 @@ static VOID SplitReference(THREADID tid, ADDRINT address, UINT32 size)
 
 static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
 {
+    if (disjointBins)
+    {
+        UINT32 bin = lcg_step(threads[tid].seed) % numBins;
+        footprint.Record(address, size);
+        bins[bin].Record(address, size);
+        ++binObservations[bin];
+        return;
+    }
     UINT32 times = sample_poisson(lambda, tid);
     if (times == 0) return;
     if (times > numBins) times = numBins; // cannot place in more distinct bins than exist
@@ -3030,6 +3048,8 @@ int main(int argc, char* argv[])
             return Usage("-i, -s and -r must be positive");
         lambda             = static_cast< double >(numBins) / KnobSampleReplication.Value();
         sampledBinInterval = BootstrapBinInterval(KnobSamplingInterval.Value(), numBins, lambda);
+        disjointBins       = KnobDisjoint.Value();
+        if (disjointBins) sampledBinInterval = (UINT64)KnobSamplingInterval.Value() * numBins;
         bins.resize(numBins);
     }
     else if (KnobMode.Value() == "spatial")
@@ -3130,6 +3150,8 @@ int main(int argc, char* argv[])
         PIN_AddSyscallEntryFunction(SyscallEntry, 0);
         PIN_AddSyscallExitFunction(SyscallExit, 0);
     }
+    else if (KnobExcludeAlloc.Value())
+        IMG_AddInstrumentFunction(FindAllocatorOnly, 0);
 
     // Each thread's accesses wait in its own buffer until it fills, so across
     // threads they are processed late by up to a buffer: a free in one thread
