@@ -63,3 +63,4 @@ paper_gpu/data/runs/
 paper_gpu/data/overhead_runs/
 paper_gpu/data/*.log
 gpu/hybrid/libkdeps_cudart.so
+paper_rss/dissertation_plan.md
