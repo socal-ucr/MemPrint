@@ -188,6 +188,27 @@ def m7():
         print(m.sort_values("median").round(3).to_string())
 
 
+def input_size(w, config):
+    """Elements of the arrays a PolyBench kernel declares at a dataset (its header's sizes); vertices for miniVite."""
+    if w == "miniVite":
+        return int(config)
+    src = os.path.join(REPO, "workloads/src/polybench")
+    c = subprocess.run(["find", src, "-name", f"{w}.c"], capture_output=True, text=True).stdout.split()[0]
+    h = open(c[:-2] + ".h").read()
+    block = re.search(rf"#\s*ifdef {config}_DATASET\n(.*?)#\s*endif", h, re.S).group(1)
+    dims = {k: v for k, v in re.findall(r"#\s*define (\w+) (.+)", block)}
+    for _ in range(3):
+        dims = {k: str(eval(v, {}, {a: int(b) for a, b in dims.items() if b.isdigit()})) for k, v in dims.items()}
+    total = 0
+    for args in re.findall(r"POLYBENCH_\dD_ARRAY_DECL\((.*?)\);", open(c).read()):
+        n = 1
+        sizes = args.split(",")[2:]
+        for d in sizes[:len(sizes) // 2]:
+            n *= int(eval(d, {}, {k: int(v) for k, v in dims.items()}))
+        total += n
+    return total
+
+
 def r1():
     """(a) the largest anon - free of the run, median of 3; (b) (a) + R, R the median of truth - (a) over the other
     workloads' configs (paper_rss/blind/score.py)."""
@@ -216,11 +237,20 @@ def r1():
     sam = sam.groupby(["workload", "split"]).sampler_mape.mean()
     s["memprint_splitter"] = [l2o.get((r.workload, r.split)) for r in s.itertuples()]
     s["memprint_sampler"] = [sam.get((r.workload, r.split)) for r in s.itertuples()]
+    # secondary: the transfer rule of paper_rss (blind/score.py) from the other configs, size = array elements
+    sys.path.insert(0, os.path.join(REPO, "paper_rss", "blind"))
+    from score import transfer
+    m["program"], m["size"] = m.workload, [input_size(r.workload, r.config) for r in m.itertuples()]
+    for split in ("EXTRA", "INTER"):
+        for r in s[s.split == split].itertuples():
+            pred = transfer(m, r.workload, r.config, floor_smaller=(split == "INTER")) + r.R
+            s.loc[r.Index, "transfer_err"] = 100 * (pred - r.truth) / r.truth
     s.to_csv(f"{OUT}/r1_splits.csv", index=False)
     pd.set_option("display.width", 200)
     print(s.round(2).to_string(index=False))
     s["abs_a"], s["abs_b"] = s.err_a.abs(), s.err_b.abs()
-    print(s.groupby("split")[["abs_a", "abs_b", "memprint_splitter", "memprint_sampler"]].agg(["mean", "median"]).round(2))
+    s["abs_transfer"] = s.transfer_err.abs()
+    print(s.groupby("split")[["abs_a", "abs_b", "abs_transfer", "memprint_splitter", "memprint_sampler"]].agg(["mean", "median"]).round(2))
     print("all configs, median |err| a, b:", round(m.err_a.abs().median(), 2), round(m.err_b.abs().median(), 2))
 
 
