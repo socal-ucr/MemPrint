@@ -36,13 +36,13 @@ shown next to it as the original result. Chapter 3's model measures resident pag
 scores it primarily against a \emph{pages-touched} truth and reports the bytes-touched error next to it.
 
 The experiments answer five questions. First, whether the analysis pipeline reproduces the published accuracy,
-and how much that accuracy changes under the bytes-touched truth (M1, M5 and M8). Second, whether the published
+and how much that accuracy changes under the bytes-touched truth and under a pages-touched truth (M1, M5, M8, M10
+and M11). Second, whether the published
 sampler labels its bins with the interval they actually sample (M2). Third, whether the sampler's bins behave
 like the splitter's bins, on which every published test error was computed (M3). Fourth, how the heap profilers
 compare with the corrected truth and how much the sampler costs, against the program alone and against the run
 that measures the truth (M6, M7 and M9). Fifth, how the resident-memory model of Chapter 3 performs on
-\memprint{}'s own inputs, with its published sampler and with a sampler triggered by events, against both truths
-(R1, R8 and R9). The protocol, including the decision rule of M3, was committed before any run (commit
+\memprint{}'s own inputs, with its published sampler and with a sampler triggered by events, against both truths, and with a base measured in each run in place of a constant (R1 and R8 to R11). The protocol, including the decision rule of M3, was committed before any run (commit
 \texttt{f32d036}), and Section~\ref{sec:amend} lists the changes and additions made after the runs. The GPU experiments of Chapters 5 and 6 are out of scope here.
 
 Table~\ref{tab:changes} summarizes the numbers in the chapter that change. Section~\ref{sec:setup} describes the
@@ -70,6 +70,8 @@ Bins per interval & 50 (text) & 20 (Section~\ref{sec:m8}) \\
 Intervals used per workload & ``12 or 13'' & 9 to 13 (Table~\ref{tab:m8}) \\
 Sampler wall time, miniVite 8,192 vertices & 42.1 s at 1 in 500; 52.2 s at 1 in 1,000; 46.1 s at 1 in 2,500
   & 30.9 s, 27.9 s and 25.6 s at those actual bin intervals (Table~\ref{tab:m7}) \\
+L2O test MAPE under the pages-touched truth & not measured & 12.06 and 3.37 on the splitter's bins, 15.31 and
+  2.97 on the sampler's (Table~\ref{tab:m11}) \\
 Sampler cost against full instrumentation & ``a fraction'' & 1.9$\times$ and 2.5$\times$ faster than the truth
   run on miniVite, 3.3$\times$ to 8.4$\times$ on PolyBench at MEDIUM (Table~\ref{tab:m9}) \\
 Cumulative training cost & 216, 484 (438.77 in the text), 720 and 1,093 s & 46, 87 and 188 s
@@ -154,7 +156,7 @@ reproduces the published maxima exactly (atax 46.83\% under L2O, trisolv 109.23\
 MT for interpolation). The start-address retrace gives tables identical to the published ones, so the retrace
 changes nothing except the truth definition. The residual of 0.06 and 0.09 points remains unexplained. Rounding the
 coefficients to four decimals, as the published scripts did, does not explain it, because rounding moves the
-extrapolation error to 10.12\% (away from 9.78\%) and the interpolation error to 3.75\%.
+extrapolation error to 10.12\% (away from 9.78\%) and the interpolation error to 3.75\%. M10 (Section~\ref{sec:m10}) shows that the refitted models equal the published ones.
 
 \paragraph{Corrected accuracy.}
 Under the bytes-touched truth, the L2O test MAPE is 11.88\% for extrapolation and 3.42\% for interpolation. The
@@ -548,13 +550,65 @@ Workload & Used & Dropped & Used & Dropped \\
 \end{tabular}
 \end{table}
 
+\subsection{M10. The published models against the refitted ones}
+\label{sec:m10}
+
+The residual of M1 (9.72\% against 9.78\% and 3.79\% against 3.70\%) does not come from the fitted models. The
+published per-workload models, stored to 4 decimals with the published scripts, and the models that the pipeline refits on the published tables select the same interval and the
+same subset for all 56 workload and split pairs, and all eight coefficients of every pair agree to 4 decimals. The
+residual therefore comes from how the published test errors were computed or averaged. The published per-workload
+test errors are not stored, so we could not locate it further.
+
+\subsection{M11. The published protocol under the pages-touched truth}
+\label{sec:m11}
+
+M11 repeats M1 and M3 with the pages-touched truth of Section~\ref{sec:r9}, so that \memprint{} and the
+resident-memory model of Chapter 3 are scored against the same quantity. We retraced the splitter with
+\texttt{-footprint pages} on the seven inputs of the 27 PolyBench kernels and the five of miniVite (with the
+allocator's references excluded, as in M4), refitted the models, and ran M3's samplers at the held-out inputs at the
+intervals that the new fits select (172 runs per sampler and seed). The Pin tool counts pages only in the exact
+footprint, and the bins stay in bytes, so the retrace changes the truth and leaves the bins as they were. The bins
+of the new tables match M1's at the median to within 0.1\%. The truth grows by the ratio of Section~\ref{sec:r9},
+which is larger at small inputs (2.80$\times$ for gemm at MINI against 1.18$\times$ at MEDIUM), so $\alpha$, the
+ratio of truth to bin, now falls faster with the input size.
+
+\begin{table}[htbp]
+\centering
+\caption{Test MAPE (\%) at each subset's training-best interval under the bytes-touched truth (M1, splitter's bins)
+and the pages-touched truth (M11), as mean / median and maximum over the workloads, and under the pages-touched
+truth on the bins of M3's two samplers at the held-out inputs (mean of 3 seeds per workload).}
+\label{tab:m11}
+\small
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+& & \multicolumn{2}{c}{Bytes, splitter} & \multicolumn{2}{c}{Pages, splitter} & \multicolumn{2}{c}{Pages, sampler} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(l){7-8}
+Split & Subset & Mean / median & Max & Mean / median & Max & Bootstrap & Disjoint \\
+\midrule
+\tabinput{m11}
+\bottomrule
+\end{tabular}
+\end{table}
+
+Under the pages-touched truth, L2O keeps its mean error and its median extrapolation error rises
+(Table~\ref{tab:m11}). L2O extrapolates with a mean of 12.06\% against 11.88\% and a median of 9.96\% against
+6.09\%, and it interpolates with a mean of 3.37\% against 3.42\%. The largest L2O extrapolation error falls from
+71.79\% (bicg) to 39.76\% (trisolv), because bicg's training-best interval moves from 1 in 7,500 to 1 in 25,000 and
+its error falls to 5.18\%. Of the 27 workloads with an L2O fit, 15 extrapolate worse and 12 better, and the
+largest increases are 15.8 to 20.5 points (jacobi-2d, cholesky and nussinov). The NZ and MT subsets extrapolate worse on average (22.71\% and 18.81\%
+against 15.18\% and 15.10\%). On the samplers' bins, L2O extrapolates with a mean of 15.31\% (bootstrap) and
+15.43\% (disjoint) and interpolates with 2.97\% and 3.49\%. M3's decision rule again selects the bootstrap sampler,
+with a median difference from the splitter's bins of 0.43 point and a median ratio of the standard deviations of
+0.919. Section~\ref{sec:r1} compares these errors with the resident-memory model's against the same truth.
+
 \section{Chapter 3: the resident-memory model on \memprint{}'s inputs}
 \label{sec:ch3}
 
 R1 tests the resident-memory model on the 28 workloads of Chapter 2. Its first result led to two further
 experiments. R8 replaces the model's sampler, which missed the peak of runs that last a few milliseconds, and R9
 explains the largest error at the held-out inputs and changes the truth that R1 is scored against. The
-results of R1 (Section~\ref{sec:r1}) therefore report both samplers against both truths.
+results of R1 (Section~\ref{sec:r1}) therefore report both samplers against both truths. R10 replaces the constant
+$R$ with a base measured in each run, and R11 replaces miniVite's truth with the pages it has in use at its peak.
 
 \subsection{R1. Setup}
 \label{sec:r1setup}
@@ -673,10 +727,10 @@ Split & Sampler & (a) & (b) $+R$ & (c) Transfer & Within 10\% & (b) $+R$ & (c) T
 
 With the event sampler and the pages-touched truth, the native measurement plus the constant $R$ predicts the
 largest inputs with a median error of 0.56\% and a mean of 1.45\%, and 27 of 28 workloads are within 10\%
-(Table~\ref{tab:r1}). The exception is miniVite ($-$16.5\%), whose truth counts the memory it frees and touches
-again. The transfer rule (c) has a median error of 3.65\% and all 28 workloads within 10\%. For comparison,
-\memprint{}'s L2O predicts the bytes-touched truth of the same inputs with a median error of 6.09\% on the
-splitter's bins and 9.49\% on the sampler's, so each method is compared with the truth it estimates. The native
+(Table~\ref{tab:r1}). The exception is miniVite ($-$16.5\%, Section~\ref{sec:r11}). The transfer rule (c) has a
+median error of 3.65\% and all 28 workloads within 10\%. Against the same pages-touched truth, \memprint{}'s L2O
+extrapolates with a median error of 9.96\% on the splitter's bins and 16.03\% on the bootstrap sampler's
+(Section~\ref{sec:m11}), and against its own bytes-touched truth with 6.09\% and 9.49\%. The native
 prediction costs one run of the program, against one sampled Pin run that M9 timed at 1.6 s to 11.3 s for PolyBench at
 MEDIUM and 35.9 s for miniVite at 8,192 vertices.
 
@@ -693,7 +747,84 @@ inputs it measured as zero and has a mean error of 18.94\%. Against the bytes-to
 (b) has nearly the same median at the largest inputs (0.77\%) but a mean of 4.51\%, because trisolv ($+$84\%) and
 trmm ($+$23\%) are triangular, and at the middle inputs its median error rises from 7.98\% to 14.19\%. The choice
 of truth therefore changes the middle inputs by about 6 points and the two triangular kernels by up to 84 points,
-and it does not change the result at the other largest inputs.
+and it does not change the result at the other largest inputs. At the middle inputs \memprint{} does better than
+the resident-memory model against the same truth. Its L2O interpolates with a median error of 2.72\% on the
+splitter's bins and 2.07\% on the sampler's (Section~\ref{sec:m11}), against 4.09\% for the transfer rule.
+
+\subsection{R10. A base measured in each run}
+\label{sec:r10}
+
+R10 replaces the constant $R$ with a base taken from the first sample of each run, and it subtracts that base
+before the transfer rule scales a measurement. We tested two bases. The first is Chapter 3's in-run base, the
+file-backed resident memory (resident minus anonymous) at the first sample. The second is anonymous memory minus
+free memory at the first sample, which is the part of the measured quantity that the program holds before it
+allocates its own data. Each base is added to the measurement together with a constant, the median of truth minus
+measurement minus base over the other workloads, because neither base alone has the scale of the pages-touched
+truth. Table~\ref{tab:r10} gives the errors under the event sampler against the pages-touched truth.
+
+\begin{table}[htbp]
+\centering
+\caption{R10. The resident-memory model with a base measured in each run, event sampler, against the
+pages-touched truth, as absolute error (\%) mean / median over the 28 workloads. The lower part gives the signed
+error (\%) of the blind NPB extrapolations, from S to W, without and with the base subtracted before scaling.}
+\label{tab:r10}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Prediction & Largest input & Middle input \\
+\midrule
+\tabinput{r10}
+\bottomrule
+\end{tabular}
+
+\medskip
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{1 ms} & \multicolumn{2}{c}{Event} \\
+\cmidrule(lr){2-3}\cmidrule(l){4-5}
+Program & Proportional & Base subtracted & Proportional & Base subtracted \\
+\midrule
+\tabinput{r10blind}
+\bottomrule
+\end{tabular}
+\end{table}
+
+On \memprint{}'s inputs, a base measured in each run does not remove the error at the middle inputs. The first
+sample is the same for almost every PolyBench run, because the kernels share one runtime and allocate their arrays
+after it. Anonymous minus free memory at the first sample is 54,752 bytes in 130 of the 189 PolyBench runs and 50,656
+to 62,944 bytes in the others, while truth minus measurement at SMALL ranges from 169,760 to 380,720 bytes. The
+base therefore carries no information about the differences between kernels that cause the error at the middle
+inputs, and with it prediction (b) has a median error of 8.09\% against 7.98\% with $R$. Chapter 3's file-backed
+base is 1.51 to 1.95 MB for PolyBench, because it includes the libraries' code, which the pages-touched truth does
+not count. Added alone it overestimates by 85\% at the largest inputs, and with a constant it adds its own run to
+run variation, so its errors (1.44\% and 10.60\% at the median) are larger than with $R$. The base helps only
+miniVite, whose first sample differs from PolyBench's, and moves its error from $-$16.5\% to $-$11.2\% at the
+largest input. Subtracting the base before the transfer rule changes nothing on \memprint{}'s inputs, because the
+rule fits a line through at least two inputs whose bases are equal.
+
+The base does remove the event sampler's regression on the blind NPB configurations (Table~\ref{tab:r10}). There
+the transfer rule scales a single smaller input in proportion to the size, and the base is 222 to 226 kilobytes of
+a measurement of 0.8 to 1.4 MB at S. With the base subtracted before scaling, IS extrapolates with $+$4.5\% instead
+of $+$40.9\%, CG with $-$3.5\% instead of $+$10.9\% and MG with $+$15.7\% instead of $+$40.0\%. Under the 1 ms
+sampler the same change brings all three within 3.7\%. MG remains worse under the event sampler. The event
+sampler therefore measures every run and transfers better on \memprint{}'s inputs, and with the base subtracted it
+no longer loses on IS and CG, but the 1 ms sampler extrapolates MG better and transfers Chapter 3's programs with a
+lower median error (2.1\% against 2.7\%, Section~\ref{sec:r8}). These results do not make the event sampler the
+better default on every program set.
+
+\subsection{R11. miniVite's pages in use}
+\label{sec:r11}
+
+R11 tests whether miniVite's error comes from a truth that counts every page touched during the run. We traced
+miniVite's five inputs with frees tracked (\texttt{-track\_frees 1}, a snapshot every 100,000 references) and took
+the largest number of pages in use. The pages in use at the peak are only 2.6\% (1,024 vertices) to 8.1\% (16,384
+vertices) below the pages touched, so the truth's treatment of frees explains a small part of the error. Against
+the new truth, prediction (b) under the event sampler underestimates miniVite by 9.1\% at the largest input and
+17.9\% at the middle one, against 16.5\% and 21.9\%, and 28 of 28 workloads are within 10\% at the largest
+input. The remaining error is consistent with the pages that MPI maps. miniVite links Open MPI, and \texttt{ldd} lists 21
+shared objects for it against 3 for gemm, and its file-backed resident memory at the first sample is 4.5 MB, against 1.6 MB for PolyBench. The
+pages-touched truth counts every page of those mappings that the program touches, while the measurement counts
+only anonymous memory, and the constant $R$, a median over PolyBench, does not include them.
 
 \section{Changes to the protocol after the runs}
 \label{sec:amend}
@@ -707,20 +838,23 @@ were fixed before their own runs, with one exception. The first run of R8 sample
 4 KiB that followed a fault, which slowed sqlite 1.99$\times$. We then added the time and growth conditions of
 Section~\ref{sec:r8} and repeated every R8 measurement, and only the second run is reported. Fourth, R9's result
 led us to score R1 primarily against the pages-touched truth, which the protocol did not define, and to keep the
-bytes-touched truth as the second column. The decision rule of M3 and every other analysis ran as written.
+bytes-touched truth as the second column. Fifth, M10, M11, R10 and R11 were added after the fourth change. In M11
+the samplers' first run used \texttt{-footprint pages}, which the Pin tool rejects in sampler mode while Pin still
+exits with status 0. That run produced no bins, and we repeated it with the bins in bytes, as in M3. The decision rule of M3 and every other analysis ran as written.
 
 \section{Open questions}
 \label{sec:open}
 
-The reproduction of M1 leaves a residual of 0.06 and 0.09 point that rounding does not explain. Comparing the
-published per-workload coefficients with the refitted ones would locate it, but no published number depends on it.
+The reproduction of M1 leaves a residual of 0.06 and 0.09 point. The published and refitted models are equal
+(M10), so the residual lies in how the published errors were computed, and the published per-workload errors that
+would locate it are not stored. No published number depends on it.
 The chapter's 52.2 s and 46.1 s cannot be traced to any log, so the chapter should replace them rather than explain
 them. The heap-profiler comparison covers gemm and miniVite only, and the sign change for miniVite rests on five
-inputs and one run each. R1's remaining error at the middle inputs comes from the constant $R$ at inputs whose
-arrays are smaller than the runtime's own pages. Chapter 3's in-run base, measured at the start of each run, may
-remove it, and we did not test it here. Both truths count every page or byte touched during the run, so they
-overstate miniVite, and a truth that counts the pages in use at the peak would remove that bias. Finally, the
-event sampler does not improve the blind NPB extrapolations, whose error comes from the transfer rule's
-proportional scaling from a single input.
+inputs and one run each. R1's remaining error at the middle inputs comes from differences between the kernels' runtime pages that neither
+$R$ nor a base from the first sample sees (R10). A base read later in the run, after the kernel's own startup,
+might see them, and we did not test it. miniVite's remaining error after R11 is consistent with MPI's mappings, and
+counting the pages it touches in file-backed mappings separately in the truth would test that. Finally, the
+choice between the event and the 1 ms sampler depends on the program set, because the 1 ms sampler extrapolates
+NPB MG better even with the base subtracted (R10).
 
 \end{document}

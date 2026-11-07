@@ -227,6 +227,47 @@ def r8():
     write("r8", "\n".join(rows) + "\n")
 
 
+def r10():
+    """R10: the in-run base in place of R and in the transfer rule, event sampler, pages truth; the blind NPB
+    transfers with and without the base."""
+    d = pd.read_csv(f"{OUT}/r10_r1.csv")
+    d = d[(d.sampler == "event") & (d.truth == "pages")]
+    f = lambda g, c: f"{g[c].abs().mean():.2f} / {g[c].abs().median():.2f}"
+    rows = []
+    for c, name in (("b_R", "(b) measured $+ R$"), ("b_file0 alone", "(b) measured $+$ file-backed RSS at start"),
+                    ("b_file0", "(b) measured $+$ file-backed RSS at start $+$ constant"),
+                    ("b_base0", "(b) measured $+$ (anon $-$ free) at start $+$ constant"),
+                    ("c_plain", "(c) transfer $+ R$"), ("c_base0", "(c) transfer of measured $-$ base, $+$ base $+ R$")):
+        rows.append(f"{name} & " + " & ".join(f(d[d.split == s_], c) for s_ in ("EXTRA", "INTER")) + " \\\\")
+    write("r10", "\n".join(rows) + "\n")
+    b = pd.read_csv(f"{OUT}/r10_blind.csv")
+    b = b[b.program.isin(["CG", "IS", "MG"])].set_index(["program", "sampler"])
+    sgn = lambda v: ("$-$" if v < 0 else "$+$") + f"{abs(v):.1f}"
+    rows = [f"NPB {p} & " + " & ".join(sgn(b.loc[(p, s_), c]) for s_ in ("pss1", "event") for c in ("c_plain", "c_base0")) + " \\\\"
+            for p in ("CG", "IS", "MG")]
+    write("r10blind", "\n".join(rows) + "\n")
+
+
+def m11():
+    """M11: the TACO protocol's test MAPE under the bytes and the pages truth, on the splitter's bins and (pages) on
+    the samplers' bins at the held-out inputs."""
+    s = pd.read_csv(f"{OUT}/m11_summary.csv")
+    sam = pd.read_csv(f"{OUT}/m3_mape_pages.csv")
+    sam = sam[sam.basis == "train_si"].groupby(["sampler", "split", "subset", "workload"]).sampler_mape.mean()
+    rows = []
+    for split in ("EXTRA", "INTER"):
+        for sub in ("NZ", "MT", "L2O"):
+            g = lambda st: s[(s.set == st) & (s.split == split) & (s.subset == sub)].iloc[0]
+            b, p = g("bytes"), g("pages")
+            sm = [sam.loc[(x, split, sub)] for x in ("boot", "disj")]
+            rows.append(f"{split if sub == 'NZ' else ''} & {sub} & {b['mean']:.2f} / {b['median']:.2f} & {b['max']:.2f} & "
+                        f"{p['mean']:.2f} / {p['median']:.2f} & {p['max']:.2f} & "
+                        + " & ".join(f"{x.mean():.2f} / {x.median():.2f}" for x in sm) + " \\\\")
+        if split == "EXTRA":
+            rows.append("\\midrule")
+    write("m11", "\n".join(rows) + "\n")
+
+
 def m8():
     m = pd.read_csv(f"{OUT}/m8.csv")
     rows = []

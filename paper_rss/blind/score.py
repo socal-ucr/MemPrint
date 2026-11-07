@@ -30,25 +30,32 @@ def measured(runs=RUNS, name="{rep}.csv"):
     rows = []
     for prog in SIZE:
         for cfg in sorted(os.listdir(f"{runs}/{prog}")):
-            peaks = []
+            peaks, b0, f0 = [], [], []
             for rep in (1, 2, 3):
                 r = pd.read_csv(f"{runs}/{prog}/{cfg}/" + name.format(rep=rep))
                 peaks.append((r.anon_bytes - r.free_bytes).clip(lower=0).max())
-            rows.append(dict(program=prog, config=cfg, measured=float(np.median(peaks)), size=SIZE[prog](cfg)))
+                r = r[r.rss_bytes > 0]   # the first sample: the in-run base of dissertation R10
+                b0.append(max(r.anon_bytes.iloc[0] - r.free_bytes.iloc[0], 0)); f0.append(r.rss_bytes.iloc[0] - r.anon_bytes.iloc[0])
+            rows.append(dict(program=prog, config=cfg, measured=float(np.median(peaks)), size=SIZE[prog](cfg),
+                             base0=float(np.median(b0)), file0=float(np.median(f0))))
     return pd.DataFrame(rows)
 
 
-def transfer(m, prog, target, floor_smaller=False):
+def transfer(m, prog, target, floor_smaller=False, base=None):
     """The peak at `target` from the program's other configurations (earlier.transfer's rule). With floor_smaller
     (post hoc), the floor is the largest peak of the smaller configurations only, as the rule was written for
-    extrapolation and floors an interpolation at the larger configurations' peaks."""
+    extrapolation and floors an interpolation at the larger configurations' peaks. With base (a column of m, the
+    run's own start-up memory in the units of measured; dissertation R10), the rule scales measured - base and adds
+    the target run's base back."""
     g = m[(m.program == prog) & (m.config != target) & m.truth.notna()].sort_values("size")
-    x, y, xt = g["size"].to_numpy(float), g.measured.to_numpy(), float(m[(m.program == prog) & (m.config == target)]["size"].iloc[0])
+    t = m[(m.program == prog) & (m.config == target)].iloc[0]
+    x, y, xt = g["size"].to_numpy(float), g.measured.to_numpy(), float(t["size"])
+    b0, bt = (g[base].to_numpy(), float(t[base])) if base else (0 * y, 0.0)
     if len(g) >= 2 and np.ptp(x) > 0:
-        a, b = np.polyfit(x, y, 1)
-        peak = a * xt + b
+        a, b = np.polyfit(x, y - b0, 1)
+        peak = a * xt + b + bt
     else:
-        peak = y[-1] * xt / x[-1]
+        peak = (y[-1] - b0[-1]) * xt / x[-1] + bt
     return max(peak, y[x < xt].max() if floor_smaller and (x < xt).any() else y.max())
 
 

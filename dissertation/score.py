@@ -109,12 +109,12 @@ def sampler_bins(d):
     return pd.Series([pd.read_csv(x).MemUsageObs.iloc[0] for x in files], dtype=float)
 
 
-def m3():
-    fits = pd.read_csv(f"{FINAL}/fits.csv")
-    tables = {w: pd.read_csv(f"{FINAL}/{w}_allData.csv") for w in WORKLOADS}
+def m3(final=FINAL, done=None, tag=""):
+    """done: (run directory, exit code) pairs, default $OUT/m3/done.txt; tag: suffix of the output CSVs."""
+    fits = pd.read_csv(f"{final}/fits.csv")
+    tables = {w: pd.read_csv(f"{final}/{w}_allData.csv") for w in WORKLOADS}
     runs, mapes = [], []
-    for done in open(f"{OUT}/m3/done.txt"):
-        d, rc = done.split()
+    for d, rc in done or (x.split() for x in open(f"{OUT}/m3/done.txt")):
         s, seed, w, config, k = d.split("/")[-5:]
         k = int(k)
         split = "EXTRA" if config == str(prepare(tables[w]).last_config) else "INTER"
@@ -139,8 +139,8 @@ def m3():
                     mapes.append(dict(sampler=s, seed=int(seed), workload=w, split=split, subset=fit.subset,
                                       basis=basis, k=k, sampler_mape=sampler_mape, splitter_mape=ref_mape))
     runs, mapes = pd.DataFrame(runs), pd.DataFrame(mapes)
-    runs.to_csv(f"{OUT}/m3_runs.csv", index=False)
-    mapes.to_csv(f"{OUT}/m3_mape.csv", index=False)
+    runs.to_csv(f"{OUT}/m3_runs{tag}.csv", index=False)
+    mapes.to_csv(f"{OUT}/m3_mape{tag}.csv", index=False)
     pd.set_option("display.width", 200)
     print("runs", len(runs), "failed", int((runs.rc != 0).sum()), "with a zero bin", int((runs.zero_bins > 0).sum()))
     print(runs.groupby("sampler")[["mean_ratio", "sd_ratio"]].describe(percentiles=[.1, .5, .9]).T.round(3))
@@ -154,6 +154,54 @@ def m3():
     disj = b["diff"].median() > 2 or not 0.9 <= sd <= 1.1
     print(f"decision: boot diff median {b['diff'].median():.2f} points, SD ratio median {sd:.3f}"
           f" -> report {'disjoint' if disj else 'bootstrap'}")
+
+
+M11 = f"{OUT}/m11"
+
+
+def m11build():
+    """M11: the pages tables from the splitter traces (m11.sh trace), M1's analysis on them -> $OUT/m11/data/fits.csv,
+    and M3's run list from the pages fits -> $OUT/m11/m3_list.txt."""
+    env = {**os.environ, "PYTHONPATH": f"{REPO}/analysis"}
+    for cmd in ("preprocess", "build"):
+        with open(f"{M11}/{cmd}.log", "w") as log:
+            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", M11, cmd] + (["--latex"] if cmd == "build" else []),
+                           check=True, stdout=log, stderr=subprocess.STDOUT, env=env)
+    f = pd.read_csv(f"{M11}/data/fits.csv")
+    lines = []
+    for w in WORKLOADS:
+        p = prepare(pd.read_csv(f"{M11}/data/{w}_allData.csv"))
+        for split, config in (("EXTRA", p.last_config), ("INTER", p.middle_config)):
+            g = f[(f.workload == w) & (f.split == split)]
+            ks = set(g.train_si.astype(int)) | set(g.best_interval.dropna().astype(int))
+            lines += [f"{w} {split} {config} {k}" for k in sorted(ks)]
+    open(f"{M11}/m3_list.txt", "w").write("\n".join(lines) + "\n")
+    print(len(lines), "runs per sampler and seed")
+
+
+def m11():
+    """M11: the TACO protocol on pages touched next to bytes touched (M1), and M3's sampler scoring on the pages
+    tables -> $OUT/m11_summary.csv, m3_runs_pages.csv, m3_mape_pages.csv."""
+    rows = []
+    for name, root in (("bytes", FINAL), ("pages", f"{M11}/data")):
+        f = pd.read_csv(f"{root}/fits.csv")
+        g = f.groupby(["split", "subset"]).test_mape_train_si.agg(["mean", "median", "max", "count"]).reset_index()
+        rows.append(g.assign(set=name))
+        f.assign(set=name).to_csv(f"{OUT}/m11_fits_{name}.csv", index=False)
+    s = pd.concat(rows)
+    s.to_csv(f"{OUT}/m11_summary.csv", index=False)
+    pd.set_option("display.width", 200)
+    print(s.pivot_table(index=["split", "subset"], columns="set", values=["mean", "median", "max"]).round(2).to_string())
+    a = pd.read_csv(f"{OUT}/m11_fits_bytes.csv").set_index(["workload", "split", "subset"]).test_mape_train_si
+    b = pd.read_csv(f"{OUT}/m11_fits_pages.csv").set_index(["workload", "split", "subset"]).test_mape_train_si
+    d = pd.DataFrame({"bytes": a, "pages": b}).assign(diff=lambda x: x.pages - x.bytes)
+    print(d[d.index.get_level_values("subset") == "L2O"].round(2).to_string())
+    rc = {}
+    for line in open(f"{M11}/done.txt"):
+        x = line.split()
+        if x[0] in ("boot", "disj"):
+            rc[f"{M11}/m3/{x[0]}/{x[3]}/{x[1]}/{x[2]}/{x[4]}"] = x[5]
+    m3(f"{M11}/data", [(p, rc.get(p, "1")) for p in sorted(glob.glob(f"{M11}/m3/*/*/*/*/*"))], "_pages")
 
 
 def m6():
@@ -209,7 +257,13 @@ def input_size(w, config):
     return total
 
 
-def r1(sampler="pss1", tag="", truth_src="bytes"):
+def inuse_truth(c):
+    """R11: miniVite's largest number of pages in use (frees tracked) over the run, in bytes."""
+    t = pd.read_csv(glob.glob(f"{OUT}/r11/{c}/Buffered_*_timeline.csv")[0])
+    return float(t[t.Bin == -1].MemUsageObs.max())
+
+
+def r1(sampler="pss1", tag="", truth_src="bytes", inuse=False):
     """(a) the largest anon - free of the run, median of 3; (b) (a) + R, R the median of truth - (a) over the other
     workloads' configs (paper_rss/blind/score.py)."""
     import numpy as np
@@ -223,6 +277,8 @@ def r1(sampler="pss1", tag="", truth_src="bytes"):
                 r = pd.read_csv(f"{OUT}/r1/{w}/{c}/{rep}/{sampler}.csv")
                 peaks.append((r.anon_bytes - r.free_bytes).clip(lower=0).max())
             t = p.truth[c] if truth_src == "bytes" else pages_truth(w, c)
+            if inuse and w == "miniVite":
+                t = inuse_truth(c)
             rows.append(dict(workload=w, config=str(c), truth=t, bytes_truth=p.truth[c], measured=float(np.median(peaks)),
                              split="EXTRA" if c == p.last_config else "INTER" if c == p.middle_config else ""))
     m = pd.DataFrame(rows)
@@ -279,6 +335,97 @@ def r1p():
     """R1 against the pages-touched truth (primary for Ch. 3), under the 1 ms and the event sampler."""
     r1("pss1", "_pages", "pages")
     r1("event", "_r8_pages", "pages")
+
+
+def first_sample(w, c, sampler):
+    """The in-run base of an R1 input, median of 3 runs: anon - free (base0) and RSS - anon (file0, Ch. 3's) at the
+    first sample."""
+    import numpy as np
+    b0, f0 = [], []
+    for rep in (1, 2, 3):
+        r = pd.read_csv(f"{OUT}/r1/{w}/{c}/{rep}/{sampler}.csv")
+        r = r[r.rss_bytes > 0]
+        b0.append(max(r.anon_bytes.iloc[0] - r.free_bytes.iloc[0], 0)); f0.append(r.rss_bytes.iloc[0] - r.anon_bytes.iloc[0])
+    return float(np.median(b0)), float(np.median(f0))
+
+
+def r10():
+    """R10: the in-run base in place of R, and subtracted before the transfer rule scales. R1 (pages and bytes truths)
+    under both samplers from r1{tag}.csv, and the blind configurations (paper_rss/blind) under both samplers."""
+    import numpy as np
+    sys.path.insert(0, os.path.join(REPO, "paper_rss", "blind"))
+    import score as B
+    rows, out = [], []
+    for sampler, tag in (("event", "_r8_pages"), ("pss1", "_pages")):
+        m = pd.read_csv(f"{OUT}/r1{tag}.csv", dtype={"config": str})
+        m[["base0", "file0"]] = [first_sample(r.workload, r.config, sampler) for r in m.itertuples()]
+        m["program"], m["size"] = m.workload, [input_size(r.workload, r.config) for r in m.itertuples()]
+        for truth in ("pages", "bytes"):
+            t = m.truth if truth == "pages" else m.bytes_truth
+            mm = m.assign(truth=t)
+            preds = {}
+            for name, Bc in (("R", None), ("file0", "file0"), ("base0", "base0")):
+                b = 0 if Bc is None else mm[Bc]
+                c = [float((mm.truth - mm.measured - b)[mm.workload != w].median()) for w in mm.workload]
+                preds[name] = mm.measured + b + c
+                if Bc == "file0":
+                    preds["file0 alone"] = mm.measured + b
+            for name, p in preds.items():
+                mm[f"err_{name}"] = 100 * (p - mm.truth) / mm.truth
+            for r in mm[mm.split.notna()].itertuples():
+                d = dict(sampler=sampler, truth=truth, workload=r.workload, config=r.config, split=r.split,
+                         base0=r.base0, file0=r.file0)
+                for name in preds:
+                    d[f"b_{name}"] = mm.loc[r.Index, f"err_{name}"]
+                for base in (None, "base0"):
+                    pred = B.transfer(mm, r.workload, r.config, floor_smaller=(r.split == "INTER"), base=base) + r.R \
+                        if truth == "pages" else None
+                    if truth == "bytes":
+                        Rb = float((mm.truth - mm.measured)[mm.workload != r.workload].median())
+                        pred = B.transfer(mm, r.workload, r.config, floor_smaller=(r.split == "INTER"), base=base) + Rb
+                    d["c_" + (base or "plain")] = 100 * (pred - r.truth if truth == "pages" else pred - r.bytes_truth) / \
+                        (r.truth if truth == "pages" else r.bytes_truth)
+                rows.append(d)
+    d = pd.DataFrame(rows)
+    d.to_csv(f"{OUT}/r10_r1.csv", index=False)
+    cols = [c for c in d.columns if c.startswith(("b_", "c_"))]
+    pd.set_option("display.width", 220)
+    print(d.groupby(["sampler", "truth", "split"])[cols].agg(lambda x: x.abs().median()).round(2).to_string())
+    print(d.groupby(["sampler", "truth", "split"])[cols].agg(lambda x: x.abs().mean()).round(2).to_string())
+    print(d[(d.workload == "miniVite")].round(1).to_string(index=False))
+    # blind configurations
+    RS = os.path.expanduser("~/memprint-data/2026-11-05-rsssample/blind")
+    bl = []
+    for sampler, runs, name in (("pss1", B.RUNS, "{rep}.csv"), ("event", f"{RS}/event", "{rep}/event.csv")):
+        m = B.measured(runs, name).merge(B.truths(), on=["program", "config"], how="left")
+        m["R"] = [float((m[(m.program != p) & m.truth.notna()].truth - m[(m.program != p) & m.truth.notna()].measured).median())
+                  for p in m.program]
+        for prog in B.SIZE:
+            have = m[(m.program == prog) & m.truth.notna()].sort_values("size")
+            for split, target in (("EXTRA", have.config.iloc[-1]), ("INTER", B.INTER.get(prog))):
+                if target is None:
+                    continue
+                row = m[(m.program == prog) & (m.config == target)].iloc[0]
+                e = {}
+                for base in (None, "base0"):
+                    pred = B.transfer(m, prog, target, base=base) + row.R
+                    e["c_" + (base or "plain")] = 100 * (pred - row.truth) / row.truth
+                bl.append(dict(sampler=sampler, program=prog, split=split, config=target, **e,
+                               base0_src=have[have.config != target].base0.iloc[-1], base0=row.base0,
+                               measured_src=have[have.config != target].measured.iloc[-1]))
+    bl = pd.DataFrame(bl)
+    bl.to_csv(f"{OUT}/r10_blind.csv", index=False)
+    print(bl.round(1).to_string(index=False))
+
+
+def r11():
+    """R11: R1 with miniVite's truth the pages in use at the peak (the other workloads keep the pages truth)."""
+    rows = [dict(config=c, touched=pages_truth("miniVite", c), inuse=inuse_truth(c)) for c in (1024, 2048, 4096, 8192, 16384)]
+    d = pd.DataFrame(rows).assign(ratio=lambda x: x.touched / x.inuse)
+    d.to_csv(f"{OUT}/r11.csv", index=False)
+    print(d.to_string(index=False))
+    r1("event", "_r11", "pages", inuse=True)
+    r1("pss1", "_r11_pss1", "pages", inuse=True)
 
 
 def r8():

@@ -172,3 +172,21 @@ i=k/20); native; 5 interleaved rounds. Reported: median per configuration (`m7_k
   Every R8 measurement was repeated with this rule.
 - R1 is scored primarily against the pages-touched truth (`score.py r1p`, r9pages.sh now covers all 194 inputs),
   with the bytes-touched truth as the second column.
+
+### M10, M11, R10 and R11 (added Nov 6, after the plan's second update)
+
+- M10 (`m10.py`): the 56 selected models of the published `{extra,inter}polation_models.csv` against the refitted
+  `$OUT/m1/taco/data/models.csv`, coefficient by coefficient at 4 decimals and by interval. The published
+  per-workload L2O errors are not stored, so the comparison stops at the models.
+- M11 (`m11.sh trace`, `score.py m11build`, `m11.sh sample`, `score.py m11`): the splitter with `-footprint pages`
+  (default 13 intervals x 20 bins; miniVite with `-exclude_alloc 1`) on every PolyBench and miniVite input, 12 at a
+  time, binaries built first. The tool counts pages only in the exact footprint (Bin -1), and the bins stay in bytes,
+  so M11 is M1 with the pages truth. The sampler runs use `-footprint bytes` (the tool rejects pages in sampler mode,
+  and Pin exits 0 on that usage error: the first sampler run produced no bins and was discarded). The run list comes
+  from the pages fits (172 runs per sampler and seed).
+- R10 (`score.py r10`): the in-run base is the first sample of each event (and 1 ms) run: anon - free (`base0`) and
+  RSS - anon (`file0`, Chapter 3's). (b) is measured + base + a constant (the median of truth - measured - base over
+  the other workloads); (c) scales measured - base and adds the target's base. The blind NPB configurations are
+  rescored with the same transfer (paper_rss/blind/score.py `transfer(..., base="base0")`).
+- R11 (`m11.sh trace`, `score.py r11`): miniVite's pages in use, `-mode splitter -intervals 1 -bins 1 -footprint pages
+  -track_frees 1 -snapshot 100000`, the largest Bin -1 value of the timeline; R1 rescored with it as miniVite's truth.
