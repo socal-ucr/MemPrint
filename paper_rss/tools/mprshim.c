@@ -11,6 +11,12 @@
    MPR_MODE=faults: the same columns, a sample after every MPR_FAULTS page faults of the process (default 256; a
                   software event per CPU, inherited by the program's threads) and at least every MPR_INT (default
                   here 0.005).
+   MPR_MODE=event: the pss columns and "trigger", from smaps_rollup (the page tables, not the status counters) at
+                  these events only: after every MPR_FAULTS page faults of the process (default 256, as faults; at
+                  least every MPR_INT, default here 0.005: trigger t or f); before a free of a block of at least MPR_BIG
+                  bytes (default 4096) or an munmap of at least MPR_BIG bytes, in the calling thread, if the process
+                  has faulted since the last sample (x, m; free is interposed only in a build with -DMPR_EVENT_FREE);
+                  and once at exit (e).
    MPR_MMAP=1 (with pss): interpose mmap and munmap and add "mapped_bytes", the bytes the program itself maps
    anonymously and has not unmapped (glibc's malloc maps through internal calls, which are not counted).
    Every sampling mode writes "vmhwm_bytes" (the kernel's peak RSS) at exit to <MPR_OUT>.hwm.
@@ -21,6 +27,7 @@
    generic.heap_size - tcmalloc.pageheap_unmapped_bytes - generic.current_allocated_bytes. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <linux/perf_event.h>
 #include <poll.h>
 #include <malloc.h>
@@ -31,12 +38,15 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
 static FILE *out;
-static int trim, pss, files, fast, faults, mmaps;
+static int trim, pss, files, fast, faults, mmaps, event;
+static size_t big = 4096;
+static void event_sample(char trig, int only_if_faulted);
 static char exe[4096];
 static double interval = 0.005, finterval = 0.001;
 static long fault_period = 256;
@@ -148,6 +158,7 @@ void *mmap64(void *a, size_t n, int prot, int fl, int fd, off_t off) { return mm
 
 int munmap(void *a, size_t n) {
     if (!real_munmap) real_munmap = dlsym(RTLD_NEXT, "munmap");
+    if (event && n >= big) event_sample('m', 1);
     int r = real_munmap(a, n);
     if (mmaps && r == 0) {
         unsigned long lo = (unsigned long)a, hi = lo + n;
@@ -178,11 +189,59 @@ static void quick(int refresh) {
     fprintf(out, "%.6f,%lu,%lu,%lu\n", t, v[0], v[1], held_free);
 }
 
+/* One event-mode sample from smaps_rollup; trig names the event. */
+static long last_flt = -1;
+static __thread int busy;
+static pthread_mutex_t elock = PTHREAD_MUTEX_INITIALIZER;
+static long minflt(void) {
+    struct rusage u;
+    getrusage(RUSAGE_SELF, &u);
+    return u.ru_minflt + u.ru_majflt;
+}
+
+static void event_sample(char trig, int only_if_faulted) {
+    if (!out || busy) return;
+    busy = 1;
+    long fl = minflt();
+    pthread_mutex_lock(&elock);
+    int skip = only_if_faulted && fl == last_flt;
+    if (!skip) last_flt = fl;
+    pthread_mutex_unlock(&elock);
+    if (!skip) {
+        /* open and read, not stdio: the sample allocates nothing, so the free bytes are the program's */
+        static const char *key[4] = {"\nRss:", "\nPss:", "\nAnonymous:", "\nLazyFree:"};
+        unsigned long v[4] = {0, 0, 0, 0};
+        char buf[4096];
+        double t = now();
+        int fd = open("/proc/self/smaps_rollup", O_RDONLY), n = 0, r;
+        while (fd >= 0 && n < (int)sizeof buf - 1 && (r = (int)read(fd, buf + n, sizeof buf - 1 - n)) > 0) n += r;
+        if (fd >= 0) close(fd);
+        buf[n] = 0;
+        for (int i = 0; i < 4; i++) {
+            char *q = strstr(buf, key[i]);
+            if (q) v[i] = strtoul(q + strlen(key[i]), NULL, 10) << 10;
+        }
+        unsigned long fb = free_bytes();
+        fprintf(out, "%.6f,%lu,%lu,%lu,%lu,%lu,%c\n", t, v[0], v[1], v[2], fb, v[3], trig);
+    }
+    busy = 0;
+}
+
+#ifdef MPR_EVENT_FREE
+extern void __libc_free(void *);
+void free(void *p) {
+    if (event && p && malloc_usable_size(p) >= big) event_sample('x', 1);
+    __libc_free(p);
+}
+#endif
+
 /* One sample (or, in the trim mode, one trim). */
 static void sample(void) {
     long page = sysconf(_SC_PAGESIZE);
     {
-        if (trim) {
+        if (event) {
+            event_sample('e', 0);
+        } else if (trim) {
             malloc_trim(0);
         } else if (fast || faults) {
             quick(1);
@@ -220,6 +279,7 @@ static void *loop(void *arg) {
     struct timespec d = {(time_t)interval, (long)((interval - (time_t)interval) * 1e9)};
     for (;;) {
         if (fast) quick(0);
+        else if (event) event_sample('t', 0);
         else sample();
         nanosleep(&d, NULL);
     }
@@ -263,12 +323,13 @@ static void *loop_faults(void *arg) {
     (void)arg;
     int ms = (int)(interval * 1000) > 0 ? (int)(interval * 1000) : 1;
     for (;;) {
-        poll(pfd, ncpu, ms);
+        int r = poll(pfd, ncpu, ms);
         for (int i = 0; i < ncpu; i++) {   /* consume the records, so the buffers never fill */
             __sync_synchronize();
             ring[i]->data_tail = ring[i]->data_head;
         }
-        quick(1);
+        if (event) event_sample(r ? 'f' : 't', 0);
+        else quick(1);
     }
     return NULL;
 }
@@ -298,6 +359,8 @@ __attribute__((constructor)) static void start(void) {
     files = !strcmp(mode, "files");
     fast = !strcmp(mode, "fast");
     faults = !strcmp(mode, "faults");
+    event = !strcmp(mode, "event");
+    if (getenv("MPR_BIG")) big = (size_t)atol(getenv("MPR_BIG"));
     mmaps = pss && getenv("MPR_MMAP") && atoi(getenv("MPR_MMAP"));
     if (fast) interval = 0.0001;
     if (iv) interval = atof(iv);
@@ -310,7 +373,8 @@ __attribute__((constructor)) static void start(void) {
     if (!trim) {
         if (!path || !(out = fopen(path, "w"))) return;
         setvbuf(out, NULL, _IOFBF, 1 << 20);
-        fprintf(out, files ? "seconds,rss_bytes,pss_bytes,anon_bytes,free_bytes,datafile_bytes,lazyfree_bytes,"
+        fprintf(out, event ? "seconds,rss_bytes,pss_bytes,anon_bytes,free_bytes,lazyfree_bytes,trigger\n"
+                     : files ? "seconds,rss_bytes,pss_bytes,anon_bytes,free_bytes,datafile_bytes,lazyfree_bytes,"
                              "datafile_ref_bytes\n"
                      : mmaps ? "seconds,rss_bytes,pss_bytes,anon_bytes,free_bytes,lazyfree_bytes,mapped_bytes\n"
                      : pss ? "seconds,rss_bytes,pss_bytes,anon_bytes,free_bytes,lazyfree_bytes\n"
@@ -318,8 +382,9 @@ __attribute__((constructor)) static void start(void) {
         atexit(flush);
     }
     pthread_t th;
-    if (faults && open_faults() > 0) {
-        quick(1);
+    if ((faults || event) && open_faults() > 0) {
+        if (event) event_sample('t', 0);
+        else quick(1);
         pthread_create(&th, NULL, loop_faults, NULL);
         pthread_detach(th);
         return;

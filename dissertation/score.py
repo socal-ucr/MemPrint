@@ -209,7 +209,7 @@ def input_size(w, config):
     return total
 
 
-def r1():
+def r1(sampler="pss1", tag=""):
     """(a) the largest anon - free of the run, median of 3; (b) (a) + R, R the median of truth - (a) over the other
     workloads' configs (paper_rss/blind/score.py)."""
     import numpy as np
@@ -220,7 +220,7 @@ def r1():
         for c in p.configs:
             peaks = []
             for rep in (1, 2, 3):
-                r = pd.read_csv(f"{OUT}/r1/{w}/{c}/{rep}/pss1.csv")
+                r = pd.read_csv(f"{OUT}/r1/{w}/{c}/{rep}/{sampler}.csv")
                 peaks.append((r.anon_bytes - r.free_bytes).clip(lower=0).max())
             rows.append(dict(workload=w, config=str(c), truth=p.truth[c], measured=float(np.median(peaks)),
                              split="EXTRA" if c == p.last_config else "INTER" if c == p.middle_config else ""))
@@ -228,7 +228,7 @@ def r1():
     m["R"] = [float((m[m.workload != w].truth - m[m.workload != w].measured).median()) for w in m.workload]
     m["err_a"] = 100 * (m.measured - m.truth) / m.truth
     m["err_b"] = 100 * (m.measured + m.R - m.truth) / m.truth
-    m.to_csv(f"{OUT}/r1.csv", index=False)
+    m.to_csv(f"{OUT}/r1{tag}.csv", index=False)
     s = m[m.split != ""].copy()
     fits = pd.read_csv(f"{FINAL}/fits.csv")
     l2o = fits[fits.subset == "L2O"].set_index(["workload", "split"]).test_mape_train_si
@@ -245,13 +245,31 @@ def r1():
         for r in s[s.split == split].itertuples():
             pred = transfer(m, r.workload, r.config, floor_smaller=(split == "INTER")) + r.R
             s.loc[r.Index, "transfer_err"] = 100 * (pred - r.truth) / r.truth
-    s.to_csv(f"{OUT}/r1_splits.csv", index=False)
+    s.to_csv(f"{OUT}/r1{tag}_splits.csv", index=False)
     pd.set_option("display.width", 200)
     print(s.round(2).to_string(index=False))
     s["abs_a"], s["abs_b"] = s.err_a.abs(), s.err_b.abs()
     s["abs_transfer"] = s.transfer_err.abs()
     print(s.groupby("split")[["abs_a", "abs_b", "abs_transfer", "memprint_splitter", "memprint_sampler"]].agg(["mean", "median"]).round(2))
     print("all configs, median |err| a, b:", round(m.err_a.abs().median(), 2), round(m.err_b.abs().median(), 2))
+
+
+def m9():
+    """Median wall time over 5 rounds per workload and run, and the sampler's time over the truth run's."""
+    t = pd.read_csv(f"{OUT}/m9/timing.csv")
+    m = t.groupby(["workload", "config"]).seconds.median().unstack()
+    m = m[["native", "instr", "truth", "splitter", "boot-1000", "disj-1000"]]
+    for c in ("boot-1000", "disj-1000"):
+        m[f"truth_over_{c}"] = m.truth / m[c]
+    m["truth_over_instr"] = m.truth / m.instr
+    m.to_csv(f"{OUT}/m9.csv")
+    print(t.groupby(["workload", "config"]).seconds.agg(["count", "min", "max"]).round(2).unstack().to_string())
+    print(m.round(2).to_string())
+
+
+def r8():
+    """R1 under the event sampler (run.sh part r8)."""
+    r1("event", "_r8")
 
 
 if __name__ == "__main__":

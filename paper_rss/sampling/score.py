@@ -2,7 +2,7 @@
 
     PYTHONPATH=analysis ~/environments/memfp/bin/python -W ignore paper_rss/sampling/score.py [part ...]
         ->  paper_rss/data/sample_{peaks,transfer,cost,large,blind,thp,py,cc1}.csv
-Parts: peaks transfer cost blind thp py cc1 (default all).
+Parts: peaks transfer cost blind thp py cc1 (default all); cost_r8 (large_r8: plain, pss1 and event interleaved).
 """
 import os
 import re
@@ -18,7 +18,7 @@ from memprint.sched import corpus as C, earlier  # noqa: E402
 
 OUT = os.path.expanduser("~/memprint-data/2026-11-05-rsssample")
 DATA = os.path.join(HERE, "..", "data")
-SAMPLERS = ("pss5", "pss1", "fast", "faults")
+SAMPLERS = ("pss5", "pss1", "fast", "faults", "event")   # event: R8, mprshim-event.so
 NAMED = ("npb-mg", "2mm", "gemm", "jacobi-2d")
 
 
@@ -67,6 +67,8 @@ def transfer():
     rows = []
     for s, rep in [(s, rep) for s in SAMPLERS for rep in (1, 2, 3)]:   # rep 1 is the protocol's; 2 and 3 a check
         cur = []
+        if not os.path.exists(f"{OUT}/small/npb-mg/{os.listdir(f'{OUT}/small/npb-mg')[0]}/{rep}/{s}.csv"):
+            continue
         for prog in sorted(os.listdir(f"{OUT}/small")):
             for inp in os.listdir(f"{OUT}/small/{prog}"):
                 p = f"{OUT}/small/{prog}/{inp}/{rep}/{s}.csv"
@@ -86,15 +88,15 @@ def transfer():
     print(d.assign(a=d.signed.abs()).groupby(["sampler", "rep"])[["a", "abs"]].median().round(1).unstack())
 
 
-def cost():
+def cost(sub="large", tag=""):
     """(d) Median wall time over the plain run's, per program and sampler, and the model's error at the largest
     input under each sampler (est1 = A - F + the runtime's pages, against the truth)."""
     ins = M.inputs()
     wr, er = [], []
-    for prog in sorted(os.listdir(f"{OUT}/large")):
+    for prog in sorted(os.listdir(f"{OUT}/{sub}")):
         t, base = M.truth(prog, ins[prog]), M.base_of(prog, ins[prog])
         for rep in (1, 2, 3):
-            o = f"{OUT}/large/{prog}/{rep}"
+            o = f"{OUT}/{sub}/{prog}/{rep}"
             for s in ("plain",) + SAMPLERS:
                 if os.path.exists(f"{o}/{s}.time"):
                     wr.append(dict(prog=prog, rep=rep, sampler=s, wall=float(open(f"{o}/{s}.time").read().split()[0])))
@@ -103,13 +105,17 @@ def cost():
                     er.append(dict(prog=prog, rep=rep, sampler=s, samples=len(r), rss_over_hwm=r.rss_bytes.max() / hwm,
                                    **M.err(data_curve(r) + base, t)))
     w = pd.DataFrame(wr).groupby(["prog", "sampler"]).wall.median().unstack()
-    x = w[list(SAMPLERS)].div(w["plain"], axis=0)
-    x.to_csv(f"{DATA}/sample_cost.csv")
+    x = w[[s for s in SAMPLERS if s in w]].div(w["plain"], axis=0)
+    x.to_csv(f"{DATA}/sample_cost{tag}.csv")
     e = pd.DataFrame(er)
-    e.to_csv(f"{DATA}/sample_large.csv", index=False)
+    e.to_csv(f"{DATA}/sample_large{tag}.csv", index=False)
     print(x.round(2).to_string()); print("median", x.median().round(3).to_dict(), "max", x.max().round(2).to_dict())
     g = e.groupby(["prog", "sampler"]).median(numeric_only=True).reset_index()
     print(g.groupby("sampler")[["signed", "abs", "peak", "rss_over_hwm", "samples"]].median().round(2))
+
+
+def cost_r8():
+    cost("large_r8", "_r8")
 
 
 def blind():
@@ -120,7 +126,7 @@ def blind():
     mm, ss = [], []
     pm, ps = B.score(B.measured())
     for s, (m, sp) in [("pss1", (pm, ps))] + [(s, B.score(B.measured(f"{OUT}/blind/{s}", "{rep}/" + s + ".csv")))
-                                               for s in ("fast", "faults")]:
+                                               for s in ("fast", "faults", "event") if os.path.isdir(f"{OUT}/blind/{s}")]:
         mm.append(m.assign(sampler=s)); ss.append(sp.assign(sampler=s))
     m, sp = pd.concat(mm), pd.concat(ss)
     m.to_csv(f"{DATA}/sample_blind.csv", index=False)
@@ -137,7 +143,7 @@ def table():
     c = pd.read_csv(f"{DATA}/sample_cost.csv")
     pk = pd.read_csv(f"{DATA}/sample_peaks.csv")
     sgn = lambda v: "--" if pd.isna(v) else ("$-$" if v < 0 else "$+$") + f"{abs(v):.0f}"
-    cols = list(SAMPLERS)
+    cols = list(SAMPLERS[:4])   # the paper's table; R8's event sampler is reported in the dissertation
     out = [r"\multicolumn{5}{l}{\emph{Transfer to the largest input, signed whole-run error (\%), median of 3 runs}} \\"]
     for prog, name in (("npb-mg", "NPB-MG"), ("2mm", "2mm"), ("gemm", "gemm"), ("jacobi-2d", "jacobi-2d"), ("atax", "atax")):
         out.append(name + " & " + " & ".join(sgn(tr.loc[prog, s]) for s in cols) + r" \\")

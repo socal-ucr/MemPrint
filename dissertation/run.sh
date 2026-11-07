@@ -103,5 +103,41 @@ part_m7b() {   # M7 at matched bin intervals k (M2: the published label i*s/r is
         done
     done; }
 
+part_m9() {   # the truth run (one interval, one bin: the full bytes-touched trace) against the samplers, 5 rounds
+    mkdir -p "$OUT/m9/x"; f=$OUT/m9/timing.csv
+    [[ -f $f ]] || echo "round,workload,config,seconds" > "$f"
+    for round in 1 2 3 4 5; do
+        for wc in "minivite miniVite 8192" "polybench gemm MEDIUM" "polybench 2mm MEDIUM" "polybench atax MEDIUM" \
+                  "polybench jacobi-2d MEDIUM"; do
+            read -r wl w c <<< "$wc"; build_of $wl $w $c || continue
+            ex=(-footprint bytes); [[ $w == miniVite ]] && ex+=(-exclude_alloc 1)
+            t() { local n=$1; shift; echo "$round,$w,$n,$(time_cmd "$@")" >> "$f"; }
+            p=("$PIN_ROOT/pin" -t "$TOOL")
+            t native "$BIN" "${ARGS[@]}"
+            t instr "${p[@]}" -mode sampler -i 4294967295 -s 1 -r 1 -outdir "$OUT/m9/x" -- "$BIN" "${ARGS[@]}"
+            t truth "${p[@]}" -mode splitter -intervals 1 -bins 1 "${ex[@]}" -outdir "$OUT/m9/x" -- "$BIN" "${ARGS[@]}"
+            t boot-1000 "${p[@]}" -mode sampler -i 100 -s 100 -r 10 "${ex[@]}" -outdir "$OUT/m9/x" -- "$BIN" "${ARGS[@]}"
+            t disj-1000 "${p[@]}" -mode sampler -i 50 -s 20 -disjoint 1 "${ex[@]}" -outdir "$OUT/m9/x" -- "$BIN" "${ARGS[@]}"
+            t splitter "${p[@]}" -mode splitter "${ex[@]}" -outdir "$OUT/m9/x" -- "$BIN" "${ARGS[@]}"
+            rm -f "$OUT"/m9/x/*.csv
+        done
+    done; }
+
+part_r8() {   # R1 again under the event sampler (mprshim-event.so: smaps_rollup after page faults, before frees, at exit)
+    gcc -O2 -shared -fPIC -DMPR_EVENT_FREE -o "$OUT/mprshim-event.so" "$ROOT/paper_rss/tools/mprshim.c" -lpthread -ldl || return 1
+    for rep in 1 2 3; do
+        for w in $(grep -v miniVite "$ROOT/analysis/workloads.txt") miniVite; do
+            wl=polybench cfgs="MINI MINI2 MINI3 SMALL SMALL2 SMALL3 MEDIUM"
+            [[ $w == miniVite ]] && wl=minivite cfgs="1024 2048 4096 8192 16384"
+            for c in $cfgs; do
+                build_of $wl "$w" $c || continue
+                o=$OUT/r1/$w/$c/$rep; mkdir -p "$o"
+                (cd "$o" && /usr/bin/time -o event.time -f "%e %M" env LD_PRELOAD="$OUT/mprshim-event.so" MPR_MODE=event \
+                    MPR_OUT="$o/event.csv" "$BIN" "${ARGS[@]}" > /dev/null 2> event.err)
+                echo "$o event $?" >> "$OUT/r1/done.txt"
+            done
+        done
+    done; }
+
 for part in ${@:-m4 m5 m3 r1 m6}; do echo "== $part $(date)"; part_$part; done
 echo all-done

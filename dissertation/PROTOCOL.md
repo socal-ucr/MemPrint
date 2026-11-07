@@ -153,3 +153,16 @@ M7 ran i = 500, 1000, 2500 as the plan states, which is not what the published n
 times each sampler at bin interval k = 500, 1000, 2500: the published sampler with s=100, r=10, i=k/10 (exact
 label) and with the published s=50, r=5, i=k/5; the current bootstrap (s=100, r=10, i=k/10) and disjoint (s=20,
 i=k/20); native; 5 interleaved rounds. Reported: median per configuration (`m7_k.csv`).
+
+### M9, R8 and R9 (added Nov 6, after the plan's update)
+
+- M9 (`run.sh m9`, `score.py m9`): the truth run is the splitter with one interval and one bin (`-intervals 1 -bins 1`),
+  which gives the splitter's own interval-1 footprint (gemm SMALL: 222,014 against 222,010 B). Five workloads, six runs
+  each (native, instrumentation only, truth, bootstrap and disjoint at 1 in 1,000, splitter), 5 interleaved rounds.
+- R8 (`run.sh r8`, `score.py r8`; paper_rss/sampling `SAMPLERS="pss1 event" LARGE=large_r8 run.sh large`,
+  `SAMPLERS=event BLIND=event run.sh small blind`, `score.py peaks transfer cost_r8 blind`): `MPR_MODE=event` of
+  mprshim.c built with `-DMPR_EVENT_FREE`. Choices fixed before the runs: the free threshold is 4 KiB, not a large
+  size, because any free after the peak lowers anon - free; a free or munmap triggers a sample only if the process has
+  faulted since the last one; the sample reads smaps_rollup with open/read so that it allocates nothing.
+- R9 (`r9pages.sh`, `r9score.py`): trisolv's +80% led to a pages-touched truth for every R1 test input. The pages
+  truth is cumulative distinct pages, not live pages, so it overstates programs that free and reuse (miniVite).

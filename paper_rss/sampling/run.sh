@@ -7,21 +7,26 @@
 #   cc1/<rep>/mmap.*, cc1/memreport.txt                cc1 with its own mappings counted; -fmem-report
 #   thp.txt                                            the huge-page test (thp_test.c)
 #   pages/python/1/{native,truthpages}                 the pages-in-use truth of python under PYTHONMALLOC=malloc
-# Samplers: pss5 (pss, 5 ms), pss1 (pss, 1 ms), fast, faults; plain is the program alone.
+# Samplers: pss5 (pss, 5 ms), pss1 (pss, 1 ms), fast, faults, event (R8 of the dissertation plan: smaps_rollup after
+# page faults and before frees, mprshim-event.so); plain is the program alone.
+#   SAMPLERS="..." picks the samplers of large and small, BLIND="..." those of blind, LARGE=<dir> the directory of large
+#   (R8: SAMPLERS="pss1 event" LARGE=large_r8 run.sh large; SAMPLERS=event BLIND=event run.sh small blind)
 #   paper_rss/sampling/run.sh [part ...]   (parts: thp large small blind py cc1 truth; default all)
 HERE=$(cd "$(dirname "$0")" && pwd)
 D=$HOME/memprint-data/2026-10-26-rsscurve; PAGES=$HOME/memprint-data/2026-10-12-resize/corpus-pages
 OUT=${OUT:-$HOME/memprint-data/2026-11-05-rsssample}; W=$HOME/MemPrint/workloads/src
 mkdir -p $OUT/scratch
 gcc -O2 -shared -fPIC -o $OUT/mprshim.so $HERE/../tools/mprshim.c -lpthread -ldl || exit 1
+gcc -O2 -shared -fPIC -DMPR_EVENT_FREE -o $OUT/mprshim-event.so $HERE/../tools/mprshim.c -lpthread -ldl || exit 1
 gcc -O2 -o $OUT/thp_test $HERE/thp_test.c || exit 1
-SAMPLERS="pss5 pss1 fast faults"
+SAMPLERS=${SAMPLERS:-"pss5 pss1 fast faults"}; BLIND=${BLIND:-"fast faults"}; LARGE=${LARGE:-large}
 
 env_of() { case $1 in   # the shim's environment for a sampler
     pss5) echo "LD_PRELOAD=$OUT/mprshim.so MPR_MODE=pss" ;;
     pss1) echo "LD_PRELOAD=$OUT/mprshim.so MPR_MODE=pss MPR_INT=0.001" ;;
     fast) echo "LD_PRELOAD=$OUT/mprshim.so MPR_MODE=fast" ;;
     faults) echo "LD_PRELOAD=$OUT/mprshim.so MPR_MODE=faults" ;;
+    event) echo "LD_PRELOAD=$OUT/mprshim-event.so MPR_MODE=event" ;;
     plain) echo "" ;;
 esac; }
 
@@ -45,7 +50,7 @@ part_large() {   # plain and every sampler interleaved, 3 rounds
     for rep in 1 2 3; do each large | while read -r prog input threads cwd cmd; do
         args_of "$cmd"; stdin=/dev/null
         [[ $prog == darknet ]] && stdin=$HOME/memprint-data/2026-10-0x-memory_estimator/win/cand/images.txt
-        for s in plain $SAMPLERS; do run $OUT/large/$prog/$rep $s "$cwd" $threads $stdin "${A[@]}"; done
+        for s in plain $SAMPLERS; do run $OUT/$LARGE/$prog/$rep $s "$cwd" $threads $stdin "${A[@]}"; done
     done; done; }
 
 part_small() {
@@ -56,7 +61,7 @@ part_small() {
 
 part_blind() {
     b() { local prog=$1 cfg=$2; shift 2
-        for rep in 1 2 3; do for s in fast faults; do
+        for rep in 1 2 3; do for s in $BLIND; do
             run $OUT/blind/$s/$prog/$cfg/$rep $s $OUT/scratch 1 /dev/null "$@"; done; done; }
     for n in 10 12 14 16 20 24 28; do b hpccg $n $W/hpccg/test_HPCCG $n $n $n; done
     for s in 5 8 10 12 15 18 20; do b lulesh $s $W/lulesh/lulesh2.0 -q -s $s -i 20; done
