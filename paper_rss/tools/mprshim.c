@@ -15,8 +15,11 @@
                   these events only: after every MPR_FAULTS page faults of the process (default 256, as faults; at
                   least every MPR_INT, default here 0.005: trigger t or f); before a free of a block of at least MPR_BIG
                   bytes (default 4096) or an munmap of at least MPR_BIG bytes, in the calling thread, if the process
-                  has faulted since the last sample (x, m; free is interposed only in a build with -DMPR_EVENT_FREE);
-                  and once at exit (e).
+                  has faulted since the last sample (x, m; free is interposed only in a build with -DMPR_EVENT_FREE)
+                  and, to bound the cost, if either MPR_GAP seconds (default 0.001) or ten times the last sample's
+                  own duration, whichever is longer, have passed since the last sample, or the process has faulted in
+                  at least MPR_GROW (default 0.01) of the last sample's anonymous bytes since it (4 KiB per fault), so
+                  that a skipped sample hides at most about that share of the footprint; and once at exit (e).
    MPR_MMAP=1 (with pss): interpose mmap and munmap and add "mapped_bytes", the bytes the program itself maps
    anonymously and has not unmapped (glibc's malloc maps through internal calls, which are not counted).
    Every sampling mode writes "vmhwm_bytes" (the kernel's peak RSS) at exit to <MPR_OUT>.hwm.
@@ -191,6 +194,8 @@ static void quick(int refresh) {
 
 /* One event-mode sample from smaps_rollup; trig names the event. */
 static long last_flt = -1;
+static double last_t = -1, last_dur, gap = 0.001, grow = 0.01;
+static unsigned long last_anon;
 static __thread int busy;
 static pthread_mutex_t elock = PTHREAD_MUTEX_INITIALIZER;
 static long minflt(void) {
@@ -204,8 +209,9 @@ static void event_sample(char trig, int only_if_faulted) {
     busy = 1;
     long fl = minflt();
     pthread_mutex_lock(&elock);
-    int skip = only_if_faulted && fl == last_flt;
-    if (!skip) last_flt = fl;
+    double t0s = now(), wait = 10 * last_dur > gap ? 10 * last_dur : gap;
+    int skip = only_if_faulted && (fl == last_flt || (t0s - last_t < wait && (fl - last_flt) * 4096.0 < grow * last_anon));
+    if (!skip) { last_flt = fl; last_t = t0s; }
     pthread_mutex_unlock(&elock);
     if (!skip) {
         /* open and read, not stdio: the sample allocates nothing, so the free bytes are the program's */
@@ -223,6 +229,8 @@ static void event_sample(char trig, int only_if_faulted) {
         }
         unsigned long fb = free_bytes();
         fprintf(out, "%.6f,%lu,%lu,%lu,%lu,%lu,%c\n", t, v[0], v[1], v[2], fb, v[3], trig);
+        last_dur = now() - t0s;
+        last_anon = v[2];
     }
     busy = 0;
 }
@@ -360,6 +368,8 @@ __attribute__((constructor)) static void start(void) {
     fast = !strcmp(mode, "fast");
     faults = !strcmp(mode, "faults");
     event = !strcmp(mode, "event");
+    if (getenv("MPR_GROW")) grow = atof(getenv("MPR_GROW"));
+    if (getenv("MPR_GAP")) gap = atof(getenv("MPR_GAP"));
     if (getenv("MPR_BIG")) big = (size_t)atol(getenv("MPR_BIG"));
     mmaps = pss && getenv("MPR_MMAP") && atoi(getenv("MPR_MMAP"));
     if (fast) interval = 0.0001;

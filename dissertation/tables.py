@@ -173,6 +173,60 @@ def r1():
     write("r1", "\n".join(rows) + "\n")
 
 
+def m9():
+    m = pd.read_csv(f"{OUT}/m9.csv").set_index("workload")
+    names = {"miniVite": "miniVite, 8{,}192", "gemm": "gemm, MEDIUM", "2mm": "2mm, MEDIUM", "jacobi-2d": "jacobi-2d, MEDIUM",
+             "atax": "atax, MEDIUM"}
+    rows = []
+    for w, n in names.items():
+        r = m.loc[w]
+        rows.append(f"{n} & {r.native:.2f} & {r.instr:.1f} & {r.truth:.1f} & {r.splitter:.1f} & {r['boot-1000']:.1f} & "
+                    f"{r['disj-1000']:.1f} & {r['truth_over_boot-1000']:.1f}$\\times$ & {r['truth_over_disj-1000']:.1f}$\\times$ \\\\")
+    write("m9", "\n".join(rows) + "\n")
+
+
+def r1p():
+    """R1 against the pages truth (primary) and the bytes truth, under the 1 ms and the event sampler."""
+    rows = []
+    for split in ("EXTRA", "INTER"):
+        for tag, name in (("", "smaps\\_rollup, 1 ms"), ("_r8", "Event (R8)")):
+            p = pd.read_csv(f"{OUT}/r1{tag}_pages_splits.csv")
+            b = pd.read_csv(f"{OUT}/r1{tag}_splits.csv")
+            p, b = p[p.split == split], b[b.split == split]
+            f = lambda g, c: f"{g[c].abs().mean():.2f} / {g[c].abs().median():.2f}"
+            cells = [split if tag == "" else "", name, f(p, "err_a"), f(p, "err_b"), f(p, "transfer_err"),
+                     f"{(p.err_b.abs() < 10).sum()} / {(p.transfer_err.abs() < 10).sum()}", f(b, "err_b"), f(b, "transfer_err")]
+            rows.append(" & ".join(cells) + " \\\\")
+        if split == "EXTRA":
+            rows.append("\\midrule")
+    write("r1p", "\n".join(rows) + "\n")
+
+
+def r8():
+    """paper_rss's short-run programs, blind configurations and cost under the 1 ms and the event sampler."""
+    d = os.path.join(HERE, "..", "paper_rss", "data")
+    tr = pd.read_csv(f"{d}/sample_transfer.csv").groupby(["prog", "sampler"]).signed.median().unstack()
+    bl = pd.read_csv(f"{d}/sample_blind.csv")
+    bl = bl[bl.truth.notna()].groupby("sampler").err_b.apply(lambda x: x.abs().median())
+    sp = pd.read_csv(f"{d}/sample_blind_splits.csv")
+    c = pd.read_csv(f"{d}/sample_cost_r8.csv").set_index("prog")
+    pk = pd.read_csv(f"{d}/sample_peaks.csv").groupby("sampler").samples.median()
+    sgn = lambda v: ("$-$" if v < 0 else "$+$") + f"{abs(v):.1f}"
+    cols = ("pss1", "event")
+    rows = []
+    for prog, name in (("npb-mg", "NPB-MG"), ("2mm", "2mm"), ("gemm", "gemm"), ("jacobi-2d", "jacobi-2d"), ("atax", "atax")):
+        rows.append(f"Transfer error, {name} (\\%) & " + " & ".join(sgn(tr.loc[prog, s]) for s in cols) + " \\\\")
+    rows.append(f"Transfer, median $|$error$|$ of {len(tr)} programs (\\%) & " + " & ".join(f"{tr[s].abs().median():.1f}" for s in cols) + " \\\\")
+    rows.append("Blind configurations, median $|$error$|$ of (b) (\\%) & " + " & ".join(f"{bl[s]:.2f}" for s in cols) + " \\\\")
+    for prog in ("CG", "IS", "MG"):
+        rows.append(f"Blind NPB {prog}, transfer from S (\\%) & " + " & ".join(
+            sgn(sp[(sp.program == prog) & (sp.split == "EXTRA") & (sp.sampler == s)].err.iloc[0]) for s in cols) + " \\\\")
+    rows.append("Samples per smaller-input run, median & " + " & ".join(f"{pk[s]:.0f}" for s in cols) + " \\\\")
+    rows.append(f"Run time over the program alone, median of {len(c)} ($\\times$) & " + " & ".join(f"{c[s].median():.2f}" for s in cols) + " \\\\")
+    rows.append("\\quad largest ($\\times$) & " + " & ".join(f"{c[s].max():.2f} ({c[s].idxmax()})" for s in cols) + " \\\\")
+    write("r8", "\n".join(rows) + "\n")
+
+
 def m8():
     m = pd.read_csv(f"{OUT}/m8.csv")
     rows = []
@@ -186,5 +240,5 @@ def m8():
 
 
 if __name__ == "__main__":
-    for part in sys.argv[1:] or ["m1", "l2o", "m2", "m3", "m4", "m6", "m7", "r1", "m8"]:
+    for part in sys.argv[1:] or ["m1", "l2o", "m2", "m3", "m4", "m6", "m7", "r1", "m8", "m9", "r1p", "r8"]:
         globals()[part]()

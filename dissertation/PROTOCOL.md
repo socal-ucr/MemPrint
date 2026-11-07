@@ -166,3 +166,9 @@ i=k/20); native; 5 interleaved rounds. Reported: median per configuration (`m7_k
   faulted since the last one; the sample reads smaps_rollup with open/read so that it allocates nothing.
 - R9 (`r9pages.sh`, `r9score.py`): trisolv's +80% led to a pages-touched truth for every R1 test input. The pages
   truth is cumulative distinct pages, not live pages, so it overstates programs that free and reuse (miniVite).
+- R8, second run (reported): the first run sampled before every free >= 4 KiB after any fault and slowed sqlite
+  1.99x. Added before the second run: a free triggers a sample only if MPR_GAP (1 ms) or ten times the last sample's
+  duration has passed, or the process has faulted in MPR_GROW (1%) of its anonymous bytes since the last sample.
+  Every R8 measurement was repeated with this rule.
+- R1 is scored primarily against the pages-touched truth (`score.py r1p`, r9pages.sh now covers all 194 inputs),
+  with the bytes-touched truth as the second column.

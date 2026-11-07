@@ -30,18 +30,20 @@ This document reports the experiments that the dissertation plan lists for Chapt
 corrections they make to the published \memprint{} results. The central change is the definition of the true
 footprint. The published results count, for each start address, the largest access made from that address
 (the \emph{start-address} truth). The chapter now uses the number of distinct bytes the program reads or writes
-(the \emph{bytes-touched} truth), which is the definition that the motivation section and Chapter 3 use. Every
+(the \emph{bytes-touched} truth), which is the definition that the motivation section uses. Every
 \memprint{} number in this document is computed under the bytes-touched truth, and every published number is
-shown next to it as the original result.
+shown next to it as the original result. Chapter 3's model measures resident pages, so Section~\ref{sec:ch3}
+scores it primarily against a \emph{pages-touched} truth and reports the bytes-touched error next to it.
 
 The experiments answer five questions. First, whether the analysis pipeline reproduces the published accuracy,
 and how much that accuracy changes under the bytes-touched truth (M1, M5 and M8). Second, whether the published
 sampler labels its bins with the interval they actually sample (M2). Third, whether the sampler's bins behave
 like the splitter's bins, on which every published test error was computed (M3). Fourth, how the heap profilers
-compare with the corrected truth and how much the sampler costs (M6 and M7). Fifth, how the resident-memory model
-of Chapter 3 performs on \memprint{}'s own inputs (R1). The protocol, including the decision rule of M3, was
-committed before any run (commit \texttt{f32d036}), and Section~\ref{sec:amend} lists the two changes made after
-the runs. The GPU experiments of Chapters 5 and 6 are out of scope here.
+compare with the corrected truth and how much the sampler costs, against the program alone and against the run
+that measures the truth (M6, M7 and M9). Fifth, how the resident-memory model of Chapter 3 performs on
+\memprint{}'s own inputs, with its published sampler and with a sampler triggered by events, against both truths
+(R1, R8 and R9). The protocol, including the decision rule of M3, was committed before any run (commit
+\texttt{f32d036}), and Section~\ref{sec:amend} lists the changes and additions made after the runs. The GPU experiments of Chapters 5 and 6 are out of scope here.
 
 Table~\ref{tab:changes} summarizes the numbers in the chapter that change. Section~\ref{sec:setup} describes the
 setup, Section~\ref{sec:ch2} the \memprint{} experiments, Section~\ref{sec:ch3} the resident-memory model, and
@@ -68,6 +70,8 @@ Bins per interval & 50 (text) & 20 (Section~\ref{sec:m8}) \\
 Intervals used per workload & ``12 or 13'' & 9 to 13 (Table~\ref{tab:m8}) \\
 Sampler wall time, miniVite 8,192 vertices & 42.1 s at 1 in 500; 52.2 s at 1 in 1,000; 46.1 s at 1 in 2,500
   & 30.9 s, 27.9 s and 25.6 s at those actual bin intervals (Table~\ref{tab:m7}) \\
+Sampler cost against full instrumentation & ``a fraction'' & 1.9$\times$ and 2.5$\times$ faster than the truth
+  run on miniVite, 3.3$\times$ to 8.4$\times$ on PolyBench at MEDIUM (Table~\ref{tab:m9}) \\
 Cumulative training cost & 216, 484 (438.77 in the text), 720 and 1,093 s & 46, 87 and 188 s
   (Figure~\ref{fig:cumulative}) \\
 Heap profilers against the truth & ``substantially underestimate'' & gemm 0.12$\times$ to 0.92$\times$;
@@ -84,7 +88,7 @@ All runs used one machine, the one on which the published overheads were measure
 E5-2620 v4 processors at 2.10 GHz (32 hardware threads) and 62 GiB of memory, and it runs Linux 4.18 with
 glibc 2.28 and GCC 8.5.0. The tracing tools run on Pin 3.30. Every program ran with one OpenMP thread
 (\texttt{OMP\_NUM\_THREADS=1}), which is the thread count of the bytes-touched retrace, and the runs ran one at a
-time. The Pin tool used for all runs is a frozen copy of \texttt{pintool/memprint\_trace.cpp} at commit
+time, except the truth runs of R9, which ran 8 at a time and measure no time. The Pin tool used for all runs is a frozen copy of \texttt{pintool/memprint\_trace.cpp} at commit
 \texttt{f32d036}.
 
 \paragraph{Workloads and inputs.}
@@ -478,6 +482,45 @@ at 1 in 500). The disjoint sampler is the cheapest at every interval (28.7 s at 
 bootstrap), because it copies each kept reference into one bin rather than about ten. The splitter, which records
 all 13 intervals at once and is the cost of training, takes 87.7 s.
 
+\subsection{M9. The sampler against the truth run}
+\label{sec:m9}
+
+The chapter states that the sampler costs a fraction of full instrumentation. The full instrumentation that the
+sampler replaces is the run that measures the truth, which records every reference. We timed that run as the
+splitter with one interval and one bin, which gives the same footprint as the splitter's complete trace (222,014
+against 222,010 bytes for gemm at SMALL). We timed it on miniVite at 8,192 vertices and on four PolyBench kernels at
+MEDIUM, next to the native run, the tool with sampling off, the bootstrap ($s=100$, $r=10$) and the disjoint sampler
+(20 bins) at a bin interval of 1 in 1,000, and the full splitter. Every run used the bytes-touched footprint, and the
+miniVite runs left out the allocator's references as in M4. The six runs of each workload were interleaved over 5
+rounds.
+
+\begin{table}[htbp]
+\centering
+\caption{Wall time (s), median of 5 rounds, and the truth run's time over each sampler's. The samplers run at a bin
+interval of 1 in 1,000.}
+\label{tab:m9}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+& & Sampling & & & & & \multicolumn{2}{c}{Truth run over} \\
+\cmidrule(l){8-9}
+Workload & Native & off & Truth run & Splitter & Bootstrap & Disjoint & Bootstrap & Disjoint \\
+\midrule
+\tabinput{m9}
+\bottomrule
+\end{tabular}
+\end{table}
+
+The claim holds for the PolyBench kernels and is weak for miniVite (Table~\ref{tab:m9}). At MEDIUM, the bootstrap
+is 3.3$\times$ to 4.0$\times$ faster than the truth run and the disjoint sampler 7.0$\times$ to 8.4$\times$, on
+gemm, 2mm and jacobi-2d. On miniVite the bootstrap is only 1.9$\times$ faster (35.9 s against 68.7 s) and the
+disjoint sampler 2.5$\times$, because running the tool with sampling off already takes 25.5 s. The saving of any
+sampler is bounded by the truth run's time over the instrumentation floor, which is 2.7$\times$ for miniVite and
+9.9$\times$ to 13.1$\times$ for gemm, 2mm and jacobi-2d. atax runs for 0.01 s natively, so Pin's start-up
+dominates every run and no sampler saves time. The chapter should state the saving with these numbers rather than
+as a fraction.
+
 \subsection{M8. Bins, intervals and the training overhead}
 \label{sec:m8}
 
@@ -508,70 +551,163 @@ Workload & Used & Dropped & Used & Dropped \\
 \section{Chapter 3: the resident-memory model on \memprint{}'s inputs}
 \label{sec:ch3}
 
+R1 tests the resident-memory model on the 28 workloads of Chapter 2. Its first result led to two further
+experiments. R8 replaces the model's sampler, which missed the peak of runs that last a few milliseconds, and R9
+explains the largest error at the held-out inputs and changes the truth that R1 is scored against. The
+results of R1 (Section~\ref{sec:r1}) therefore report both samplers against both truths.
+
 \subsection{R1. Setup}
+\label{sec:r1setup}
+
 We ran each of the 27 PolyBench kernels at its seven inputs and miniVite at its five natively, 3 times each, under
-the shim that samples \texttt{/proc/self/smaps\_rollup} every 1 ms, which Chapter 3 found to be the best sampler for
-short runs. The truth is the bytes-touched truth of the same input. Both quantities cover the whole run, and the
-PolyBench kernels allocate their arrays once, so the peak of memory in use should equal the bytes touched up to the
-runtime's share.
+each of two samplers of the shim. The first reads \texttt{/proc/self/smaps\_rollup} every 1 ms, which Chapter 3
+found to be the best periodic sampler for short runs. The second is the event sampler of Section~\ref{sec:r8}.
 
 We scored three predictions of the footprint, as in Chapter 3's blind test. Prediction (a) is the largest
 anonymous memory minus the allocator's free memory during the run, the median of 3 runs. Prediction (b) adds to
-(a) a constant $R$, the median of truth minus (a) over the other workloads' inputs, which is about 153,000 bytes.
-Prediction (c) is Chapter 3's transfer rule, a linear fit of (a) against the input size over the workload's other
-inputs, evaluated at the held-out input, plus $R$. The input size is the number of array elements the kernel
-declares at that dataset, from its header, and the number of vertices for miniVite.
+(a) a constant $R$, the median of truth minus (a) over the other workloads' inputs. Prediction (c) is Chapter 3's
+transfer rule, a linear fit of (a) against the input size over the workload's other inputs, evaluated at the
+held-out input, plus $R$. The input size is the number of array elements the kernel declares at that dataset, from
+its header, and the number of vertices for miniVite. The interpolation column of (c) uses the floor of Chapter 3's
+post hoc variant (the largest peak of the smaller inputs only), and the protocol fixed only the extrapolation
+column.
 
-\subsection{R1. Results}
+The primary truth is the \emph{pages-touched} truth, the number of distinct 4 KiB pages that a complete trace of the
+run reads or writes, times 4,096. It comes from the same Pin tool with one interval and one bin
+(\texttt{-footprint pages}). A resident-memory measurement counts whole pages, so the pages-touched truth is the
+quantity the model can observe. We also report the error against the bytes-touched truth of Chapter 2, to show how
+much the conclusion depends on the definition. Both truths count what the run touches at any time, not what is in
+use at its peak, so both overstate a program that frees memory and touches new memory later. The PolyBench
+kernels allocate their arrays once, and among these workloads miniVite is the one that allocates and frees during
+the run.
+
+\subsection{R9. Pages against bytes}
+\label{sec:r9}
+
+The first scoring of R1, against the bytes-touched truth, had one large error at the largest inputs. Prediction
+(b) overestimated trisolv at MEDIUM by 80\%, because the measured peak (1.21 MB) exceeded the truth (0.75 MB).
+trisolv initializes and reads only the lower triangle of its $400 \times 400$ matrix of doubles. A row is
+3,200 bytes, shorter than a page, so every page of the matrix holds the start of some row, and the kernel touches
+every page while it touches only half of the bytes. Its pages-touched truth is 1,613,824 bytes, 2.14$\times$ the
+bytes-touched truth, and against it prediction (b) is within 0.1\% (Table~\ref{tab:r1}). trmm, the second error
+at MEDIUM, is triangular in the same way.
+
+The two truths differ for every workload, by an amount that depends on the input size. At MEDIUM, the
+pages-touched truth is 1.19$\times$ the bytes-touched truth at the median (1.08$\times$ to 2.14$\times$). At the
+smaller inputs it is 2.21$\times$ (1.19$\times$ to 3.32$\times$), because there the arrays are a few hundred
+kilobytes or less and the runtime's pages (the stack, static data and the libraries' writable pages), which the
+program touches only in part, are a large share of the footprint. The bytes-touched truth of each held-out input
+measured again in R9 differed from the stored one by at most 0.98\%, because the environment and arguments of a run
+change the stack it touches.
+
+\subsection{R8. A sampler triggered by events}
+\label{sec:r8}
+
+The 1 ms sampler measured no memory above the allocator's free memory for 67 of the 194 inputs, all of them
+PolyBench runs of a few milliseconds whose arrays it never saw. The event sampler reads
+\texttt{/proc/self/smaps\_rollup}, which walks the page tables, rather than the status counters, which lag the page
+tables on short runs on this kernel (Chapter 3). It takes a sample at four kinds of events. First, a page-fault
+event of the process wakes the sampler thread after every 256 faults, and a timer wakes it at least every 5 ms.
+Second, before the program frees a block of at least 4 KiB or unmaps at least 4 KiB, the shim samples in the
+calling thread. Third, it samples once at exit. A sample reads the file with \texttt{open} and \texttt{read} and
+allocates nothing, so the allocator's free memory is the program's own.
+
+The free threshold is small on purpose. Any free after the peak lowers anonymous memory minus free memory, so a
+sampler that waits for a large free can miss the peak by everything the program frees before it. A sample before a
+free is taken only if the process has faulted since the last sample, and only if 1 ms or ten times the last
+sample's duration, whichever is longer, has passed, or if the process has faulted in at least 1\% of its anonymous
+memory since the last sample. A skipped sample therefore hides at most about 1\% of the footprint. The time and
+growth conditions were added after the first run of R8 (Section~\ref{sec:amend}). Without them, sqlite took 3,761
+samples before frees in a run of one second and ran 1.99$\times$ slower than alone.
 
 \begin{table}[htbp]
 \centering
-\caption{The resident-memory model at the held-out inputs of the 28 workloads. The model's columns give the absolute error against the
-bytes-touched truth (\%) as mean / median, next to \memprint{}'s L2O test MAPE (\%), mean / median. The last column
-counts the workloads within 10\% for (b) and (c).}
-\label{tab:r1}
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lrrrrrr@{}}
+\caption{The event sampler on Chapter 3's programs, against the 1 ms sampler. Transfer errors are signed, the
+median of 3 runs, against Chapter 3's pages-in-use truth. Run time is the median of 3 interleaved rounds at each
+program's largest input.}
+\label{tab:r8}
+\small
+\begin{tabular}{@{}lrr@{}}
 \toprule
-& \multicolumn{3}{c}{Resident-memory model} & \multicolumn{2}{c}{\memprint{} L2O} & \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-6}
-Split & (a) Measured & (b) Measured $+R$ & (c) Transfer $+R$ & Splitter bins & Sampler bins & Within 10\% \\
+& 1 ms & Event \\
 \midrule
-\tabinput{r1}
+\tabinput{r8}
 \bottomrule
 \end{tabular}
 \end{table}
 
-At the largest inputs, measuring the run natively and adding the constant $R$ is more accurate than \memprint{}
-(Table~\ref{tab:r1}). Prediction (b) has a median error of 2.82\% and a mean of 5.90\%, with 26 of 28 workloads
-within 10\%, against \memprint{}'s 9.49\% median and 12.16\% mean on the sampler's bins. Prediction (b) costs one
-native run, a fraction of a second here, against one sampled Pin run of 25 s or more. The two exceptions are
-trisolv, which (b) overestimates by 80\% because its measured peak at MEDIUM (1.21 MB) exceeds the truth
-(0.75 MB), and trmm, overestimated by 18\%.
+On \memprint{}'s inputs, the event sampler measures every run. No input measures zero, and the constant $R$
+against the pages-touched truth falls from 404,416 to 275,344 bytes, because $R$ no longer has to stand in for
+missed arrays. On Chapter 3's own programs, the event sampler matches the 1 ms sampler without improving it
+(Table~\ref{tab:r8}). The four programs that Chapter 3 names as short runs transfer within 4.5\% under both
+samplers, and the median error over all programs is 2.7\% against 2.1\%. The blind NPB configurations extrapolate
+worse under the event sampler (IS +40.9\% and MG +40.0\%, against +16.7\% and +25.6\%), although it measures each
+target input to within 1\%. Each of these programs has a single smaller input with a truth, S, and the transfer
+rule scales the S measurement in proportion to the size. The event sampler measures more of S's memory, including
+the program's fixed share, and scaling that share overestimates the larger input. atax transfers worse under the
+event sampler ($-$51.2\% against $-$33.0\%), and both samplers fail on it. The cost is the same as the 1 ms
+sampler's (1.06$\times$ against 1.05$\times$ at the median), and sqlite, with 116 samples before frees, runs
+1.18$\times$ slower than alone, against 1.99$\times$ in the first run of R8.
 
-At the middle inputs, the native measurement fails. Prediction (b) has a median error of 24.36\% and only 2 of 28
-workloads within 10\%. At SMALL, a PolyBench kernel runs for a few milliseconds and its arrays occupy about 100 kilobytes or less, so a 1 ms sampler often reads the process before the arrays are touched, and 6 of the 28 runs measure no
-memory above the free memory at all. The transfer rule (c), which predicts the middle input from the other inputs,
-recovers much of the accuracy, with a median of 4.97\% and 21 of 28 within 10\%, but \memprint{} is still better
-there (2.49\% median on the sampler's bins). At the largest inputs the transfer rule is worse than measuring
-directly (8.97\% median and an 88.8\% maximum for mvt), because the small inputs it extrapolates from are the ones
-the sampler measures poorly. The interpolation column of (c) uses the floor of Chapter 3's post hoc variant (the
-largest peak of the smaller inputs only), and the protocol fixed only the extrapolation column.
+\subsection{R1. Results}
+\label{sec:r1}
 
-The comparison therefore splits by run length rather than by method. For a run long enough for the sampler to see
-its peak, a native measurement plus a constant is cheaper and more accurate than \memprint{}. For runs of a few
-milliseconds, \memprint{}'s trace sees every reference and the native sampler does not, and Chapter 3's own
-limitation on short runs applies.
+\begin{table}[htbp]
+\centering
+\caption{The resident-memory model at the held-out inputs of the 28 workloads, as absolute error (\%) mean /
+median, against the pages-touched truth and, for (b) and (c), against the bytes-touched truth. ``Within 10\%''
+counts workloads for (b) / (c) against the pages-touched truth.}
+\label{tab:r1}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+& & \multicolumn{4}{c}{Pages-touched truth} & \multicolumn{2}{c}{Bytes-touched truth} \\
+\cmidrule(lr){3-6}\cmidrule(l){7-8}
+Split & Sampler & (a) & (b) $+R$ & (c) Transfer & Within 10\% & (b) $+R$ & (c) Transfer \\
+\midrule
+\tabinput{r1p}
+\bottomrule
+\end{tabular}
+\end{table}
+
+With the event sampler and the pages-touched truth, the native measurement plus the constant $R$ predicts the
+largest inputs with a median error of 0.56\% and a mean of 1.45\%, and 27 of 28 workloads are within 10\%
+(Table~\ref{tab:r1}). The exception is miniVite ($-$16.5\%), whose truth counts the memory it frees and touches
+again. The transfer rule (c) has a median error of 3.65\% and all 28 workloads within 10\%. For comparison,
+\memprint{}'s L2O predicts the bytes-touched truth of the same inputs with a median error of 6.09\% on the
+splitter's bins and 9.49\% on the sampler's, so each method is compared with the truth it estimates. The native
+prediction costs one run of the program, against one sampled Pin run that M9 timed at 1.6 s to 11.3 s for PolyBench at
+MEDIUM and 35.9 s for miniVite at 8,192 vertices.
+
+At the middle inputs, prediction (b) has a median error of 7.98\% and 18 of 28 workloads within 10\%, and the
+transfer rule does better, with 4.09\% and 26 of 28. The middle inputs are SMALL for every PolyBench kernel. There
+the measured memory is 130 to 380 kilobytes, about as large as $R$, so the error of (b) is mostly the difference between
+the kernel's own runtime pages and the median of the other kernels'. That difference reaches $+$24.1\% for
+seidel-2d and $-$20.5\% for correlation. The transfer rule fits the workload's own measurements across its inputs,
+so its intercept absorbs part of that difference.
+
+The 1 ms sampler gives the same picture at the largest inputs against the pages-touched truth (0.72\% median for
+(b)), because a run at MEDIUM is long enough to sample, but the transfer rule then extrapolates from the small
+inputs it measured as zero and has a mean error of 18.94\%. Against the bytes-touched truth, the event sampler's
+(b) has nearly the same median at the largest inputs (0.77\%) but a mean of 4.51\%, because trisolv ($+$84\%) and
+trmm ($+$23\%) are triangular, and at the middle inputs its median error rises from 7.98\% to 14.19\%. The choice
+of truth therefore changes the middle inputs by about 6 points and the two triangular kernels by up to 84 points,
+and it does not change the result at the other largest inputs.
 
 \section{Changes to the protocol after the runs}
 \label{sec:amend}
 
-Two changes were made after the runs and are marked in \texttt{dissertation/PROTOCOL.md}. First, the protocol's
+The following changes were made after the runs and are marked in \texttt{dissertation/PROTOCOL.md}. First, the protocol's
 timing (M7) ran at $i = 500$, 1,000 and 2,500, as the plan states. M2 then showed that the published numbers were
 measured at different bin intervals, so we added the matched-interval timing of Section~\ref{sec:m7} and report it
 instead. Second, R1's transfer rule needs each input's size, which the protocol did not define. We used the number
-of declared array elements. The decision rule of M3 and every other analysis ran as written.
+of declared array elements. Third, M9, R8 and R9 were added to the plan after the first runs, and their designs
+were fixed before their own runs, with one exception. The first run of R8 sampled before every free of at least
+4 KiB that followed a fault, which slowed sqlite 1.99$\times$. We then added the time and growth conditions of
+Section~\ref{sec:r8} and repeated every R8 measurement, and only the second run is reported. Fourth, R9's result
+led us to score R1 primarily against the pages-touched truth, which the protocol did not define, and to keep the
+bytes-touched truth as the second column. The decision rule of M3 and every other analysis ran as written.
 
 \section{Open questions}
 \label{sec:open}
@@ -580,7 +716,11 @@ The reproduction of M1 leaves a residual of 0.06 and 0.09 point that rounding do
 published per-workload coefficients with the refitted ones would locate it, but no published number depends on it.
 The chapter's 52.2 s and 46.1 s cannot be traced to any log, so the chapter should replace them rather than explain
 them. The heap-profiler comparison covers gemm and miniVite only, and the sign change for miniVite rests on five
-inputs and one run each. Finally, R1 shows that the resident-memory model needs runs longer than its sampling
-period, and Chapter 3 should state this limit with the PolyBench numbers above.
+inputs and one run each. R1's remaining error at the middle inputs comes from the constant $R$ at inputs whose
+arrays are smaller than the runtime's own pages. Chapter 3's in-run base, measured at the start of each run, may
+remove it, and we did not test it here. Both truths count every page or byte touched during the run, so they
+overstate miniVite, and a truth that counts the pages in use at the peak would remove that bias. Finally, the
+event sampler does not improve the blind NPB extrapolations, whose error comes from the transfer rule's
+proportional scaling from a single input.
 
 \end{document}

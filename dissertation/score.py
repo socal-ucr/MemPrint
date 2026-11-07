@@ -209,7 +209,7 @@ def input_size(w, config):
     return total
 
 
-def r1(sampler="pss1", tag=""):
+def r1(sampler="pss1", tag="", truth_src="bytes"):
     """(a) the largest anon - free of the run, median of 3; (b) (a) + R, R the median of truth - (a) over the other
     workloads' configs (paper_rss/blind/score.py)."""
     import numpy as np
@@ -222,7 +222,8 @@ def r1(sampler="pss1", tag=""):
             for rep in (1, 2, 3):
                 r = pd.read_csv(f"{OUT}/r1/{w}/{c}/{rep}/{sampler}.csv")
                 peaks.append((r.anon_bytes - r.free_bytes).clip(lower=0).max())
-            rows.append(dict(workload=w, config=str(c), truth=p.truth[c], measured=float(np.median(peaks)),
+            t = p.truth[c] if truth_src == "bytes" else pages_truth(w, c)
+            rows.append(dict(workload=w, config=str(c), truth=t, bytes_truth=p.truth[c], measured=float(np.median(peaks)),
                              split="EXTRA" if c == p.last_config else "INTER" if c == p.middle_config else ""))
     m = pd.DataFrame(rows)
     m["R"] = [float((m[m.workload != w].truth - m[m.workload != w].measured).median()) for w in m.workload]
@@ -265,6 +266,19 @@ def m9():
     m.to_csv(f"{OUT}/m9.csv")
     print(t.groupby(["workload", "config"]).seconds.agg(["count", "min", "max"]).round(2).unstack().to_string())
     print(m.round(2).to_string())
+
+
+def pages_truth(w, c):
+    """R9's pages-touched truth of an R1 input (dissertation/r9pages.sh)."""
+    import glob
+    f = [x for x in glob.glob(f"{OUT}/r9/all/pages/{w}/{c}/Buffered_*.csv") if "SubSample" not in x]
+    return float(pd.read_csv(f[0]).MemUsageObs.iloc[0])
+
+
+def r1p():
+    """R1 against the pages-touched truth (primary for Ch. 3), under the 1 ms and the event sampler."""
+    r1("pss1", "_pages", "pages")
+    r1("event", "_r8_pages", "pages")
 
 
 def r8():
