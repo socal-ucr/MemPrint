@@ -52,8 +52,8 @@ and can embed the reservations in the binary. Third, \libmpr{}, linked or preloa
 prefix or ranges of a block and maps the rest \texttt{MAP\_NORESERVE}, so that an under-prediction costs commit
 accounting and never correctness; it also skips the zeroing of pages a program has never touched. Every program
 we ran produced its original output. On llama.cpp, which sizes and zeroes a KV cache for an 8192-token context,
-\libmpr{} reduces peak commit by 86\% and peak RSS by 54\% with a 135M-parameter model (90\% and 45\% with a 360M
-model), and profiles from other model sizes do as well. It reduces commit by 85\% on llama2.c, whose KV caches
+\libmpr{} reduces peak commit by 86\% and peak RSS by 52\% with a 135M-parameter model (89\% and 44\% with a 360M
+model), and profiles from other model sizes do almost as well. It reduces commit by 85\% on llama2.c, whose KV caches
 are used in one range per layer, by 47\% on darknet AlexNet inference, and by 22\% on miniVite with the pass's
 per-call-site container capacities. Across a 23-program HPC and interpreter corpus, where most programs already
 hold about what they touch, it changes no output and no total RSS, keeps run time within $-5\%$ to $+7\%$, and
@@ -64,8 +64,8 @@ token count leaves no KV cache used beyond its commitment, where a reservation f
 27\,MB. Finally, \memprint{}'s static interpreter now produces the same per-site profile from source: on GAP's
 kernels it finds every site Pin finds, with total high water within 0.5\%, and its reservations perform as Pin's do.
 \libmpr{} can also take the profile itself, from the pages each block touched, in one native run: over 28
-configurations its reservations commit what the Pin profile's do (2{,}391 against 2{,}383\,MB) after 95\,s of
-profiling instead of 21{,}676\,s. Mapping threads' stacks \texttt{MAP\_NORESERVE} cuts a further 60\% of the commit of
+configurations its reservations commit what the Pin profile's do (2{,}394 against 2{,}386\,MB) after 95\,s of
+profiling instead of 21{,}676\,s. Mapping threads' stacks \texttt{MAP\_NORESERVE} cuts a further 57 to 63\% of the commit of
 miniVite and llama.cpp, and a second run parameter, the prompt's length, leaves nothing beyond the commitment on 9
 of 10 unseen llama.cpp inputs. Against three published memory-provisioning policies, Pond, dynamic provisioning
 and KS+, which change what a system holds for a job but not what the job commits or touches, \libmpr{} holds 23\%
@@ -130,7 +130,7 @@ In this work, we make the following contributions:
   \item We extend \memprint{}'s static interpreter to produce the per-site profile from source, keyed by the
   pass's identifiers through its site map (\secref{sec:static}).
   \item We evaluate the system on darknet, miniVite, two LLM inference engines and a 23-program corpus. It cuts
-  llama.cpp's commit by 86\% and its resident memory by 54\%, and llama2.c's commit by 85\%, with identical
+  llama.cpp's commit by 86\% and its resident memory by 52\%, and llama2.c's commit by 85\%, with identical
   outputs and no time cost, and we measure what each refinement adds (\secref{sec:eval}). The savings hold on
   21 unseen LLM inputs, and the parameterised reservation follows their lengths (\secref{sec:inputs}); the
   static profiles of GAP agree with Pin's site by site (\secref{sec:staticeval}).
@@ -828,6 +828,21 @@ the reference and Extraction networks; for miniVite, 8192 and 16384 vertices). T
 with calling contexts, shaped reservations, zeroing left out of the profile, and per-call-site container
 capacities the \term{refined} version.
 
+\textbf{A correction to the llama.cpp runs.} An earlier version of \libmpr{} read each reservation line into a
+512-byte buffer and dropped the rest of a longer line. The only lines this long are those of llama.cpp's KV cache,
+whose \texttt{runs} models list 60 to 120 ranges, of which \libmpr{} kept the first 24; with the own profile of the
+135M model at 32 tokens it committed 0.5\,MB of the cache where the run used 1.0\,MB. \libmpr{} now reads lines of up
+to 8{,}192 bytes and skips a longer line with a warning. Every llama.cpp configuration that used these reservations
+(\tabref{tab:headline}, \tabref{tab:improvements}, \tabref{tab:inputs}, \tabref{tab:passpreload}, \tabref{tab:stacks}
+and \tabref{tab:nprof}) was run again with the corrected \libmpr{}, with glibc interleaved; the commit under \libmpr{}
+rises by 0.4 to 2.7\,MB with each model's own profile and by up to 7.3\,MB with held-out and pooled ones, and RSS and outputs do not change. In
+these new runs glibc's peak RSS is 16\,MB lower than in the original runs (363 against 380\,MB for the 135M model), all
+of it anonymous memory, with identical output; we attribute this to fewer transparent huge pages being available on
+the machine, and the RSS reductions we report for llama.cpp are 1.4 to 2.4 percentage points smaller because of it.
+The comparison with provisioning policies (\secref{sec:baselines}) and the cluster simulation (\secref{sec:cluster})
+use the original runs: they take each run's peak of commit and RSS, and llama.cpp's commit under \libmpr{} (57 to
+62\,MB) stays far below its RSS (176 to 426\,MB), so the correction does not change them.
+
 \subsection{Headline results}
 
 \begin{table}[t]
@@ -848,11 +863,11 @@ identical to glibc's.}
 \end{figure}
 
 \tabref{tab:headline} and \figref{fig:headline} summarise the results. With its own profile, \libmpr{} reduces peak
-commit by 86.3\% on llama.cpp with the 135M model (404.5 to 55.6\,MB) and by 90.0\% with the 360M model (560.5 to
-56.3\,MB), and it reduces peak RSS by 53.9\% and 45.5\%. It reduces commit by 84.5\% on llama2.c 110M (78.2 to
-12.1\,MB) and by 46.8\% on darknet. Held-out profiles do as well on llama.cpp, where the sites are the same code
+commit by 85.9\% on llama.cpp with the 135M model (404.5 to 56.9\,MB) and by 89.5\% with the 360M model (560.5 to
+58.9\,MB), and it reduces peak RSS by 51.5\% and 44.1\%. It reduces commit by 84.5\% on llama2.c 110M (78.2 to
+12.1\,MB) and by 46.8\% on darknet. Held-out profiles do almost as well on llama.cpp (at most 4.5\,MB more), where the sites are the same code
 paths at every model size. Every run of every workload produced glibc's output, and run time stayed between
-0.93$\times$ and 1.02$\times$ of glibc.
+0.90$\times$ and 1.02$\times$ of glibc.
 
 \subsection{Effect of the refinements}
 \label{sec:refined}
@@ -873,7 +888,7 @@ own profiles. miniVite is the \pass{} build; its glibc bar is the build without 
 \end{table}
 
 \figref{fig:improvements} and \tabref{tab:improvements} compare the first and the refined version. The
-refinements reduce llama.cpp's commit by a further 79\% (265.1 to 55.6\,MB) and llama2.c 110M's by 83\% (72.8 to
+refinements reduce llama.cpp's commit by a further 79\% (265.1 to 56.9\,MB) and llama2.c 110M's by 83\% (72.8 to
 12.1\,MB). Three refinements combine on llama.cpp:
 \begin{itemize}
   \item \textbf{Zeroing left out of the profile.} The first profile counted the start-up \texttt{memset} as touching
@@ -883,7 +898,7 @@ refinements reduce llama.cpp's commit by a further 79\% (265.1 to 55.6\,MB) and 
   one site in \texttt{ggml\_aligned\_malloc}. The fit splits that site by two caller frames, and each buffer gets
   its own model.
   \item \textbf{Shaped reservations.} The KV cache is 60 tensors (30 layers, K and V), each written in its first
-  rows. Its \texttt{runs} reservation commits 1.0\,MB of the cache, against 189\,MB for any prefix, and the compute
+  rows. Its \texttt{runs} reservation commits 1.2\,MB of the cache, against 189\,MB for any prefix, and the compute
   buffer's commits 0.4\,MB of 115\,MB.
 \end{itemize}
 On llama2.c, the shaped reservation alone does the work: each KV cache gets one committed range per layer.
@@ -987,16 +1002,16 @@ whole KV cache with \texttt{memset} at start-up and again after its warm-up deco
 therefore resident although a 32-token completion uses 0.4\% of it. The model's weights are mapped from the GGUF
 file, so their 143\,MB count in RSS but not in commit.
 
-RSS and commit fall for different reasons (\figref{fig:llamacpp}). RSS falls from 380\,MB to 175\,MB because of
+RSS and commit fall for different reasons (\figref{fig:llamacpp}). RSS falls from 363\,MB to 176\,MB because of
 the zero skipping. To attribute it, we recorded each buffer's address and measured its resident pages at the
 peak from \texttt{/proc/<pid>/pagemap} under four configurations of the first runtime. Without zero skipping,
 the KV cache holds 188.7\,MB, as under glibc. Skipping the zeroing alone leaves 123.7\,MB, all of it huge pages
 faulted in by the warm-up's writes of one row per layer. Skipping the zeroing and keeping huge pages off the
 skipped pages leaves 1.0\,MB. The compute buffer holds 15 to 17\,MB under every configuration, which is the part
 llama.cpp uses at the peak, and the remaining 174\,MB (weights, heap and code) does not change. Commit falls
-from 404.5\,MB to 55.6\,MB because of the reservations (\secref{sec:refined}): the scheduler arrays are
-\texttt{dead}, and the KV cache and the compute buffer are committed in ranges. Run time does not change (0.71\,s
-against 0.73\,s for 32 tokens, 1.81\,s against 1.95\,s for the 360M model).
+from 404.5\,MB to 56.9\,MB because of the reservations (\secref{sec:refined}): the scheduler arrays are
+\texttt{dead}, and the KV cache and the compute buffer are committed in ranges. Run time does not grow (0.74\,s
+against 0.79\,s for 32 tokens, 1.80\,s against 2.00\,s for the 360M model).
 
 \label{sec:llama2c}
 \textbf{llama2.c.} llama2.c's KV caches are also sized for the full sequence (37.7\,MB each for the 110M model,
@@ -1035,23 +1050,23 @@ so at the full sequence length the periodic reservation commits what glibc does.
 
 A profile describes the input it was taken on. We ran both engines on 21 inputs that no profile saw, with the
 reservations from each model's default-input profile (\tabref{tab:inputs}). All 189 runs produced glibc's output.
-llama.cpp's commit stays at about 56\,MB on every input, 78 to 90\% below glibc's, and its RSS falls by 24 to 53\%.
-llama2.c's falls by about 80\% for the 42M and 110M models. Profiling the new input itself gains nothing: for
-llama.cpp at 512 tokens the input's own profile commits 54.9\,MB (56.0 per-model), at context 2048 56.2\,MB (55.7),
+llama.cpp's commit stays between 56 and 59\,MB on every input, 78 to 89\% below glibc's, and its RSS falls by 19 to 52\%.
+llama2.c's falls by about 80\% for the 42M and 110M models. Profiling the new input itself gains little: for
+llama.cpp at 512 tokens the input's own profile commits 55.1\,MB (56.9 per-model), at context 2048 57.6\,MB (56.1),
 and for llama2.c 42M at 512 steps 10.0\,MB (7.7), because its ranges cover the rows the longer run writes.
-Pooling the profiles of all models of an engine costs little for llama.cpp (56.3 to 57.8\,MB) and much for
+Pooling the profiles of all models of an engine costs 2 to 6\,MB for llama.cpp (58.0 to 65.1\,MB) and much for
 llama2.c (49\,MB instead of 13\,MB for 110M), whose models have 6, 8 and 12 layers, so the ranges of one fall
 elsewhere in another's blocks.
 
 The commit, however, stops describing the run when the run is longer than the profile. The per-model reservation
-of llama.cpp's KV cache covers the rows of a 36-token run, so a 1{,}024-token run writes 23.4\,MB beyond it, and
+of llama.cpp's KV cache covers the rows of a 36-token run, so a 1{,}024-token run writes 22.6\,MB beyond it, and
 llama2.c 110M writes 27.2\,MB beyond it at 1{,}024 steps (\figref{fig:inputs}). This is safe, since the kernel
 backs those pages on touch, but a scheduler reading the commit would under-count the job. The \texttt{periodic}
 reservation (\secref{sec:fit}) removes it. With $T$ from the run, no KV cache was used beyond its commitment on
-any input, except 0.25\,MB on the 136-token prompt, and the commit grows with the run: 56.7\,MB at 20 tokens, 62.1
-at 260, 68.0 at 516 and 80.0 at 1{,}032 for llama.cpp 135M, against 405\,MB under glibc. RSS does not change, since
+any input, except 0.25\,MB on the 136-token prompt, and the commit grows with the run: 56.9\,MB at 20 tokens, 62.3
+at 260, 68.2 at 516 and 80.2 at 1{,}032 for llama.cpp 135M, against 405\,MB under glibc. RSS does not change, since
 the same pages are touched either way. The four profiles are not needed: fitted from the 32-token profile
-alone (through the origin, 455 instead of 384 bytes per token), the reservation commits 56.2 to 83.8\,MB on the
+alone (through the origin, 455 instead of 384 bytes per token), the reservation commits 56.4 to 83.9\,MB on the
 same inputs, 3.7\,MB more than the four-profile fit at 1{,}032 tokens, and again no KV cache was used beyond its
 commitment, with identical outputs. For llama2.c the parameter is the number of steps, which bounds the tokens
 from above, because a story usually ends after about 200 tokens. A 1{,}024-step run therefore commits the whole
@@ -1139,7 +1154,7 @@ function below the inserted line.}
 \label{tab:passcost}
 \end{table}
 
-\tabref{tab:passpreload} compares the two ways of running llama.cpp. They save the same: with its own profile the clang build with \pass{} commits 56.0\,MB and holds 177.5\,MB (135M, 32 tokens), against 55.6\,MB and 175.1\,MB for the preloaded GCC build, and held-out profiles give the same in both. In llama.cpp the large buffers come from a few allocation functions, which return addresses name as well as the pass's identifiers do, and none of its growing containers reaches 64\,KB of capacity in a way that a reservation changes. The pass is needed for
+\tabref{tab:passpreload} compares the two ways of running llama.cpp. They save the same: with its own profile the clang build with \pass{} commits 57.0\,MB and holds 177.5\,MB (135M, 32 tokens), against 56.9\,MB and 176.2\,MB for the preloaded GCC build, and held-out profiles give the same in both. In llama.cpp the large buffers come from a few allocation functions, which return addresses name as well as the pass's identifiers do, and none of its growing containers reaches 64\,KB of capacity in a way that a reservation changes. The pass is needed for
 container capacities, which come from inside inlined library code, and it gives identifiers that do not depend on
 the build; a preloaded run needs no rebuild. \tabref{tab:passcost} shows what the pass costs: no measurable compile
 time on darknet and 2.8\% on llama.cpp (one build, while other jobs ran). With the previous identifiers, inserting
@@ -1238,8 +1253,8 @@ runs. The programs whose commit changes by more than 0.5\,MB are listed; every o
 
 \tabref{tab:stacks} shows the stacks on every corpus program and on llama.cpp, whose engines start four threads.
 miniVite's commit falls from 45.1 to 16.5\,MB, because its four
-OpenMP threads no longer commit 8\,MB each; llama.cpp's falls from 56.1 to 22.5\,MB with the 135M model and from
-56.8 to 23.3\,MB with the 360M model, a further 60\% below the reservations alone and 94 to 96\% below glibc.
+OpenMP threads no longer commit 8\,MB each; llama.cpp's falls from 56.9 to 23.4\,MB with the 135M model and from
+58.9 to 25.4\,MB with the 360M model, a further 57 to 59\% below the reservations alone and 94 to 95\% below glibc.
 Quicksilver and MiniFE lose 8.4\,MB each. The single-threaded programs do not change, RSS does not change, and
 every output is identical.
 
@@ -1256,8 +1271,8 @@ tool's \texttt{-sites} profile of the same input, on the corpus's largest inputs
 \end{table}
 
 \tabref{tab:nprof} replaces the Pin profile by \libmpr{}'s. Over the 28 configurations the reservations commit
-2{,}391\,MB against 2{,}383\,MB from Pin's profiles and hold 3{,}578\,MB of RSS against 3{,}581, every output is
-identical, and run time is 0.92 to 1.03 of glibc's. The profiles took 95\,s in all, against 21{,}676\,s under
+2{,}394\,MB against 2{,}386\,MB from Pin's profiles and hold 3{,}578\,MB of RSS against 3{,}581, every output is
+identical, and run time is 0.87 to 1.03 of glibc's. The profiles took 95\,s in all, against 21{,}676\,s under
 Pin, from 0.07 to 15\,s each. The one program that differs is Perl (61.5 against 52.2\,MB): its large buffers grow by
 \texttt{realloc}, and \libmpr{} records each at its final size, which the program has used almost entirely, so the fit
 keeps no reservation for the site; from the Pin profile, which records every buffer of the chain, it kept one.

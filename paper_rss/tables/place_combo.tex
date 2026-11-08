@@ -1,0 +1,23 @@
+\begin{tabular}{llrrrr}
+\toprule
+Program & Configuration & Commit & Node 0 & Node 1 & Time \\
+\midrule
+darknet & libmpr alone & 511 & 271 & 0 & 1.000 \\
+ & reservations & 272 & 271 & 0 & 1.003 \\
+ & cold 25 & 511 & 201 & 70 & 1.009 \\
+ & reservations + cold 25 & 272 & 201 & 70 & 1.008 \\
+ & reservations + cold 50 & 272 & 147 & 124 & 1.016 \\
+ & reservations + hot 50 & 271 & 125 & 146 & 1.017 \\
+ & remote & 511 & 0 & 271 & 1.024 \\
+ & reservations + remote & 272 & 0 & 271 & 1.030 \\
+\addlinespace
+llama.cpp & libmpr alone & 354 & 202 & 0 & 1.000 \\
+ & reservations & 22 & 22 & 0 & 0.832 \\
+ & cold 25 & 355 & 14 & 8 & 0.836 \\
+ & reservations + cold 25 & 24 & 14 & 8 & 0.832 \\
+ & reservations + cold 50 & 24 & 14 & 8 & 0.834 \\
+ & reservations + hot 50 & 22 & 19 & 3 & 0.829 \\
+ & remote & 354 & 0 & 202 & 1.072 \\
+ & reservations + remote & 22 & 0 & 22 & 0.854 \\
+\bottomrule
+\end{tabular}

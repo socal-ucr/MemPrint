@@ -53,6 +53,11 @@ each job's estimated curve, it gives the lowest mean response time of all estima
 error is $-4\%$. Under jemalloc it is $-1\%$ with transparent huge pages disabled and $+35\%$ with them enabled,
 because the kernel backs memory the program touches in part with whole 2\,MiB pages. On llama2.c and llama.cpp, the
 data-file term brings the model from between $-39\%$ and $-92\%$ to between $-28\%$ and $+15\%$ of the truth.
+The same library also measures which memory is cold, from the pages' accessed bits per call site and 2\,MiB chunk, at
+$1.03\times$ to $1.21\times$ a native run. On a remote NUMA node that stands in for a memory pool, a plan built from
+one profile run, even on a smaller input, keeps a quarter of the memory-time in the pool at $1.000\times$ to
+$1.008\times$ the run time on GAP and CPython, where placing the hottest quarter costs up to $1.135\times$, and
+moving memory between nodes during the run costs more than the plan.
 \end{abstract}
 
 \section{Introduction}
@@ -94,6 +99,11 @@ interface without privileges can resolve inside a huge page (\secref{sec:alloc} 
 \item We use the model at run time in libmpr, our allocation-resizing runtime, to return glibc's free memory to the
 kernel from \texttt{free}, which lowers the time-averaged RSS of the allocator-heavy programs by 4.4\% at a median
 run time of $1.01\times$, half of what returning every free byte would give (\secref{sec:trim}).
+\item We extend the sampling library to measure cold memory per call site from the pages' accessed bits, without
+privileges, and we show on an emulated memory pool that a placement plan from one profile run, carried to a larger
+input, keeps a quarter of a job's memory-time in the pool at 0 to 17\% of the cost of placing all of it there, that
+moving memory during the run does not pay on our programs, and that libmpr applies the plan together with its
+reservations (\secref{sec:place}).
 \item We show that the model needs no earlier run of a job, that it is within a median of 2.0\% of the truth on the
 blind programs of a companion study~\cite{memprintstatic}, that borrowing the growth of similar programs does not
 beat proportional growth, that code embeddings do not capture growth either, and that the companion study's
@@ -986,7 +996,9 @@ miniVite built with the resizing compiler pass, and six configurations of llama2
 under six builds, glibc, libmpr with the reservations of its own input and libmpr with reservations profiled on
 other inputs, each without and with trimming at $s = 0.1$, three times each, with RSS sampled every 20\,ms. Four
 workloads ran at a time on the 32-core machine, which adds about 5\% of noise to each run time. Every run produced
-the output of the glibc run.
+the output of the glibc run. The libmpr of these runs read only part of llama.cpp's longest reservation lines, which
+lowered its commit by 0.8 to 4.2\,MB and left its RSS unchanged (\secref{sec:place}). Trimming acts on RSS, so we
+keep these runs.
 
 \begin{table}[t]
 \centering
@@ -1094,6 +1106,233 @@ blocks account for most of the memory that the jobs request and do not use. An a
 memory in chunks smaller than a page would raise the throughput of a cluster that already resizes the large blocks and the reservations by 0.9
 to 2.3 jobs per hour.
 
+\section{Hot and cold memory for a memory pool}
+\label{sec:place}
+
+A system with disaggregated memory gives each node local memory and a shared pool that is slower to
+reach~\cite{Li2023Pond,Peng2020Underutilization}. The footprint model tells the system how much memory a job holds.
+To place part of that memory in the pool without slowing the job, the system must also know which memory the job
+touches rarely. Pin can record every access, but at the cost of \secref{sec:repeat}. In this section, we extend the
+sampling library to measure, at about the cost of a native run, which of a job's memory is hot and which is cold, and
+we test whether a placement plan built from one profile run lets a job keep a quarter or half of its memory in the
+pool at a small cost in run time.
+
+\subsection{Measuring hot and cold memory without privileges}
+
+\textbf{Accessed bits.} The referenced-page alternative of \secref{sec:options} clears the accessed bits of the
+process's pages by writing \texttt{1} to \texttt{/proc/self/clear\_refs}, which needs no privileges. In the new mode
+(\texttt{MPR\_MODE=refs}), the library's thread reads \texttt{/proc/self/smaps} at the end of each window of $W$
+seconds and then clears the bits. For each mapping, \texttt{Rss} counts its resident memory and \texttt{Referenced}
+the resident memory touched since the last clear. We call the referenced bytes of a window \term{hot} and the rest
+of the resident bytes \term{cold}. The library writes these per window for the heap, the other anonymous mappings,
+the stacks, the program's data and code, and for each call site below. Our kernel (4.18) has no
+DAMON~\cite{park2019damon}, and its idle-page tracking interface (\texttt{/sys/kernel/mm/page\_idle}) requires
+root.
+
+\textbf{Call sites.} The kernel reports accessed bits per mapping, so the library makes every large block a mapping
+of its own. In a build with call sites, it serves each \texttt{malloc}, \texttt{calloc}, \texttt{realloc},
+\texttt{posix\_memalign}, \texttt{aligned\_alloc} or \texttt{memalign} of at least 256\,KiB with its own
+\texttt{mmap}, followed by an inaccessible guard page, because the kernel merges adjacent anonymous mappings. It also
+records the program's own anonymous private mappings of at least 64\,KiB, which covers CPython's 256\,KiB arenas and
+GCC's garbage-collected pages. Each block belongs to a site, the stack of up to 8 return addresses that
+\texttt{backtrace} finds above the library's own frames, identified by a hash of each frame's object path and offset.
+The hash does not depend on where the objects are loaded, so a site has the same identity in every run and on every
+input. To find the cold parts of a large block, the library also splits each block into 2\,MiB chunks. It marks every
+other chunk with \texttt{MADV\_DONTDUMP}, which changes no behavior that our programs use, but which keeps the kernel
+from merging neighboring chunks, so that each chunk is a mapping of its own.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Measuring hot and cold memory: run time with windows of 0.1\,s over the library's run without a mode, for the
+zones alone (refs) and with call sites (sites); the share of the resident anonymous memory referenced within a window
+at three window lengths (memory-time weighted); the share of anonymous memory in site blocks at the peak (site share);
+and the cold bytes at 2\,MiB chunk granularity over the cold bytes at page granularity at the peak, with windows of
+0.1\,s (cold named). Median of 3 runs, one run for the windows of 0.02 and 0.5\,s.}
+\label{tab:place-refs}
+\setlength{\tabcolsep}{4pt}
+\input{tables/place_refs.tex}
+\end{table}
+
+\textbf{Cost and what is cold.} With windows of 0.1\,s, the mode costs $1.01\times$ to $1.06\times$ the library's run
+without a mode, and with call sites $1.03\times$ to $1.21\times$, the most on miniVite, which allocates many blocks
+of about 256\,KiB (\tabref{tab:place-refs}). Whether memory is cold depends on the window. On the four GAP kernels, a
+window of 0.02\,s references 28\% to 45\% of the resident anonymous memory, a window of 0.1\,s 56\% to 69\%, and a
+window of 0.5\,s all of it. A window must therefore be short compared with the run, and we use 0.1\,s for runs of 1.5
+to 4\,s and 0.02\,s for the smaller profiling inputs below. Call sites cover all of GAP's anonymous memory, 95\% of
+CPython's and 87\% of \texttt{cc1}'s, but only half of Lua's, 22\% of Perl's and none of SQLite's, whose memory lies
+in blocks smaller than 256\,KiB. On GAP, the 2\,MiB chunks name 76\% to 90\% of the cold memory that the page-level
+counts find.
+
+\subsection{Placement on an emulated pool}
+
+\textbf{Emulation.} Our machine has two NUMA nodes, and we use the second as the pool. Every run binds its threads and
+its memory to node 0 (\texttt{numactl --cpunodebind=0 --membind=0}, from a user installation of numactl), and a plan
+binds chunks to node 1 with \texttt{mbind} and \texttt{MPOL\_BIND} when the library creates the block, before the
+program touches it. The firmware's distance table gives 21 for node 1 against 10 for node 0. A pool behind CXL is
+slower than one NUMA hop~\cite{Li2023Pond}, so the run times below are a lower bound on the cost of a placement. Every
+placement run turns off transparent huge pages for the process (\texttt{MPR\_NOTHP}) and records the bytes on each
+node from \texttt{/proc/self/numa\_maps} every 0.25\,s.
+
+\textbf{Plans.} A profile run with chunks gives, for each chunk, its memory-time, the sum of its resident bytes over
+the windows, and its referenced memory-time, the sum of its referenced bytes. A plan ranks the chunks by their
+referenced share, the referenced memory-time over the memory-time, and takes chunks until their memory-time reaches a
+share $f$ of the memory-time of all anonymous memory. The \term{cold} plan takes the least referenced chunks first,
+the \term{hot} plan the most referenced first, and the \term{random} plan a random order. All plans with the same $f$
+place the same memory-time in the pool, so they differ only in which memory they place. A budget of bytes at the peak
+would not do this on GAP, whose peak falls in the construction of the graph, before the kernel runs. A chunk is named
+by its site, the order of its block among the site's blocks, and its position in the block. Each policy runs 5 times,
+interleaved with the others, and we report the median run time over that of the run with no plan.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Static placement: run time with a plan over the run with no plan ($\times$), median of 5 runs, for all
+memory on node 1 (remote) and for plans that place 25\% or 50\% of the memory-time in the pool, cold, random or hot
+first. The plans from the smaller input come from GAP at a scale of 16 and CPython and Lua at a quarter of the input,
+with windows of 0.02\,s, applied at a scale of 18 and the full input. They ran in a separate set of runs with its own
+baseline.}
+\label{tab:place-static}
+\setlength{\tabcolsep}{3.5pt}
+\input{tables/place_static.tex}
+\end{table}
+
+\textbf{Which memory goes to the pool matters.} On GAP and CPython, the cold plan keeps the run time within 1\% of
+the run with no plan at $f = 0.25$, while the hot plan with the same memory-time in the pool costs up to
+$1.117\times$ and all memory on node 1 costs up to $1.160\times$ (GAP pr, \tabref{tab:place-static}). On GAP, CPython
+and Lua, the cold plan pays 0 to 17\% of the cost of placing all memory in the pool, and the hot plan 32\% to 73\%.
+At $f = 0.5$, the cold plan costs at most $1.027\times$ on GAP and CPython. The memory that the cold plan places is
+not idle: on GAP, 31\% to 34\% of its memory-time is referenced within a window, and the remote node serves these
+accesses at a small cost. The random plan lies between the two. miniVite, Quicksilver and \texttt{cc1} run at most $1.016\times$ slower
+with all memory in the pool, so their placement does not matter. On Perl, the plans can place only the 17\% of the
+memory-time that call sites cover, and all three plans give the same chunks.
+
+\textbf{Plans from a smaller input.} A plan named by the block's order and the chunk's position does not carry over
+to a larger input, whose blocks are larger and more numerous. A \term{relative} plan instead names, for each site, the
+ranges of the block, in 16 equal parts, to place, pooled over all the site's blocks. We profiled GAP at a scale of 16
+and CPython and Lua at a quarter of the input, and applied the relative plans at a scale of 18 and at the full input.
+On the larger input, 90\% to 100\% of the site memory-time comes from sites that the smaller run saw. The transferred
+cold plan matches the plan from the same input on GAP and CPython, $1.000\times$ to $1.008\times$ at $f = 0.25$, and the
+transferred hot plan still costs $1.135\times$ on GAP pr. The memory-time that the transferred plans place differs
+from $f$ by up to 0.11 on CPython, where the cold plan at $f = 0.25$ places 14\% of the memory-time and the hot plan
+31\%. On Lua, the plans cover the same few sites, and all three cost about $1.045\times$.
+
+\subsection{Moving memory while the program runs}
+
+A plan needs a profile run. A runtime could instead move memory between the nodes while the program runs, by scoring
+each chunk from the accessed bits of the past windows and moving chunks with \texttt{mbind} and
+\texttt{MPOL\_MF\_MOVE}, as tiered-memory systems do~\cite{Maruf2023TPP,Raybuck2021HeMem,Lee2023Memtis}. We tested
+three policies in the library (\texttt{MPR\_MIGRATE}). Each window, a chunk's score is $\alpha$ times its referenced
+share in the window plus $1 - \alpha$ times its previous score. The \term{fill} policy ($\alpha = 0.5$, windows of
+0.1\,s) keeps the lowest-scored chunks in the pool up to $f$ of the anonymous RSS. The \term{threshold} policy moves
+only chunks scored at most 0.1. The \term{slow} policy uses $\alpha = 0.1$ and windows of 0.25\,s, so that a chunk must
+stay cold for several windows before it moves.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Moving memory while the program runs, against the static cold plan from a profile of the same input: run time
+over the run with no plan ($\times$), median of 5 runs. Monitor: the accessed bits sampled and cleared at the window
+length, no memory moved. Fill, threshold and slow at $f = 0.25$ or $0.5$ of the anonymous RSS. Three sets of runs, each
+with its own baseline.}
+\label{tab:place-migrate}
+\setlength{\tabcolsep}{3.5pt}
+\input{tables/place_migrate.tex}
+\end{table}
+
+None of the three policies approaches the static plan (\tabref{tab:place-migrate}). Monitoring alone costs
+$1.013\times$ to $1.055\times$ with windows of 0.1\,s and $1.010\times$ to $1.022\times$ with windows of 0.25\,s,
+because each sample reads every mapping and clears every accessed bit. The fill policy costs $1.074\times$ to
+$1.148\times$ at $f = 0.25$, more than placing all memory in the pool on four of the six programs. In the steady state of these
+programs, too little memory stays cold for a window to fill the budget, so the policy places hot memory and moves it
+back and forth. The threshold policy finds less than 3\% of the memory-time cold enough to move, so its cost is that
+of monitoring. The slow policy moves 68 to 205\,MB per run and costs $1.034\times$ to $1.060\times$ at $f = 0.25$,
+against $1.000\times$ to $1.026\times$ for the static plan, because it judges new chunks before their accesses begin. The
+static plan places memory before the first touch, so it moves nothing, it ranks chunks over the whole run, and it
+needs no monitoring. On runs of a few seconds, the profile run is therefore worth more than run-time migration. A
+program whose phases last much longer than a window may favor migration, but we did not test one.
+
+\subsection{Placement in libmpr}
+
+\textbf{Mechanism.} libmpr already serves each large block of a site with a reservation from a mapping of its own, so
+it can bind ranges of the block to the pool before the program touches them. We added placement lines to its
+reservation format, \texttt{key place K lo$_1$ hi$_1$ \ldots}, which bind $K$ ranges of each block of the site, given as
+shares of the block, to the pool node (\texttt{MPR\_PLACE}, \texttt{MPR\_NODE}). A line is independent of the site's
+reservation, and a site with a placement line and no reservation is served and committed in full. libmpr also
+intercepts \texttt{mmap} and places the program's own anonymous mappings by their caller's line. libmpr names a site by
+its return address in its object file, with up to two frames above it as a context, so a converter
+(\texttt{place\_lplans.py}) maps each profiled stack to libmpr's key, skips the frames of \texttt{operator new} in the
+C++ runtime, and pools the stacks that share a key. GAP's stacks map to keys one to one, and CPython's 62 stacks and
+Lua's 8 map to 31 and 6 keys. Finding a site's context takes a \texttt{backtrace} and two \texttt{dladdr} lookups,
+which on CPython, with about 2{,}700 arena mappings per run, cost $1.04\times$ even with all memory left on node 0.
+libmpr now caches the site of each context by its frame addresses, which brings this cost to $1.01\times$.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Placement through libmpr, plans from the smaller input except ``same 25'': libmpr with no plan over the run
+without libmpr (libmpr), and run time with a plan over libmpr with no plan ($\times$), median of 5 runs. Pool share:
+the share of the anonymous memory-time on node 1 under the transferred cold plan at $f = 0.25$.}
+\label{tab:place-libmpr}
+\setlength{\tabcolsep}{3.5pt}
+\input{tables/place_libmpr.tex}
+\end{table}
+
+\textbf{Results.} Through libmpr, the transferred cold plan costs $1.005\times$ to $1.007\times$ on GAP and
+$1.017\times$ on CPython at $f = 0.25$, against $1.136\times$ for the hot plan on GAP pr, which matches the
+library's own placement (\tabref{tab:place-libmpr}). libmpr with no plan costs $1.00\times$ to $1.02\times$ the run
+without it. On CPython, the random plan at $f = 0.25$ and the hot plan at $f = 0.5$ cost more than placing all memory in the
+pool ($1.061\times$ and $1.072\times$ against $1.049\times$). These plans bind sixteenths of the 256\,KiB arenas, which splits each arena into
+mappings of 16\,KiB, and we suspect that the kernel's handling of these small mappings costs more than the remote
+accesses, but we did not confirm it.
+
+\textbf{Reservations and placement together.} The reservations decide which memory is backed, and the plan decides on
+which node the backed memory lies. We ran both on darknet and llama.cpp with the 135M model generating 32 tokens, the
+two workloads on which the reservations of the resizing study save the most, with plans profiled on the same input
+(\tabref{tab:place-combo}). All 110 runs gave the output of the glibc run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Reservations and placement together through libmpr: peak commit, peak anonymous memory on node 0 and on node
+1 (MB), and run time over libmpr with neither ($\times$), median of 5 runs. Plans profiled on the same input. Every
+run turns transparent huge pages off.}
+\label{tab:place-combo}
+\setlength{\tabcolsep}{4pt}
+\input{tables/place_combo.tex}
+\end{table}
+
+On darknet, the two add up. The reservations lower the peak commit from 511 to 272\,MB, because darknet never touches
+some of the blocks it allocates, and the cold plan at $f = 0.5$ then moves 124\,MB of the memory it touches to the
+pool, which lowers the local memory from 271 to 147\,MB at $1.016\times$. darknet runs only $1.03\times$ slower with all
+memory in the pool, so the hot plan costs about as little.
+
+On llama.cpp, the reservations alone lower the anonymous memory from 202 to 22\,MB, because libmpr does not zero the
+pages of the key-value cache that the program never touches, and they make the run $0.83\times$ as long. The rest of
+its resident memory is the model's weights, which the engine maps from its file and which no plan places. The first
+profile covered only 6.5\% of llama.cpp's memory-time, because the library did not intercept the aligned allocations
+through which ggml allocates its buffers. With \texttt{posix\_memalign}, \texttt{aligned\_alloc} and \texttt{memalign}
+intercepted, the plans cover 27\% and 54\%. The cold plans then place 8\,MB in the pool and leave 14\,MB on node 0, at
+no measurable cost, and the hot plan places 3\,MB. The plans place far less than $f$ because the profile ran under
+glibc, which zeroes the whole key-value cache and so makes it resident and cold, whereas libmpr never backs most of
+it. A plan meant to run with reservations should therefore be profiled with them. The placement lines also add 1.8\,MB
+of commit, because libmpr serves the sites they name in full, where it would otherwise leave them to glibc. Without
+reservations, the cold plan alone gives most of the reservations' effect for the same reason: libmpr serves the plan's
+sites, including the key-value cache, and does not zero their untouched pages.
+
+\textbf{A correction to the resizing runs.} While testing these changes, we found that libmpr read each reservation
+line into a buffer of 512 bytes and dropped the rest of a longer line. The only lines this long are those of
+llama.cpp's key-value cache, which list 60 to 120 ranges, of which libmpr kept the first 24. libmpr now reads lines of
+up to 8{,}192 bytes and skips a longer line with a warning instead of reading part of it. With the whole lines, llama.cpp commits 0.7\,MB more at 32 tokens with the 135M model and 1.9\,MB
+more at 64 tokens with the 360M model, and its RSS and output do not change. On the other 23 programs, the new
+libmpr gives the same per-site commit, the same output and a peak commit 8\,KB higher than before. We ran the
+resizing study's llama.cpp configurations again with the corrected libmpr (own, held-out and pooled reservations,
+unseen inputs, the build with the pass, thread stacks and native profiles; 351 runs, every output identical): the
+commit under libmpr rose by 0.4 to 2.7\,MB with each model's own profile and by up to 7.3\,MB with held-out and
+pooled ones, whose lines are longer, and its commit stays 77 to 90\% below glibc's. The runs of
+\secref{sec:trim} used the truncated lines too; they measure RSS, which the correction does not change, and we
+keep them.
+
 \section{Costs and effects of the approaches}
 \label{sec:space}
 
@@ -1107,7 +1346,8 @@ largest we observed. Effect: on the 7 allocator-heavy programs unless stated (wh
 memory), and in the cluster simulation at load 0.8 (jobs per hour and mean response time).}
 \label{tab:space}
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{L{3.1cm}L{2.2cm}L{2.2cm}L{4.3cm}L{3.6cm}}
+\scriptsize
+\begin{tabular}{L{3.2cm}L{2.3cm}L{2.2cm}L{4.9cm}L{3.5cm}}
 \toprule
 Approach & One-time cost & Cost per run & Effect & Limit \\
 \midrule
@@ -1141,6 +1381,15 @@ programs: peak commit $-10.7\%$, RSS unchanged; 29 workloads: jobs/h 21.7 to 25.
 libmpr \texttt{MAP\_NORESERVE} stacks & none & $0.87\times$ to $1.13\times$ & commit $-8$ to $-34$\,MB per multithreaded program &
 commit only \\
 \addlinespace
+\multicolumn{5}{l}{\emph{Place cold memory in a pool (the runtime changes where memory lies, \secref{sec:place})}} \\
+Accessed bits per site and chunk & profile run, $1.03\times$ to $1.21\times$ & none & names 76\% to 90\% of GAP's cold
+memory & blocks of 256\,KiB or more \\
+Static cold plan, mbind at first touch & one profile run, smaller input works & $1.00\times$ to $1.03\times$ & 25\% of the
+memory-time in the pool at 0 to 17\% of the all-remote cost; darknet local memory 271 to 147\,MB with reservations &
+one NUMA hop, not CXL \\
+Migration between windows & none & $1.02\times$ to $1.15\times$ & worse than the static plan & monitoring costs
+$1.01\times$ to $1.06\times$ \\
+\addlinespace
 \multicolumn{5}{l}{\emph{Reserve less than the request (the scheduler changes)}} \\
 Dynamic provisioning, look-back & none & resizes and restarts, not charged here & response 1{,}844 to 1{,}129\,min & a
 job restarts when its growth does not fit \\
@@ -1150,13 +1399,14 @@ Exact curve (upper bound) & --- & --- & 30.5 jobs/h, 630\,min; 34.3 and 340\,min
 \end{tabular}
 \end{table}
 
-The approaches that we measured fall into three groups, which differ in what they change and in when they cost
+The approaches that we measured fall into four groups, which differ in what they change and in when they cost
 (\tabref{tab:space}). The first group estimates the footprint for a scheduler and leaves the job's memory unchanged.
 Its cost is paid once per program and input, and a production run costs nothing. The second group lowers the memory
 that the job holds, by returning free memory to the kernel or by committing only the predicted part of each large
 block. Its cost is paid on every run, and libmpr's reservations also need a profile. The third group changes the
 scheduler, which reserves less than the request and resizes the reservation while the job runs, at the cost of
-resizes and of restarts when a growth does not fit.
+resizes and of restarts when a growth does not fit. The fourth group, placement, leaves the job's memory and the
+scheduler's reservation unchanged and decides which part of the memory lies in a slower pool.
 
 \textbf{Estimating the footprint.} The data estimate gives \memprint{}'s accuracy at the cost of a native run, and
 the other cheap estimates are either less accurate (RSS, the trim alternatives) or below the footprint (referenced
@@ -1170,6 +1420,12 @@ Trimming acts on the small blocks that the program has freed. From \texttt{free}
 and returns half of the free memory, and the other half needs an allocator that can return memory in chunks smaller
 than a page. The cost of such an allocator is the open question of this group. Mesh reports its own costs, and we did
 not run it.
+
+\textbf{Placing memory in a pool.} A static plan from one profile run places a quarter of the memory-time in the pool
+at $1.00\times$ to $1.01\times$ on GAP and CPython, and it combines with libmpr's reservations: on darknet, the
+reservations lower the commit by 47\% and the plan then lowers the local memory by 46\%, at $1.016\times$. Moving
+memory while the program runs costs more than the static plan on every program we ran, and the monitoring alone costs
+up to $1.06\times$.
 
 \textbf{Reserving less.} Dynamic provisioning gains the most in response time, 1{,}844 to 1{,}129\,min, and its
 costs are those of the cluster, resizes and restarts, and not of the job. The approaches combine. libmpr with
@@ -1210,6 +1466,12 @@ the curve of runs shorter than a few tens of milliseconds and limits the model's
 NPB-MG's transfer, but atax's transfer stays $-33\%$, and the kernel's cheaper RSS counters lag the page tables on runs
 of a few milliseconds (\tabref{tab:sampling}).
 
+A limitation of the placement study is its pool, a second NUMA node one hop away, which is faster than a pool
+behind CXL, so the costs of the plans, and the gap between the cold and the hot plans, are lower bounds. Its runs last
+1.5 to 4\,s, which favors a static plan over migration, and its plans place only blocks of 256\,KiB or more and the
+program's own mappings, which leaves SQLite and most of Perl and Lua unplaced. Node 1 had about 400\,MB free, which
+limited the inputs.
+
 The evaluation covers a single machine, short runs of 0.1 to 12\,s and single-process programs. The truth's clock
 mapping passes through the native run's reference counts, which also place \memprint{}'s curve, so \memprint{}'s timing
 accuracy is overstated against the truth. The truths under jemalloc and TCMalloc use the clock of the native run under
@@ -1228,6 +1490,12 @@ accessed bits of pages to find cold memory, and PEBS sampling~\cite{roca_nonell2
 sampled loads. These methods measure which pages a program uses within a period of time, which is the working
 set~\cite{denning1968} and not the footprint. Our referenced-page alternative (\secref{sec:options}) shows that the
 working set of a window falls far below the footprint on allocator-heavy programs.
+
+\textbf{Tiered memory.} TPP~\cite{Maruf2023TPP}, HeMem~\cite{Raybuck2021HeMem} and Memtis~\cite{Lee2023Memtis}
+move pages between fast and slow memory while the program runs, from sampled accesses or the kernel's page faults,
+and Pond~\cite{Li2023Pond} sizes a virtual machine's local memory and places the rest in a CXL pool. Our placement
+decides per call site before the program runs, from one profile run, and our runs show that on short jobs this beats
+moving memory from the accessed bits during the run.
 
 \textbf{Memory prediction for scheduling.} KS+~\cite{KSplus2024} predicts a workflow task's memory over time from the
 RSS of earlier runs, and Zacarias et al.~\cite{Zacarias2021Accurate,Zacarias2023Dynamic} predict the memory of HPC jobs
@@ -1260,12 +1528,18 @@ companion study's blind programs within a median of 2.0\%, and for a program tha
 scheduled, the interpreter's footprint plus the runtime's pages of other programs predicts array programs within
 1.1\% of the peak, but programs that free memory need the model's own run. Static features of the code and the
 executable relate to the model's terms, and four code embeddings, up to 8B parameters, do not relate to how the
-footprint grows with the input.
+footprint grows with the input. The same library measures which memory is cold per call site at close to the cost of
+a native run, and a plan from one profile run, carried to a larger input and applied by libmpr with its reservations,
+keeps a quarter of a job's memory-time in a slower pool at a cost of at most 1\% on GAP and CPython.
 
 \textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library. \texttt{run\_model.sh},
 \texttt{run\_transfer.sh}, \texttt{run\_options.sh}, \texttt{run\_alloc.sh} and \texttt{run\_llm.sh} run the
 experiments, \texttt{grid.py} builds the simulator's corpus and runs the scheduling grid, and \texttt{compute.py}
-produces every table. The runs are in \texttt{\textasciitilde/memprint-data/2026-10-26-rsscurve}.
+produces every table. The runs are in \texttt{\textasciitilde/memprint-data/2026-10-26-rsscurve}. For
+\secref{sec:place}, \texttt{run\_refs.sh}, \texttt{run\_place.sh}, \texttt{run\_lplace.sh} and \texttt{run\_combo.sh}
+run the experiments, \texttt{place\_plans.py}, \texttt{place\_rplans.py} and \texttt{place\_lplans.py} build the
+plans, \texttt{regress\_libmpr.sh} compares two builds of libmpr, and \texttt{place\_tables.py} produces the tables,
+from \texttt{\textasciitilde/memprint-data/2026-11-07-refs} and \texttt{2026-11-08-lplace}.
 
 \bibliographystyle{plain}
 \bibliography{references}

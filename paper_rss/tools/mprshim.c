@@ -477,6 +477,33 @@ size_t malloc_usable_size(void *p) {
     return real(p);
 }
 
+/* Aligned allocations (ggml's buffers: posix_memalign with 64-byte alignment). A block's pointer is HDR bytes into a
+   page, so any power-of-two alignment up to HDR is met; a larger one goes to glibc. */
+extern void *__libc_memalign(size_t, size_t);
+static void *big_aligned(size_t al, size_t n) {
+    if (!take(n) || al > HDR || (al & (al - 1))) return NULL;
+    in_shim = 1; void *p = big_alloc(n); in_shim = 0;
+    return p;
+}
+
+int posix_memalign(void **out, size_t al, size_t n) {
+    void *p = big_aligned(al, n);
+    if (p) { *out = p; return 0; }
+    static int (*real)(void **, size_t, size_t);
+    if (!real) real = dlsym(RTLD_NEXT, "posix_memalign");
+    return real(out, al, n);
+}
+
+void *aligned_alloc(size_t al, size_t n) {
+    void *p = big_aligned(al, n);
+    return p ? p : __libc_memalign(al, n);
+}
+
+void *memalign(size_t al, size_t n) {
+    void *p = big_aligned(al, n);
+    return p ? p : __libc_memalign(al, n);
+}
+
 /* The program's own mappings (kind 1). mmap: an anonymous private mapping of at least MPR_MMAP_MIN bytes at an
    address of the kernel's choosing gets one more page, the guard. munmap of a whole block also unmaps its guard; a
    partial munmap trims or splits the block (the guard of a trimmed tail stays mapped: one page of address space).

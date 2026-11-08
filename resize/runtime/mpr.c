@@ -1263,16 +1263,20 @@ context:;
     }
 }
 
+/* a reservation line: up to MAX_RUNS ranges of two numbers, a key with two context frames */
+#define MAX_LINE 8192
+
 /* reservations built into the program by the pass (apply mode) */
 static void load_embedded(const char *text)
 {
-    char line[2048];
+    static char line[MAX_LINE];
     while (*text) {
         size_t n = strcspn(text, "\n");
         if (n < sizeof line) {
             memcpy(line, text, n), line[n] = 0;
             parse_line(line);
-        }
+        } else
+            fprintf(stderr, "libmpr: a reservation line of %zu bytes is longer than %d: skipped\n", n, MAX_LINE - 1);
         text += n + (text[n] == '\n');
     }
 }
@@ -1284,8 +1288,15 @@ static void load(const char *file)
         fprintf(stderr, "libmpr: cannot read %s\n", file);
         return;
     }
-    char line[2048];
+    static char line[MAX_LINE];
     while (fgets(line, sizeof line, f)) {
+        size_t n = strlen(line);
+        if (n == sizeof line - 1 && line[n - 1] != '\n') { /* longer than the buffer: skip it all, never a prefix */
+            fprintf(stderr, "libmpr: a line of %s is longer than %d bytes: skipped\n", file, MAX_LINE - 1);
+            int c;
+            while ((c = fgetc(f)) != EOF && c != '\n') {}
+            continue;
+        }
         parse_line(line);
     }
     fclose(f);
