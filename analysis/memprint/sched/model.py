@@ -53,6 +53,9 @@ class Job:
     retry: object = None
     # the policies' own costs (0: none): seconds of progress lost per growing resize (dynamic provisioning; 10 s in
     # Zacarias et al.'s simulator), and seconds per GB moved by Pond's mitigation (50 ms/GB in the Pond paper)
+    # the runtime stretch with share f of the resident GB-minutes in the pool: T = base (1 + pool_cost(f)); None:
+    # the cluster's beta f (a CXL pool's per-program cost, paper_rss/cxl_sim.py)
+    pool_cost: object = None
     nodes: int = 1            # nodes the job spans; each holds `resident` (SPMD)
     resize_cost: float = 0.0
     migrate_cost: float = 0.0

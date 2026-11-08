@@ -55,6 +55,8 @@ progs = {l[0]: l[3] for l in lines}
 rows = []
 for prog, cwd in progs.items():
     d = f"{PO}/runs/{prog}/1"
+    if not os.path.exists(f"{d}/chunks.csv.sites"):   # no block of 256 KiB or more (static arrays: PolyBench)
+        print(prog, "no sites: no plan"); continue
     m, z = pd.read_csv(f"{d}/chunks.csv"), pd.read_csv(f"{d}/chunks.csv.zones")
     c, s = pd.read_csv(f"{d}/chunks.csv.chunks"), pd.read_csv(f"{d}/chunks.csv.sites", dtype={"sig": str, "offset": str})
     full = m.window[(m.window > 0) & (m.window < m.window.max())]

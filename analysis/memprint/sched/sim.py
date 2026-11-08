@@ -91,7 +91,7 @@ class Sim:
             kill = min(kills) if kills else None
             run = slice(0, T if kill is None else kill)
             f = max(float(np.maximum(a[run] - q["local"][run], 0).sum() / max(a[run].sum(), EPS)) for q in parts)
-            T2 = max(1, math.ceil(job.base * (1 + c.beta * f) + extra))
+            T2 = max(1, math.ceil(job.base * (1 + (job.pool_cost(f) if job.pool_cost else c.beta * f)) + extra))
             if T2 == T or it == 7:   # unconverged after 8 rounds: keep the last placement, computed for T
                 break
             T = T2

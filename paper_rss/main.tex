@@ -57,7 +57,10 @@ The same library also measures which memory is cold, from the pages' accessed bi
 $1.03\times$ to $1.21\times$ a native run. On a remote NUMA node that stands in for a memory pool, a plan built from
 one profile run, even on a smaller input, keeps a quarter of the memory-time in the pool at $1.000\times$ to
 $1.008\times$ the run time on GAP and CPython, where placing the hottest quarter costs up to $1.135\times$, and
-moving memory between nodes during the run costs more than the plan.
+moving memory between nodes during the run costs more than the plan. A latency model, checked at two pool latencies,
+predicts that the plan costs at most $1.07\times$ on a pool at four times the local latency, where all memory in the
+pool costs up to $1.94\times$; in a simulated cluster, the cold plan then runs 4\% more jobs per hour than a random
+one.
 \end{abstract}
 
 \section{Introduction}
@@ -1170,7 +1173,8 @@ counts find.
 its memory to node 0 (\texttt{numactl --cpunodebind=0 --membind=0}, from a user installation of numactl), and a plan
 binds chunks to node 1 with \texttt{mbind} and \texttt{MPOL\_BIND} when the library creates the block, before the
 program touches it. The firmware's distance table gives 21 for node 1 against 10 for node 0. A pool behind CXL is
-slower than one NUMA hop~\cite{Li2023Pond}, so the run times below are a lower bound on the cost of a placement. Every
+slower than one NUMA hop~\cite{Li2023Pond}, so the run times below are a lower bound on the cost of a placement;
+\secref{sec:cxl} models a slower pool. Every
 placement run turns off transparent huge pages for the process (\texttt{MPR\_NOTHP}) and records the bytes on each
 node from \texttt{/proc/self/numa\_maps} every 0.25\,s.
 
@@ -1320,6 +1324,98 @@ of commit, because libmpr serves the sites they name in full, where it would oth
 reservations, the cold plan alone gives most of the reservations' effect for the same reason: libmpr serves the plan's
 sites, including the key-value cache, and does not zero their untouched pages.
 
+\subsection{A slower pool}
+\label{sec:cxl}
+
+Node 1 is a pool one NUMA hop away: a pointer chase over 512\,MB takes 101\,ns per load on node 0 and 157\,ns on node
+1, so the pool adds 56\,ns. Memory behind CXL adds more than a NUMA hop~\cite{Li2023Pond}, and our machine offers no
+way for an unprivileged user to slow node 1 down (throttling the uncore clock needs the model-specific registers, and
+Broadwell has no memory bandwidth allocation). We therefore model a slower pool from the runs we can make.
+
+\textbf{Model.} For each program, the time a placement adds is the number of the program's reads that the pool serves
+times the pool's added latency $d$ times a constant $s$, the inverse of the program's memory-level parallelism:
+$T(d) = T(56\,\mathrm{ns}) + s\,N\,(d - 56\,\mathrm{ns})$. We count $N$ with \texttt{perf stat} in user mode, as the
+reads (loads, stores' reads for ownership and prefetches) that missed the last-level cache and were served by node 1's
+memory, and fit $s$ by least squares over the runs whose policies differ only in where the memory lies: for GAP,
+CPython and Lua every plan against libmpr with no plan, since libmpr serves the same blocks under both; for darknet
+and llama.cpp only all memory local against all memory in the pool, with and without the reservations, since there a
+plan also makes libmpr serve the sites it names and skip zeroing their untouched pages. The same runs, five of each,
+use the plans, libmpr and settings of \tabref{tab:place-libmpr} and \tabref{tab:place-combo}.
+
+\textbf{Check.} To test the model at a second latency, we ran every configuration again with eight threads on node 1's
+CPUs streaming over node 1's memory. The pointer chase then takes 209\,ns on node 1, so the pool adds 107\,ns, and
+102.5\,ns on node 0. Predicted from the runs at 56\,ns alone, the slowdowns at 107\,ns are within 0.015 of the measured
+ones at the median and within 0.02 to 0.07 for every program but GAP bfs (0.11), whose run without a plan itself slows
+by 5\% beside the streaming threads (\tabref{tab:place-cxl}). The model errs high: the prediction exceeds the
+measurement in 74\% of the configurations, by 0.013 on average, so the slowdowns it gives at higher latencies are, if
+anything, too large. The streaming threads also take bandwidth from the pool, which the check therefore includes, but
+a CXL link with less bandwidth than a socket's memory controllers could cost bandwidth-bound programs more than the
+model says.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{A slower pool: run time with all anonymous memory in the pool or with the transferred cold or hot plan at
+$f = 0.25$ over the run with all memory local ($\times$, median of 5 runs), for the pool's added latency over local
+memory of 56\,ns (node 1 idle) and 107\,ns (node 1 busy), measured, and of 200 and 300\,ns, about $3\times$ and
+$4\times$ the local latency, predicted. darknet and llama.cpp run with their reservations, over the reservations
+alone. Error: the largest difference between the predicted and the measured slowdown at 107\,ns.}
+\label{tab:place-cxl}
+\setlength{\tabcolsep}{2.6pt}
+\input{tables/place_cxl.tex}
+\end{table}
+
+\textbf{The cold plan stays cheap on a slower pool.} At 300\,ns, about $4\times$ the local latency, placing all
+anonymous memory in the pool costs $1.38\times$ to $1.94\times$ on GAP, $1.46\times$ on CPython and $2.31\times$ on Lua,
+and the hot plan at $f = 0.25$ costs $1.17\times$ to $1.71\times$ on GAP. The transferred cold plan still costs
+$1.03\times$ to $1.07\times$ on GAP and CPython, 4 to 11\% of the all-pool cost on GAP. The model's cost is linear in the
+latency, so the slower pool widens the gap between the cold and the hot plan without changing their order. On Lua the
+cold plan costs $1.26\times$ at 300\,ns; it already paid 35\% of the all-pool cost at 56\,ns, the most of any program.
+With their reservations, darknet's cold plan, which places 70\,MB, costs $1.04\times$, and llama.cpp's, which places
+8\,MB, $1.09\times$.
+
+\textbf{The pool in the cluster.} The cluster simulation of \secref{sec:trim} charges a job that holds a share $f$ of
+its memory-time in the pool a run time of $1 + \beta f$, with $\beta = 0.5$ for every job. We replaced this cost with
+one measured per workload: we ran each of the 29 workloads under libmpr with all memory local, all memory on node 1,
+and the random plan at $f = 0.25$ and the cold and hot plans at $f = 0.25$ and $0.5$, each made from the workload's own
+profile, under \texttt{perf stat} as above (3 runs each, node 1 idle and busy). The model above gives each policy's
+run time at an added latency $d$, and a job's cost at $f$ is interpolated between the measured plans, from no cost
+at $f = 0$ to all memory in the pool at $f = 1$. Only the reads that a plan adds over the local run count, because
+node 1 also holds the page cache of files that a local run maps, such as llama2.c's weights. Fitted on the idle
+node, the model predicts the slowdowns on the busy node within 0.008 at the median. It errs most on HPCCG and NPB CG
+(0.17 and 0.24), which stream through memory and slow down beside the streaming threads more than the pointer chase
+does. Each job also reads the pool at its workload's measured rate per thread times its cores, so the cluster's
+demand on the pool follows from the schedule. A pool of bandwidth $B$ then has the latency that node 1 measured at
+the same share of its own bandwidth (53\,GB/s at most; the pointer chase takes 149\,ns idle and 205\,ns at
+saturation), and above $B$ the pool's part of each run is stretched by the excess. We run the simulation at the idle
+latency, take the mean demand over the steady part of the run, set the loaded latency from it, and run again, halving
+the step, until the latency moves by less than 1\,ns; 1{,}285 of the 1{,}296 simulations with a bounded bandwidth
+settle in 10 runs or fewer, and the other 11 alternate between two latencies 2\,ns apart.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Cluster simulation with a slower pool (the setup of \tabref{tab:trim-grid}, load 0.8, 32 nodes of 128\,GB
+and a 1{,}024\,GB pool of 64\,GB/s): throughput in jobs per hour, mean of 3 seeds, with the flat cost $\beta = 0.5$
+and with each workload's modelled cost at the pool's idle added latency over local memory in ns, when the pool holds
+the job's coldest, a random or its hottest memory. The standard deviation over seeds is about 0.8 jobs per hour.}
+\label{tab:cxl-grid}
+\setlength{\tabcolsep}{4pt}
+\input{tables/cxl_grid.tex}
+\end{table}
+
+\textbf{The flat cost hides the placement.} With the measured costs, every policy runs more jobs per hour than with
+$\beta = 0.5$ (\tabref{tab:cxl-grid}): at 56\,ns and with the cold plan, libmpr runs 30.0 against 25.1 jobs per hour
+and the request held 25.9 against 21.6. The pool holds about 30\% of the jobs' memory-time, and the mean stretch of a job
+is 1.06 under the flat cost and 1.017 under the cold plan at 56\,ns. At 300\,ns, libmpr's throughput falls to 26.4
+jobs per hour with the cold plan and to 25.4 with the random or the hot plan, close to the flat cost, and the mean
+stretch is 1.043 with the cold plan, 1.052 with the random and 1.054 with the hot one. libmpr's lead over the request held stays at
+3.0 to 4.1 jobs per hour, 13 to 16\%, at every latency and placement, so a slower pool does not change the order of the
+policies. The bandwidth matters little at this scale: the jobs read the pool at 12\,GB/s on average and at
+21\,GB/s at most, so a pool of 32\,GB/s adds 13 to 17\,ns to its latency on average (42\,ns at most) and costs 0.24
+jobs per hour on average against a pool of unbounded bandwidth, less than the variation over seeds. The mean demand smooths over the minutes in which several streaming jobs share the
+pool, so the bandwidth's effect is a lower bound.
+
 \textbf{A correction to the resizing runs.} While testing these changes, we found that libmpr read each reservation
 line into a buffer of 512 bytes and dropped the rest of a longer line. The only lines this long are those of
 llama.cpp's key-value cache, which list 60 to 120 ranges, of which libmpr kept the first 24. libmpr now reads lines of
@@ -1386,7 +1482,7 @@ Accessed bits per site and chunk & profile run, $1.03\times$ to $1.21\times$ & n
 memory & blocks of 256\,KiB or more \\
 Static cold plan, mbind at first touch & one profile run, smaller input works & $1.00\times$ to $1.03\times$ & 25\% of the
 memory-time in the pool at 0 to 17\% of the all-remote cost; darknet local memory 271 to 147\,MB with reservations &
-one NUMA hop, not CXL \\
+one NUMA hop; model: up to $1.07\times$ at 300\,ns \\
 Migration between windows & none & $1.02\times$ to $1.15\times$ & worse than the static plan & monitoring costs
 $1.01\times$ to $1.06\times$ \\
 \addlinespace
@@ -1467,10 +1563,14 @@ NPB-MG's transfer, but atax's transfer stays $-33\%$, and the kernel's cheaper R
 of a few milliseconds (\tabref{tab:sampling}).
 
 A limitation of the placement study is its pool, a second NUMA node one hop away, which is faster than a pool
-behind CXL, so the costs of the plans, and the gap between the cold and the hot plans, are lower bounds. Its runs last
+behind CXL. We model a slower pool from the counts of the reads the pool serves and check the model at a second,
+measured latency, but the model is linear in the latency, misses part of the cost to programs that stream through
+memory (HPCCG and NPB CG, by up to 0.24), and runs on a node
+with CPUs, where the kernel's placement of its own memory differs from that on a CPU-less pool. Its runs last
 1.5 to 4\,s, which favors a static plan over migration, and its plans place only blocks of 256\,KiB or more and the
 program's own mappings, which leaves SQLite and most of Perl and Lua unplaced. Node 1 had about 400\,MB free, which
-limited the inputs.
+limited the inputs. The cluster simulation with the slower pool sets the pool's loaded latency from the jobs' mean
+demand over the run, not minute by minute, and scales each job's cost and traffic from one run of its workload.
 
 The evaluation covers a single machine, short runs of 0.1 to 12\,s and single-process programs. The truth's clock
 mapping passes through the native run's reference counts, which also place \memprint{}'s curve, so \memprint{}'s timing
@@ -1530,7 +1630,10 @@ scheduled, the interpreter's footprint plus the runtime's pages of other program
 executable relate to the model's terms, and four code embeddings, up to 8B parameters, do not relate to how the
 footprint grows with the input. The same library measures which memory is cold per call site at close to the cost of
 a native run, and a plan from one profile run, carried to a larger input and applied by libmpr with its reservations,
-keeps a quarter of a job's memory-time in a slower pool at a cost of at most 1\% on GAP and CPython.
+keeps a quarter of a job's memory-time in a slower pool at a cost of at most 1\% on GAP and CPython, and a latency
+model predicts at most 7\% on a pool four times slower than local memory. In a cluster simulation with these costs,
+the pool's latency, not its bandwidth, sets the throughput, and placing the cold memory in the pool keeps one more
+job per hour than a random placement at 300\,ns.
 
 \textbf{Artifacts.} \texttt{paper\_rss/tools/mprshim.c} is the sampling library. \texttt{run\_model.sh},
 \texttt{run\_transfer.sh}, \texttt{run\_options.sh}, \texttt{run\_alloc.sh} and \texttt{run\_llm.sh} run the
@@ -1539,7 +1642,11 @@ produces every table. The runs are in \texttt{\textasciitilde/memprint-data/2026
 \secref{sec:place}, \texttt{run\_refs.sh}, \texttt{run\_place.sh}, \texttt{run\_lplace.sh} and \texttt{run\_combo.sh}
 run the experiments, \texttt{place\_plans.py}, \texttt{place\_rplans.py} and \texttt{place\_lplans.py} build the
 plans, \texttt{regress\_libmpr.sh} compares two builds of libmpr, and \texttt{place\_tables.py} produces the tables,
-from \texttt{\textasciitilde/memprint-data/2026-11-07-refs} and \texttt{2026-11-08-lplace}.
+from \texttt{\textasciitilde/memprint-data/2026-11-07-refs} and \texttt{2026-11-08-lplace}. For \secref{sec:cxl},
+\texttt{run\_cxl.sh} (with \texttt{cxl/hog.c} and \texttt{cxl/chase.c}) runs the counted runs at both latencies
+and \texttt{cxl\_model.py} fits the model, from \texttt{2026-11-08-cxl}. \texttt{run\_cxlsim.sh} profiles and runs the 29
+workloads for the cluster and measures node 1's loaded latency, and \texttt{cxl\_sim.py} runs the cluster simulation,
+from \texttt{2026-11-08-cxlsim}.
 
 \bibliographystyle{plain}
 \bibliography{references}
