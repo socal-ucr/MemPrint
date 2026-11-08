@@ -1,0 +1,12 @@
+\begin{tabular}{rrrrrrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{Demand (GB/s)} & Minutes & \multicolumn{2}{c}{Latency (ns)} & \multicolumn{3}{c}{Jobs/h, minute by minute} & Jobs/h, \\
+\cmidrule(lr){2-4}\cmidrule(lr){6-7}\cmidrule(lr){8-10}
+Bandwidth & Mean & p95 & Max & over & Mean & p95 & Cold & Random & Hot & averaged \\
+\midrule
+256\,GB/s & 12.5 & 28.3 & 39.9 & 0\% & 302 & 306 & 24.6 & 23.7 & 23.8 & 24.3 \\
+64\,GB/s & 12.5 & 28.2 & 40.2 & 0\% & 312 & 331 & 24.9 & 23.8 & 23.7 & 24.1 \\
+32\,GB/s & 12.2 & 26.7 & 38.3 & 2\% & 331 & 393 & 24.4 & 23.6 & 23.5 & 24.0 \\
+16\,GB/s & 12.7 & 27.3 & 37.8 & 30\% & 377 & 447 & 23.6 & 22.5 & 22.3 & --- \\
+\bottomrule
+\end{tabular}

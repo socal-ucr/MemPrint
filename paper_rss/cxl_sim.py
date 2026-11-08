@@ -28,6 +28,11 @@ runs again (half-way damped) until the latency moves by less than 1 ns and the s
 
     PYTHONPATH=analysis python paper_rss/cxl_sim.py model           # the per-workload model and its check
     PYTHONPATH=analysis python paper_rss/cxl_sim.py grid [out.csv]  # the cluster grid (OMP_NUM_THREADS=1)
+    PYTHONPATH=analysis python paper_rss/cxl_sim.py minute [out.csv]  # the same, the pool's latency minute by minute
+
+Minute by minute (memprint.sched.sim's contention): each minute, the running jobs' reads give the pool's demand, the
+demand its latency and stretch as above, and each job advances by 1 / (1 + e(f, d)) minutes of its base run. A job is
+planned at the latency of the minute it starts and ends when its progress is done.
 """
 import glob
 import os
@@ -86,6 +91,7 @@ class Model:
         self.d0 = self.lat.pool[0] - self.lat.local[0]
         self.local_ns = self.lat.local[0]
         self.u, self.m, self.bw = bandwidth_curve()
+        self._lin = {}
         threads = {l.split()[0]: int(l.split()[2]) for l in open(f"{D}/list.txt")}
         share = pd.read_csv(f"{D}/lplans/plans.csv").set_index(["prog", "plan"]).planned_share
         med = x.groupby(["prog", "hog", "pol"]).median(numeric_only=True)
@@ -152,6 +158,32 @@ class Model:
               / w["threads"] / 1e9 for p, _ in pts]
         return lambda f: float(np.interp(f, fs, np.maximum.accumulate(gb)))
 
+    def linear(self, prog, placement):
+        """(f points, e = a + b d at each point, pool reads at each point): the cost and traffic curves of a workload
+        as functions of the latency, cached"""
+        key = (prog, placement)
+        if key not in self._lin:
+            name = ALIAS.get(prog, prog)
+            w, pts = self.w[name], self.points(prog, placement)
+            fs = np.array([q[1] for q in pts])
+            a = np.array([0.0 if p == "local" else (w["T"][p] - w["s"] * self.pool_reads(name, p) * self.d0)
+                          / w["T"]["local"] - 1 for p, _ in pts])
+            b = np.array([0.0 if p == "local" else w["s"] * self.pool_reads(name, p) / w["T"]["local"] for p, _ in pts])
+            gb = np.array([0.0 if p == "local" else self.pool_reads(name, p) * 64 / w["T"]["local"] / w["threads"] / 1e9
+                           for p, _ in pts])
+            self._lin[key] = (fs, a, b, gb)
+        return self._lin[key]
+
+    def cost_d(self, prog, placement):
+        """(f, d, stretch) -> the extra share of the run, as cost(prog, placement, d, stretch)(f)"""
+        fs, a, b, _ = self.linear(prog, placement)
+        return lambda f, d, st=1.0: float(np.interp(f, fs, np.maximum.accumulate(np.maximum(a + b * d, 0)))) * st
+
+    def traffic_d(self, prog, placement):
+        """(f, d) -> GB/s of pool reads per thread, as traffic(prog, placement, d)(f)"""
+        fs, a, b, gb = self.linear(prog, placement)
+        return lambda f, d: float(np.interp(f, fs, np.maximum.accumulate(gb / (1 + np.maximum(a + b * d, 0)))))
+
     def loaded(self, d, U):
         return (self.local_ns + d) * float(np.interp(min(U, 1.0), self.u, self.m)) - self.local_ns
 
@@ -205,15 +237,54 @@ def simulate(task):
                     bw_gbs=B, error=repr(e), trace=traceback.format_exc()[-600:])
 
 
+class PoolLatency:
+    """the pool's added latency and bandwidth stretch at a demand of GB/s (Sim's contention)"""
+    def __init__(self, model, d, B):
+        self.model, self.d, self.B, self.idle = model, float(d), B, float(d)
+
+    def at(self, demand):
+        U = demand / self.B if self.B else 0.0
+        return self.model.loaded(self.d, U), max(1.0, U)
+
+
+def simulate_minute(task):
+    """the cluster with the pool's latency set each minute by the jobs running in it (Sim's contention)"""
+    from memprint.sched.model import Cluster
+    from memprint.sched.run import steady
+    from memprint.sched.sim import Sim
+    truth, load, seed, policy, local, placement, d, B = task
+    try:
+        jobs = []
+        for j0 in _setup.assign(_setup.stream(truth, load, seed), policy):
+            j = copy(j0)
+            j.pool_cost_d, j.traffic_d = _model.cost_d(j.shape, placement), _model.traffic_d(j.shape, placement)
+            jobs.append(j)
+        sim = Sim(Cluster(local=local), jobs, contention=PoolLatency(_model, d, B))
+        dd, s = sim.run()
+        lo, hi = int(dd.arrival.quantile(0.1)), int(dd.arrival.quantile(0.9))
+        dem, lat = sim.demand[lo:hi + 1], sim.lat[lo:hi + 1]
+        util = dem / B if B else np.zeros_like(dem)
+        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, placement=placement, d_idle=d,
+                    bw_gbs=B, demand_gbs=dem.mean(), demand_p95=np.quantile(dem, 0.95), demand_max=dem.max(),
+                    util=util.mean(), util_max=util.max(), min_over=int((util > 1).sum()), window=hi - lo + 1, d_eff=lat.mean(),
+                    d_p95=np.quantile(lat, 0.95), d_max=lat.max(), **s, **steady(dd, sim))
+    except Exception as e:
+        import traceback
+        return dict(truth=truth, load=load, seed=seed, policy=policy, local_gb=local, placement=placement, d_idle=d,
+                    bw_gbs=B, error=repr(e), trace=traceback.format_exc()[-600:])
+
+
 def grid(out, policies=("request", "mpr", "zacarias", "mpr+zacarias", "pond", "mpr+pond"), loads=(0.8, 1.2),
          seeds=(0, 1, 2), locals_=(128,), placements=("rand", "cold", "hot"), ds=(56, 107, 200, 300), bws=(0, 256, 64, 32),
-         truth="rss", n=3000, procs=28):
+         truth="rss", n=3000, procs=28, minute=False):
     tasks = [(truth, l, s, p, lo, "beta", 0, 0) for l, s, p, lo in product(loads, seeds, policies, locals_)]
     tasks += [(truth, l, s, p, lo, pl, d, b) for l, s, p, lo, pl, d, b in
               product(loads, seeds, policies, locals_, placements, ds, bws)]
-    rows = []
+    rows, fn = [], simulate
+    if minute:   # the pool's latency set each minute: no beta runs, no unbounded bandwidth (it would be the idle one)
+        tasks, fn = [t for t in tasks if t[5] != "beta" and t[7]], simulate_minute
     with Pool(procs, _init, (n,)) as p, open(out + ".jsonl", "a") as log:
-        for r in p.imap_unordered(simulate, tasks, chunksize=1):
+        for r in p.imap_unordered(fn, tasks, chunksize=1):
             rows.append(r)
             log.write(pd.Series(r).to_json() + "\n")
             log.flush()
@@ -241,6 +312,35 @@ def table(csv, load=0.8, bw=64):
         t.write("\\bottomrule\n\\end{tabular}\n")
 
 
+def table_minute(csv, it_csv, d=300):
+    """tables/cxl_minute.tex: at the idle added latency d, per pool bandwidth, the pool's demand and latency minute by
+    minute and the throughput by placement (means over the policies, loads and seeds), with the throughput of the
+    iterate-until-settles runs for the cold plan"""
+    from memprint.sched import resize_cluster
+    m, g = pd.read_csv(csv), pd.read_csv(it_csv)
+    st = resize_cluster.Setup(int(m.jobs.max()) + int(m.rejected.max()))
+    win = {}
+    for load, seed in set(zip(m.load, m.seed)):
+        a = np.array([j.arrival for j in st.stream(m.truth.iloc[0], load, seed)])
+        win[(load, seed)] = int(np.quantile(a, 0.9)) - int(np.quantile(a, 0.1)) + 1
+    m["over"] = m.min_over / [win[(l, s)] for l, s in zip(m.load, m.seed)]
+    x, y = m[m.d_idle == d], g[(g.d_idle == d) & (g.placement == "cold")]
+    it = y.groupby("bw_gbs").throughput.mean()
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tables/cxl_minute.tex"), "w") as t:
+        t.write("\\begin{tabular}{rrrrrrrrrrr}\n\\toprule\n & \\multicolumn{3}{c}{Demand (GB/s)} & Minutes & "
+                "\\multicolumn{2}{c}{Latency (ns)} & \\multicolumn{3}{c}{Jobs/h, minute by minute} & Jobs/h, \\\\\n"
+                "\\cmidrule(lr){2-4}\\cmidrule(lr){6-7}\\cmidrule(lr){8-10}\n"
+                "Bandwidth & Mean & p95 & Max & over & Mean & p95 & Cold & Random & Hot & averaged \\\\\n\\midrule\n")
+        for b in sorted(x.bw_gbs.unique(), reverse=True):
+            r = x[x.bw_gbs == b]
+            tp = r.groupby("placement").throughput.mean()
+            t.write(" & ".join([f"{b:.0f}\\,GB/s", f"{r.demand_gbs.mean():.1f}", f"{r.demand_p95.mean():.1f}",
+                                f"{r.demand_max.mean():.1f}", f"{100 * r.over.mean():.0f}\\%", f"{r.d_eff.mean():.0f}",
+                                f"{r.d_p95.mean():.0f}", f"{tp['cold']:.1f}", f"{tp['rand']:.1f}", f"{tp['hot']:.1f}",
+                                f"{it[b]:.1f}" if b in it.index else "---"]) + " \\\\\n")
+        t.write("\\bottomrule\n\\end{tabular}\n")
+
+
 if __name__ == "__main__":
     if sys.argv[1] == "model":
         m = Model()
@@ -257,6 +357,10 @@ if __name__ == "__main__":
                   "GB/s/thr remote", round(m.traffic(prog, "rand", m.d0)(1.0), 2))
     elif sys.argv[1] == "table":
         table(sys.argv[2] if len(sys.argv) > 2 else f"{D}/grid.csv")
+    elif sys.argv[1] == "table_minute":
+        table_minute(f"{D}/grid_minute.csv", f"{D}/grid.csv")
+    elif sys.argv[1] == "minute":
+        grid(sys.argv[2] if len(sys.argv) > 2 else f"{D}/grid_minute.csv", bws=(256, 64, 32, 16), minute=True)
     else:
         out = sys.argv[2] if len(sys.argv) > 2 else f"{D}/grid.csv"
         grid(out)

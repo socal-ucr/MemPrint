@@ -33,8 +33,17 @@ EPS = 1e-9
 
 
 class Sim:
-    def __init__(self, cluster: Cluster, jobs):
+    def __init__(self, cluster: Cluster, jobs, contention=None):
+        """contention: None, or a pool whose latency follows its load minute by minute. It has `at(demand GB/s)` ->
+        (added latency ns, bandwidth stretch) and `idle` (the latency of an empty pool). Each minute, the jobs that
+        run read the pool at job.traffic_d, the pool's latency follows from their sum, and each job advances by
+        1 / (1 + job.pool_cost_d) minutes of its base run; a job is planned (its resources committed) at the
+        latency of the minute it starts, ends when its progress is done (the rest released), and is extended a
+        minute at a time past its planned end (committed even where it overcommits a node, counted)."""
         self.c = cluster
+        self.contention = contention
+        if contention is not None:
+            self.d_now, self.st_now = contention.idle, 1.0
         self.jobs = sorted(jobs, key=lambda j: (j.arrival, j.id))
         self.h = 4096
         self.local = np.zeros((cluster.nodes, self.h))
@@ -45,6 +54,8 @@ class Sim:
         self.rev = {j.id: 0 for j in self.jobs}   # bumped when a retry replaces a job's reservation
         self.restarts = {}   # job id -> restarts of a dynamic job
         self._slots = {}   # (job id, which, multiplier, slots) -> the curve on that many slots
+        if contention is not None:
+            self.demand, self.lat = np.zeros(self.h), np.zeros(self.h)   # per minute: pool GB/s, added latency ns
 
     def _ensure(self, end):
         if end <= self.h:
@@ -52,6 +63,8 @@ class Sim:
         h = max(end, 2 * self.h)
         grow = lambda a: np.concatenate([a, np.zeros(a.shape[:-1] + (h - self.h,), a.dtype)], axis=-1)
         self.local, self.cores, self.pool = grow(self.local), grow(self.cores), grow(self.pool)
+        if self.contention is not None:
+            self.demand, self.lat = grow(self.demand), grow(self.lat)
         self.resident, self.h = grow(self.resident), h
 
     def plan(self, job, nodes, s):
@@ -91,7 +104,7 @@ class Sim:
             kill = min(kills) if kills else None
             run = slice(0, T if kill is None else kill)
             f = max(float(np.maximum(a[run] - q["local"][run], 0).sum() / max(a[run].sum(), EPS)) for q in parts)
-            T2 = max(1, math.ceil(job.base * (1 + (job.pool_cost(f) if job.pool_cost else c.beta * f)) + extra))
+            T2 = max(1, math.ceil(job.base * (1 + self._cost(job, f)) + extra))
             if T2 == T or it == 7:   # unconverged after 8 rounds: keep the last placement, computed for T
                 break
             T = T2
@@ -107,6 +120,11 @@ class Sim:
             p["r"] = np.where(first, r, 0.0)
             p["local"], p["pool"] = parts[0]["local"], sum(q["pool"] for q in parts)
         return p
+
+    def _cost(self, job, f):
+        if self.contention is not None and job.pool_cost_d is not None:
+            return job.pool_cost_d(f, self.d_now, self.st_now)
+        return job.pool_cost(f) if job.pool_cost else self.c.beta * f
 
     def _part(self, job, node, s, T, r, a, win, pool_used):
         """One node's share of a placement: local first, the rest from the pool left after the job's other nodes."""
@@ -236,8 +254,64 @@ class Sim:
         queue, ends, ticks, done, rejected = [], [], [], {}, []
         seq = itertools.count()   # tie-break: a restarted job's dead end event can share its new one's time
         stats = dict(kills=0, restarts=0, wasted_core_min=0.0, reserved=0.0, resident=0.0, remote=0.0, resizes=0,
-                     migrations=0, overhead_core_min=0.0, fallbacks=0)
+                     migrations=0, overhead_core_min=0.0, fallbacks=0, overrun_min=0, overcommit_core_min=0.0)
         nxt = 0
+        cont = self.contention
+        running = {}   # with contention: job id -> [job, placement, progress, the progress needed]
+        last = [0]
+
+        def finish(job, p, t):
+            done[job.id] = dict(id=job.id, shape=job.shape, arrival=job.arrival, start=p["s"], end=t,
+                                base=job.base, runtime=t - p["s"], cores=job.cores, remote=p["remote"],
+                                node=p["node"], nodes=len(p["parts"]))
+
+        def extend(job, p):
+            """one more minute past the planned end, at the last minute's resources"""
+            s, T = p["s"], p["T"]
+            self._ensure(s + T + 1)
+            for q in p["parts"]:
+                n = q["node"]
+                self.local[n, s + T] += q["local"][-1]
+                self.pool[s + T] += q["pool"][-1]
+                self.cores[n, s + T] += job.cores
+                stats["overcommit_core_min"] += max(0, self.cores[n, s + T] - c.cores)
+                q["local"], q["pool"] = np.append(q["local"], q["local"][-1]), np.append(q["pool"], q["pool"][-1])
+            p["a"], p["r"] = np.append(p["a"], p["a"][-1]), np.append(p["r"], p["r"][-1])
+            p["T"] = T + 1
+            stats["overrun_min"] += 1
+
+        def advance(t):
+            """the minutes before t: the pool's latency from the running jobs' reads, their progress; True if a job
+            ended"""
+            ended = False
+            for m in range(last[0], t):
+                if not running:
+                    self.d_now, self.st_now = cont.at(0.0)
+                    break
+                for k in [k for k, v in running.items() if v[1].get("dead")]:
+                    del running[k]
+                self._ensure(m + 1)
+                dem = sum(j.traffic_d(p["remote"], self.d_now) * j.cores * len(p["parts"])
+                          for j, p, _, _ in running.values())
+                self.d_now, self.st_now = cont.at(dem)
+                self.demand[m], self.lat[m] = dem, self.d_now
+                for k, v in list(running.items()):
+                    j, p = v[0], v[1]
+                    v[2] += 1 / (1 + j.pool_cost_d(p["remote"], self.d_now, self.st_now))
+                    if p["kill"] is None and v[2] >= v[3] - EPS:   # done at the end of minute m
+                        del running[k]
+                        e = m + 1 - p["s"]
+                        if e < p["T"]:
+                            self._commit(j, p, -1, frm=e)
+                            p["T"] = e
+                        p["finished"] = True
+                        account(p, p["s"], e)
+                        finish(j, p, m + 1)
+                        ended = True
+                    elif p["kill"] is None and m + 1 - p["s"] >= p["T"]:   # past its planned end: one more minute
+                        extend(j, p)
+            last[0] = t
+            return ended
 
         def account(p, t, n):
             used = slice(0, n)
@@ -253,9 +327,14 @@ class Sim:
             stats["overhead_core_min"] += job.cores * len(p["parts"]) * p.get("extra", 0.0)
             end = t + (p["T"] if p["kill"] is None else p["kill"])
             heapq.heappush(ends, (end, job.id, next(seq), job, p))
+            contended = cont is not None and job.pool_cost_d is not None
+            if contended:
+                running[job.id] = [job, p, 0.0, job.base + p.get("extra", 0.0)]
             if job.interval:   # accounted when it ends, once its resizes are known
                 if job.interval < p["T"]:
                     heapq.heappush(ticks, (t + job.interval, job.id, next(seq), job, p))
+                return
+            if contended and p["kill"] is None:   # accounted when its progress is done
                 return
             account(p, t, end - t)
 
@@ -323,20 +402,27 @@ class Sim:
                     queue.remove(j)
                 return
 
-        while nxt < len(jobs) or ends or queue:
+        while nxt < len(jobs) or ends or queue or running:
             t = min(jobs[nxt].arrival if nxt < len(jobs) else math.inf, ends[0][0] if ends else math.inf,
-                    ticks[0][0] if ticks else math.inf)
+                    ticks[0][0] if ticks else math.inf, last[0] + 1 if running else math.inf)
             if t == math.inf:
                 rejected.extend(queue)
                 break
+            event = cont is not None and advance(t)
+            if cont is not None and not event and not (nxt < len(jobs) and jobs[nxt].arrival == t) \
+                    and not (ends and ends[0][0] == t) and not (ticks and ticks[0][0] == t):
+                continue   # a minute of progress only: nothing to schedule
             killed = []
             while ends and ends[0][0] == t:
                 _, _, _, job, p = heapq.heappop(ends)
-                if p.get("dead"):
+                if p.get("dead") or p.get("finished"):
                     continue
+                if job.id in running and p["kill"] is None:
+                    continue   # with contention, its progress ends it
                 if job.interval:
                     account(p, p["s"], p["T"])
                 if p["kill"] is not None:
+                    running.pop(job.id, None)
                     p["dead"] = True   # its pending resizes (a dynamic job) must not run for the requeued job
                     self._commit(job, p, -1, frm=p["kill"])
                     stats["kills"] += 1
@@ -354,7 +440,7 @@ class Sim:
                                         node=p["node"], nodes=len(p["parts"]))
             while ticks and ticks[0][0] == t:
                 _, _, _, job, p = heapq.heappop(ticks)
-                if not p.get("dead") and resize(job, p, t) is not None:
+                if not p.get("dead") and not p.get("finished") and resize(job, p, t) is not None:
                     killed.append(job)
             queue[:0] = killed
             while nxt < len(jobs) and jobs[nxt].arrival == t:
@@ -380,7 +466,8 @@ def summarize(d, stats, c, rejected):
         response=d.response.mean(), response_p95=d.response.quantile(0.95), wait=(d.start - d.arrival).mean(),
         bsld=d.bsld.mean(), stretch=(d.runtime / d.base).mean(),
         kills=stats["kills"], restarts=stats["restarts"], fallbacks=stats["fallbacks"], resizes=stats["resizes"],
-        migrations=stats["migrations"],
+        migrations=stats["migrations"], overrun_min=stats.get("overrun_min", 0),
+        overcommit_core_min=stats.get("overcommit_core_min", 0.0),
         overhead_core_h=stats["overhead_core_min"] / 60, wasted_core_h=stats["wasted_core_min"] / 60,
         reserved_util=stats["reserved"] / capacity, resident_util=stats["resident"] / capacity,
         pool_share=stats["remote"] / max(stats["resident"], EPS), makespan_h=span / 60,

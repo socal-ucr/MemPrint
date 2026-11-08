@@ -204,4 +204,34 @@ d, s = Sim(c, [oj]).run()
 check("dynamic: an OOM kill retires the placement and its resizes", s["kills"] == 2 and len(d) == 1,
       f"kills {s['kills']}, done {len(d)}")
 
+# A contended pool: each job spills half its memory to the pool, costs e = 0.001 d per ns of latency and reads
+# 10 GB/s; the pool adds 100 ns idle and 100 ns more per 10 GB/s. Alone, a job's own reads put the pool at 200 ns
+# (base 100 -> 120 minutes); two at once both run at 300 ns (130 minutes).
+
+
+class Lat:
+    idle = 100.0
+
+    def at(self, dem):
+        return 100.0 + 10.0 * dem, 1.0
+
+
+def pjob(i, arrival=0):
+    j = job(i, np.full(K, 100.0), np.full(K, 100.0), arrival=arrival)
+    j.pool_cost_d = lambda f, d, st: 0.001 * d * st * (f > 0)
+    j.traffic_d = lambda f, d: 10.0 * (f > 0)
+    return j
+
+
+c = Cluster(nodes=2, cores=8, local=50, pool=200)
+d, s = Sim(c, [pjob(0)], contention=Lat()).run()
+check("contention: a job alone runs at the latency of its own reads", d.runtime.tolist() == [120], f"runtime {d.runtime.tolist()}")
+d, s = Sim(c, [pjob(0), pjob(1)], contention=Lat()).run()
+check("contention: two jobs at once slow each other down", d.runtime.tolist() == [130, 130],
+      f"runtime {d.runtime.tolist()}")
+d, s = Sim(c, [pjob(0), pjob(1, arrival=60)], contention=Lat()).run()
+# job 0: 60 minutes at 200 ns (50 base minutes), then 50 more at 300 ns: 65 minutes, 125 in all, past its plan of 120
+check("contention: a job started later slows a running one, which runs past its plan",
+      d.runtime.tolist()[0] == 125 and s["overrun_min"] > 0, f"runtime {d.runtime.tolist()}, overrun {s['overrun_min']}")
+
 sys.exit(failed)

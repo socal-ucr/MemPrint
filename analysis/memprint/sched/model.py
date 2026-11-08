@@ -51,14 +51,18 @@ class Job:
     # KS+ (Bader et al., eScience 2024): after an OOM kill at progress t, retry(job, t) gives the new reservation
     # (None: grow it as for every other oracle)
     retry: object = None
-    # the policies' own costs (0: none): seconds of progress lost per growing resize (dynamic provisioning; 10 s in
-    # Zacarias et al.'s simulator), and seconds per GB moved by Pond's mitigation (50 ms/GB in the Pond paper)
     # the runtime stretch with share f of the resident GB-minutes in the pool: T = base (1 + pool_cost(f)); None:
     # the cluster's beta f (a CXL pool's per-program cost, paper_rss/cxl_sim.py)
     pool_cost: object = None
     nodes: int = 1            # nodes the job spans; each holds `resident` (SPMD)
+    # the policies' own costs (0: none): seconds of progress lost per growing resize (dynamic provisioning; 10 s in
+    # Zacarias et al.'s simulator), and seconds per GB moved by Pond's mitigation (50 ms/GB in the Pond paper)
     resize_cost: float = 0.0
     migrate_cost: float = 0.0
+    # with a contended pool (Sim's `contention`): pool_cost_d(f, d, stretch) is the extra share of the run at the
+    # pool's current added latency d (ns) and bandwidth stretch, and traffic_d(f, d) the GB/s of pool reads per core
+    pool_cost_d: object = None
+    traffic_d: object = None
 
 
 def at_slots(curve, slots):

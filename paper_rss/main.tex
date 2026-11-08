@@ -1413,8 +1413,37 @@ stretch is 1.043 with the cold plan, 1.052 with the random and 1.054 with the ho
 3.0 to 4.1 jobs per hour, 13 to 16\%, at every latency and placement, so a slower pool does not change the order of the
 policies. The bandwidth matters little at this scale: the jobs read the pool at 12\,GB/s on average and at
 21\,GB/s at most, so a pool of 32\,GB/s adds 13 to 17\,ns to its latency on average (42\,ns at most) and costs 0.24
-jobs per hour on average against a pool of unbounded bandwidth, less than the variation over seeds. The mean demand smooths over the minutes in which several streaming jobs share the
-pool, so the bandwidth's effect is a lower bound.
+jobs per hour on average against a pool of unbounded bandwidth, less than the variation over seeds. The mean demand, however, smooths over the minutes in which several jobs that stream
+through memory share the pool.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{The pool minute by minute, at an idle added latency of 300\,ns: the jobs' demand on the pool (mean,
+95th percentile and largest minute), the share of the steady minutes in which it exceeds the bandwidth, the pool's
+added latency, and the throughput with each placement, means over the 6 policies, both loads and 3 seeds (36 runs
+per cell); the last column is the throughput of the cold plan with the latency set from the mean demand
+(\tabref{tab:cxl-grid}), which the 16\,GB/s pool was not run with.}
+\label{tab:cxl-minute}
+\setlength{\tabcolsep}{3pt}
+\input{tables/cxl_minute.tex}
+\end{table}
+
+\textbf{Minute by minute.} To see the peaks, we made the simulator set the pool's latency every minute. Each minute,
+the jobs that run read the pool at their rates at the current latency; the sum gives the pool's latency and stretch
+as above, and each job advances by $1 / (1 + e)$ minutes of its run with all memory local, where $e$ is its cost at
+that latency. The scheduler commits a job's resources for the run time at the latency of the minute it starts; a job
+that finishes early releases the rest, and one that runs longer keeps its last minute's resources one minute at a
+time. In the 1{,}728 simulations, no extended job ever needed more cores than its node had. The pool's demand is
+bursty (\tabref{tab:cxl-minute}): at 300\,ns it averages 12.5\,GB/s, but its 95th percentile is 27 to 28\,GB/s and
+its largest minute 38 to 40\,GB/s, so a pool of 32\,GB/s is saturated in 2\% of the minutes and one of 16\,GB/s in
+30\%, where the latency reaches that of node 1 at saturation. Where the pool is not saturated, the minute-by-minute
+throughput agrees with the averaged one: over the configurations the two have in common, the difference is
+$+0.1$ to $+0.3$ jobs per hour on average, below the standard deviation over seeds of 0.85. At 16\,GB/s, the
+throughput falls by 1.0 jobs per hour with the cold plan against a pool of 256\,GB/s and by 1.2 and 1.5 with the
+random and the hot plan, because the cold plan reads the pool least: at 16\,GB/s, the mean stretch of a job is 1.058
+with the cold plan and 1.077 with the hot one. The bandwidth therefore matters only when the pool's bandwidth is near the jobs'
+peak demand, and then a cold placement matters more, not less.
 
 \textbf{A correction to the resizing runs.} While testing these changes, we found that libmpr read each reservation
 line into a buffer of 512 bytes and dropped the rest of a longer line. The only lines this long are those of
@@ -1569,8 +1598,9 @@ memory (HPCCG and NPB CG, by up to 0.24), and runs on a node
 with CPUs, where the kernel's placement of its own memory differs from that on a CPU-less pool. Its runs last
 1.5 to 4\,s, which favors a static plan over migration, and its plans place only blocks of 256\,KiB or more and the
 program's own mappings, which leaves SQLite and most of Perl and Lua unplaced. Node 1 had about 400\,MB free, which
-limited the inputs. The cluster simulation with the slower pool sets the pool's loaded latency from the jobs' mean
-demand over the run, not minute by minute, and scales each job's cost and traffic from one run of its workload.
+limited the inputs. The cluster simulation with the slower pool scales each job's cost and pool traffic from runs of
+its workload and takes them as constant over the job's run, so the peaks of demand within a job are not modelled;
+the pool's latency follows only the mix of jobs that run.
 
 The evaluation covers a single machine, short runs of 0.1 to 12\,s and single-process programs. The truth's clock
 mapping passes through the native run's reference counts, which also place \memprint{}'s curve, so \memprint{}'s timing
@@ -1645,7 +1675,7 @@ plans, \texttt{regress\_libmpr.sh} compares two builds of libmpr, and \texttt{pl
 from \texttt{\textasciitilde/memprint-data/2026-11-07-refs} and \texttt{2026-11-08-lplace}. For \secref{sec:cxl},
 \texttt{run\_cxl.sh} (with \texttt{cxl/hog.c} and \texttt{cxl/chase.c}) runs the counted runs at both latencies
 and \texttt{cxl\_model.py} fits the model, from \texttt{2026-11-08-cxl}. \texttt{run\_cxlsim.sh} profiles and runs the 29
-workloads for the cluster and measures node 1's loaded latency, and \texttt{cxl\_sim.py} runs the cluster simulation,
+workloads for the cluster and measures node 1's loaded latency, and \texttt{cxl\_sim.py} runs the cluster simulation, averaged and minute by minute,
 from \texttt{2026-11-08-cxlsim}.
 
 \bibliographystyle{plain}
