@@ -40,6 +40,17 @@
                               as many bytes as separate the resident free bytes from the threshold, and at least
                               MPR_TRIM_EVERY (default 1 MB)
      MPR_TRIM_REPORT=<file>   at exit: "checks,trims,released_bytes"
+     MPR_PLACE=<file>         placement lines (besides any in the reservations): "key place K lo1 hi1 ... loK hiK"
+                              binds K ranges of each block of the site (fractions of the block, rounded out to pages)
+                              to NUMA node MPR_NODE (default 1, the pool) with mbind(MPOL_BIND) before the program
+                              touches them; the rest follows the process's policy. A site with a place line and no
+                              reservation is served and committed in full. Besides malloc's blocks, the program's own
+                              anonymous private mmaps of at least MPR_PLACE_MIN bytes (default MPR_MIN) are placed by
+                              the same lines (key: the caller of mmap). paper_rss/place_lplans.py writes them from
+                              mprshim profiles
+     MPR_NUMA=<file>          from a thread, every MPR_NUMA_INTERVAL seconds (default 0.25), "seconds,node0_anon_bytes,
+                              node1_anon_bytes,placed_bytes" (/proc/self/numa_maps; placed: bytes bound so far)
+     MPR_NOTHP=1              transparent huge pages off for the whole process (prctl PR_SET_THP_DISABLE)
      MPR_MONITOR=<file>       from a thread, every MPR_INTERVAL seconds (default 0.005) write "seconds,rss_bytes,anon_bytes,
                               file_bytes,free_bytes,released_bytes,data_bytes,trims": RSS, its anonymous and file
                               parts (/proc/self/status), glibc's free bytes (mallinfo2, else mallinfo), the free
@@ -85,6 +96,15 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/prctl.h>
+
+/* the runtime's own mappings bypass its mmap (below), which may take the lock */
+static void *raw_mmap(void *a, size_t n, int prot, int fl, int fd, off_t off)
+{
+    return (void *)syscall(SYS_mmap, a, n, prot, fl, fd, off);
+}
+#define mmap raw_mmap
 
 extern void *__libc_malloc(size_t);
 extern void *__libc_calloc(size_t, size_t);
@@ -98,8 +118,9 @@ extern void *__libc_memalign(size_t, size_t);
 enum model { M_NONE, M_DEAD, M_RATIO, M_AFFINE, M_CONST, M_CAP, M_RUNS, M_PERIODIC, M_RANGES };
 #define MAX_RUNS 128
 
+#define MAX_PLACE 32
 struct site {
-    char key[128];
+    char key[256];
     int model;
     double a, b;
     /* telemetry */
@@ -112,6 +133,8 @@ struct site {
     double per;    /* M_PERIODIC: bytes committed at the start of each period (a T + b) */
     float runs[MAX_RUNS][2];
     int has_model; /* the site has a line of its own (else: a base for context lines only) */
+    int nplace;    /* MPR_PLACE: ranges of each block (fractions) bound to node MPR_NODE */
+    float place[MAX_PLACE][2];
 };
 
 /* sites: from the reservation file, plus (MPR_ALL) sites without one; read-only keys after init */
@@ -292,7 +315,7 @@ static struct site *site_of_return(uintptr_t ret)
         return s;
     }
     pthread_mutex_unlock(&lock);
-    char key[128];
+    char key[256];
     int ok = key_of(ret, key, sizeof key);
     pthread_mutex_lock(&lock);
     struct site *s = NULL;
@@ -317,6 +340,11 @@ static struct site *site_of_id(uint64_t id)
     return s;
 }
 
+/* calling context -> site, for sites with per-context lines */
+#define CTX_MAX 4
+#define CTX_CACHE 8192
+static struct ctx_entry { struct site *base, *site; uintptr_t fr[CTX_MAX]; } *ctx_cache;
+
 static __thread int in_backtrace __attribute__((tls_model("initial-exec"))); /* backtrace() may allocate (it loads libgcc_s on first use) */
 
 /* A site with per-context lines: the line for the frames above the call that returns to `ret`
@@ -330,6 +358,23 @@ static struct site *with_context(struct site *s, uintptr_t ret)
     in_backtrace = 0;
     int i = 0;
     while (i < n && (uintptr_t)frames[i] != ret) i++;
+    /* the answer for these frames, if known: dladdr and the key search are slow (an mmap-heavy program asks often) */
+    uintptr_t fr[CTX_MAX] = {0};
+    int nf = s->ctx_depth < CTX_MAX ? s->ctx_depth : CTX_MAX;
+    uint64_t h = hash((uintptr_t)s);
+    for (int d = 0; d < nf && i + 1 + d < n; d++) fr[d] = (uintptr_t)frames[i + 1 + d], h = hash(h ^ fr[d]);
+    pthread_mutex_lock(&lock);
+    for (int k = 0; k < CTX_CACHE; k++) {
+        struct ctx_entry *e = &ctx_cache[(h + k) % CTX_CACHE];
+        if (!e->base) break;
+        if (e->base == s && !memcmp(e->fr, fr, sizeof fr)) {
+            struct site *c = e->site;
+            pthread_mutex_unlock(&lock);
+            return c;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    struct site *found = s->has_model ? s : NULL;
     for (int depth = s->ctx_depth; depth > 0; depth--) {
         if (i + depth >= n) continue;
         char key[sizeof s->key];
@@ -346,10 +391,21 @@ static struct site *with_context(struct site *s, uintptr_t ret)
         pthread_mutex_unlock(&lock);
         if (c) {
             TRACE("context %s\n", key);
-            return c;
+            found = c;
+            break;
         }
     }
-    return s->has_model ? s : NULL;
+    if (s->ctx_depth <= CTX_MAX) {
+        pthread_mutex_lock(&lock);
+        for (int k = 0; k < CTX_CACHE; k++) {
+            struct ctx_entry *e = &ctx_cache[(h + k) % CTX_CACHE];
+            if (e->base && !(e->base == s && !memcmp(e->fr, fr, sizeof fr))) continue;
+            e->base = s, e->site = found, memcpy(e->fr, fr, sizeof fr);
+            break;
+        }
+        pthread_mutex_unlock(&lock);
+    }
+    return found;
 }
 
 /* the runtime's blocks start on a page; glibc's (16 bytes into a chunk) almost never do */
@@ -615,6 +671,23 @@ static size_t commit_ranges(char *p, size_t len, const struct site *s)
     return total;
 }
 
+/* MPR_PLACE */
+static int nplaced_sites, place_node = 1;
+static size_t place_min;
+static atomic_uint_least64_t placed;
+
+static void place_block(char *p, size_t len, const struct site *s)
+{
+    unsigned long mask = 1UL << place_node;
+    for (int i = 0; i < s->nplace; i++) {
+        size_t lo = (size_t)(s->place[i][0] * len) & ~(PAGE - 1), hi = ROUND((size_t)(s->place[i][1] * len));
+        if (hi > len) hi = len;
+        if (hi <= lo) continue;
+        if (syscall(SYS_mbind, p + lo, hi - lo, 2 /* MPOL_BIND */, &mask, 65, 0) == 0) atomic_fetch_add(&placed, hi - lo);
+        else TRACE("mbind %p +%zu %zu: errno %d\n", (void *)p, lo, hi - lo, errno);
+    }
+}
+
 static void *serve(size_t size, struct site *s, size_t align)
 {
     int shaped = s->model == M_RUNS || s->model == M_PERIODIC || s->model == M_RANGES;
@@ -625,6 +698,7 @@ static void *serve(size_t size, struct site *s, size_t align)
     if (s->model == M_RUNS) commit = commit_runs(p, len, s);
     if (s->model == M_PERIODIC) commit = commit_periodic(p, size, len, s);
     if (s->model == M_RANGES) commit = commit_ranges(p, len, s);
+    if (s->nplace) place_block(p, len, s);
     pthread_mutex_lock(&lock);
     struct block *b = slot((uintptr_t)p, 1);
     if (!b) {
@@ -857,6 +931,7 @@ static void *realloc_at(void *ptr, size_t size, uintptr_t ret, uint64_t id, int 
                 errno = ENOMEM;
                 return NULL;
             }
+            if (b->site->nplace) place_block(q, len, b->site); /* the new tail, or the moved block */
             struct block moved = *b;
             size_t old_len = b->len;
             (void)old_len;
@@ -1096,13 +1171,33 @@ static double param(const char *name, double dflt)
 
 static void parse_line(const char *line)
 {
-    char key[128], model[32], pname[32];
+    char key[256], model[32], pname[32];
     double a, b, a2, b2, dflt;
     int k;
     if (!strncmp(line, "# image ", 8)) parse_image(line);
     if (line[0] == '#') return;
-    int got = sscanf(line, "%127s %31s %lf %lf", key, model, &a, &b);
+    int got = sscanf(line, "%255s %31s %lf %lf", key, model, &a, &b);
     if (got < 2) return;
+    if (!strcmp(model, "place")) { /* "key place K lo1 hi1 ...": placement, independent of the reservation */
+        struct site *s = find_key(key);
+        if (!s) s = add_site(key, M_NONE, 0, 0);
+        if (!s) return;
+        s->has_model = 1;
+        const char *q = line;
+        for (int skip = 0; skip < 3 && *q; skip++) { /* past the key, "place" and K */
+            while (*q && *q != ' ' && *q != '\t') q++;
+            while (*q == ' ' || *q == '\t') q++;
+        }
+        int k = (int)a;
+        for (int i = 0; i < k && s->nplace < MAX_PLACE; i++) {
+            char *end;
+            float lo = strtof(q, &end), hi = strtof(end, &end);
+            if (end == q) break;
+            s->place[s->nplace][0] = lo, s->place[s->nplace][1] = hi, s->nplace++, q = end;
+        }
+        nplaced_sites++;
+        goto context;
+    }
     int m = !strcmp(model, "dead") ? M_DEAD : !strcmp(model, "ratio") ? M_RATIO
           : !strcmp(model, "affine") ? M_AFFINE : !strcmp(model, "const") ? M_CONST
           : !strcmp(model, "cap") ? M_CAP : !strcmp(model, "runs") ? M_RUNS
@@ -1111,7 +1206,7 @@ static void parse_line(const char *line)
     if (m == M_RANGES) a = b = 0;      /* (its parameter's name follows K: parsed below) */
     else if (got != 4) return;
     if (m == M_PERIODIC) { /* "key periodic K a b PARAM DEFAULT" */
-        if (sscanf(line, "%127s %31s %d %lf %lf %31s %lf", key, model, &k, &a2, &b2, pname, &dflt) != 7 || k < 1) return;
+        if (sscanf(line, "%255s %31s %d %lf %lf %31s %lf", key, model, &k, &a2, &b2, pname, &dflt) != 7 || k < 1) return;
         a = k, b = a2 * param(pname, dflt) + b2;
     }
     struct site *s = find_key(key);
@@ -1155,6 +1250,7 @@ static void parse_line(const char *line)
             s->runs[s->nruns][0] = lo, s->runs[s->nruns][1] = hi, p = end;
         }
     }
+context:;
     /* a context line: its base site must look at the calling context */
     char *at = strchr(key, '@');
     if (at) {
@@ -1170,7 +1266,7 @@ static void parse_line(const char *line)
 /* reservations built into the program by the pass (apply mode) */
 static void load_embedded(const char *text)
 {
-    char line[512];
+    char line[2048];
     while (*text) {
         size_t n = strcspn(text, "\n");
         if (n < sizeof line) {
@@ -1188,7 +1284,7 @@ static void load(const char *file)
         fprintf(stderr, "libmpr: cannot read %s\n", file);
         return;
     }
-    char line[512];
+    char line[2048];
     while (fgets(line, sizeof line, f)) {
         parse_line(line);
     }
@@ -1413,6 +1509,70 @@ static void start_monitor(void)
     pthread_attr_destroy(&a);
 }
 
+/* MPR_NUMA: the process's anonymous bytes per node */
+static FILE *numa_out;
+static double numa_interval = 0.25;
+static void *numa_loop(void *arg)
+{
+    (void)arg;
+    static char line[8192];
+    for (;;) {
+        unsigned long v[2] = {0, 0};
+        FILE *f = fopen("/proc/self/numa_maps", "r");
+        while (f && fgets(line, sizeof line, f)) {
+            if (!strstr(line, " anon=")) continue;
+            unsigned long kbp = 4, n;
+            char *q = strstr(line, "kernelpagesize_kB=");
+            if (q) kbp = strtoul(q + 18, NULL, 10);
+            for (int i = 0; i < 2; i++) {
+                char k[8];
+                snprintf(k, sizeof k, " N%d=", i);
+                if ((q = strstr(line, k)) && (n = strtoul(q + strlen(k), NULL, 10))) v[i] += n * kbp << 10;
+            }
+        }
+        if (f) fclose(f);
+        fprintf(numa_out, "%.4f,%lu,%lu,%lu\n", (now_us() - t0_us) / 1e6, v[0], v[1], (unsigned long)atomic_load(&placed));
+        fflush(numa_out);
+        struct timespec ts = {(time_t)numa_interval, (long)((numa_interval - (time_t)numa_interval) * 1e9)};
+        nanosleep(&ts, NULL);
+    }
+    return NULL;
+}
+
+static void start_numa(void)
+{
+    const char *v = getenv("MPR_NUMA");
+    if (!v || !*v || !(numa_out = fopen(v, "w"))) return;
+    unsetenv("MPR_NUMA");
+    if ((v = getenv("MPR_NUMA_INTERVAL"))) numa_interval = strtod(v, NULL);
+    fprintf(numa_out, "seconds,node0_anon_bytes,node1_anon_bytes,placed_bytes\n");
+    int (*create)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *) =
+        (int (*)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *))dlsym(RTLD_NEXT, "pthread_create");
+    pthread_attr_t a;
+    pthread_t t;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&a, 1 << 16);
+    if (create) create(&t, &a, numa_loop, NULL);
+    pthread_attr_destroy(&a);
+}
+
+/* MPR_PLACE: the program's own anonymous private mappings, placed by their caller's line */
+#undef mmap
+void *mmap(void *a, size_t n, int prot, int fl, int fd, off_t off)
+{
+    void *p = raw_mmap(a, n, prot, fl, fd, off);
+    if (p != MAP_FAILED && nplaced_sites && ready && !a && fd == -1 && (fl & MAP_ANONYMOUS) && (fl & MAP_PRIVATE)
+        && !(fl & (MAP_FIXED | MAP_STACK | MAP_GROWSDOWN)) && n >= place_min && !in_backtrace) {
+        uintptr_t ret = RET;
+        struct site *s = with_context(site_of_return(ret), ret);
+        if (s && s->nplace) place_block(p, ROUND(n), s);
+    }
+    return p;
+}
+void *mmap64(void *a, size_t n, int prot, int fl, int fd, off_t off) __attribute__((alias("mmap")));
+#define mmap raw_mmap
+
 __attribute__((constructor)) static void init(void)
 {
     const char *v;
@@ -1420,7 +1580,8 @@ __attribute__((constructor)) static void init(void)
     cache = table(CACHE * sizeof *cache);
     live  = table(LIVE * sizeof *live);
     starts = table(LIVE * sizeof *starts);
-    if (!sites || !cache || !live || !starts) return; /* not ready: everything goes to glibc */
+    ctx_cache = table(CTX_CACHE * sizeof *ctx_cache);
+    if (!sites || !cache || !live || !starts || !ctx_cache) return; /* not ready: everything goes to glibc */
     if ((v = getenv("MPR_MIN"))) min_size = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_SCALE"))) scale = strtod(v, NULL);
     if ((v = getenv("MPR_ALL"))) serve_all = atoi(v);
@@ -1429,6 +1590,10 @@ __attribute__((constructor)) static void init(void)
     if ((v = getenv("MPR_ZERO_MIN"))) zero_min = strtoull(v, NULL, 10);
     if ((v = getenv("MPR_THP"))) thp = atoi(v);
     if ((v = getenv("MPR_STACKS"))) stacks_on = atoi(v);
+    if ((v = getenv("MPR_NODE"))) place_node = atoi(v);
+    place_min = min_size;
+    if ((v = getenv("MPR_PLACE_MIN"))) place_min = strtoull(v, NULL, 10);
+    if (getenv("MPR_NOTHP")) prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
     if ((v = getenv("MPR_PROFILE")) && *v) {
         char exe[256], path[512];
         ssize_t k = readlink("/proc/self/exe", exe, sizeof exe - 1);
@@ -1453,8 +1618,10 @@ __attribute__((constructor)) static void init(void)
         load(v);
     else if (__mpr_embedded_reservations)
         load_embedded(__mpr_embedded_reservations);
+    if ((v = getenv("MPR_PLACE")) && *v) load(v);
     ready = 1;
     start_monitor();
+    start_numa();
 }
 
 static int image_line(struct dl_phdr_info *info, size_t size, void *arg)
