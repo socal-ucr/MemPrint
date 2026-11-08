@@ -837,8 +837,12 @@ to 8{,}192 bytes and skips a longer line with a warning. Every llama.cpp configu
 and \tabref{tab:nprof}) was run again with the corrected \libmpr{}, with glibc interleaved; the commit under \libmpr{}
 rises by 0.4 to 2.7\,MB with each model's own profile and by up to 7.3\,MB with held-out and pooled ones, and RSS and outputs do not change. In
 these new runs glibc's peak RSS is 16\,MB lower than in the original runs (363 against 380\,MB for the 135M model), all
-of it anonymous memory, with identical output; we attribute this to fewer transparent huge pages being available on
-the machine, and the RSS reductions we report for llama.cpp are 1.4 to 2.4 percentage points smaller because of it.
+of it anonymous memory, with identical output. The cause is transparent huge pages: by the time of the new runs the
+machine had almost no free 2\,MB blocks left, so glibc's large buffers, which llama.cpp touches only in part, were no
+longer backed by huge pages. With huge pages requested on those buffers (\texttt{MADV\_HUGEPAGE}, under which the
+kernel compacts memory to find them), a glibc run reproduces the original anonymous memory exactly (217.2\,MB for the
+135M model and 357.0\,MB for the 360M model). The RSS reductions we report for llama.cpp are 1.4 to 2.4 percentage
+points smaller because of it.
 The comparison with provisioning policies (\secref{sec:baselines}) and the cluster simulation (\secref{sec:cluster})
 use the original runs: they take each run's peak of commit and RSS, and llama.cpp's commit under \libmpr{} (57 to
 62\,MB) stays far below its RSS (176 to 426\,MB), so the correction does not change them.
