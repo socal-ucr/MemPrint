@@ -147,7 +147,8 @@ def table():
     out = [r"\multicolumn{5}{l}{\emph{Transfer to the largest input, signed whole-run error (\%), median of 3 runs}} \\"]
     for prog, name in (("npb-mg", "NPB-MG"), ("2mm", "2mm"), ("gemm", "gemm"), ("jacobi-2d", "jacobi-2d"), ("atax", "atax")):
         out.append(name + " & " + " & ".join(sgn(tr.loc[prog, s]) for s in cols) + r" \\")
-    out.append(r"Median $|$error$|$, 23 programs & " + " & ".join(f"{tr[s].abs().median():.1f}" for s in cols) + r" \\")
+    out.append(rf"Median $|$error$|$, {tr[cols].notna().sum().max()} programs & " +   # pss5 lacks atax (21)
+               " & ".join(f"{tr[s].abs().median():.1f}" for s in cols) + r" \\")
     out.append(r"\addlinespace")
     out.append(r"\multicolumn{5}{l}{\emph{Blind configurations, error (\%) of the extrapolation to the largest}} \\")
     for prog in ("MG", "IS", "CG"):
