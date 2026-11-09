@@ -190,3 +190,6 @@ i=k/20); native; 5 interleaved rounds. Reported: median per configuration (`m7_k
   rescored with the same transfer (paper_rss/blind/score.py `transfer(..., base="base0")`).
 - R11 (`m11.sh trace`, `score.py r11`): miniVite's pages in use, `-mode splitter -intervals 1 -bins 1 -footprint pages
   -track_frees 1 -snapshot 100000`, the largest Bin -1 value of the timeline; R1 rescored with it as miniVite's truth.
+- M7 splitter check (added Nov 9): the published splitter (`buffer_memtrace_poisson_cascade.so -short_name`) once
+  at 8,192 vertices on the current miniVite binary, with `OMP_NUM_THREADS=1` (113.0 s) and unset (32 threads,
+  386.9 s; published 373.6 s from `runtime_miniVite.sh`, which never sets it). The tool writes into `./traces/`.

@@ -72,6 +72,8 @@ Sampler wall time, miniVite 8,192 vertices & 42.1 s at 1 in 500; 52.2 s at 1 in 
   & 30.9 s, 27.9 s and 25.6 s at those actual bin intervals (Table~\ref{tab:m7}) \\
 L2O test MAPE under the pages-touched truth & not measured & 12.06 and 3.37 on the splitter's bins, 15.31 and
   2.97 on the sampler's (Table~\ref{tab:m11}) \\
+Splitter wall time, miniVite 8,192 vertices & 373.6 s & 87.7 s with one thread; the published splitter takes 113.0 s
+  with one thread and 386.9 s with 32 (Section~\ref{sec:m7}) \\
 Sampler cost against full instrumentation & ``a fraction'' & 1.9$\times$ and 2.5$\times$ faster than the truth
   run on miniVite, 3.3$\times$ to 8.4$\times$ on PolyBench at MEDIUM (Table~\ref{tab:m9}) \\
 Cumulative training cost & 216, 484 (438.77 in the text), 720 and 1,093 s & 46, 87 and 188 s
@@ -94,7 +96,10 @@ time, except the truth runs of R9, which ran 8 at a time and measure no time. Th
 \texttt{f32d036}.
 
 \paragraph{Workloads and inputs.}
-The workloads are the 27 PolyBench/C kernels of the published test table and miniVite. Each PolyBench kernel runs
+The workloads are the 27 PolyBench/C kernels of the published test table and miniVite. PolyBench's deriche is not
+among them because it did not build in the original setup. Its generated Makefile does not link the math library,
+so the link fails on \texttt{powf} and \texttt{expf}, and the published pipeline's files for deriche are empty. The
+patched build used here links it with \texttt{-lm}. Each PolyBench kernel runs
 at seven inputs (MINI, MINI2, MINI3, SMALL, SMALL2, SMALL3 and MEDIUM), four of which (MINI2, MINI3, SMALL2 and SMALL3) extend PolyBench's own datasets with intermediate sizes. miniVite runs on generated graphs of 1,024, 2,048, 4,096, 8,192 and 16,384
 vertices. M5 adds durbin and jacobi-1d, which appear in the published tables but were not retraced before. As in
 the published protocol, the extrapolation split (EXTRA) holds out each workload's largest input, and the
@@ -484,6 +489,16 @@ at 1 in 500). The disjoint sampler is the cheapest at every interval (28.7 s at 
 bootstrap), because it copies each kept reference into one bin rather than about ten. The splitter, which records
 all 13 intervals at once and is the cost of training, takes 87.7 s.
 
+The published splitter time at 8,192 vertices, 373.6 s, comes mostly from the thread count. The published script
+(\texttt{runtime\_miniVite.sh}, one run per input) does not set \texttt{OMP\_NUM\_THREADS}, so miniVite ran with
+one OpenMP thread per hardware thread, 32 on this machine. We ran the published splitter
+(\texttt{buffer\_memtrace\_poisson\_cascade.so}) once at 8,192 vertices with the current miniVite binary in both
+ways, with nothing else running. With the default thread count it takes 386.9 s, within 4\% of the published run,
+and with one thread it takes 113.0 s. The thread count therefore explains a factor of 3.4, and the current tool's
+splitter is 1.29$\times$ faster than the published one at one thread (87.7 s against 113.0 s). The published
+instrumentation-only time (36.2 s against 25.1 s here) is consistent with the same cause. These two runs are single
+runs and are the only runs in this document with more than one OpenMP thread.
+
 \subsection{M9. The sampler against the truth run}
 \label{sec:m9}
 
@@ -694,7 +709,8 @@ On \memprint{}'s inputs, the event sampler measures every run. No input measures
 against the pages-touched truth falls from 404,416 to 275,344 bytes, because $R$ no longer has to stand in for
 missed arrays. On Chapter 3's own programs, the event sampler matches the 1 ms sampler without improving it
 (Table~\ref{tab:r8}). The four programs that Chapter 3 names as short runs transfer within 4.5\% under both
-samplers, and the median error over all programs is 2.7\% against 2.1\%. The blind NPB configurations extrapolate
+samplers, and the median error over the 22 programs with a smaller input is 2.7\% against 2.1\% (darknet, the
+23rd program of Chapter 3's corpus, has no smaller input to transfer from). The blind NPB configurations extrapolate
 worse under the event sampler (IS +40.9\% and MG +40.0\%, against +16.7\% and +25.6\%), although it measures each
 target input to within 1\%. Each of these programs has a single smaller input with a truth, S, and the transfer
 rule scales the S measurement in proportion to the size. The event sampler measures more of S's memory, including
@@ -838,7 +854,8 @@ were fixed before their own runs, with one exception. The first run of R8 sample
 4 KiB that followed a fault, which slowed sqlite 1.99$\times$. We then added the time and growth conditions of
 Section~\ref{sec:r8} and repeated every R8 measurement, and only the second run is reported. Fourth, R9's result
 led us to score R1 primarily against the pages-touched truth, which the protocol did not define, and to keep the
-bytes-touched truth as the second column. Fifth, M10, M11, R10 and R11 were added after the fourth change. In M11
+bytes-touched truth as the second column. Fifth, M10, M11, R10 and R11 were added after the fourth change, and two single runs of the published splitter
+(Section~\ref{sec:m7}) were added to explain the published splitter time. In M11
 the samplers' first run used \texttt{-footprint pages}, which the Pin tool rejects in sampler mode while Pin still
 exits with status 0. That run produced no bins, and we repeated it with the bins in bytes, as in M3. The decision rule of M3 and every other analysis ran as written.
 
