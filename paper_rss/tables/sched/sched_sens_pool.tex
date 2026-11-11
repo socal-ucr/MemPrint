@@ -1,0 +1,25 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{4}{c}{Truth = pages in use} & \multicolumn{4}{c}{RSS} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+Pool (GB) & 512 & 1024 & 2048 & 4096 & 512 & 1024 & 2048 & 4096 \\
+\midrule
+Exact curve & 602 & 86 & 51 & 51 & 652 & 92 & 51 & 51 \\
+Exact, 20 windows & 852 & 164 & 53 & 51 & 868 & 156 & 53 & 51 \\
+Exact peak & 1{,}489 & 445 & 73 & 52 & 1{,}480 & 415 & 64 & 52 \\
+MemPrint windowed 5\% & 3{,}440 & 1{,}608 & 480 & 126 & 3{,}791 & 1{,}822 & 546 & 124 \\
+MemPrint pages only & 3{,}352 & 1{,}581 & 488 & 124 & 3{,}872 & 1{,}818 & 551 & 124 \\
+Massif curve & 3{,}797 & 2{,}012 & 672 & 189 & 3{,}683 & 1{,}813 & 561 & 133 \\
+DHAT peak & 2{,}578 & 1{,}043 & 280 & 70 & 2{,}606 & 1{,}048 & 276 & 67 \\
+RSS peak (earlier run) & 2{,}250 & 837 & 217 & 62 & 1{,}480 & 415 & 64 & 52 \\
+User request & 4{,}461 & 2{,}197 & 691 & 247 & 4{,}444 & 2{,}188 & 662 & 223 \\
+ML peak (quantile GBM) & 4{,}190 & 1{,}994 & 678 & 247 & 4{,}218 & 1{,}983 & 650 & 222 \\
+Reactive resizing (5 min) & 1{,}668 & 578 & 89 & 52 & 1{,}707 & 615 & 86 & 52 \\
+Pond (untouched in pool) & 4{,}993 & 2{,}517 & 797 & 247 & 4{,}979 & 2{,}492 & 773 & 221 \\
+Dynamic provisioning (5 min) & 1{,}655 & 415 & 61 & 50 & 1{,}598 & 445 & 57 & 50 \\
+Dynamic provisioning, look-back & 2{,}057 & 583 & 57 & 50 & 1{,}974 & 550 & 57 & 50 \\
+KS+ (segments from other inputs) & 1{,}791 & 1{,}023 & 380 & 130 & 1{,}436 & 876 & 258 & 106 \\
+RSS curve, earlier run & 1{,}658 & 553 & 100 & 56 & 1{,}324 & 364 & 64 & 54 \\
+Data $\hat f_1$, smaller inputs & 4{,}586 & 2{,}542 & 1{,}028 & 319 & 4{,}233 & 2{,}341 & 846 & 198 \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,27 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{Truth = pages in use} & \multicolumn{3}{c}{RSS} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Oracle & Jobs/h & Resp.\ (min) & Fails & Jobs/h & Resp.\ (min) & Fails \\
+\midrule
+Exact curve & 7.4 & 10{,}330 & 0 & 7.1 & 10{,}909 & 0 \\
+Exact, 20 windows & 6.8 & 11{,}579 & 0 & 6.7 & 12{,}432 & 0 \\
+Reactive resizing (5 min) & 6.6 & 12{,}611 & 4 & 6.5 & 13{,}741 & 3 \\
+Dynamic provisioning (5 min) & 6.3 & 12{,}989 & 414 & 7.0 & 14{,}757 & 482 \\
+Dynamic provisioning, look-back & 6.6 & 13{,}809 & 256 & 6.7 & 13{,}858 & 289 \\
+Exact peak & 6.3 & 16{,}245 & 0 & 6.3 & 16{,}297 & 0 \\
+User request & 6.3 & 16{,}245 & 0 & 6.3 & 16{,}297 & 0 \\
+Pond (untouched in pool) & 6.0 & 19{,}536 & 0 & 6.0 & 19{,}859 & 0 \\
+ML peak (quantile GBM) & 4.0 & 19{,}722 & 212 & 4.2 & 20{,}173 & 212 \\
+KS+ (segments from other inputs) & 3.6 & 20{,}038 & 6{,}450 & 3.4 & 17{,}368 & 6{,}675 \\
+RSS peak (earlier run) & 5.5 & 20{,}931 & 488 & 6.3 & 16{,}297 & 0 \\
+DHAT peak & 5.3 & 23{,}340 & 1{,}395 & 5.2 & 24{,}150 & 1{,}393 \\
+MemPrint windowed 5\% & 4.5 & 25{,}770 & 422 & 4.3 & 27{,}914 & 306 \\
+MemPrint pages only & 4.5 & 26{,}176 & 422 & 4.3 & 28{,}813 & 327 \\
+Massif curve & 4.1 & 31{,}312 & 1{,}205 & 4.2 & 29{,}251 & 1{,}268 \\
+Massif curve, ms clock & 3.7 & 33{,}882 & 1{,}139 & 3.8 & 34{,}539 & 1{,}263 \\
+DHAT curve (3 points) & 3.3 & 44{,}100 & 1{,}177 & 3.4 & 42{,}425 & 1{,}219 \\
+heaptrack curve & 5.2 & 47{,}576 & 1{,}364 & 5.9 & 45{,}573 & 1{,}400 \\
+gperftools peak & 4.1 & 56{,}346 & 1{,}748 & 5.1 & 54{,}168 & 1{,}748 \\
+\bottomrule
+\end{tabular}

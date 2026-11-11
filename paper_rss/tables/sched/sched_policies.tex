@@ -1,0 +1,43 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = pages in use} & \multicolumn{5}{c}{RSS} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Oracle & Resp.\ (min) & BSLD & Kills & Res.\ \% & Used \% & Resp.\ (min) & BSLD & Kills & Res.\ \% & Used \% \\
+\midrule
+Exact curve & 86 & 2.5 & 0 & 80 & 80 & 92 & 2.7 & 0 & 80 & 80 \\
+Exact, 20 windows & 164 & 5.8 & 0 & 80 & 72 & 156 & 5.5 & 0 & 80 & 72 \\
+\memprint{} W5, native clock & 347 & 13.8 & 358 & 80 & 62 & 643 & 26.7 & 556 & 73 & 52 \\
+Dynamic provisioning (5 min) & 415 & 17.0 & 279 & 76 & 64 & 445 & 18.4 & 287 & 75 & 64 \\
+Exact peak & 445 & 18.2 & 0 & 77 & 59 & 415 & 16.9 & 0 & 78 & 60 \\
+Data $\hat f_1$, earlier run & 528 & 21.6 & 313 & 76 & 57 & 694 & 28.9 & 420 & 73 & 51 \\
+RSS curve, earlier run & 553 & 22.8 & 310 & 73 & 55 & 364 & 14.6 & 339 & 75 & 62 \\
+Charged $\hat f_2$, earlier run & 573 & 23.6 & 327 & 75 & 55 & 767 & 32.1 & 243 & 71 & 50 \\
+Reactive resizing (5 min) & 578 & 24.1 & 14 & 71 & 54 & 615 & 25.7 & 18 & 69 & 53 \\
+Dynamic provisioning, look-back & 583 & 24.5 & 449 & 70 & 58 & 550 & 23.1 & 433 & 70 & 59 \\
+RSS peak, earlier run & 771 & 32.4 & 378 & 73 & 49 & 651 & 27.0 & 365 & 75 & 54 \\
+RSS peak (earlier run) & 837 & 35.3 & 488 & 72 & 47 & 415 & 16.9 & 0 & 78 & 60 \\
+MemPrint windowed 5\%, peak & 849 & 35.7 & 358 & 72 & 49 & 935 & 39.4 & 488 & 71 & 47 \\
+KS+ (segments from other inputs) & 1{,}023 & 43.8 & 8{,}604 & 61 & 41 & 876 & 37.2 & 8{,}888 & 64 & 47 \\
+DHAT peak & 1{,}043 & 44.1 & 1{,}395 & 71 & 44 & 1{,}048 & 44.5 & 1{,}393 & 68 & 44 \\
+MemPrint pages only & 1{,}581 & 67.8 & 441 & 61 & 34 & 1{,}818 & 78.3 & 327 & 58 & 33 \\
+MemPrint windowed 5\% & 1{,}608 & 69.0 & 443 & 60 & 33 & 1{,}822 & 78.5 & 304 & 58 & 33 \\
+MemPrint windowed 1\% & 1{,}684 & 72.4 & 470 & 58 & 32 & 1{,}801 & 77.5 & 304 & 58 & 33 \\
+\memprint{} W5, native clock, smaller inputs & 1{,}768 & 76.1 & 550 & 54 & 30 & 2{,}142 & 92.6 & 208 & 53 & 29 \\
+Charged $\hat f_2$, smaller inputs & 1{,}867 & 81.0 & 789 & 56 & 30 & 2{,}472 & 107.0 & 188 & 52 & 26 \\
+ML peak (quantile GBM) & 1{,}994 & 86.1 & 115 & 60 & 29 & 1{,}983 & 85.6 & 115 & 61 & 31 \\
+Massif curve & 2{,}012 & 86.8 & 1{,}205 & 56 & 29 & 1{,}813 & 77.9 & 1{,}264 & 58 & 33 \\
+RSS peak, smaller inputs & 2{,}116 & 91.4 & 367 & 53 & 27 & 1{,}763 & 75.8 & 367 & 56 & 31 \\
+User request & 2{,}197 & 95.0 & 0 & 57 & 28 & 2{,}188 & 94.6 & 0 & 57 & 29 \\
+\memprint{} W5, smaller inputs & 2{,}261 & 97.7 & 337 & 54 & 28 & 2{,}299 & 99.4 & 208 & 52 & 28 \\
+Pond (untouched in pool) & 2{,}517 & 109.0 & 0 & 53 & 26 & 2{,}492 & 107.8 & 0 & 53 & 27 \\
+Data $\hat f_1$, smaller inputs & 2{,}542 & 110.2 & 794 & 51 & 24 & 2{,}341 & 101.4 & 526 & 54 & 28 \\
+Massif curve, ms clock & 2{,}566 & 111.2 & 1{,}143 & 51 & 25 & 2{,}411 & 104.3 & 1{,}263 & 52 & 27 \\
+RSS curve, smaller inputs & 2{,}607 & 113.0 & 576 & 50 & 24 & 2{,}431 & 105.1 & 490 & 51 & 26 \\
+DHAT curve (3 points) & 2{,}832 & 122.8 & 1{,}169 & 53 & 26 & 2{,}756 & 119.5 & 1{,}233 & 51 & 25 \\
+DHAT hold-then-decay & 3{,}686 & 159.8 & 1{,}169 & 49 & 22 & 3{,}646 & 157.9 & 1{,}230 & 48 & 22 \\
+Massif pages-as-heap & 4{,}615 & 200.8 & 615 & 41 & 15 & 4{,}447 & 193.3 & 615 & 41 & 16 \\
+Massif pages-as-heap, ms clock & 6{,}181 & 269.8 & 729 & 36 & 12 & 5{,}807 & 253.3 & 729 & 38 & 12 \\
+gperftools peak & 11{,}206 & 491.0 & 1{,}748 & 33 & 7 & 11{,}463 & 502.8 & 1{,}748 & 33 & 7 \\
+heaptrack curve & 12{,}113 & 529.7 & 1{,}364 & 31 & 6 & 12{,}916 & 566.7 & 1{,}397 & 30 & 6 \\
+\bottomrule
+\end{tabular}

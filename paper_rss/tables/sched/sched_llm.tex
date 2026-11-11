@@ -1,0 +1,32 @@
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{Truth = pages in use} & \multicolumn{5}{c}{RSS} \\
+\cmidrule(lr){2-6} \cmidrule(lr){7-11}
+Oracle & Resp.\ (min) & BSLD & Kills & Res.\ \% & Used \% & Resp.\ (min) & BSLD & Kills & Res.\ \% & Used \% \\
+\midrule
+Exact curve & 200 & 7.5 & 0 & 75 & 75 & 182 & 6.7 & 0 & 74 & 74 \\
+Exact, 20 windows & 229 & 8.8 & 0 & 75 & 73 & 202 & 7.5 & 0 & 76 & 73 \\
+Exact peak & 284 & 11.1 & 0 & 76 & 70 & 361 & 14.4 & 0 & 76 & 66 \\
+Dynamic provisioning (5 min) & 377 & 15.4 & 111 & 72 & 66 & 443 & 18.3 & 200 & 71 & 63 \\
+Dynamic provisioning, look-back & 478 & 19.9 & 238 & 72 & 65 & 694 & 29.3 & 356 & 62 & 56 \\
+MemPrint windowed 5\%, peak & 651 & 27.0 & 597 & 72 & 61 & 986 & 41.6 & 1{,}214 & 70 & 49 \\
+KS+ (segments from other inputs) & 680 & 28.7 & 1{,}529 & 66 & 51 & 547 & 22.8 & 797 & 69 & 56 \\
+Reactive resizing (5 min) & 765 & 32.3 & 11 & 65 & 54 & 712 & 29.9 & 9 & 66 & 54 \\
+RSS peak (earlier run) & 1{,}035 & 43.8 & 597 & 69 & 57 & 361 & 14.4 & 0 & 76 & 66 \\
+MemPrint windowed 5\% & 1{,}320 & 56.3 & 842 & 55 & 37 & 948 & 40.0 & 1{,}213 & 70 & 50 \\
+MemPrint windowed 1\% & 1{,}470 & 63.0 & 858 & 54 & 36 & 930 & 39.4 & 1{,}213 & 70 & 50 \\
+ML peak (quantile GBM) & 1{,}800 & 77.5 & 115 & 60 & 36 & 1{,}904 & 82.1 & 115 & 61 & 34 \\
+MemPrint pages only & 1{,}841 & 79.1 & 973 & 50 & 31 & 939 & 39.7 & 1{,}213 & 70 & 50 \\
+User request & 2{,}055 & 88.7 & 0 & 58 & 34 & 2{,}146 & 92.7 & 0 & 57 & 31 \\
+Pond (untouched in pool) & 2{,}361 & 102.0 & 0 & 53 & 31 & 2{,}450 & 105.9 & 0 & 53 & 28 \\
+Massif pages-as-heap & 2{,}579 & 111.7 & 0 & 47 & 27 & 2{,}186 & 94.5 & 0 & 52 & 30 \\
+Massif pages-as-heap, ms clock & 2{,}885 & 125.0 & 0 & 45 & 25 & 2{,}495 & 107.9 & 0 & 48 & 26 \\
+Massif curve & 8{,}742 & 380.8 & 1{,}195 & 31 & 9 & 8{,}528 & 372.3 & 1{,}195 & 32 & 10 \\
+heaptrack curve & 8{,}916 & 388.5 & 1{,}195 & 31 & 9 & 8{,}333 & 363.2 & 1{,}195 & 32 & 10 \\
+Massif curve, ms clock & 8{,}921 & 388.6 & 1{,}195 & 32 & 9 & 8{,}630 & 376.5 & 1{,}195 & 32 & 10 \\
+DHAT curve (3 points) & 9{,}090 & 397.0 & 1{,}195 & 31 & 9 & 8{,}776 & 383.4 & 1{,}195 & 32 & 9 \\
+DHAT peak & 9{,}131 & 398.1 & 1{,}195 & 31 & 9 & 8{,}986 & 391.7 & 1{,}195 & 32 & 9 \\
+DHAT hold-then-decay & 9{,}418 & 411.1 & 1{,}195 & 31 & 9 & 9{,}251 & 404.3 & 1{,}195 & 32 & 9 \\
+gperftools peak & 10{,}117 & 442.6 & 1{,}792 & 33 & 11 & 9{,}108 & 397.5 & 1{,}195 & 32 & 9 \\
+\bottomrule
+\end{tabular}
