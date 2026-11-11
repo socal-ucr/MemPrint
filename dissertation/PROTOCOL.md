@@ -193,3 +193,11 @@ i=k/20); native; 5 interleaved rounds. Reported: median per configuration (`m7_k
 - M7 splitter check (added Nov 9): the published splitter (`buffer_memtrace_poisson_cascade.so -short_name`) once
   at 8,192 vertices on the current miniVite binary, with `OMP_NUM_THREADS=1` (113.0 s) and unset (32 threads,
   386.9 s; published 373.6 s from `runtime_miniVite.sh`, which never sets it). The tool writes into `./traces/`.
+
+### B50 (added Nov 11): 50 splitter bins per interval
+`bins50.sh trace` (splitter `-bins 50`, bytes, 13 default intervals; miniVite `-exclude_alloc 1`, its five inputs alone
+and in sequence for the cumulative cost; PolyBench 12 at a time), `score.py b50build` (preprocess, build, run list
+from the new fits: 137 runs per sampler and seed), `bins50.sh sample` (bootstrap s=100, r=10, i=k/10 as M3; disjoint
+s=50, i=k/50), `score.py b50`, `bins50.sh time` (splitter at 20 and 50 bins on miniVite 8,192, 5 interleaved
+rounds). Checked first: 50 bins needs 2.9 GB on miniVite 16,384 and 3.9 GB on lu MEDIUM (20 bins: 1.5 and 1.6 GB).
+Data: ~/memprint-data/2026-11-11-bins50.

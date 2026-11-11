@@ -159,23 +159,23 @@ def m3(final=FINAL, done=None, tag=""):
 M11 = f"{OUT}/m11"
 
 
-def m11build():
+def m11build(root=M11):
     """M11: the pages tables from the splitter traces (m11.sh trace), M1's analysis on them -> $OUT/m11/data/fits.csv,
-    and M3's run list from the pages fits -> $OUT/m11/m3_list.txt."""
+    and M3's run list from the pages fits -> $OUT/m11/m3_list.txt. B50 uses the same steps on its own root."""
     env = {**os.environ, "PYTHONPATH": f"{REPO}/analysis"}
     for cmd in ("preprocess", "build"):
-        with open(f"{M11}/{cmd}.log", "w") as log:
-            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", M11, cmd] + (["--latex"] if cmd == "build" else []),
+        with open(f"{root}/{cmd}.log", "w") as log:
+            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", root, cmd] + (["--latex"] if cmd == "build" else []),
                            check=True, stdout=log, stderr=subprocess.STDOUT, env=env)
-    f = pd.read_csv(f"{M11}/data/fits.csv")
+    f = pd.read_csv(f"{root}/data/fits.csv")
     lines = []
     for w in WORKLOADS:
-        p = prepare(pd.read_csv(f"{M11}/data/{w}_allData.csv"))
+        p = prepare(pd.read_csv(f"{root}/data/{w}_allData.csv"))
         for split, config in (("EXTRA", p.last_config), ("INTER", p.middle_config)):
             g = f[(f.workload == w) & (f.split == split)]
             ks = set(g.train_si.astype(int)) | set(g.best_interval.dropna().astype(int))
             lines += [f"{w} {split} {config} {k}" for k in sorted(ks)]
-    open(f"{M11}/m3_list.txt", "w").write("\n".join(lines) + "\n")
+    open(f"{root}/m3_list.txt", "w").write("\n".join(lines) + "\n")
     print(len(lines), "runs per sampler and seed")
 
 
@@ -202,6 +202,50 @@ def m11():
         if x[0] in ("boot", "disj"):
             rc[f"{M11}/m3/{x[0]}/{x[3]}/{x[1]}/{x[2]}/{x[4]}"] = x[5]
     m3(f"{M11}/data", [(p, rc.get(p, "1")) for p in sorted(glob.glob(f"{M11}/m3/*/*/*/*/*"))], "_pages")
+
+
+B50 = os.path.expanduser("~/memprint-data/2026-11-11-bins50")
+
+
+def b50build():
+    """B50: the 50-bin tables from dissertation/bins50.sh trace, the refit, and M3's run list from the new fits."""
+    m11build(B50)
+
+
+def b50():
+    """B50: test MAPE with 50 bins against 20 (M1's bytes tables), the intervals kept, and M3's samplers on the
+    50-bin tables (bins50.sh sample) -> $OUT/b50_summary.csv, b50_fits.csv, m3_runs_b50.csv, m3_mape_b50.csv."""
+    rows, fits = [], []
+    for name, root in (("20", FINAL), ("50", f"{B50}/data")):
+        f = pd.read_csv(f"{root}/fits.csv").assign(bins=name)
+        fits.append(f)
+        g = f.groupby(["split", "subset"]).test_mape_train_si.agg(["mean", "median", "max", "count"]).reset_index()
+        rows.append(g.assign(bins=name))
+    s = pd.concat(rows)
+    s.to_csv(f"{OUT}/b50_summary.csv", index=False)
+    f = pd.concat(fits)
+    f.to_csv(f"{OUT}/b50_fits.csv", index=False)
+    pd.set_option("display.width", 200)
+    print(s.pivot_table(index=["split", "subset"], columns="bins", values=["mean", "median", "max"]).round(2).to_string())
+    w = f[f.subset == "L2O"].pivot_table(index=["workload", "split"], columns="bins", values="test_mape_train_si")
+    print(w.assign(diff=w["50"] - w["20"]).round(2).sort_values("diff").to_string())
+    kept = []
+    for b, root in (("20", FINAL), ("50", f"{B50}/data")):
+        for wl in WORKLOADS:
+            kept.append(dict(bins=b, workload=wl, intervals=len(prepare(pd.read_csv(f"{root}/{wl}_allData.csv")).intervals)))
+    k = pd.DataFrame(kept).pivot(index="workload", columns="bins", values="intervals")
+    k.to_csv(f"{OUT}/b50_intervals.csv")
+    print("intervals kept: 20 bins", k["20"].sum(), "50 bins", k["50"].sum(), "; fewer than 13:",
+          (k["20"] < 13).sum(), "and", (k["50"] < 13).sum())
+    if os.path.exists(f"{B50}/done.txt"):
+        rc = {}
+        for line in open(f"{B50}/done.txt"):
+            x = line.split()
+            if x[0] in ("boot", "disj"):
+                rc[f"{B50}/m3/{x[0]}/{x[3]}/{x[1]}/{x[2]}/{x[4]}"] = x[5] if int(x[6]) > 0 else "1"
+        runs = sorted(glob.glob(f"{B50}/m3/*/*/*/*/*"))
+        if runs:
+            m3(f"{B50}/data", [(p, rc.get(p, "1")) for p in runs], "_b50")
 
 
 def m6():

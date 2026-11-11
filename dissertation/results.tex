@@ -66,7 +66,9 @@ L2O maximum, extrapolation & 46.83 (atax) & 71.79 (bicg) \\
 Largest test MAPE, any subset & 109.23 (trisolv, MT) & 99.56 (bicg, MT) \\
 L2O on the sampler's own bins & not measured & 12.16 and 3.63 (Table~\ref{tab:m3}) \\
 miniVite L2O, extrapolation and interpolation & 12.90 and 1.57 & 10.32 and 1.79 (Table~\ref{tab:m4mape}) \\
-Bins per interval & 50 (text) & 20 (Section~\ref{sec:m8}) \\
+Bins per interval & 50 (text) & 20 in every table (Section~\ref{sec:m8}); 50 in the rerun of Section~\ref{sec:b50} \\
+L2O test MAPE with 50 bins & 9.78 and 3.70 (with 20) & 8.29 and 2.70; 9.07 and 2.87 on the sampler's bins
+  (Table~\ref{tab:b50}) \\
 Intervals used per workload & ``12 or 13'' & 9 to 13 (Table~\ref{tab:m8}) \\
 Sampler wall time, miniVite 8,192 vertices & 42.1 s at 1 in 500; 52.2 s at 1 in 1,000; 46.1 s at 1 in 2,500
   & 30.9 s, 27.9 s and 25.6 s at those actual bin intervals (Table~\ref{tab:m7}) \\
@@ -565,6 +567,53 @@ Workload & Used & Dropped & Used & Dropped \\
 \end{tabular}
 \end{table}
 
+\subsection{B50. Fifty bins per interval}
+\label{sec:b50}
+
+B50 repeats M1 and M3 with the 50 bins per interval that the chapter's text states. With 20 bins, the standard
+deviation of the observed footprint across the bins, which is one of the model's inputs, is estimated from 20
+values, and its relative standard error, about $1/\sqrt{2(n-1)}$ for $n$ bins, is 16\%. With 50 bins it is 10\%.
+We retraced the splitter on every input of the 28 workloads with \texttt{-bins 50} at the same 13 intervals
+(bytes touched, with the allocator's references excluded for miniVite), refitted every model, and ran M3's samplers
+at the intervals that the new fits select (137 runs per sampler and seed). The bootstrap sampler keeps M3's setting
+($s = 100$, $r = 10$), and the disjoint sampler now has 50 bins ($s = 50$, $i = k/50$).
+
+\begin{table}[htbp]
+\centering
+\caption{B50. Test MAPE (\%) at each subset's training-best interval with 20 and 50 splitter bins per interval, as
+mean / median and maximum over the 28 workloads, and with 50 bins on the bins of M3's two samplers at the held-out
+inputs (mean of 3 seeds per workload).}
+\label{tab:b50}
+\small
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+& & \multicolumn{2}{c}{20 bins, splitter} & \multicolumn{2}{c}{50 bins, splitter} & \multicolumn{2}{c}{50 bins, sampler} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(l){7-8}
+Split & Subset & Mean / median & Max & Mean / median & Max & Bootstrap & Disjoint \\
+\midrule
+\tabinput{b50}
+\bottomrule
+\end{tabular}
+\end{table}
+
+With 50 bins, L2O extrapolates with a mean error of 8.29\% instead of 11.88\% and interpolates with 2.70\% instead
+of 3.42\% (Table~\ref{tab:b50}). The largest L2O extrapolation error falls from 71.79\% (bicg) to 26.48\% (ludcmp),
+and the NZ and MT subsets improve as well. The improvement is not uniform. Of the 28 workloads, 18 extrapolate
+better and 10 worse, and the largest increases are 15.0 to 19.2 points (ludcmp, lu and heat-3d), while bicg,
+trisolv, trmm, gemver and seidel-2d improve by 17.5 to 50.6 points. The pipeline keeps 332 of the 364 interval and
+workload pairs, against 335 with 20 bins, so more bins do not make the sparse intervals unusable. On the samplers'
+bins, L2O extrapolates with 9.07\% (bootstrap) and 7.34\% (disjoint) and interpolates with 2.87\% and 2.77\%, against
+12.16\% and 3.63\% for the bootstrap sampler with 20 splitter bins. M3's decision rule now selects the disjoint
+sampler, because the median ratio of the bootstrap sampler's standard deviation across bins to the splitter's is
+0.896, just below the rule's bound of 0.9. The median difference from the splitter's bins is 0.71 point.
+
+The cost of training grows with the number of bins. On miniVite at 8,192 vertices, the splitter takes 188.6 s and
+1.85 GB with 50 bins against 104.7 s and 1.03 GB with 20 (median of 5 interleaved rounds, bytes touched with the
+allocator excluded, which is slower than M7's setting). At the largest training inputs it needs 2.9 GB for miniVite
+at 16,384 vertices and 3.9 GB for lu at MEDIUM, against 1.5 and 1.6 GB, well within the machine's 62 GB. The
+cumulative splitter time of miniVite's training inputs (Figure~\ref{fig:cumulative}) becomes 67, 133 and 321 s up to
+2,048, 4,096 and 8,192 vertices, against 46, 87 and 188 s.
+
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}
 
@@ -854,7 +903,7 @@ were fixed before their own runs, with one exception. The first run of R8 sample
 4 KiB that followed a fault, which slowed sqlite 1.99$\times$. We then added the time and growth conditions of
 Section~\ref{sec:r8} and repeated every R8 measurement, and only the second run is reported. Fourth, R9's result
 led us to score R1 primarily against the pages-touched truth, which the protocol did not define, and to keep the
-bytes-touched truth as the second column. Fifth, M10, M11, R10 and R11 were added after the fourth change, and two single runs of the published splitter
+bytes-touched truth as the second column. Fifth, M10, M11, R10, R11 and B50 were added after the fourth change, and two single runs of the published splitter
 (Section~\ref{sec:m7}) were added to explain the published splitter time. In M11
 the samplers' first run used \texttt{-footprint pages}, which the Pin tool rejects in sampler mode while Pin still
 exits with status 0. That run produced no bins, and we repeated it with the bins in bytes, as in M3. The decision rule of M3 and every other analysis ran as written.

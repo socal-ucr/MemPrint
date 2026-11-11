@@ -268,6 +268,25 @@ def m11():
     write("m11", "\n".join(rows) + "\n")
 
 
+def b50():
+    """B50: test MAPE with 50 splitter bins against 20, on the splitter's bins and (50) on the samplers' bins."""
+    s = pd.read_csv(f"{OUT}/b50_summary.csv")
+    sam = pd.read_csv(f"{OUT}/m3_mape_b50.csv")
+    sam = sam[sam.basis == "train_si"].groupby(["sampler", "split", "subset", "workload"]).sampler_mape.mean()
+    rows = []
+    for split in ("EXTRA", "INTER"):
+        for sub in ("NZ", "MT", "L2O"):
+            g = lambda b: s[(s.bins == b) & (s.split == split) & (s.subset == sub)].iloc[0]
+            a, b = g(20), g(50)
+            sm = [sam.loc[(x, split, sub)] for x in ("boot", "disj")]
+            rows.append(f"{split if sub == 'NZ' else ''} & {sub} & {a['mean']:.2f} / {a['median']:.2f} & {a['max']:.2f} & "
+                        f"{b['mean']:.2f} / {b['median']:.2f} & {b['max']:.2f} & "
+                        + " & ".join(f"{x.mean():.2f} / {x.median():.2f}" for x in sm) + " \\\\")
+        if split == "EXTRA":
+            rows.append("\\midrule")
+    write("b50", "\n".join(rows) + "\n")
+
+
 def m8():
     m = pd.read_csv(f"{OUT}/m8.csv")
     rows = []
