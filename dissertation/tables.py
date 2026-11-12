@@ -55,10 +55,10 @@ def m1():
     write("m1", "\n".join(rows) + "\n")
 
 
-def l2o(fits=None, tag="", name="l2o"):
+def l2o(fits=None, tag="", name="l2o", sampler="boot"):
     """Per workload, L2O test MAPE; with fits and tag (B50: b50_fits.csv's 50-bin rows, "_b50") the same layout."""
     BYTES_ = BYTES if fits is None else fits
-    s = sampler_mape(tag).loc["boot"]
+    s = sampler_mape(tag).loc[sampler]
     rows = []
     for w in WORKLOADS:
         cells = [w]
@@ -112,9 +112,9 @@ def m4():
     m4_mape()
 
 
-def m4_mape(fits=None, tag="", name="m4_mape"):
+def m4_mape(fits=None, tag="", name="m4_mape", sampler="boot"):
     pub = {"EXTRA": [3.98, 4.98, 12.90], "INTER": [2.94, 1.04, 1.57]}
-    s = sampler_mape(tag).loc["boot"]
+    s = sampler_mape(tag).loc[sampler]
     f = (BYTES if fits is None else fits)
     f = f[f.workload == "miniVite"]
     rows = []
@@ -301,6 +301,9 @@ def b50_workloads():
     l2o(f, "_b50", "l2o_b50")
     m3("_b50", "m3_b50", "Disjoint, 50 bins")
     m4_mape(f, "_b50", "m4_mape_b50")
+    # the same with the disjoint sampler (50 bins), which M3's decision rule selects at 50 bins
+    l2o(f, "_b50", "l2o_b50_disj", sampler="disj")
+    m4_mape(f, "_b50", "m4_mape_b50_disj", sampler="disj")
 
 
 def m8():
