@@ -33,8 +33,8 @@ def num(x):
     return f"{int(round(x)):,}".replace(",", "{,}")
 
 
-def sampler_mape():
-    m = pd.read_csv(f"{OUT}/m3_mape.csv")
+def sampler_mape(tag=""):
+    m = pd.read_csv(f"{OUT}/m3_mape{tag}.csv")
     m = m[m.basis == "train_si"]
     return m.groupby(["sampler", "workload", "split", "subset"]).sampler_mape.mean()
 
@@ -55,20 +55,22 @@ def m1():
     write("m1", "\n".join(rows) + "\n")
 
 
-def l2o():
-    s = sampler_mape().loc["boot"]
+def l2o(fits=None, tag="", name="l2o"):
+    """Per workload, L2O test MAPE; with fits and tag (B50: b50_fits.csv's 50-bin rows, "_b50") the same layout."""
+    BYTES_ = BYTES if fits is None else fits
+    s = sampler_mape(tag).loc["boot"]
     rows = []
     for w in WORKLOADS:
         cells = [w]
         for split in ("EXTRA", "INTER"):
             t = TACO[(TACO.workload == w) & (TACO.split == split) & (TACO.subset == "L2O")]
-            b = BYTES[(BYTES.workload == w) & (BYTES.split == split) & (BYTES.subset == "L2O")]
+            b = BYTES_[(BYTES_.workload == w) & (BYTES_.split == split) & (BYTES_.subset == "L2O")]
             cells += [pct(t.test_mape_train_si.iloc[0]) if len(t) else "--",
                       pct(b.test_mape_train_si.iloc[0]) if len(b) else "--",
                       str(int(b.train_si.iloc[0])) if len(b) else "--",
                       pct(s.get((w, split, "L2O"), np.nan))]
         rows.append(" & ".join(cells) + " \\\\")
-    write("l2o", "\n".join(rows) + "\n")
+    write(name, "\n".join(rows) + "\n")
 
 
 def m2():
@@ -85,21 +87,21 @@ def m2():
     write("m2", "\n".join(rows) + "\n")
 
 
-def m3():
-    r = pd.read_csv(f"{OUT}/m3_runs.csv")
-    m = pd.read_csv(f"{OUT}/m3_mape.csv")
+def m3(tag="", name="m3", disj="Disjoint, 20 bins"):
+    r = pd.read_csv(f"{OUT}/m3_runs{tag}.csv")
+    m = pd.read_csv(f"{OUT}/m3_mape{tag}.csv")
     m = m[m.basis == "train_si"]
     g = m.groupby(["sampler", "workload", "split", "subset"])[["sampler_mape", "splitter_mape"]].mean()
     g["diff"] = g.sampler_mape - g.splitter_mape
     rows = []
-    for s, name in (("boot", "Bootstrap, $s=100$, $r=10$"), ("disj", "Disjoint, 20 bins")):
+    for s, label in (("boot", "Bootstrap, $s=100$, $r=10$"), ("disj", disj)):
         x = r[r.sampler == s]
         d = g.loc[s]
-        rows.append(f"{name} & {x.mean_ratio.median():.3f} & {x.sd_ratio.median():.3f} & "
+        rows.append(f"{label} & {x.mean_ratio.median():.3f} & {x.sd_ratio.median():.3f} & "
                     f"{x.sd_ratio.quantile(.1):.2f} to {x.sd_ratio.quantile(.9):.2f} & "
                     f"{d['diff'].median():.2f} & {d.xs('L2O', level='subset').loc[:, 'sampler_mape'].groupby('split').mean()['EXTRA']:.2f} & "
                     f"{d.xs('L2O', level='subset').loc[:, 'sampler_mape'].groupby('split').mean()['INTER']:.2f} \\\\")
-    write("m3", "\n".join(rows) + "\n")
+    write(name, "\n".join(rows) + "\n")
 
 
 def m4():
@@ -107,16 +109,21 @@ def m4():
     rows = [f"{num(r.Config)} & {num(r.starts_B)} & {num(r.bytes_alloc_B)} & {num(r.bytes_B)} & "
             f"{r.vs_alloc_pct:.2f} & {r.vs_starts_pct:.2f} \\\\" for r in t.itertuples()]
     write("m4_truth", "\n".join(rows) + "\n")
+    m4_mape()
+
+
+def m4_mape(fits=None, tag="", name="m4_mape"):
     pub = {"EXTRA": [3.98, 4.98, 12.90], "INTER": [2.94, 1.04, 1.57]}
-    s = sampler_mape().loc["boot"]
-    f = BYTES[BYTES.workload == "miniVite"]
+    s = sampler_mape(tag).loc["boot"]
+    f = (BYTES if fits is None else fits)
+    f = f[f.workload == "miniVite"]
     rows = []
     for split in ("EXTRA", "INTER"):
         for i, sub in enumerate(("NZ", "MT", "L2O")):
             r = f[(f.split == split) & (f.subset == sub)].iloc[0]
             rows.append(f"{split if i == 0 else ''} & {sub} & {pub[split][i]:.2f} & {int(r.train_si):,} & "
                         f"{r.test_mape_train_si:.2f} & {pct(s.get(('miniVite', split, sub), np.nan))} \\\\".replace(",", "{,}"))
-    write("m4_mape", "\n".join(rows) + "\n")
+    write(name, "\n".join(rows) + "\n")
 
 
 def m6():
@@ -285,6 +292,15 @@ def b50():
         if split == "EXTRA":
             rows.append("\\midrule")
     write("b50", "\n".join(rows) + "\n")
+
+
+def b50_workloads():
+    """B50's per-workload tables in the layouts of l2o, m3 and m4_mape (50 splitter bins; disjoint sampler 50 bins)."""
+    f = pd.read_csv(f"{OUT}/b50_fits.csv")
+    f = f[f.bins == 50]
+    l2o(f, "_b50", "l2o_b50")
+    m3("_b50", "m3_b50", "Disjoint, 50 bins")
+    m4_mape(f, "_b50", "m4_mape_b50")
 
 
 def m8():

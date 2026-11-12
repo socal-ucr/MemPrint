@@ -40,13 +40,13 @@ def corpus_table(data, out):
         lines.append(" & ".join([NAMES.get(p, p), i.replace("_", r"\_"), fmt(r.truth / 1e6, 1),
                                  fmt(m.loc[(p, i), "truth"] / r.truth), fmt(r.rss / r.truth),
                                  fmt(r.W5 / r.truth), fmt(r.massifi / r.truth), fmt(r.dhat / r.truth),
-                                 fmt(r.heaptrack / r.truth), fmt(nat.get((p, i)), 1),
+                                 fmt(r.heaptrack / r.truth), fmt(r.gperf / r.truth), fmt(nat.get((p, i)), 1),
                                  fmt(s.loc[(p, i), "W5"], 1), fmt(s.loc[(p, i), "massifi"], 1),
                                  fmt(s.loc[(p, i), "dhat"], 1), fmt(s.loc[(p, i), "truth"], 0)]) + r" \\")
-    head = (r"\begin{tabular}{llrrrrrrrrrrrr}" "\n" r"\toprule" "\n"
-            r" & & \multicolumn{7}{c}{Footprint (ratios to the true peak)} & & \multicolumn{4}{c}{Cost (time / native)} \\"
-            "\n" r"\cmidrule(lr){3-9} \cmidrule(lr){11-14}" "\n"
-            r"Program & Input & Peak (MB) & Mean/peak & RSS & MemPrint W5 & Massif & DHAT & heaptrack & Native (s) & W5 & Massif & DHAT & Full trace \\"
+    head = (r"\begin{tabular}{llrrrrrrrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & & \multicolumn{8}{c}{Footprint (ratios to the true peak)} & & \multicolumn{4}{c}{Cost (time / native)} \\"
+            "\n" r"\cmidrule(lr){3-10} \cmidrule(lr){12-15}" "\n"
+            r"Program & Input & Peak (MB) & Mean/peak & RSS & MemPrint W5 & Massif & DHAT & heaptrack & gperftools & Native (s) & W5 & Massif & DHAT & Full trace \\"
             "\n" r"\midrule")
     open(f"{out}/corpus.tex", "w").write(head + "\n" + "\n".join(lines) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")
 

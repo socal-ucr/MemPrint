@@ -201,3 +201,6 @@ from the new fits: 137 runs per sampler and seed), `bins50.sh sample` (bootstrap
 s=50, i=k/50), `score.py b50`, `bins50.sh time` (splitter at 20 and 50 bins on miniVite 8,192, 5 interleaved
 rounds). Checked first: 50 bins needs 2.9 GB on miniVite 16,384 and 3.9 GB on lu MEDIUM (20 bins: 1.5 and 1.6 GB).
 Data: ~/memprint-data/2026-11-11-bins50.
+- B50 sampler cost (added Nov 11, `bins50.sh samptime`): miniVite 8,192 at k = 500, 1,000, 2,500 (M7b's default
+  knobs) for bootstrap (s=100, r=10), disjoint 20 and disjoint 50 bins, plus native; gemm, 2mm, jacobi-2d MEDIUM at
+  k = 1,000 with `-footprint bytes` next to the truth run (M9's); 5 interleaved rounds, nothing else running.

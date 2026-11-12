@@ -605,7 +605,9 @@ workload pairs, against 335 with 20 bins, so more bins do not make the sparse in
 bins, L2O extrapolates with 9.07\% (bootstrap) and 7.34\% (disjoint) and interpolates with 2.87\% and 2.77\%, against
 12.16\% and 3.63\% for the bootstrap sampler with 20 splitter bins. M3's decision rule now selects the disjoint
 sampler, because the median ratio of the bootstrap sampler's standard deviation across bins to the splitter's is
-0.896, just below the rule's bound of 0.9. The median difference from the splitter's bins is 0.71 point.
+0.896, just below the rule's bound of 0.9. The rule's other test passes. The bootstrap sampler's test MAPE is
+0.71 point above the splitter bins' at the median over the workloads, splits and subsets, and the disjoint sampler's
+is 0.98 point above, with a median ratio of standard deviations of 0.926.
 
 The cost of training grows with the number of bins. On miniVite at 8,192 vertices, the splitter takes 188.6 s and
 1.85 GB with 50 bins against 104.7 s and 1.03 GB with 20 (median of 5 interleaved rounds, bytes touched with the
@@ -613,6 +615,15 @@ allocator excluded, which is slower than M7's setting). At the largest training 
 at 16,384 vertices and 3.9 GB for lu at MEDIUM, against 1.5 and 1.6 GB, well within the machine's 62 GB. The
 cumulative splitter time of miniVite's training inputs (Figure~\ref{fig:cumulative}) becomes 67, 133 and 321 s up to
 2,048, 4,096 and 8,192 vertices, against 46, 87 and 188 s.
+
+The 50-bin disjoint sampler keeps 2.5 times the references of the 20-bin one at the same bin interval, and it costs
+little more. We timed it as M7 timed the samplers, on miniVite at 8,192 vertices at matched bin intervals of 1 in 500,
+1,000 and 2,500, next to the bootstrap and the 20-bin disjoint sampler, and as M9 timed them against the truth run,
+on gemm, 2mm and jacobi-2d at MEDIUM at 1 in 1,000, in 5 interleaved rounds with nothing else running. On miniVite
+it takes 34.9, 30.0 and 27.3 s, which is 5\% to 23\% more than the 20-bin disjoint sampler (28.4, 26.8 and 26.0 s)
+and 4.5\% to 13\% less than the bootstrap (40.2, 33.3 and 28.5 s). On the three PolyBench kernels it takes 5.1 to
+8.2 s, and the truth run is 4.7$\times$ to 5.8$\times$ slower, against 7.7$\times$ to 8.9$\times$ for the 20-bin
+disjoint sampler and 3.4$\times$ to 4.3$\times$ for the bootstrap.
 
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}

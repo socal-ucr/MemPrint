@@ -66,5 +66,27 @@ time)
             -exclude_alloc 1 -outdir $O/time -name x -- $b $args > /dev/null 2>&1
         echo "$round,$bins,$(tr ' ' , < $O/time/t)" >> $f; rm -f $O/time/*.csv
     done; done ;;
+samptime)   # the samplers' cost: miniVite 8,192 at matched bin intervals as M7b (default knobs), then the three
+            # PolyBench kernels of M9 at 1 in 1,000 next to the truth run as M9 (-footprint bytes); 5 interleaved rounds
+    mkdir -p $O/time; f=$O/samptime.csv; [[ -f $f ]] || echo "round,workload,run,k,seconds" > $f
+    t() { local wl=$1 n=$2 kk=$3; shift 3; /usr/bin/time -f "%e" -o $O/time/t "$@" > /dev/null 2>&1
+          echo "$round,$wl,$n,$kk,$(cat $O/time/t)" >> $f; rm -f $O/time/*.csv; }
+    l=$(build miniVite 8192); read -r w c b args <<< "$l"
+    for c_ in gemm 2mm jacobi-2d; do build $c_ MEDIUM > /dev/null; done
+    p=($PIN_ROOT/pin -t $TOOL)
+    for round in 1 2 3 4 5; do
+        t miniVite native 0 $b $args
+        for kk in 500 1000 2500; do
+            t miniVite boot $kk "${p[@]}" -mode sampler -i $((kk / 10)) -s 100 -r 10 -outdir $O/time -- $b $args
+            t miniVite disj20 $kk "${p[@]}" -mode sampler -i $((kk / 20)) -s 20 -disjoint 1 -outdir $O/time -- $b $args
+            t miniVite disj50 $kk "${p[@]}" -mode sampler -i $((kk / 50)) -s 50 -disjoint 1 -outdir $O/time -- $b $args
+        done
+        for wl in gemm 2mm jacobi-2d; do bb=$O/bin/$wl-MEDIUM; fb=(-footprint bytes)
+            t $wl truth 1 "${p[@]}" -mode splitter -intervals 1 -bins 1 "${fb[@]}" -outdir $O/time -- $bb
+            t $wl boot 1000 "${p[@]}" -mode sampler -i 100 -s 100 -r 10 "${fb[@]}" -outdir $O/time -- $bb
+            t $wl disj20 1000 "${p[@]}" -mode sampler -i 50 -s 20 -disjoint 1 "${fb[@]}" -outdir $O/time -- $bb
+            t $wl disj50 1000 "${p[@]}" -mode sampler -i 20 -s 50 -disjoint 1 "${fb[@]}" -outdir $O/time -- $bb
+        done
+    done ;;
 esac
 echo "all-done $1" >> $O/done.txt
