@@ -109,10 +109,10 @@ def sampler_bins(d):
     return pd.Series([pd.read_csv(x).MemUsageObs.iloc[0] for x in files], dtype=float)
 
 
-def m3(final=FINAL, done=None, tag=""):
+def m3(final=FINAL, done=None, tag="", workloads=None):
     """done: (run directory, exit code) pairs, default $OUT/m3/done.txt; tag: suffix of the output CSVs."""
     fits = pd.read_csv(f"{final}/fits.csv")
-    tables = {w: pd.read_csv(f"{final}/{w}_allData.csv") for w in WORKLOADS}
+    tables = {w: pd.read_csv(f"{final}/{w}_allData.csv") for w in (workloads or WORKLOADS)}
     runs, mapes = [], []
     for d, rc in done or (x.split() for x in open(f"{OUT}/m3/done.txt")):
         s, seed, w, config, k = d.split("/")[-5:]
@@ -159,17 +159,20 @@ def m3(final=FINAL, done=None, tag=""):
 M11 = f"{OUT}/m11"
 
 
-def m11build(root=M11):
+def m11build(root=M11, workloads=None, plan=True):
     """M11: the pages tables from the splitter traces (m11.sh trace), M1's analysis on them -> $OUT/m11/data/fits.csv,
     and M3's run list from the pages fits -> $OUT/m11/m3_list.txt. B50 uses the same steps on its own root."""
     env = {**os.environ, "PYTHONPATH": f"{REPO}/analysis"}
     for cmd in ("preprocess", "build"):
         with open(f"{root}/{cmd}.log", "w") as log:
-            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", root, cmd] + (["--latex"] if cmd == "build" else []),
+            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", root, cmd] + (workloads or [])
+                           + (["--latex"] if cmd == "build" else []),
                            check=True, stdout=log, stderr=subprocess.STDOUT, env=env)
+    if not plan:
+        return
     f = pd.read_csv(f"{root}/data/fits.csv")
     lines = []
-    for w in WORKLOADS:
+    for w in workloads or WORKLOADS:
         p = prepare(pd.read_csv(f"{root}/data/{w}_allData.csv"))
         for split, config in (("EXTRA", p.last_config), ("INTER", p.middle_config)):
             g = f[(f.workload == w) & (f.split == split)]
@@ -246,6 +249,47 @@ def b50():
         runs = sorted(glob.glob(f"{B50}/m3/*/*/*/*/*"))
         if runs:
             m3(f"{B50}/data", [(p, rc.get(p, "1")) for p in runs], "_b50")
+
+
+MORE = os.path.expanduser("~/memprint-data/2026-11-12-b50more")
+CORPUS50 = ["gap-bfs", "gap-cc", "gap-pr", "gap-sssp", "hpccg", "lulesh", "minife"]
+
+
+def b50more_build():
+    """The 50-bin follow-ups (batch50.sh trace): M5's two kernels, M11 at 50 bins (pages truth) and the corpus programs,
+    each preprocessed and fitted on its own; run lists for the samplers of p50 and c50."""
+    m11build(f"{MORE}/m5", ["durbin", "jacobi-1d"], plan=False)
+    m11build(f"{MORE}/p50")
+    m11build(f"{MORE}/c50", CORPUS50)
+
+
+def b50more():
+    """Scores of the 50-bin follow-ups -> $OUT/b50more_*.csv."""
+    pd.set_option("display.width", 220)
+    m5 = pd.read_csv(f"{MORE}/m5/data/fits.csv")
+    m5.to_csv(f"{OUT}/b50more_m5.csv", index=False)
+    print(m5[["workload", "split", "subset", "train_si", "test_mape_train_si"]].round(2).to_string(index=False))
+    rows = []
+    for name, root in (("bytes20", FINAL), ("pages20", f"{M11}/data"), ("bytes50", f"{B50}/data"), ("pages50", f"{MORE}/p50/data"),
+                       ("corpus50", f"{MORE}/c50/data")):
+        f = pd.read_csv(f"{root}/fits.csv")
+        f = f.assign(set=name)
+        rows.append(f)
+    f = pd.concat(rows)
+    f.to_csv(f"{OUT}/b50more_fits.csv", index=False)
+    g = f.groupby(["set", "split", "subset"]).test_mape_train_si.agg(["mean", "median", "max", "count"])
+    print(g.round(2).to_string())
+    c = f[f.set == "corpus50"].pivot_table(index="workload", columns=["split", "subset"], values="test_mape_train_si")
+    print(c.round(2).to_string())
+    for st in ("p50", "c50"):
+        rc = {}
+        for line in open(f"{MORE}/done.txt"):
+            x = line.split()
+            if x[0] == st and x[1] in ("boot", "disj"):
+                rc[f"{MORE}/{st}/m3/{x[1]}/{x[4]}/{x[2]}/{x[3]}/{x[5]}"] = x[6] if int(x[7]) > 0 else "1"
+        runs = sorted(glob.glob(f"{MORE}/{st}/m3/*/*/*/*/*"))
+        if runs:
+            m3(f"{MORE}/{st}/data", [(p, rc.get(p, "1")) for p in runs], f"_{st}", None if st == "p50" else CORPUS50)
 
 
 def m6():

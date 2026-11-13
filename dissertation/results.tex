@@ -625,6 +625,116 @@ and 4.5\% to 13\% less than the bootstrap (40.2, 33.3 and 28.5 s). On the three 
 8.2 s, and the truth run is 4.7$\times$ to 5.8$\times$ slower, against 7.7$\times$ to 8.9$\times$ for the 20-bin
 disjoint sampler and 3.4$\times$ to 4.3$\times$ for the bootstrap.
 
+\subsection{B50 follow-ups: other kernels, the pages truth, the corpus and the cost}
+\label{sec:b50more}
+
+Four further runs use 50 bins. All ran with every run exiting without an error and every sampler bin observing at
+least one reference, except four corpus traces that the kernel's out-of-memory killer stopped when 12 ran at once,
+which we repeated three at a time.
+
+\paragraph{durbin and jacobi-1d.} M5's two kernels now have a monotone interval at 50 bins, so all three subsets can
+be fitted. Their NZ test MAPE is 1.18\% and 0.38\% for durbin and 1.04\% and 0.19\% for jacobi-1d (extrapolation and
+interpolation), against 1.07\%, 0.36\%, 1.06\% and 0.19\% with 20 bins, and their L2O test MAPE is 1.19\% and
+0.16\% for durbin and 1.05\% and 0.16\% for jacobi-1d.
+
+\paragraph{The pages-touched truth.} We repeated M11 with 50 bins (\texttt{-footprint pages}, the refit, and both
+samplers at the held-out inputs, 164 runs per sampler and seed). L2O extrapolates with a mean of 9.64\% and a median
+of 7.67\% (12.06\% and 9.96\% with 20 bins) and interpolates with 2.54\% and 2.15\% (3.37\% and 2.72\%). On the
+samplers' bins it extrapolates with a median of 15.61\% (bootstrap) and 13.96\% (disjoint), and interpolates with
+1.66\% and 2.20\%. M3's decision rule selects the bootstrap sampler here (median ratio of standard deviations
+0.904, median difference 0.38 point), against the disjoint sampler on the bytes-touched tables (0.896), so the
+rule's choice at 50 bins rests on a ratio within 0.01 of its bound. Against the resident-memory model of
+Section~\ref{sec:r1} on the same truth, the comparison of Section~\ref{sec:r1} holds with 50 bins. At the largest
+inputs the model's prediction (b) has a median error of 0.56\%, against 7.67\% for \memprint{} on the splitter's
+bins and 13.96\% to 15.61\% on the samplers'. At the middle inputs \memprint{} is more accurate, 2.15\% on the
+splitter's bins and 1.66\% to 2.20\% on the samplers', against 4.09\% for the model's transfer rule.
+
+\paragraph{The scheduling corpus.} \memprint{} is evaluated on PolyBench and miniVite because they have five to seven
+inputs each, against three for each program of Chapter 3's corpus. Seven corpus programs take an input size that
+can be varied, and we ran each at six or seven inputs (Table~\ref{tab:b50corpus}): the four GAP kernels at scales 12
+to 17, HPCCG at 16 to 48, LULESH at 10 to 30 and MiniFE at 16 to 40. The NPB kernels come in fixed classes, of which
+only S, W and A can be traced (MG's class A already exceeded the memory of the Pin run in Chapter 3), and darknet
+has a single network, so neither has five inputs. As for PolyBench, EXTRA holds out the largest input and INTER the
+middle one, and every workload keeps all 13 intervals.
+
+\begin{table}[htbp]
+\centering
+\caption{\memprint{} on the corpus programs with an input size, 50 bins, bytes touched. Test MAPE (\%) at the
+training-best interval on the splitter's bins (NZ, L2O) and of the L2O model on the samplers' bins (mean of 3 seeds).}
+\label{tab:b50corpus}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrrrrrrrrrrr@{}}
+\toprule
+& & & & \multicolumn{4}{c}{Extrapolation (largest input)} & \multicolumn{4}{c}{Interpolation (middle input)} \\
+\cmidrule(lr){5-8}\cmidrule(l){9-12}
+Program & Inputs & $n$ & Truth (MB) & NZ & L2O & Boot. & Disj. & NZ & L2O & Boot. & Disj. \\
+\midrule
+\tabinput{b50_corpus}
+\bottomrule
+\end{tabular}
+\end{table}
+
+On these seven programs, NZ extrapolates with a mean of 3.72\% and a median of 3.04\% and interpolates with 2.64\%
+and 1.03\%. L2O has the lower median (4.83\% and 1.11\%) but a mean of 13.89\% for extrapolation, because GAP pr's
+L2O model, fitted at 1 in 250, misses its largest input by 74.01\%, on the samplers' bins as well (71.14\% and
+72.45\%), while its NZ model is within 8.57\%. Without GAP pr, L2O extrapolates within 9.25\% for every program. On
+the samplers' bins, one further outlier appears: the disjoint sampler misses LULESH's middle input by 69.08\%,
+against 2.65\% for the bootstrap. The PolyBench result therefore carries over to programs with irregular memory
+access, except that the L2O subset can choose an interval that does not transfer, as it did for bicg in M1.
+
+\paragraph{Cost, in the same rounds.} We timed the program alone, the tool with sampling off, the truth run and the
+three samplers at 1 in 1,000 in the same 5 interleaved rounds (Table~\ref{tab:b50cost}). The truth run is
+2.15$\times$ slower than the 50-bin disjoint sampler on miniVite and 4.6$\times$ to 5.6$\times$ slower on the three
+PolyBench kernels, which take 5.06 s (gemm), 5.98 s (2mm) and 8.10 s (jacobi-2d) under that sampler.
+
+\begin{table}[htbp]
+\centering
+\caption{Wall time (s), median of 5 interleaved rounds, at 1 in 1,000, and the truth run's time over each sampler's.
+miniVite at 8,192 vertices (allocator excluded), PolyBench at MEDIUM, bytes touched.}
+\label{tab:b50cost}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+& & & & \multicolumn{3}{c}{Sampler} & \multicolumn{3}{c}{Truth / sampler} \\
+\cmidrule(lr){5-7}\cmidrule(l){8-10}
+Workload & Native & Instr. & Truth & Boot. & Disj.\ 20 & Disj.\ 50 & Boot. & Disj.\ 20 & Disj.\ 50 \\
+\midrule
+\tabinput{b50_cost}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Training cost.} The 50-bin splitter, run alone and one input at a time, takes 1.81 h over the 194
+PolyBench and miniVite inputs. A PolyBench kernel takes 1.0 to 2.2 s at MINI, 3.1 s at SMALL and 69.5 s at MEDIUM at
+the median (up to 653 s, floyd-warshall), and miniVite takes 28.0, 38.8, 68.5, 186.5 and 574.5 s at 1,024 to
+16,384 vertices. Its largest memory is 3.85 GB. On the corpus programs it needs much more memory, up to 33 GB for
+HPCCG at 48. Fitting the models is cheap next to tracing. On the 50-bin traces of the 28 workloads, reading and
+summarizing the splitter's files takes 418 s (median of 3), most of it reading about 126,000 small files from a
+network file system, and the fit takes 6.4 s, of which the regressions take 1.0 s and preparing the tables,
+choosing the intervals and scoring them by interval take 4.3 s.
+
+\paragraph{Intervals dropped.} Table~\ref{tab:m8b50} lists, per workload, the intervals that pruning drops with 20
+and 50 bins.
+
+\begin{table}[htbp]
+\centering
+\caption{Workloads that drop intervals with 20 or 50 bins, with the number of intervals used and those dropped
+(1 in $k$), bytes touched. The other workloads use all 13 intervals in both.}
+\label{tab:m8b50}
+\small
+\begin{tabular}{@{}lrlrl@{}}
+\toprule
+& \multicolumn{2}{c}{20 bins} & \multicolumn{2}{c}{50 bins} \\
+\cmidrule(lr){2-3}\cmidrule(l){4-5}
+Workload & Used & Dropped & Used & Dropped \\
+\midrule
+\tabinput{m8_b50}
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}
 

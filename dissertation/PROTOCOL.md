@@ -204,3 +204,13 @@ Data: ~/memprint-data/2026-11-11-bins50.
 - B50 sampler cost (added Nov 11, `bins50.sh samptime`): miniVite 8,192 at k = 500, 1,000, 2,500 (M7b's default
   knobs) for bootstrap (s=100, r=10), disjoint 20 and disjoint 50 bins, plus native; gemm, 2mm, jacobi-2d MEDIUM at
   k = 1,000 with `-footprint bytes` next to the truth run (M9's); 5 interleaved rounds, nothing else running.
+
+### B50 follow-ups (added Nov 12)
+`batch50.sh trace` (12 at a time): durbin and jacobi-1d at 50 bins (m5); M11 at 50 bins, `-footprint pages` (p50); the
+corpus programs with an input size at 6 or 7 inputs (GAP bfs/cc/pr/sssp -g 12..17, HPCCG 16..48, LULESH -s 10..30
+-i 20, MiniFE 16..40), bytes, 50 bins (c50). NPB (fixed classes, only S/W/A traceable) and darknet (one network) left
+out. Four corpus traces were OOM-killed at 12 at a time (12 to 33 GB each) and rerun 3 at a time
+(`batch50_retry.sh`). Then `score.py b50more_build`, `batch50.sh sample` (bootstrap s=100 r=10; disjoint 50 bins),
+`score.py b50more`; alone: `batch50.sh cost` (native, instr, truth and the three samplers at 1 in 1,000 in the same
+5 rounds), `batch50.sh splittime` (50-bin splitter per input, one at a time), `buildtime.py` (preprocess and build,
+cProfile, 3 repetitions). Chain: `batch50_chain.sh`. Data: ~/memprint-data/2026-11-12-b50more.
