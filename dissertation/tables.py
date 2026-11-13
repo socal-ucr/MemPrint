@@ -306,6 +306,65 @@ def b50_workloads():
     m4_mape(f, "_b50", "m4_mape_b50_disj", sampler="disj")
 
 
+MORE = os.path.expanduser("~/memprint-data/2026-11-12-b50more")
+CORPUS50 = ["gap-bfs", "gap-cc", "gap-pr", "gap-sssp", "hpccg", "lulesh", "minife"]
+
+
+def unified():
+    """Chapter 2's evaluation set at 50 bins: the 28 workloads of B50 (27 PolyBench kernels and miniVite) and the 7
+    corpus programs with an input size (B50 follow-ups), 35 in all. Writes ch2_accuracy.tex (b50.tex's layout),
+    ch2_l2o.tex (l2o.tex's layout, the sampler that M3's decision rule selects) and ch2_samplers.tex (m3.tex's layout),
+    and prints the decision rule and the medians the text quotes."""
+    f = pd.read_csv(f"{OUT}/b50_fits.csv")
+    f = pd.concat([f[f.bins == 50].drop(columns="bins"), pd.read_csv(f"{MORE}/c50/data/fits.csv")], ignore_index=True)
+    mp = pd.concat([pd.read_csv(f"{OUT}/m3_mape_b50.csv"), pd.read_csv(f"{OUT}/m3_mape_c50.csv")], ignore_index=True)
+    runs = pd.concat([pd.read_csv(f"{OUT}/m3_runs_b50.csv"), pd.read_csv(f"{OUT}/m3_runs_c50.csv")], ignore_index=True)
+    mp = mp[mp.basis == "train_si"]
+    g = mp.groupby(["sampler", "split", "subset", "workload"])[["sampler_mape", "splitter_mape"]].mean()
+    g["diff"] = g.sampler_mape - g.splitter_mape
+    diff = g.loc["boot", "diff"].median()
+    sd = runs[runs.sampler == "boot"].sd_ratio.median()
+    chosen = "disj" if diff > 2 or not 0.9 <= sd <= 1.1 else "boot"
+    print(f"{f.workload.nunique()} workloads; decision: bootstrap diff median {diff:.2f} points, SD ratio median {sd:.3f}"
+          f" -> {'disjoint' if chosen == 'disj' else 'bootstrap'}")
+    sm = g.sampler_mape
+    rows = []
+    for split in ("EXTRA", "INTER"):
+        for sub in ("NZ", "MT", "L2O"):
+            t = f[(f.split == split) & (f.subset == sub)].test_mape_train_si
+            cells = [split if sub == "NZ" else "", sub, f"{t.mean():.2f} / {t.median():.2f}", f"{t.max():.2f}", str(len(t))]
+            for x in ("boot", "disj"):
+                v = sm.loc[(x, split, sub)]
+                cells.append(f"{v.mean():.2f} / {v.median():.2f}")
+            rows.append(" & ".join(cells) + " \\\\")
+            print(split, sub, "n", len(t), "mean", round(t.mean(), 2), "median", round(t.median(), 2), "max", round(t.max(), 2),
+                  "(" + t.idxmax().__class__.__name__ + ")" if False else f"max workload {f.loc[t.idxmax()].workload}")
+        if split == "EXTRA":
+            rows.append("\\midrule")
+    write("ch2_accuracy", "\n".join(rows) + "\n")
+    rows = []
+    for w in WORKLOADS + CORPUS50:
+        cells = [w]
+        for split in ("EXTRA", "INTER"):
+            t = TACO[(TACO.workload == w) & (TACO.split == split) & (TACO.subset == "L2O")]
+            b = f[(f.workload == w) & (f.split == split) & (f.subset == "L2O")]
+            cells += [pct(t.test_mape_train_si.iloc[0]) if len(t) else "--",
+                      pct(b.test_mape_train_si.iloc[0]) if len(b) else "--",
+                      str(int(b.train_si.iloc[0])) if len(b) else "--",
+                      pct(sm.get((chosen, split, "L2O", w), np.nan))]
+        rows.append(" & ".join(cells) + " \\\\")
+    write("ch2_l2o", "\n".join(rows) + "\n")
+    rows = []
+    for x, name in (("boot", "Bootstrap, $s=100$, $r=10$"), ("disj", "Disjoint, 50 bins")):
+        r = runs[runs.sampler == x]
+        d = g.loc[x]
+        l2o = d.xs("L2O", level="subset").sampler_mape.groupby("split").mean()
+        rows.append(f"{name} & {r.mean_ratio.median():.3f} & {r.sd_ratio.median():.3f} & "
+                    f"{r.sd_ratio.quantile(.1):.2f} to {r.sd_ratio.quantile(.9):.2f} & {d['diff'].median():.2f} & "
+                    f"{l2o['EXTRA']:.2f} & {l2o['INTER']:.2f} \\\\")
+    write("ch2_samplers", "\n".join(rows) + "\n")
+
+
 def m8():
     m = pd.read_csv(f"{OUT}/m8.csv")
     rows = []

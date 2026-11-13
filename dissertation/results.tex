@@ -683,6 +683,47 @@ the samplers' bins, one further outlier appears: the disjoint sampler misses LUL
 against 2.65\% for the bootstrap. The PolyBench result therefore carries over to programs with irregular memory
 access, except that the L2O subset can choose an interval that does not transfer, as it did for bicg in M1.
 
+Both outliers have a visible cause. GAP pr's $\alpha$, the truth over the mean bin footprint, does not grow
+steadily with the input. At 1 in 250 it is 9.21 at scale 15, 12.03 at scale 16 and 10.63 at scale 17. The L2O
+model, trained on the inputs up to scale 16 at its five densest intervals, follows the rise at scale 16 and
+predicts an $\alpha$ of 18.49 at scale 17. The spread across bins gives the model nothing to correct this with,
+because it is 0.1\% to 0.5\% of the mean at every input. NZ, trained at 1 in 5,000, predicts 177 against a true
+163. LULESH's outlier comes from the disjoint sampler at 1 in 100, where it keeps one reference in two
+($i = k/50 = 2$). There its bins are 6.4\% smaller than the splitter's and their standard deviation is 7.1 times
+the splitter's, with the same values for all three seeds (68.9\% to 69.4\% error), so the bias is systematic
+rather than random. At 1 in 250 ($i = 5$) the same sampler matches the splitter (mean ratio 1.000, standard
+deviation ratio 0.955 to 1.105). The result is consistent with a period in LULESH's reference stream that a
+sampling period of two aliases with. The bootstrap sampler keeps one reference in ten at 1 in 100 and is not
+affected.
+
+\paragraph{The evaluation set at 50 bins.} Together, B50 and the corpus programs give 35 workloads at 50 bins
+(Table~\ref{tab:ch2unified}). L2O extrapolates with a mean of 9.41\% and a median of 5.21\% (maximum 74.01\%, GAP
+pr) and interpolates with 2.79\% and 2.37\%. NZ has medians of 8.62\% and 4.76\% and MT of 8.57\% and 5.04\%. Over
+the 35 workloads M3's decision rule selects the disjoint sampler, because the median ratio of the bootstrap
+sampler's standard deviation across bins to the splitter's is 0.897, below 0.9 (median difference in test MAPE
+0.66 point). The disjoint sampler extrapolates with a mean of 8.64\% and interpolates with 4.53\% (medians 5.38\%
+and 2.14\%), where the mean of the interpolation includes LULESH's 69.08\%. The pages-touched truth, the splitter's
+time per input, the build time, the comparison of 20 and 50 bins, and durbin and jacobi-1d cover PolyBench and
+miniVite only.
+
+\begin{table}[htbp]
+\centering
+\caption{Chapter 2's evaluation set at 50 bins: the 27 PolyBench kernels, miniVite and the seven corpus programs.
+Test MAPE (\%) at each subset's training-best interval on the splitter's bins (mean / median, maximum, number of
+workloads) and on M3's samplers' bins at the held-out inputs (mean / median, mean of 3 seeds per workload).}
+\label{tab:ch2unified}
+\small
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+& & \multicolumn{3}{c}{Splitter} & \multicolumn{2}{c}{Sampler} \\
+\cmidrule(lr){3-5}\cmidrule(l){6-7}
+Split & Subset & Mean / median & Max & $n$ & Bootstrap & Disjoint \\
+\midrule
+\tabinput{ch2_accuracy}
+\bottomrule
+\end{tabular}
+\end{table}
+
 \paragraph{Cost, in the same rounds.} We timed the program alone, the tool with sampling off, the truth run and the
 three samplers at 1 in 1,000 in the same 5 interleaved rounds (Table~\ref{tab:b50cost}). The truth run is
 2.15$\times$ slower than the 50-bin disjoint sampler on miniVite and 4.6$\times$ to 5.6$\times$ slower on the three
@@ -1042,6 +1083,8 @@ $R$ nor a base from the first sample sees (R10). A base read later in the run, a
 might see them, and we did not test it. miniVite's remaining error after R11 is consistent with MPI's mappings, and
 counting the pages it touches in file-backed mappings separately in the truth would test that. Finally, the
 choice between the event and the 1 ms sampler depends on the program set, because the 1 ms sampler extrapolates
-NPB MG better even with the base subtracted (R10).
+NPB MG better even with the base subtracted (R10). The cluster simulation of the allocation-resizing chapter
+(libmpr) still sizes each job by its RSS or its committed memory, not by the pages-in-use truth that the
+scheduling results of Chapter 3 now use, and rerunning it on that truth remains open.
 
 \end{document}
