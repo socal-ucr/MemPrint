@@ -830,6 +830,61 @@ share of the references executed and the share of the run elapsed has a median o
 W (0.304, 0.27 s and 53 samples) and atax (0.249, 0.06 s and 12 samples), and of GAP bfs and cc (0.187 and 0.193),
 whose largest difference falls at 45\% of the run.
 
+\subsection{Modeling statements of Chapter 2 on the evaluation set}
+\label{sec:modelcheck}
+
+Four statements of the chapter's modeling and implementation sections were checked on the 50-bin splitter bins of
+the 35-workload evaluation set, without new traces. Every model is fitted per split and subset as MemPrint-Build fits
+it (train on the other inputs, predict at the interval with the lowest training MAPE), and the chosen model reproduces
+the build's test MAPE in all 210 workload, split and subset cells.
+
+\paragraph{Higher-order terms.} We added the squares of the three logarithms to the chosen model (eq.\ mp-alpha-final),
+and in a second variant their squares and cubes. Table~\ref{tab:modelcheck} gives the test MAPE. With the L2O subset
+at EXTRA, the squares leave the median at 5.24\% against 5.21\% and raise the MAPE on 17 of the 35 workloads. The
+squares and cubes lower the median to 2.49\% (mean 6.28\% against 9.41\%) and raise the MAPE on 14 of the 35. With
+the NZ and MT subsets the higher-order models also lower the median, but their largest errors grow, from 27.9\% to
+99.0\% (NZ, GAP pr) and from 54.1\% to 237.6\% (MT with cubes, gesummv). At INTER, the squares lower the L2O median
+from 2.37\% to 1.56\% and raise the MAPE on 14 of the 35 workloads.
+
+\paragraph{Per-workload fitting.} One model of the chosen form, fitted on the other 34 workloads with the same subset
+and all their inputs and evaluated on the held-out workload, has a higher mean and median than the workload's own model in every row of
+Table~\ref{tab:modelcheck}. With L2O at EXTRA, its median is 23.22\% against 5.21\%, and it is worse on 32 of the 35
+workloads. Adding the held-out workload's training inputs to the pool gives 20.56\%, worse on 31. Unlike the pooled
+regression of the earlier study, these pooled models have no feature that describes the held-out workload (that
+regression used a static estimate of $\alpha$ and reached a median of 4.10\% on 27 PolyBench kernels).
+
+\begin{table}[t]
+\centering
+\caption{Test MAPE (\%, mean / median over the 35 workloads) of the chosen model, the model with squared terms (Sq.),
+with squared and cubic terms (Cub.), and one pooled model of the chosen form fitted on the other 34 workloads, without
+and with the held-out workload's training inputs. In parentheses, the number of workloads on which the variant's MAPE
+is higher than the chosen model's.}
+\label{tab:modelcheck}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Split & Subset & Chosen & Sq. & Cub. & Pooled & Pooled + own \\
+\midrule
+\tabinput{modelcheck}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The slope of $\alpha$ on $k$.} Per workload and input, the least-squares slope of the logarithm of the
+mean $\alpha$ over bins on the logarithm of $k$ has a median of 0.905 over the 238 curves at $k$ from 1{,}000 to
+10{,}000, with 80\% of the curves between 0.816 and 0.953. Over all intervals the model uses (100 to 100{,}000), the
+median is 0.860 and 80\% lie between 0.798 and 0.903. The lowest slopes are miniVite's, which fall with the input
+size to 0.294 at 16{,}384 vertices, and floyd-warshall's at MEDIUM (0.681).
+
+\paragraph{The position of the best monotone interval.} With the monotone scores computed on the training inputs only
+(EXTRA split), the best monotone interval is the densest interval ($k = 100$) for 11 of the 35 workloads, one of the
+two densest for 16, one of the three densest for 23, and one of the five densest ($k \le 1{,}000$) for 33. The
+exceptions are seidel-2d (7{,}500) and floyd-warshall (2{,}500). MemPrint-Build computes the scores on all inputs, the
+held-out input included. With the training inputs only, the best interval changes for 15 workloads at EXTRA and 2 at
+INTER, and the L2O test MAPE changes from 9.41\% / 5.21\% to 9.29\% / 5.36\% (mean / median) at EXTRA and from 2.79\%
+/ 2.37\% to 2.75\% / 2.37\% at INTER.
+
 \subsection{The corpus truths with the current tool}
 \label{sec:truthcur}
 

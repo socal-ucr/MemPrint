@@ -233,3 +233,9 @@ The 56 scheduling-corpus truths (bytes, 2026-10-13-sched-llm/corpus; pages, 2026
 `memsched.py` (48 GB, 12 jobs), native dirs linked from sched-llm; compared by `truthcur.py` (peak and area of the
 resampled curves) -> ~/memprint-data/2026-11-17-truthcur/compare.csv. Lua's bytes truth repeated three more times with
 the current tool (scratchpad) after its first check (53.56 MB) disagreed with the corpus rerun (57.10 MB).
+
+### Modeling statements (added Nov 17)
+`modelcheck.py` on the 50-bin splitter bins of the 35 workloads (B50 data and b50more/c50 data), no new traces:
+squared and cubic terms, a pooled leave-one-workload-out model (with and without the target's training inputs),
+the slope of log alpha on log k per input, the rank of the best monotone interval with training-only selection, and
+L2O with training-only selection (`modelcheck.py l2o_trainsel`). Outputs: $OUT/modelcheck_{terms,slope,rank,l2o_trainsel}.csv.
