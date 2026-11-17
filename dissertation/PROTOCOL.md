@@ -214,3 +214,15 @@ out. Four corpus traces were OOM-killed at 12 at a time (12 to 33 GB each) and r
 `score.py b50more`; alone: `batch50.sh cost` (native, instr, truth and the three samplers at 1 in 1,000 in the same
 5 rounds), `batch50.sh splittime` (50-bin splitter per input, one at a time), `buildtime.py` (preprocess and build,
 cProfile, 3 repetitions). Chain: `batch50_chain.sh`. Data: ~/memprint-data/2026-11-12-b50more.
+
+### Corpus follow-ups and profiler checks (added Nov 13 to 16)
+`corpusmore.sh` (chain `corpusmore_chain.sh`; traces under `memsched.py`, 48 GB): the corpus programs with
+`-footprint pages` at 50 bins (cp50) and bytes at 20 bins (c20), refits (`score.py corpusmore_build`), both samplers
+at the held-out inputs (and durbin/jacobi-1d's at 50 bins), `score.py corpusmore`, the 50-bin splitter per corpus
+input alone, `buildtime.py corpus` (35 workloads). Three bootstrap runs on GAP pr 17 were OOM-killed (sampler jobs
+budgeted at 2 GB, they need 12) and rerun alone (`corpusmore.sh retry`). Data: ~/memprint-data/2026-11-13-corpusmore.
+Decision-rule check: bootstrap SD ratio on runs matched in workload, input, interval and seed between m3_runs.csv
+and m3_runs_b50.csv. Profiler checks: Lua (input 1) under Massif with --heap-admin=0 and 8, DHAT's blocks at t-gmax,
+the bytes truth with the current tool under glibc, jemalloc and TCMalloc and with the October 11 tool
+(2026-10-11-sched/corpus/tool.so); truth over Massif's requested heap at the peak (corpus, largest inputs); the largest
+gap between reference and wall-clock progress over 20 windows from nativerefs.

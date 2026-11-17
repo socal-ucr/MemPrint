@@ -702,9 +702,32 @@ pr) and interpolates with 2.79\% and 2.37\%. NZ has medians of 8.62\% and 4.76\%
 the 35 workloads M3's decision rule selects the disjoint sampler, because the median ratio of the bootstrap
 sampler's standard deviation across bins to the splitter's is 0.897, below 0.9 (median difference in test MAPE
 0.66 point). The disjoint sampler extrapolates with a mean of 8.64\% and interpolates with 4.53\% (medians 5.38\%
-and 2.14\%), where the mean of the interpolation includes LULESH's 69.08\%. The pages-touched truth, the splitter's
-time per input, the build time, the comparison of 20 and 50 bins, and durbin and jacobi-1d cover PolyBench and
-miniVite only.
+and 2.14\%), where the mean of the interpolation includes LULESH's 69.08\%.
+
+The rule's choice between the samplers is not a property of the bin count. The bootstrap sampler ran with the same
+setting in M3 and B50, so on the 177 runs that match in workload, input, interval and seed (59 combinations of
+workload, input and interval, 24 workloads), only the splitter's standard deviation in the denominator changes. On
+these runs the median ratio is 0.930 against the 20-bin splitter and 0.903 against the 50-bin one, and the 50-bin
+splitter's standard deviation is 1.04 times the 20-bin one's at the median (0.78 to 1.41 for 10\% to 90\% of the
+runs), which is the spread expected of a standard deviation estimated from 20 values. The rule's bound is crossed
+only by the runs at the intervals that the 50-bin fits newly select (median 0.888 over 234 runs), and the 95\%
+intervals of the two medians over workloads overlap (0.898 to 0.959 and 0.862 to 0.941). The change from the
+bootstrap to the disjoint sampler therefore comes from a median within 0.03 of the bound, and the same holds on the
+corpus programs (0.882 and 0.898 below).
+
+\paragraph{The remaining results on the corpus programs.} We ran the corpus programs' 44 inputs again with the
+pages-touched truth at 50 bins and with the bytes-touched truth at 20 bins, ran both samplers at the held-out inputs
+of each, and timed the 50-bin splitter on every input alone. Under the pages-touched truth, L2O extrapolates with a
+mean of 12.60\% and a median of 5.07\% and interpolates with 4.36\% and 3.77\%, and GAP pr is again the outlier
+(61.61\%). With 20 bins, L2O extrapolates with a mean of 6.67\% and a median of 4.86\%, against 13.89\% and
+4.83\% with 50, because GAP pr's error is 22.12\% with 20 bins. NZ goes the other way, with a mean of 7.28\% with 20
+bins against 3.72\% with 50, so on these seven programs neither bin count is better for every subset. M3's rule
+selects the disjoint sampler on both sets (ratios 0.882 and 0.898). durbin and jacobi-1d, now with sampler runs at
+50 bins, extrapolate within 2.11\% and interpolate within 0.26\% on both samplers' bins, and the rule selects the
+bootstrap sampler for them (0.944). The 50-bin splitter takes 3.35 h over the 44 inputs, from 9.3 s (GAP bfs at
+scale 12) to 1,558 s (HPCCG at 48), and needs up to 33.0 GB (HPCCG at 48), against at most 3.85 GB on PolyBench and
+miniVite. Fitting all 35 workloads takes 496 s of preprocessing and 7.7 s of fitting (median of 3), of which the
+regressions take 1.2 s.
 
 \begin{table}[htbp]
 \centering
@@ -775,6 +798,38 @@ Workload & Used & Dropped & Used & Dropped \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Profiler peaks against the truth on the corpus}
+\label{sec:profpeak}
+
+The chapter's motivation compares the heap profilers' peaks with the bytes-in-use truth of the scheduling corpus.
+Three of its statements were checked without new runs of the corpus, and one with new runs of Lua.
+
+\paragraph{Lua.} The profilers read Lua's peak at 0.92 of the truth (57.07 MB) and Massif at 1.02. Massif's 1.02 is
+its requested heap (52.39 MB) plus 5.83 MB of ``extra'' bytes, which are its 8 administrative bytes per block and the
+rounding of each block to the alignment. With \texttt{--heap-admin=0}, the extra falls to 0.60 MB and Massif reads
+52.99 MB, 0.93 of the truth. DHAT counts 653,369 live blocks at its peak, 80.2 bytes on average. Sixteen bytes per
+block would be 10.45 MB and glibc's whole per-block overhead about 11.04 MB, while the truth exceeds the requested
+heap by only 4.68 MB, so allocator metadata does not account for the difference. The difference comes from the
+truth. The corpus truth was traced with the Pin tool as of October 11. The same command with the current tool gives
+a peak of 53.56 MB, and with the October tool 56.74 MB again. The current truth is the requested heap plus the 1.14 MB
+that the run holds before its first allocation (52.39 + 1.14 = 53.53 MB). Under jemalloc and TCMalloc the current
+tool gives 51.76 MB and 55.33 MB. Against the current truth, the profilers read Lua at 0.98, and Massif at 1.09 with
+its extra bytes and 0.99 without them. We did not locate the change between the two tool versions that causes the
+difference. Lua allocates every block through \texttt{realloc}, so the tracking of \texttt{realloc} is the likely
+place. The other programs whose truths were traced with the October tool may carry the same difference in proportion
+to their use of \texttt{realloc}.
+
+\paragraph{Programs that touch the heap they allocate.} Over the 20 programs whose gperftools peak is within 5\% of
+the truth, the truth's peak over Massif's requested heap at its peak has a median of 1.003 and ranges from 0.957
+(llama.cpp) to 1.089 (Lua, with the October truth).
+
+\paragraph{The clock.} A curve on the reference clock is placed on the wall clock through the native run's counts of
+retired loads and stores (5 ms samples). Over 20 equal windows of the native run, the largest difference between the
+share of the references executed and the share of the run elapsed has a median of 0.043 over the 25 programs, with
+13 programs within 0.05 and 17 within 0.1. The largest differences are those of the shortest runs, NPB MG at class
+W (0.304, 0.27 s and 53 samples) and atax (0.249, 0.06 s and 12 samples), and of GAP bfs and cc (0.187 and 0.193),
+whose largest difference falls at 45\% of the run.
 
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}

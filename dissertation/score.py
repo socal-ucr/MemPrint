@@ -292,6 +292,37 @@ def b50more():
             m3(f"{MORE}/{st}/data", [(p, rc.get(p, "1")) for p in runs], f"_{st}", None if st == "p50" else CORPUS50)
 
 
+CM = os.path.expanduser("~/memprint-data/2026-11-13-corpusmore")
+
+
+def corpusmore_build():
+    """The corpus follow-ups (corpusmore.sh trace): the corpus at 50 bins under the pages truth (cp50) and at 20 bins
+    (c20), each refitted with its run list; and the run list of durbin and jacobi-1d's 50-bin fits (B50 follow-ups)."""
+    m11build(f"{CM}/cp50", CORPUS50)
+    m11build(f"{CM}/c20", CORPUS50)
+    m11build(f"{MORE}/m5", ["durbin", "jacobi-1d"])
+
+
+def corpusmore():
+    """Scores of the corpus follow-ups -> $OUT/corpusmore_fits.csv, m3_*_{cp50,c20,m5}.csv."""
+    pd.set_option("display.width", 220)
+    sets = (("c50 bytes 50", f"{MORE}/c50/data"), ("c20 bytes 20", f"{CM}/c20/data"), ("cp50 pages 50", f"{CM}/cp50/data"))
+    f = pd.concat([pd.read_csv(f"{root}/fits.csv").assign(set=name) for name, root in sets], ignore_index=True)
+    f.to_csv(f"{OUT}/corpusmore_fits.csv", index=False)
+    print(f.groupby(["set", "split", "subset"]).test_mape_train_si.agg(["mean", "median", "max"]).round(2).unstack("set").to_string())
+    print(f[f.subset == "L2O"].pivot_table(index=["workload", "split"], columns="set", values="test_mape_train_si").round(2).to_string())
+    for st, root, wl in (("cp50", f"{CM}/cp50", CORPUS50), ("c20", f"{CM}/c20", CORPUS50), ("m5", f"{MORE}/m5", ["durbin", "jacobi-1d"])):
+        rc = {}
+        for line in open(f"{CM}/done.txt"):
+            x = line.split()
+            if x[0] == st and x[1] in ("boot", "disj"):
+                rc[f"{root}/m3/{x[1]}/{x[4]}/{x[2]}/{x[3]}/{x[5]}"] = x[6] if int(x[7]) > 0 else "1"
+        runs = sorted(glob.glob(f"{root}/m3/*/*/*/*/*"))
+        if runs:
+            print("==", st)
+            m3(f"{root}/data", [(p, rc.get(p, "1")) for p in runs], f"_{st}", wl)
+
+
 def m6():
     rows = []
     for x in sorted(glob.glob(f"{OUT}/m6/*.massif")):

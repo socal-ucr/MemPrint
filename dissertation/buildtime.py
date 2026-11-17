@@ -1,7 +1,7 @@
 """The time MemPrint-Build takes on the 50-bin traces of the 28 workloads (B50), split into its parts, 3 repetitions,
 one process, alone on the machine.
 
-    PYTHONPATH=analysis ~/environments/memfp/bin/python dissertation/buildtime.py   ->  $O/buildtime.csv
+    PYTHONPATH=analysis ~/environments/memfp/bin/python dissertation/buildtime.py [corpus]   ->  $O/buildtime[_35].csv
 
 Parts (cumulative time of the functions, from cProfile):
   preprocess   reading the splitter's CSVs and adding the spread across bins (traces.load_traces, add_sample_spread)
@@ -36,15 +36,24 @@ def cum(stats, file, func):
     return sum(v[3] for (f, _, fn), v in stats.stats.items() if f.endswith(file) and fn == func)
 
 
-def one(rep):
+def one(rep, corpus=False):
+    """corpus: the 35 workloads (B50's 28 and the 7 corpus programs of the B50 follow-ups), else B50's 28."""
     root = tempfile.mkdtemp(prefix="buildtime-")
-    os.symlink(f"{B50}/traces", f"{root}/traces")
+    if corpus:
+        os.makedirs(f"{root}/traces")
+        for d in [f"{B50}/traces"] + [os.path.expanduser("~/memprint-data/2026-11-12-b50more/c50/traces")]:
+            for w in os.listdir(d):
+                os.symlink(f"{d}/{w}", f"{root}/traces/{w}")
+        wl = sorted(os.listdir(f"{root}/traces"))
+    else:
+        os.symlink(f"{B50}/traces", f"{root}/traces")
+        wl = []
     rows = {}
     for cmd in ("preprocess", "build"):
         pr = cProfile.Profile()
         t0 = time.perf_counter()
         pr.enable()
-        M.main(["--root", root, cmd])
+        M.main(["--root", root, cmd] + wl)
         pr.disable()
         rows[f"{cmd}_wall"] = time.perf_counter() - t0
         st = pstats.Stats(pr)
@@ -62,12 +71,13 @@ def one(rep):
 if __name__ == "__main__":
     import contextlib
     import io
+    corpus = sys.argv[1:] == ["corpus"]
     out = []
     for rep in (1, 2, 3):
         with contextlib.redirect_stdout(io.StringIO()):   # the build's own progress lines
-            r = one(rep)
+            r = one(rep, corpus)
         out.append(r)
         print(r, flush=True)
     d = pd.DataFrame(out)
-    d.to_csv(f"{O}/buildtime.csv", index=False)
+    d.to_csv(f"{O}/buildtime{'_35' if corpus else ''}.csv", index=False)
     print(d.median().round(2).to_string())
