@@ -89,8 +89,8 @@ def cmd_build(args, paths):
     fits = []
     for workload in args.workloads or default_workloads():
         print(f"fitting {workload}")
-        fits += build.fit_workload(workload, paths.read_all_data(workload))
-    write(build.select_models(fits), paths.models, index=False)
+        fits += build.fit_workload(workload, paths.read_all_data(workload), select_on=args.select_on)
+    write(build.select_models(fits, by="train" if args.select_on == "train" else "test"), paths.models, index=False)
     write(build.fits_table(fits), paths.data / "fits.csv", index=False)
     if args.latex:
         for name, lines in build.latex_tables(fits).items():
@@ -452,6 +452,8 @@ def main(argv=None):
     p = sub.add_parser("build", help="fit models -> data/models.csv, data/fits.csv")
     p.add_argument("workloads", nargs="*")
     p.add_argument("--latex", action="store_true", help="print the rows of the paper's accuracy tables")
+    p.add_argument("--select-on", choices=("train", "all"), default="train",
+                   help="choose the intervals and subsets on the training inputs (default) or on all inputs, the held-out one included (the published tables)")
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("predict", help="cross-workload error matrices -> data/*_errors.csv")

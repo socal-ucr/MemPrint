@@ -49,13 +49,17 @@ def table(w):
 
 
 def sd():
-    """SD of MemUsageObs across the 20 splitter bins against input size, gemm; the monotone (MT) intervals solid."""
-    p = prepare(table("gemm"))
+    """SD of MemUsageObs across the 20 splitter bins against input size, gemm; the monotone (MT) intervals solid, as
+    chosen on the EXTRA split's training inputs (the largest input held out)."""
+    a = table("gemm")
+    p = prepare(a)
+    q = prepare(a[a.Config != p.last_config])
     d = p.data.groupby(["SamplingInterval", "Config"]).SD_MemUsage.first().unstack()[p.configs]
     d = d[d.index <= 10000]
     fig, ax = plt.subplots(figsize=(5.2, 3.0))
     x = np.arange(len(p.configs))
-    mt = [k for k in d.index if k in p.monotone_scores]
+    mt = [k for k in d.index if k in q.monotone_scores]
+    print("MT on all inputs:", sorted(k for k in d.index if k in p.monotone_scores), "on EXTRA training inputs:", mt)
     for k in d.index:
         if k not in mt:
             ax.plot(x, d.loc[k], color=MUTED, lw=1, ls="--", marker="o", ms=2.5, zorder=1)

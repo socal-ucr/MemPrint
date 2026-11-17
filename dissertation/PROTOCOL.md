@@ -239,3 +239,15 @@ the current tool (scratchpad) after its first check (53.56 MB) disagreed with th
 squared and cubic terms, a pooled leave-one-workload-out model (with and without the target's training inputs),
 the slope of log alpha on log k per input, the rank of the best monotone interval with training-only selection, and
 L2O with training-only selection (`modelcheck.py l2o_trainsel`). Outputs: $OUT/modelcheck_{terms,slope,rank,l2o_trainsel}.csv.
+
+### Selection on the training inputs (added Nov 17)
+`memprint build` now selects on the training inputs of each split (`--select-on train`, the default): the empty-bin
+pruning, the monotone scores and the best interval come from `prepare` on the training configs; test rows are the
+held-out config's bins at the same intervals, empty ones dropped and counted (`test_dropped`, 0 everywhere);
+`select_models` picks NZ or L2O by training MAPE at the best interval (`--select-on all` keeps the published
+selection and the test-MAPE choice; `score.py m1` uses it for the TACO-appendix sets). Rebuilt: m1/final, m1/bytes-m4,
+m11, bins50, b50more/{c50,m5,p50}, corpusmore/{c20,cp50}; old fits kept as fits_all.csv / models_all.csv, old scores
+in $OUT/selall/. Sampler runs at the newly needed intervals: `samplefill.sh $OUT/samplefill_missing.csv` (172 rows x
+3 seeds = 516 runs, memsched, the set's own knobs and done format). Rescored with `score.py m3 m11 b50 b50more
+corpusmore r1 r8 r1p r11`; `modelcheck.py` (terms and pooled now on training-only selection); `matched.py`;
+`tables.py m1 l2o m3 m4 b50 b50_workloads unified b50_corpus m11 r1 r1p trainsel`; `figures.py sd m3 cumulative`.

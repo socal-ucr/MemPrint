@@ -25,7 +25,7 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "analysis"))
 from memprint.dataset import prepare  # noqa: E402
-from memprint.build import SPLITS  # noqa: E402
+from memprint.build import SPLITS, test_rows  # noqa: E402
 
 OUT = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2")
 ROOTS = [os.path.expanduser("~/memprint-data/2026-11-11-bins50/data"),
@@ -67,29 +67,36 @@ def load():
     return P
 
 
-def terms(P):
+def split_sets(raw, p, tc, sub_of):
+    """Training rows from the selection on the training inputs (memprint build --select-on train), and the held-out
+    input's rows at the same intervals."""
+    q = prepare(raw[raw.Config != tc])
+    for sub in q.subsets:
+        train = q.subset(sub)
+        test, _ = test_rows(raw, p, tc, train.SamplingInterval.unique())
+        yield sub, train, test
+
+
+def terms(P, raw):
     rows = []
     for w, p in P.items():
         for split, attr in SPLITS.items():
             tc = getattr(p, attr)
-            for sub in p.subsets:
-                d = p.subset(sub)
-                train, test = d[d.Config != tc], d[d.Config == tc]
+            for sub, train, test in split_sets(raw[w], p, tc, None):
                 for form in ("base", "sq", "cub"):
                     m, si = at_best(train, test, fit(train, form), form)
                     rows.append(dict(workload=w, split=split, subset=sub, form=form, test_mape=m, train_si=si))
     return pd.DataFrame(rows)
 
 
-def pooled(P):
+def pooled(P, raw):
+    """The other workloads enter with all their inputs and their own selection (they are known workloads)."""
     rows = []
     for w, p in P.items():
         for split, attr in SPLITS.items():
             tc = getattr(p, attr)
-            for sub in p.subsets:
+            for sub, train, test in split_sets(raw[w], p, tc, None):
                 others = [q.subset(sub) for v, q in P.items() if v != w and sub in q.subsets]
-                d = p.subset(sub)
-                train, test = d[d.Config != tc], d[d.Config == tc]
                 for kind, pool in (("pooled", others), ("pooled_own", others + [train])):
                     m, si = at_best(train, test, fit(pd.concat(pool), "base"), "base")
                     rows.append(dict(workload=w, split=split, subset=sub, form=kind, test_mape=m, train_si=si))
@@ -132,11 +139,11 @@ def main():
     P = {w: prepare(d) for w, d in raw.items()}
     print(len(P), "workloads", flush=True)
 
-    t = terms(P)
-    ref = pd.concat([pd.read_csv(f"{OUT}/b50_fits.csv").query("bins == 50"), pd.read_csv(f"{ROOTS[1]}/fits.csv")])
+    t = terms(P, raw)
+    ref = pd.concat([pd.read_csv(f"{r}/fits.csv") for r in ROOTS])
     chk = t[t.form == "base"].merge(ref, on=["workload", "split", "subset"])
     print("base reproduces fits.csv: max |diff|", round((chk.test_mape - chk.test_mape_train_si).abs().max(), 6), "over", len(chk))
-    t = pd.concat([t, pooled(P)], ignore_index=True)
+    t = pd.concat([t, pooled(P, raw)], ignore_index=True)
     t.to_csv(f"{OUT}/modelcheck_terms.csv", index=False)
     pd.set_option("display.width", 200)
     for split in SPLITS:

@@ -4,6 +4,7 @@
 Parts:
     plan   M3's runs (workload, split, config, interval) from M1's bytes fits -> $OUT/m3_list.txt
     m1     the TACO protocol on the taco, starts and bytes tables -> $OUT/m1/<set>/data/fits.csv, m1_summary.csv
+           (selection on all inputs, as published; every other build here selects on the training inputs)
     m8     bins and intervals per table, intervals dropped per workload -> $OUT/m8.csv
     m4     miniVite truths under three definitions and its six test MAPEs -> $OUT/m4.csv
     m3     sampler bins against splitter bins, the decision rule -> $OUT/m3_runs.csv, m3_mape.csv
@@ -43,7 +44,7 @@ def m1(sets=SETS):
         for w in WORKLOADS:
             subprocess.run(["cp", f"{src}/{w}_allData.csv", f"{root}/data/"], check=True)
         with open(f"{root}/build.log", "w") as log:
-            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", root, "build", "--latex"], check=True,
+            subprocess.run([PY, "-W", "ignore", "-m", "memprint", "--root", root, "build", "--latex", "--select-on", "all"], check=True,
                            stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "PYTHONPATH": f"{REPO}/analysis"})
         f = pd.read_csv(f"{root}/data/fits.csv")
         g = f.groupby(["split", "subset"]).test_mape_train_si.agg(["mean", "median", "max", "count"]).reset_index()

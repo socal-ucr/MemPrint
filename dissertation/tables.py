@@ -365,6 +365,51 @@ def unified():
     write("ch2_samplers", "\n".join(rows) + "\n")
 
 
+def b50_corpus():
+    """tab:b50corpus: the corpus programs at 50 bins (bytes), NZ and L2O on the splitter's bins and L2O on the samplers'
+    bins (mean of 3 seeds). The first four columns (inputs, count, truth range) are the program's, kept as written."""
+    static = {"gap-bfs": "GAP bfs & 12 to 17 & 6 & 2.1 to 54.2", "gap-cc": "GAP cc & 12 to 17 & 6 & 2.1 to 54.2",
+              "gap-pr": "GAP pr & 12 to 17 & 6 & 2.1 to 54.2", "gap-sssp": "GAP sssp & 12 to 17 & 6 & 3.3 to 94.8",
+              "hpccg": "HPCCG & 16 to 48 & 7 & 2.0 to 43.2", "lulesh": "LULESH & 10 to 30 & 6 & 1.2 to 30.7",
+              "minife": "MiniFE & 16 to 40 & 7 & 6.1 to 36.3"}
+    f = pd.read_csv(f"{MORE}/c50/data/fits.csv").set_index(["workload", "split", "subset"]).test_mape_train_si
+    sm = sampler_mape("_c50")
+    rows = []
+    for w in CORPUS50:
+        cells = [static[w]]
+        for split in ("EXTRA", "INTER"):
+            cells += [pct(f.get((w, split, "NZ"), np.nan)), pct(f.get((w, split, "L2O"), np.nan)),
+                      pct(sm.get(("boot", w, split, "L2O"), np.nan)), pct(sm.get(("disj", w, split, "L2O"), np.nan))]
+        rows.append(" & ".join(cells) + " \\\\")
+    write("b50_corpus", "\n".join(rows) + "\n")
+
+
+def trainsel():
+    """The selection on the training inputs against on all inputs: L2O test MAPE (mean / median) on the splitter's bins
+    per table set, from each root's fits.csv (training inputs) and fits_all.csv (all inputs, memprint build
+    --select-on all)."""
+    O = os.path.expanduser("~/memprint-data")
+    CM = f"{O}/2026-11-13-corpusmore"
+    sets = (("Bytes, 20 bins, 28 workloads", [f"{OUT}/m1/bytes-m4/data"]),
+            ("Bytes, 50 bins, 28 workloads", [f"{O}/2026-11-11-bins50/data"]),
+            ("Bytes, 50 bins, 7 corpus programs", [f"{MORE}/c50/data"]),
+            ("Bytes, 50 bins, all 35", [f"{O}/2026-11-11-bins50/data", f"{MORE}/c50/data"]),
+            ("Pages, 20 bins, 28 workloads", [f"{OUT}/m11/data"]),
+            ("Pages, 50 bins, 28 workloads", [f"{MORE}/p50/data"]),
+            ("Pages, 50 bins, 7 corpus programs", [f"{CM}/cp50/data"]),
+            ("Bytes, 20 bins, 7 corpus programs", [f"{CM}/c20/data"]))
+    rows = []
+    for name, roots in sets:
+        cells = [name]
+        for split in ("EXTRA", "INTER"):
+            for fn in ("fits_all", "fits"):
+                f = pd.concat([pd.read_csv(f"{r}/{fn}.csv") for r in roots])
+                t = f[(f.split == split) & (f.subset == "L2O")].test_mape_train_si
+                cells.append(f"{t.mean():.2f} / {t.median():.2f}")
+        rows.append(" & ".join(cells) + " \\\\")
+    write("trainsel", "\n".join(rows) + "\n")
+
+
 def m8():
     m = pd.read_csv(f"{OUT}/m8.csv")
     rows = []
