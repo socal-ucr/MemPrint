@@ -810,19 +810,18 @@ its requested heap (52.39 MB) plus 5.83 MB of ``extra'' bytes, which are its 8 a
 rounding of each block to the alignment. With \texttt{--heap-admin=0}, the extra falls to 0.60 MB and Massif reads
 52.99 MB, 0.93 of the truth. DHAT counts 653,369 live blocks at its peak, 80.2 bytes on average. Sixteen bytes per
 block would be 10.45 MB and glibc's whole per-block overhead about 11.04 MB, while the truth exceeds the requested
-heap by only 4.68 MB, so allocator metadata does not account for the difference. The difference comes from the
-truth. The corpus truth was traced with the Pin tool as of October 11. The same command with the current tool gives
-a peak of 53.56 MB, and with the October tool 56.74 MB again. The current truth is the requested heap plus the 1.14 MB
-that the run holds before its first allocation (52.39 + 1.14 = 53.53 MB). Under jemalloc and TCMalloc the current
-tool gives 51.76 MB and 55.33 MB. Against the current truth, the profilers read Lua at 0.98, and Massif at 1.09 with
-its extra bytes and 0.99 without them. We did not locate the change between the two tool versions that causes the
-difference. Lua allocates every block through \texttt{realloc}, so the tracking of \texttt{realloc} is the likely
-place. The other programs whose truths were traced with the October tool may carry the same difference in proportion
-to their use of \texttt{realloc}.
+heap by only 4.68 MB (4.56 MB at the median truth below), so allocator metadata does not account for the difference. The truth itself varies from run to run. Five runs of
+the current tool give 53.56, 56.36, 56.95, 57.00 and 57.10 MB (median 56.95 MB), and two runs of the October 11 tool
+give 56.74 and 57.07 MB, so the two tool versions agree within the spread of one version's runs. The lowest run,
+53.56 MB, is the requested heap plus the 1.14 MB that the run holds before its first allocation (52.39 + 1.14 = 53.53
+MB), and the other runs exceed that sum by 2.8 to 3.6 MB. We did not locate the source of the spread. The script fixes
+the random seed, and Lua 5.3 seeds its string hashes from the clock and from addresses at each start. Single runs
+under jemalloc and TCMalloc give 51.76 MB and 55.33 MB. Against the median truth, the profilers read Lua at 0.92, and
+Massif at 1.02 with its extra bytes and 0.93 without them.
 
 \paragraph{Programs that touch the heap they allocate.} Over the 20 programs whose gperftools peak is within 5\% of
 the truth, the truth's peak over Massif's requested heap at its peak has a median of 1.003 and ranges from 0.957
-(llama.cpp) to 1.089 (Lua, with the October truth).
+(llama.cpp) to 1.089 (Lua).
 
 \paragraph{The clock.} A curve on the reference clock is placed on the wall clock through the native run's counts of
 retired loads and stores (5 ms samples). Over 20 equal windows of the native run, the largest difference between the
@@ -830,6 +829,20 @@ share of the references executed and the share of the run elapsed has a median o
 13 programs within 0.05 and 17 within 0.1. The largest differences are those of the shortest runs, NPB MG at class
 W (0.304, 0.27 s and 53 samples) and atax (0.249, 0.06 s and 12 samples), and of GAP bfs and cc (0.187 and 0.193),
 whose largest difference falls at 45\% of the run.
+
+\subsection{The corpus truths with the current tool}
+\label{sec:truthcur}
+
+The scheduling corpus's truths were traced with the Pin tool as of October 11 (bytes in use) and October 12 (pages
+in use). We traced all 56 again with the current tool (the frozen copy of the dissertation runs) with the same
+commands, 28 bytes truths and 28 pages truths over the 23 programs at their largest inputs and the five LLM
+configurations. All 56 peaks agree with the October peaks within 1\% except sqlite's pages truth, which is 2.3\%
+higher (78.94 MB against 77.13 MB), and the median peak ratio is 1.0000 for both truths. The curves' areas agree within
+1\% except llama.cpp's, whose areas differ by up to 16.6\%. llama.cpp runs with four threads, and the old and new pages
+runs took 768 s and 329 s, so the instructions that its spinning threads execute move the model load to a different
+share of the run. Its peak is the same (355.74 MB against 355.75 MB). sqlite's curves agree at every tenth of the run
+and differ only at the last snapshot. The scheduling results therefore stand with the October truths, and we did not
+rerun them.
 
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}

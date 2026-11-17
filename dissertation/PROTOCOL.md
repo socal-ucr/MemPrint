@@ -226,3 +226,10 @@ and m3_runs_b50.csv. Profiler checks: Lua (input 1) under Massif with --heap-adm
 the bytes truth with the current tool under glibc, jemalloc and TCMalloc and with the October 11 tool
 (2026-10-11-sched/corpus/tool.so); truth over Massif's requested heap at the peak (corpus, largest inputs); the largest
 gap between reference and wall-clock progress over 20 windows from nativerefs.
+
+### Corpus truths with the current tool (added Nov 17)
+The 56 scheduling-corpus truths (bytes, 2026-10-13-sched-llm/corpus; pages, 2026-10-12-resize/corpus-pages and
+2026-10-26-rsscurve/llm) traced again with the frozen current tool through `scripts/footprint_corpus.sh` under
+`memsched.py` (48 GB, 12 jobs), native dirs linked from sched-llm; compared by `truthcur.py` (peak and area of the
+resampled curves) -> ~/memprint-data/2026-11-17-truthcur/compare.csv. Lua's bytes truth repeated three more times with
+the current tool (scratchpad) after its first check (53.56 MB) disagreed with the corpus rerun (57.10 MB).
