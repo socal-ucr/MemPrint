@@ -49,29 +49,41 @@ def table(w):
 
 
 def sd():
-    """SD of MemUsageObs across the 20 splitter bins against input size, gemm; the monotone (MT) intervals solid, as
+    """SD of MemUsageObs across the splitter bins against input size, gemm; the monotone (MT) intervals solid, as
     chosen on the EXTRA split's training inputs (the largest input held out)."""
     a = table("gemm")
     p = prepare(a)
     q = prepare(a[a.Config != p.last_config])
     d = p.data.groupby(["SamplingInterval", "Config"]).SD_MemUsage.first().unstack()[p.configs]
     d = d[d.index <= 10000]
-    fig, ax = plt.subplots(figsize=(5.2, 3.0))
-    x = np.arange(len(p.configs))
     mt = [k for k in d.index if k in q.monotone_scores]
     print("MT on all inputs:", sorted(k for k in d.index if k in p.monotone_scores), "on EXTRA training inputs:", mt)
-    for k in d.index:
-        if k not in mt:
-            ax.plot(x, d.loc[k], color=MUTED, lw=1, ls="--", marker="o", ms=2.5, zorder=1)
+    save(plot_sd(d, mt), "sd_gemm")
+
+
+# nine distinct colours and markers: the eight-colour palette C plus brown (gemm has nine MT intervals up to 1 in 10,000)
+C9 = C + ["#8c5a2b"]
+MARK9 = MARK + ["h"]
+
+
+def plot_sd(d, mt):
+    """Draw the sd figure from a table of SD (rows: interval, columns: input). Legend outside, right of the axes."""
+    fig, ax = plt.subplots(figsize=(5.0, 3.0))
+    x = np.arange(len(d.columns))
+    others = [k for k in d.index if k not in mt]
+    for k in others:
+        ax.plot(x, d.loc[k], color=MUTED, lw=1, ls="--", marker="o", ms=2.5, zorder=1)
     for i, k in enumerate(mt):
-        ax.plot(x, d.loc[k], color=C[i % len(C)], marker=MARK[i % len(MARK)], label=f"1 in {k:,}", zorder=3)
-    ax.plot([], [], color=MUTED, lw=1, ls="--", label="other intervals")
+        ax.plot(x, d.loc[k], color=C9[i % len(C9)], marker=MARK9[i % len(MARK9)], label=f"1 in {k:,}", zorder=3)
+    if others:
+        ax.plot([], [], color=MUTED, lw=1, ls="--", label="other intervals")
     ax.set_yscale("log")
-    ax.set_xticks(x, p.configs)
+    ax.set_xticks(x, d.columns)
     ax.set_xlabel("Input (PolyBench dataset)")
     ax.set_ylabel("SD of footprint across bins (bytes)")
-    ax.legend(title="Monotone intervals (MT)", title_fontsize=8, loc="upper left", ncol=2)
-    save(fig, "sd_gemm")
+    ax.legend(title="Monotone intervals (MT)", title_fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+              borderaxespad=0)
+    return fig
 
 
 def alpha():
