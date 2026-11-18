@@ -159,6 +159,9 @@ REAL = {
     "dhat": _peak("dhat"), "dhat-curve": _curve("dhatcurve"), "dhat-hold": _curve("dhathold"), "gperf": _peak("gperf"),
     "rss-peak": lambda j, m: peak(j.info.get("rssview", j.info["rss"]), m),
     "request": lambda j, m: np.full(K, j.info["request"]),
+    # MemPrint's sampled estimate as a peak: the true peak x (1 + e), e one of MemPrint's signed extrapolation
+    # errors drawn per job (real.make_jobs, mp); the calibrated margin comes from the other workloads' errors
+    "memprint-peak": lambda j, m: np.full(K, float(np.max(j.resident)) * (1 + j.info["mp_e"]) * (1 + m)),
     **{n: _scaled_to_rss(m) for n, m in HYBRID.items()},
     **{n: _earlier(*v) for n, v in EARLIER.items()},
 }
@@ -172,6 +175,8 @@ def available(jobs, name):
             "gperf": "gperf", "rss-peak": "rss",
             "dhat-curve": "dhatcurve", "dhat-hold": "dhathold",
             **{f"memprint-{n}": m for n, m in CLOCK_PAGES.items()}, **HYBRID}.get(name)
+    if name == "memprint-peak":
+        return all("mp_e" in j.info for j in jobs)
     if name in EARLIER:
         return all(all(m in j.info for m in EARLIER[name][1:] if m) or "request" in j.info for j in jobs)
     return need is None or all(need in j.info and (name not in HYBRID or "rss" in j.info) for j in jobs)

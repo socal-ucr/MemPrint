@@ -961,6 +961,105 @@ share of the run. Its peak is the same (355.74 MB against 355.75 MB). sqlite's c
 and differ only at the last snapshot. The scheduling results therefore stand with the October truths, and we did not
 rerun them.
 
+\subsection{The simulator's assumptions behind the motivating gain}
+\label{sec:motivchecks}
+
+The motivation's gain comes from DMSched-Sim (\texttt{analysis/memprint/sched}) on a synthetic stream of 3{,}000 jobs
+whose requests are lognormal with a median of 100\,GB and $\sigma = 0.8$, whose used memory is the request times a
+used-to-requested ratio $u$ drawn from the LANL CM5 log, and whose footprint curves are corpus curves scaled by one
+factor so that the truth's peak equals the used memory. Three checks ran on that setting (offered load 0.8, three
+seeds, calibrated 90\% margins, the 25 corpus programs at their largest inputs). With none of the new options the
+simulator reproduces the published rows exactly. The scripts are \texttt{dissertation/mp\_errors.py} and
+\texttt{dissertation/motiv\_checks.py}, and the data are in \texttt{2026-11-18-motivchecks}.
+
+\paragraph{E1. \memprint{} as an oracle.} No oracle of the motivation uses \memprint{}'s sampled prediction. The
+oracle \texttt{memprint-peak} reserves the true peak times $1 + e$, with $e$ drawn per job from \memprint{}'s signed
+L2O extrapolation errors on the 35-workload set (the mean of the per-bin estimates over the truth, minus one, at the
+training-best interval, one value per workload and seed). Its calibrated margin is the 90th percentile of the margins
+the other workloads need. With the bootstrap sampler's errors, \memprint{} under-estimates in 71\% of the runs
+(median $-1.8\%$, 10th to 90th percentile $-15.7\%$ to $+8.0\%$), and the margin is about 17\%. Table~\ref{tab:motive1}
+gives the result. With calibrated 90\% margins it gives 1{,}179 minutes under the bytes-touched truth, 58\% of the
+gap between the request (2{,}208) and the exact peak (448), against 68\% for the DHAT peak, and 1{,}078 and
+1{,}081 minutes (64\%) with the disjoint sampler's and the splitter's bins. It needs 9.0\,TB, as DHAT does, which is
+40\% of the memory between the request (11.0\,TB) and the exact peak (6.0\,TB). Its errors run in both directions, so
+a margin that covers 90\% of the workloads leaves 320 to 420 kills per stream, and a margin that covers all of them
+is set by GAP pr ($-40\%$) and gives 6{,}829 minutes. \memprint{}'s sampled peak is therefore worth about as much as
+DHAT's peak in this simulator. The full version of E1, which would run \memprint{}'s build and prediction on the
+corpus programs themselves, needs several hours of Pin runs per program and was not run.
+
+\begin{table}[htbp]
+\centering
+\caption{E1. \memprint{}'s sampled peak as a scheduling oracle at load 0.8: mean response time (min), OOM kills per
+stream and the share of the gap between the request and the exact peak (\%), per source of the errors and margin
+policy.}
+\label{tab:motive1}
+\footnotesize
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+& & \multicolumn{3}{c}{Bytes touched} & \multicolumn{3}{c}{RSS} \\
+\cmidrule(lr){3-5}\cmidrule(l){6-8}
+Errors from & Margin & Resp. & Kills & Share & Resp. & Kills & Share \\
+\midrule
+\tabinput{motiv_e1}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{E2. The size of the bound.} The exact peak's gain over the request is set by the over-reservation, not by
+the corpus. In the CM5 draw the median request is 1.52 times the peak (1.63 times in total). With the request a fixed
+1.5, 2 and 3 times every job's peak, the request over the exact peak grows from 4.9 (CM5) to 7.0, 14.6 and 18.9 under
+the bytes-touched truth (Table~\ref{tab:motive2}), because the offered load is fixed on resident memory, so a request
+of twice the peak saturates memory. Every oracle captures a larger share of the larger bounds, and their order holds.
+DHAT captures 68\%, 69\%, 91\% and 95\%. On the MetaCentrum2 stream, with its own requests and arrivals and $u$ from
+CM5, memory is not the contended resource (the exact curve keeps 25\% of memory resident), the request over the exact
+peak is 3.7, and every footprint estimator, including \memprint{}'s sampled peak, gives a response time within 37\%
+of the exact peak's (131 minutes), against 479 minutes for the request.
+
+\begin{table}[htbp]
+\centering
+\caption{E2. The request's mean response time over the exact peak's, and each oracle's share of that gap (\%) under the
+bytes-touched truth, at load 0.8 with calibrated 90\% margins, per setting of the request.}
+\label{tab:motive2}
+\footnotesize
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+& CM5 $u$ & 1.5$\times$ & 2$\times$ & 3$\times$ & MetaCentrum2 \\
+\midrule
+\tabinput{motiv_e2}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{E3. Proportional scaling.} Scaling every curve by one factor also scales the runtime's fixed footprint,
+which for a heap profiler is the part it cannot see. We split each curve into a fixed part, the intercept of a linear
+fit of its peak on the input size over the program's three inputs (between 0 and the smallest input's peak), and the
+rest, scaled only the rest, and added the fixed part back unscaled. The fixed parts are small, 0 to 7.9\,MB of the
+true peaks (cc1 the largest), and llama.cpp has none because its two inputs share one model and so one size. The
+heap profilers' margins do not shrink (Table~\ref{tab:motive3}). The 90th percentile of gperftools' needed margin
+rises from 233\% to 271\% and Massif's pages-as-heap curve's from 28\% to 100\%, while DHAT's peak stays at 6\%. At
+load 0.8 the oracles keep their order, with the exact peak at 469 minutes (448 with proportional scaling), the DHAT
+peak at 1{,}103 (1{,}011) and the request at 2{,}220 (2{,}208), and the memory sweep gives the same totals for every
+oracle except the RSS peak of an earlier run, which needs 7.0\,TB instead of 9.0\,TB. The heap profilers' shortfall
+therefore does not come from scaling a fixed runtime footprint.
+
+\begin{table}[htbp]
+\centering
+\caption{E3. The margin each oracle needs to stay above the truth (\%, median and 90th percentile over the 25 programs),
+with proportional scaling (Prop.) and with the fixed part unscaled (Fixed).}
+\label{tab:motive3}
+\footnotesize
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+& \multicolumn{4}{c}{Bytes touched} & \multicolumn{4}{c}{RSS} \\
+\cmidrule(lr){2-5}\cmidrule(l){6-9}
+& \multicolumn{2}{c}{Prop.} & \multicolumn{2}{c}{Fixed} & \multicolumn{2}{c}{Prop.} & \multicolumn{2}{c}{Fixed} \\
+Oracle & Med. & 90th & Med. & 90th & Med. & 90th & Med. & 90th \\
+\midrule
+\tabinput{motiv_e3_margins}
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}
 

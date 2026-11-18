@@ -251,3 +251,13 @@ in $OUT/selall/. Sampler runs at the newly needed intervals: `samplefill.sh $OUT
 3 seeds = 516 runs, memsched, the set's own knobs and done format). Rescored with `score.py m3 m11 b50 b50more
 corpusmore r1 r8 r1p r11`; `modelcheck.py` (terms and pooled now on training-only selection); `matched.py`;
 `tables.py m1 l2o m3 m4 b50 b50_workloads unified b50_corpus m11 r1 r1p trainsel`; `figures.py sd m3 cumulative`.
+
+### Motivation checks (added Nov 18)
+`mp_errors.py` (MemPrint's signed L2O EXTRA errors on the 35 workloads: mean of per-bin estimates / truth - 1, per
+sampler and seed) and `motiv_checks.py` (DMSched-Sim on the 2026-10-13-sched-llm corpus, synthetic stream, load 0.8,
+seeds 0-2, both truths): e1 oracle memprint-peak (true peak x (1+e), margin = q90 of the other workloads' needed
+margins) for boot/disj/split errors and every margin policy, e1cap its memory sweep; e2 request = 1.5/2/3 x peak
+(real.make_jobs overestimate) and the MetaCentrum2 stream (kind=trace); e3 fixed parts unscaled (real.fixed_parts:
+intercept of peak on INPUT_SIZE, clipped to [0, smallest-input peak]; run.Setup.required on the curves without them),
+e3cap its sweep. Data ~/memprint-data/2026-11-18-motivchecks. The MetaCentrum2 grid lost 3 tasks and 1 run to memory
+(28 workers each parsing the SWF log); those 4 were rerun with 4 workers.

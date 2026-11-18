@@ -1,0 +1,22 @@
+Request / exact peak, bytes touched & 4.9 & 7.0 & 14.6 & 18.9 & 3.7 \\
+Request / exact peak, RSS & 5.2 & 8.2 & 17.9 & 22.0 & 3.7 \\
+\midrule
+Exact curve & 121 & 113 & 105 & 102 & 102 \\
+Exact, 20 windows & 116 & 112 & 104 & 101 & 102 \\
+Dynamic provisioning (5 min) & 99 & 105 & 101 & 97 & 98 \\
+Dynamic provisioning, look-back & 97 & 97 & 95 & 91 & 98 \\
+Reactive resizing (5 min) & 92 & 93 & 95 & 94 & 69 \\
+RSS peak (earlier run) & 70 & 75 & 93 & 96 & 102 \\
+DHAT peak & 68 & 69 & 91 & 95 & 98 \\
+KS+ (segments from other inputs) & 54 & 62 & 75 & 89 & 38 \\
+ML peak (quantile GBM) & 12 & 18 & 18 & 16 & 73 \\
+Massif curve & -11 & -3 & 61 & 87 & 104 \\
+Pond (untouched in pool) & -18 & -17 & -15 & -12 & 62 \\
+DHAT curve (3 points) & -74 & -79 & 24 & 75 & 99 \\
+DHAT hold-then-decay & -111 & -120 & 2 & 71 & 99 \\
+Massif curve, ms clock & -117 & -121 & 3 & 70 & 103 \\
+Massif pages-as-heap & -140 & -157 & -48 & 22 & 101 \\
+Massif pages-as-heap, ms clock & -250 & -279 & -123 & -10 & 92 \\
+gperftools peak & -470 & -520 & -256 & -55 & 86 \\
+heaptrack curve & -544 & -655 & -362 & -123 & 86 \\
+MemPrint's sampled peak & 58 & 59 & 88 & 94 & 100 \\

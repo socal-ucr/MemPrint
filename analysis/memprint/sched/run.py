@@ -54,8 +54,12 @@ def largest(curves, require=None):
 class Setup:
     """Everything a run needs, loaded once per worker."""
 
-    def __init__(self, corpus, traces, n, cluster, kind="synthetic", programs=None):
+    def __init__(self, corpus, traces, n, cluster, kind="synthetic", programs=None, opts=None):
+        """opts (the motivation's assumption checks): overestimate (request = factor x peak instead of CM5's u),
+        fixed (keep each curve's fixed part unscaled, real.fixed_parts), mp (path of MemPrint's signed errors,
+        dissertation/mp_errors.py) and mp_sampler (its rows: boot, disj or split)."""
         self.cluster = cluster
+        self.opts = dict(opts or {})
         # programs: None (every program, largest input), "static" (the programs the static route predicts, at
         # their largest input with a prediction) or "llm" (the LLM engines at every input, each (engine, input) a
         # program of its own, so that a margin is calibrated on the other models and lengths)
@@ -74,6 +78,11 @@ class Setup:
         history = all_curves[[(p, i) not in EXCLUDE for p, i in zip(all_curves.prog, all_curves.input)]]
         self.ksplus = ksplus.models(history, pd.read_csv(f"{corpus}/costs.csv", dtype={"input": str}), targets,
                                     real.rebase)
+        self.fixed = real.fixed_parts(all_curves, ksplus.INPUT_SIZE) if self.opts.get("fixed") else None
+        self.mp = None
+        if self.opts.get("mp"):
+            e = pd.read_csv(self.opts["mp"])
+            self.mp = e[e.sampler == self.opts.get("mp_sampler", "boot")].reset_index(drop=True)
         cm5 = real.cm5_ratios(f"{traces}/LANL-CM5-1994-4.1-cln.swf.gz")
         self.cm5_train, self.cm5_test = ml.split_users(cm5)
         self.model = ml.PeakModel(self.cm5_train)
@@ -91,7 +100,8 @@ class Setup:
         if seed not in self._trace:
             self._trace[seed] = (real.synthetic_trace(self.n, seed, cluster=ref) if self.kind == "synthetic"
                                  else real.trace_jobs(self.trace_path, ref, self.n, seed))
-        jobs = real.make_jobs(self._trace[seed], self.curves, self.cm5_test, scenario, seed=seed)
+        jobs = real.make_jobs(self._trace[seed], self.curves, self.cm5_test, scenario, seed=seed,
+                              overestimate=self.opts.get("overestimate"), fixed=self.fixed, mp=self.mp)
         gbmin = sum(at_slots(j.resident, j.base).sum() for j in jobs)
         t = real.scale_arrivals([j.arrival for j in jobs], load, ref, gbmin)
         for j, a in zip(jobs, t):
@@ -110,6 +120,8 @@ class Setup:
                 wide = real.rebase(wide)  # as make_jobs
                 if truth_method not in wide:
                     continue
+                if self.fixed:   # at a job's scale the unscaled fixed part is negligible: margins on the rest
+                    wide = {m: np.maximum(c - self.fixed.get((prog, m), 0.0), 0.0) for m, c in wide.items()}
                 info = dict(wide)
                 if real.rss_view(info, scenario) is not None:
                     info["rssview"] = real.rss_view(info, scenario)
@@ -127,6 +139,14 @@ class Setup:
         req = self.required(scenario, name)
         return float(np.quantile([m for p, m in req.items() if p != prog], q))
 
+    def mp_margin(self, workload, q=0.9):
+        """memprint-peak's calibrated margin: the q-quantile over the other MemPrint workloads of the margin each
+        needs (over its runs) for its estimate to cover the truth, 1 / (1 + e) - 1 for an under-estimate."""
+        if not hasattr(self, "_mp_req"):
+            need = (1 / (1 + self.mp.e) - 1).clip(lower=0)
+            self._mp_req = need.groupby(self.mp.workload).max()
+        return float(np.quantile(self._mp_req.drop(workload), q))
+
     def oracle(self, name):
         if name == "ml-peak":
             return ml.oracle(self.model)
@@ -140,7 +160,7 @@ class Setup:
 _setup = None
 
 
-def _init(corpus, traces, n, cluster, kind="synthetic", programs=None, interval=None):
+def _init(corpus, traces, n, cluster, kind="synthetic", programs=None, interval=None, opts=None):
     global _setup
     if interval:   # the dynamic policies' update interval (minutes), for the sensitivity runs
         oracles.INTERVAL = interval
@@ -148,7 +168,7 @@ def _init(corpus, traces, n, cluster, kind="synthetic", programs=None, interval=
         from .lisa_run import LisaSetup
         _setup = LisaSetup(corpus, traces, n, cluster, kind, programs)
     else:
-        _setup = Setup(corpus, traces, n, cluster, kind, programs)
+        _setup = Setup(corpus, traces, n, cluster, kind, programs, opts)
 
 
 def steady(d, sim, trim=0.1):
@@ -182,7 +202,10 @@ def _run_one(task):
     f = _setup.oracle(name)
     if margin in ("cal", "cal100"):
         q = 0.9 if margin == "cal" else 1.0
-        if name in CALIBRATED:
+        if name == "memprint-peak":
+            base = f
+            f = lambda j, m: base(j, _setup.mp_margin(j.info["mp_w"], q))
+        elif name in CALIBRATED:
             base = f
             f = lambda j, m: base(j, _setup.calibrated(scenario, name, j.info["prog"], q))
             f.elastic = getattr(base, "elastic", False)
@@ -191,20 +214,20 @@ def _run_one(task):
     jobs = oracles.assign([copy(j) for j in jobs], f, 0.0 if margin in ("cal", "cal100") else margin)
     sim = Sim(_setup.cluster, jobs)
     d, s = sim.run()
-    return dict(stream=_setup.kind, programs=_setup.panel, local_gb=_setup.cluster.local, pool_gb=_setup.cluster.pool,
+    return dict(stream=_setup.kind, programs=_setup.panel, **{f"opt_{k}": v for k, v in _setup.opts.items()}, local_gb=_setup.cluster.local, pool_gb=_setup.cluster.pool,
                 scenario=scenario, load=load, seed=seed, margin=margin, oracle=name, **s,
                 **steady(d, sim))
 
 
 def run(corpus, traces, out, scenarios=("rss", "bytes"), loads=(0.5, 0.7, 0.9, 1.2), seeds=(0, 1, 2),
         margins=(0.0, 0.1, 0.3), names=ORACLES, n=3000, cluster=None, procs=24, kind="synthetic", programs=None,
-        interval=None):
+        interval=None, opts=None):
     cluster = cluster or Cluster()
     tasks = list(product(scenarios, loads, seeds, margins, names))
     # the exact oracles, Pond and dynamic provisioning do not use a margin
     tasks = [t for t in tasks if not (t[4] in NO_MARGIN and t[3] != margins[0])]
     rows = []
-    with Pool(procs, _init, (corpus, traces, n, cluster, kind, programs, interval)) as p, open(out + ".jsonl", "a") as log:
+    with Pool(procs, _init, (corpus, traces, n, cluster, kind, programs, interval, opts)) as p, open(out + ".jsonl", "a") as log:
         for r in p.imap_unordered(_one, tasks, chunksize=1):
             if r:
                 rows.append(r)

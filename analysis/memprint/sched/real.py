@@ -98,12 +98,60 @@ def rss_view(info, scenario):
     return info.get("rssdata") if scenario == "rssdata" and "rssdata" in info else info.get("rss")
 
 
-def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
+def fixed_parts(all_curves, sizes):
+    """Per (program, method): the part of the curve that does not grow with the input, the intercept of a linear
+    fit of the curve's peak on the input size over the program's inputs (curves rebased as make_jobs does), kept
+    between 0 and the smallest input's peak. 0 for a program with one input or no input size."""
+    from .run import EXCLUDE, rank
+    out = {}
+    c = all_curves[[(p, i) not in EXCLUDE for p, i in zip(all_curves.prog, all_curves.input)]]
+    for prog, g in c.groupby("prog"):
+        inputs = sorted(g.input.unique(), key=rank)
+        if len(inputs) < 2 or prog not in sizes:
+            continue
+        by = {i: rebase({m: h.sort_values("k").bytes.to_numpy() for m, h in g[g.input == i].groupby("method")})
+              for i in inputs}
+        for m in {m for i in inputs for m in by[i]}:
+            have = [i for i in inputs if m in by[i] and i in sizes[prog]]
+            if len(have) < 2:
+                continue
+            x = np.array([sizes[prog][i] for i in have], float)
+            y = np.array([by[i][m].max() for i in have])
+            if not np.all(np.isfinite(y)) or np.ptp(x) == 0:
+                continue
+            slope = np.sum((x - x.mean()) * (y - y.mean())) / np.sum((x - x.mean()) ** 2)
+            b = y.mean() - slope * x.mean()
+            out[(prog, m)] = float(np.clip(b, 0, y[np.argmin(x)]))
+    return out
+
+
+def scale_curves(info, truth_method, peak, prog, fixed=None):
+    """Every curve scaled so the truth's peak is `peak`. Without `fixed`, by one factor (proportional scaling).
+    With `fixed` (fixed_parts), each curve's fixed part stays as measured and only the rest is scaled, by the
+    factor that puts the truth's peak at `peak`."""
+    t = info[truth_method]
+    if not fixed:
+        s = peak / t.max()
+        return {m: c * s for m, c in info.items()}, s
+    ft = fixed.get((prog, truth_method), 0.0)   # bytes, as the corpus curves; the job's curves are in GB
+    s = max(peak - ft / GB, 0.0) / max(t.max() - ft, 1e-12)
+    out = {}
+    for m, c in info.items():
+        f = fixed.get((prog, m), 0.0)
+        out[m] = np.maximum(c - f, 0.0) * s + f / GB
+    return out, s
+
+
+def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0, overestimate=None, fixed=None, mp=None):
     """Jobs whose resident curve is the corpus truth of a random program, scaled to the job's peak.
 
     curves: corpus curves (prog, input, method, k, bytes), largest input per program. info gets every method's
-    curve on the same scale, the user request, and the CM5 record (u and features)."""
+    curve on the same scale, the user request, and the CM5 record (u and features).
+    overestimate: the request is this factor times the job's peak (peak = request / factor) instead of request x u
+    from CM5. fixed: the fixed parts (fixed_parts) that scale_curves keeps unscaled. mp: MemPrint's signed
+    extrapolation errors (rows with workload, e), one drawn per job into info["mp_e"], info["mp_w"]."""
     rng = np.random.default_rng(seed + 1)
+    rng_mp = np.random.default_rng(seed + 101)   # its own stream, so the jobs are the same with or without it
     truth_method = TRUTHS[scenario][0]
     wide = {(p, m): g.sort_values("k").bytes.to_numpy() for (p, m), g in curves.groupby(["prog", "method"])}
     progs = sorted(p for p in {p for p, _ in wide} if (p, truth_method) in wide)
@@ -114,13 +162,14 @@ def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0):
         prog = progs[rng.integers(len(progs))]
         c = cm5.iloc[rng.integers(len(cm5))]
         # a trace with measured peaks (the Lisa trace) sizes the job by them; otherwise request x u from CM5
-        peak = r.peak_gb if "peak_gb" in r else r.req_gb * c.u
+        peak = r.peak_gb if "peak_gb" in r else r.req_gb / overestimate if overestimate else r.req_gb * c.u
         info = {m: wide[(p_, m)] for (p_, m) in wide if p_ == prog}
         info = rebase(info)
-        t = info[truth_method]
-        s = peak / t.max()
-        info = {m: c * s for m, c in info.items()}
+        info, s = scale_curves(info, truth_method, peak, prog, fixed)
         info.update(request=r.req_gb, cm5=c, prog=prog, scale=s)
+        if mp is not None:
+            e = mp.iloc[rng_mp.integers(len(mp))]
+            info.update(mp_e=float(e.e), mp_w=e.workload)
         if rss_view(info, scenario) is not None:
             info["rssview"] = rss_view(info, scenario)
         # arrival in trace time; run.Setup rescales it to the offered load
