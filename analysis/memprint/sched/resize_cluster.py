@@ -33,6 +33,12 @@ The truth (what the job must be given, or it is OOM-killed) is its RSS ("rss") o
                        (the data estimate of paper_rss), as if the allocator gave every free byte back; the free
                        bytes from the monitor of trim_eval.sh's trim build with MPR_TRIM=-1 (RESIZE_EST_RUNS)
   mpre, mpre+zacarias[-past]  the same bound on the libmpr build (own profile)
+  memrss               glibc build, MemRSS's estimated curve as the reservation: the data estimate plus the file
+                       RSS from the monitor of the trim build with MPR_TRIM=-1 (RESIZE_EST_RUNS, the run of the
+                       same index), less the glibc run's smallest RSS, with headroom = the q90 over the other
+                       workloads of the margin each needs to cover its truth (leave one workload out, as the
+                       scheduling study); an OOM kill grows the reservation as for every other oracle
+  mpr+memrss           the same on the libmpr build (own profile), from the selftrim build's monitor
 The trim builds need the runs of scripts/trim_eval.sh: RESIZE_RUNS=<its runs directory> reads every build from there
 (base, trim, self, selftrim, heldout, heldouttrim), else the resize study's runs (no trim builds).
 
@@ -105,6 +111,7 @@ POLICIES = ["exact", "request", "pond", "zacarias", "zacarias-past", "ksplus", "
             "mpr+zacarias-past", "mpr+pond", "mprh", "mprh+zacarias"]
 TRIM_POLICIES = ["trim", "trim+zacarias", "trim+zacarias-past", "mprt", "mprt+zacarias", "mprt+zacarias-past"]
 EST_POLICIES = ["est+zacarias", "est+zacarias-past", "mpre", "mpre+zacarias", "mpre+zacarias-past"]
+MEMRSS_POLICIES = ["memrss", "mpr+memrss"]   # (RESIZE_EST_RUNS)
 
 
 def build_of(policy):
@@ -163,8 +170,14 @@ def workloads():
                     return trimmed
                 return [(np.minimum(np.maximum(rss - gs[k % len(gs)], 0), trimmed[k % len(trimmed)][0]), com)
                         for k, (rss, com) in enumerate(runs)]
-            out[name].update(est=less(out[name]["glibc"], gaps("trim"), out[name]["trim"]),
-                             mpre=less(out[name]["mpr"], gaps("selftrim"), out[name]["mprt"]))
+            if "trim" in out[name]:   # (RESIZE_RUNS: the trim builds' runs)
+                out[name].update(est=less(out[name]["glibc"], gaps("trim"), out[name]["trim"]),
+                                 mpre=less(out[name]["mpr"], gaps("selftrim"), out[name]["mprt"]))
+
+            def memrss(label):   # MemRSS's data footprint: anon - resident free (data_bytes) + file RSS, less base
+                return [_curve(t.assign(memrss=t.data_bytes + t.file_bytes), "memrss", b)
+                        for t in map(pd.read_csv, sorted(glob.glob(f"{e}/{label}-[0-9].monitor.csv")))]
+            out[name].update(memrss=memrss("trim"), mpr_memrss=memrss("selftrim"))
     return out
 
 
@@ -185,6 +198,31 @@ class Setup:
                                 real.rebase)
         self.n = n
         self._trace = {}
+        self._need = {}
+
+    def need(self, truth, build):
+        """Per workload: the headroom (share of the estimate's peak) MemRSS's curve needs to cover the truth in
+        every run of the build (glibc: None, or "mpr"), the runs paired by index."""
+        key = (truth, build)
+        if key not in self._need:
+            runs, est = ("mpr", "mpr_memrss") if build == "mpr" else ("glibc", "memrss")
+            out = {}
+            for name, w in self.wl.items():
+                if not w.get(est):
+                    continue
+                m = 0.0
+                for k, (rss, com) in enumerate(w[runs]):
+                    t = np.maximum(rss, com) if truth == "strict" else rss
+                    e = w[est][k % len(w[est])]
+                    m = max(m, float(np.max((t - e) / max(e.max(), 1e-12))))
+                out[name] = m
+            self._need[key] = out
+        return self._need[key]
+
+    def margin(self, truth, build, name, q=0.9):
+        """The q-quantile of the other workloads' needed headroom (leave one workload out)."""
+        need = self.need(truth, build)
+        return float(np.quantile([m for p, m in need.items() if p != name], q))
 
     def stream(self, truth, load, seed, inflate=0.0):
         """The jobs of one stream: workload, scale and both builds' truths; arrivals at the glibc offered load."""
@@ -221,7 +259,10 @@ class Setup:
                         glibc_truth=pick(rss, com) * s, mpr_truth=pick(mrss, mcom) * s, mprh_truth=pick(hrss, hcom) * s,
                         # Pond's history sees the user's request: the untouched share includes the over-request
                         um=1 - (1 - um) / (1 + inflate), mpr_um=untouched(mothers), mprh_um=untouched(hothers),
-                        **extra)
+                        truth=truth, **extra)
+            for est in ("memrss", "mpr_memrss"):   # (RESIZE_EST_RUNS only)
+                if w.get(est):
+                    info[f"{est}_est"] = w[est][k % len(w[est])] * s
             for bld in ("trim", "est"):   # the glibc build with trimming: the user's request all the same (or its own
                 # peak, when its run happens to peak above the glibc run's: run-to-run noise, not the user's choice)
                 if f"{bld}_request" in info:
@@ -262,6 +303,9 @@ class Setup:
             um = i[f"{build}_um"] if build else i["um"]
             if policy in ("exact", "mpr-exact"):
                 j.reservation = j.resident.copy()
+            elif policy in ("memrss", "mpr+memrss"):
+                e = i["mpr_memrss_est" if mpr else "memrss_est"]
+                j.reservation = e + self.margin(i["truth"], "mpr" if mpr else None, j.shape) * e.max()
             elif policy == "ksplus":
                 j.reservation = np.asarray(ks(j, 0.0), float)
                 j.retry = ks.attrs(j, 0.0)["retry"]
