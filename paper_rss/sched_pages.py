@@ -12,7 +12,7 @@ smallest value, at every input, with their transfers (model1X, model2X). The oth
 grid.py's (their mapped data files are at most 0.07 MB). Each job takes the curve of a program at its largest input (run.largest). Scenarios: pagesnat and rss.
 Calibrated margins only (the q90 of the other programs' required margins; 10% for the oracles without a profile).
 
-Parts (run): grid (loads 0.4 to 1.2), llm (the stream of the two engines' five configurations), sens (beta, pool,
+Parts (run): grid (loads 0.4 to 1.2), memprint (MemPrint's sampled peak beside MemRSS), llm (the stream of the two engines' five configurations), sens (beta, pool,
 update interval at load 0.8), lisa (the hybrid Lisa stream at 32 GB per node), capacity (local GB per node at every
 load).
 """
@@ -128,6 +128,18 @@ def part_sens():
 def part_lisa():
     from memprint.sched.lisa_run import HYBRID, lisa_cluster
     go("lisa/lisa_hybrid_32", names=HYBRID, cluster=lisa_cluster(32), kind="lisa-hybrid")
+
+
+MP = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2/mp_errors.csv")   # dissertation/mp_errors.py (37 workloads)
+
+
+def part_memprint():
+    """MemPrint's sampled peak under the pages-in-use truth, for Ch3's comparison with MemRSS: E1's memprint-peak (the
+    job's true peak x (1 + e), e one of MemPrint's signed L2O extrapolation errors with the bootstrap sampler, its
+    calibrated margin over the other MemPrint workloads), with MemRSS's curve (model1-rep), the bounds and the request
+    in the same run (all loads)."""
+    go("grid_memprint", names=["memprint-peak", "model1-rep", "exact", "exact-coarse", "exact-peak", "rss-peak",
+                               "request"], opts=dict(mp=MP, mp_sampler="boot"))
 
 
 def part_capacity():
