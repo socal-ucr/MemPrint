@@ -111,13 +111,28 @@ POLICIES = ["exact", "request", "pond", "zacarias", "zacarias-past", "ksplus", "
             "mpr+zacarias-past", "mpr+pond", "mprh", "mprh+zacarias"]
 TRIM_POLICIES = ["trim", "trim+zacarias", "trim+zacarias-past", "mprt", "mprt+zacarias", "mprt+zacarias-past"]
 EST_POLICIES = ["est+zacarias", "est+zacarias-past", "mpre", "mpre+zacarias", "mpre+zacarias-past"]
-MEMRSS_POLICIES = ["memrss", "mpr+memrss", "memrss-w", "mpr+memrss-w"]   # (RESIZE_EST_RUNS)
+MEMRSS_POLICIES = ["memrss", "mpr+memrss", "memrss-w", "mpr+memrss-w", "memrss-peak", "mpr+memrss-peak"]   # (RESIZE_EST_RUNS)
+# -peak: MemRSS's peak held for the whole run (a flat reservation), its margin calibrated on that peak: the curve's
+# level without its timing, which another run of the program does not share
 # -w: MemRSS's curve at the scheduling study's resolution for measured curves (20 windows, each widened to its
 # neighbours, oracles.curve), so that a run's timing differs from the estimate's without a margin of its peak
 
 
 def _widened(e):
     return oracles.curve(e, 0.0, windows=20, widen=1)
+
+
+def _shape(e, mode):
+    """MemRSS's estimate as a policy reserves it: the curve (None), widened ("w") or its peak held ("peak")."""
+    if mode == "w":
+        return _widened(e)
+    if mode == "peak":
+        return np.full(K, float(np.max(e)))
+    return e
+
+
+def _mode(policy):
+    return "w" if policy.endswith("-w") else "peak" if policy.endswith("-peak") else None
 
 
 def build_of(policy):
@@ -206,7 +221,7 @@ class Setup:
         self._trace = {}
         self._need = {}
 
-    def need(self, truth, build, widened=False):
+    def need(self, truth, build, widened=None):
         """Per workload: the headroom (share of the estimate's peak) MemRSS's curve needs to cover the truth in
         every run of the build (glibc: None, or "mpr"), the runs paired by index (widened: of the -w curve)."""
         key = (truth, build, widened)
@@ -220,14 +235,13 @@ class Setup:
                 for k, (rss, com) in enumerate(w[runs]):
                     t = np.maximum(rss, com) if truth == "strict" else rss
                     e = w[est][k % len(w[est])]
-                    if widened:
-                        e = _widened(e)
+                    e = _shape(e, widened if widened != True else "w")
                     m = max(m, float(np.max((t - e) / max(e.max(), 1e-12))))
                 out[name] = m
             self._need[key] = out
         return self._need[key]
 
-    def margin(self, truth, build, name, q=0.9, widened=False):
+    def margin(self, truth, build, name, q=0.9, widened=None):
         """The q-quantile of the other workloads' needed headroom (leave one workload out)."""
         need = self.need(truth, build, widened)
         return float(np.quantile([m for p, m in need.items() if p != name], q))
@@ -312,9 +326,8 @@ class Setup:
             if policy in ("exact", "mpr-exact"):
                 j.reservation = j.resident.copy()
             elif policy in MEMRSS_POLICIES:
-                widened = policy.endswith("-w")
-                e = i["mpr_memrss_est" if mpr else "memrss_est"]
-                e = _widened(e) if widened else e
+                widened = _mode(policy)
+                e = _shape(i["mpr_memrss_est" if mpr else "memrss_est"], widened)
                 j.reservation = e + self.margin(i["truth"], "mpr" if mpr else None, j.shape, widened=widened) * e.max()
             elif policy == "ksplus":
                 j.reservation = np.asarray(ks(j, 0.0), float)

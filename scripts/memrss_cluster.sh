@@ -31,7 +31,7 @@ fi
 if [[ $STEP == sim || $STEP == all ]]; then
     cd "$HOME/MemPrint/analysis"
     export RESIZE_EST_RUNS=$D/runs
-    P="exact request mpr-exact mpr memrss mpr+memrss"
+    P="exact request mpr-exact mpr memrss mpr+memrss memrss-w mpr+memrss-w memrss-peak mpr+memrss-peak"
     $PY -m memprint.sched.resize_cluster --out "$D/grid_none.csv" --policies $P
     $PY -m memprint.sched.resize_cluster --out "$D/capacity_none.csv" --policies $P --loads 0.8 \
         --locals 64 96 128 160 192 224 256
