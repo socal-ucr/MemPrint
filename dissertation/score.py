@@ -134,11 +134,13 @@ def m3(final=FINAL, done=None, tag="", workloads=None):
         for fit in fits[(fits.workload == w) & (fits.split == split)].itertuples():
             pred = Model.from_row(pd.Series(fit._asdict())).predict(test)
             sampler_mape = (pred.ErrorRate.abs()).mean()
+            sampler_err = pred.ErrorRate.mean()   # signed: > 0 over-estimates the footprint
             for basis, si, ref_mape in (("train_si", fit.train_si, fit.test_mape_train_si),
                                         ("best", fit.best_interval, fit.test_mape_best)):
                 if si == k:
                     mapes.append(dict(sampler=s, seed=int(seed), workload=w, split=split, subset=fit.subset,
-                                      basis=basis, k=k, sampler_mape=sampler_mape, splitter_mape=ref_mape))
+                                      basis=basis, k=k, sampler_mape=sampler_mape, sampler_err=sampler_err,
+                                      splitter_mape=ref_mape))
     runs, mapes = pd.DataFrame(runs), pd.DataFrame(mapes)
     runs.to_csv(f"{OUT}/m3_runs{tag}.csv", index=False)
     mapes.to_csv(f"{OUT}/m3_mape{tag}.csv", index=False)
