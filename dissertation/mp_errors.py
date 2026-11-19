@@ -1,4 +1,4 @@
-"""MemPrint's signed extrapolation errors on the 35-workload evaluation set (50 bins, bytes touched, selection on the
+"""MemPrint's signed extrapolation errors on the 37-workload evaluation set (50 bins, bytes touched, selection on the
 training inputs), for the scheduling oracle memprint-peak (analysis/memprint/sched, E1 of PROTOCOL.md).
 
 Per workload, the L2O model of the EXTRA split predicts alpha for every bin of a sampler run at its training-best
@@ -21,7 +21,8 @@ from memprint.dataset import prepare  # noqa: E402
 from memprint.model import Model  # noqa: E402
 
 OUT = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2")
-SETS = [os.path.expanduser("~/memprint-data/2026-11-11-bins50"), os.path.expanduser("~/memprint-data/2026-11-12-b50more/c50")]
+SETS = [os.path.expanduser("~/memprint-data/2026-11-11-bins50"), os.path.expanduser("~/memprint-data/2026-11-12-b50more/c50"),
+        os.path.expanduser("~/memprint-data/2026-11-12-b50more/m5")]   # 37 workloads: B50, the corpus, durbin and jacobi-1d
 
 
 def estimate(model, bins, k):

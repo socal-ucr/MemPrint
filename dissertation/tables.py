@@ -316,9 +316,11 @@ def unified():
     ch2_l2o.tex (l2o.tex's layout, the sampler that M3's decision rule selects) and ch2_samplers.tex (m3.tex's layout),
     and prints the decision rule and the medians the text quotes."""
     f = pd.read_csv(f"{OUT}/b50_fits.csv")
-    f = pd.concat([f[f.bins == 50].drop(columns="bins"), pd.read_csv(f"{MORE}/c50/data/fits.csv")], ignore_index=True)
-    mp = pd.concat([pd.read_csv(f"{OUT}/m3_mape_b50.csv"), pd.read_csv(f"{OUT}/m3_mape_c50.csv")], ignore_index=True)
-    runs = pd.concat([pd.read_csv(f"{OUT}/m3_runs_b50.csv"), pd.read_csv(f"{OUT}/m3_runs_c50.csv")], ignore_index=True)
+    f = pd.concat([f[f.bins == 50].drop(columns="bins"), pd.read_csv(f"{MORE}/c50/data/fits.csv"),
+                   pd.read_csv(f"{MORE}/m5/data/fits.csv")], ignore_index=True)
+    tags = ("b50", "c50", "m5")   # B50's 28, the 7 corpus programs, durbin and jacobi-1d (M5 at 50 bins): 37
+    mp = pd.concat([pd.read_csv(f"{OUT}/m3_mape_{t}.csv") for t in tags], ignore_index=True)
+    runs = pd.concat([pd.read_csv(f"{OUT}/m3_runs_{t}.csv") for t in tags], ignore_index=True)
     mp = mp[mp.basis == "train_si"]
     g = mp.groupby(["sampler", "split", "subset", "workload"])[["sampler_mape", "splitter_mape"]].mean()
     g["diff"] = g.sampler_mape - g.splitter_mape
@@ -343,7 +345,7 @@ def unified():
             rows.append("\\midrule")
     write("ch2_accuracy", "\n".join(rows) + "\n")
     rows = []
-    for w in WORKLOADS + CORPUS50:
+    for w in WORKLOADS + ["durbin", "jacobi-1d"] + CORPUS50:
         cells = [w]
         for split in ("EXTRA", "INTER"):
             t = TACO[(TACO.workload == w) & (TACO.split == split) & (TACO.subset == "L2O")]
@@ -363,6 +365,12 @@ def unified():
                     f"{r.sd_ratio.quantile(.1):.2f} to {r.sd_ratio.quantile(.9):.2f} & {d['diff'].median():.2f} & "
                     f"{l2o['EXTRA']:.2f} & {l2o['INTER']:.2f} \\\\")
     write("ch2_samplers", "\n".join(rows) + "\n")
+    s = sm.loc[chosen]
+    for split in ("EXTRA", "INTER"):
+        t = f[(f.split == split) & (f.subset == "L2O")]
+        u = s.xs((split, "L2O"), level=("split", "subset"))
+        print(f"L2O {split}: within 10% on the splitter's bins {(t.test_mape_train_si < 10).sum()} of {len(t)}, "
+              f"on the {chosen} sampler's bins {(u < 10).sum()} of {len(u)}")
 
 
 def b50_corpus():

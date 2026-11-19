@@ -62,6 +62,11 @@ def e1cap():
         go(f"e1cap_{gb}", ["memprint-peak"], cluster=Cluster(local=gb), **MPO)
 
 
+def e1cap_disj():
+    for gb in SIZES:
+        go(f"e1capdisj_{gb}", ["memprint-peak"], cluster=Cluster(local=gb), mp=MP, mp_sampler="disj")
+
+
 def e2():
     for f in (1.5, 2.0, 3.0):
         go(f"e2_x{f}", LOAD08 + ["memprint-peak"], overestimate=f, **MPO)

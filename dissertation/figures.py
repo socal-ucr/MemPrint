@@ -209,10 +209,24 @@ def splitter_seconds():
     return t
 
 
-def cumulative():
+B50 = os.path.expanduser("~/memprint-data/2026-11-11-bins50")
+
+
+def splitter_seconds_b50():
+    """Wall time of B50's 50-bin splitter run per miniVite config (bins50.sh trace, done.txt)."""
+    t = {}
+    for line in open(f"{B50}/done.txt"):
+        x = line.split()
+        if x[:2] == ["split", "miniVite"]:
+            t[int(x[2])] = float(x[7])
+    return t
+
+
+def cumulative(bins=20):
     """miniVite, EXTRA (16384 held out): test MAPE at the training-best interval when the training set is the
-    configs up to n, the subsets chosen from the training configs only; and the cumulative splitter time."""
-    a = table("miniVite")
+    configs up to n, the subsets chosen from the training configs only; and the cumulative splitter time.
+    bins=50: B50's tables and splitter times -> cumulative_b50.pdf and $B50/cumulative.csv."""
+    a = table("miniVite") if bins == 20 else pd.read_csv(f"{B50}/data/miniVite_allData.csv")
     full = prepare(a)
     test_cfg = full.last_config
     rows = []
@@ -227,9 +241,9 @@ def cumulative():
             si = int(tm.idxmin())
             rows.append(dict(n=n, subset=s, train_si=si, mape=mape(model.predict(test[test.SamplingInterval == si]))))
     r = pd.DataFrame(rows)
-    secs = splitter_seconds()
+    secs = splitter_seconds() if bins == 20 else splitter_seconds_b50()
     r["cum_seconds"] = [sum(v for c, v in secs.items() if c <= n) for n in r.n]
-    r.to_csv(f"{OUT}/cumulative.csv", index=False)
+    r.to_csv(f"{OUT}/cumulative.csv" if bins == 20 else f"{B50}/cumulative.csv", index=False)
     print(r.round(2).to_string(index=False))
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.5, 2.6))
     ns = sorted(r.n.unique())
@@ -251,7 +265,7 @@ def cumulative():
     a2.set_title("(b) Training cost", loc="left")
     a2.grid(axis="x", visible=False)
     fig.tight_layout()
-    save(fig, "cumulative")
+    save(fig, "cumulative" if bins == 20 else "cumulative_b50")
 
 
 def m3():
@@ -285,4 +299,7 @@ def m3():
 
 if __name__ == "__main__":
     for part in sys.argv[1:] or ["sd", "alpha", "valgrind", "overhead", "cumulative", "m3"]:
-        globals()[part]()
+        if part == "cumulative_b50":
+            cumulative(50)
+        else:
+            globals()[part]()

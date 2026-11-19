@@ -675,7 +675,10 @@ The cost of training grows with the number of bins. On miniVite at 8,192 vertice
 allocator excluded, which is slower than M7's setting). At the largest training inputs it needs 2.9 GB for miniVite
 at 16,384 vertices and 3.9 GB for lu at MEDIUM, against 1.5 and 1.6 GB, well within the machine's 62 GB. The
 cumulative splitter time of miniVite's training inputs (Figure~\ref{fig:cumulative}) becomes 67, 133 and 321 s up to
-2,048, 4,096 and 8,192 vertices, against 46, 87 and 188 s.
+2,048, 4,096 and 8,192 vertices, against 46, 87 and 188 s. With 50 bins, adding training inputs still improves every
+subset (\texttt{cumulative\_b50}): at 2,048, 4,096 and 8,192 vertices NZ extrapolates with 36.84\%, 10.05\% and 6.29\%,
+MT with 36.60\%, 6.09\% and 0.71\%, and L2O with 19.22\%, 17.84\% and 6.77\%, against NZ 37.83\%, 14.88\% and 3.17\%,
+MT 32.60\%, 22.04\% and 15.72\%, and L2O 29.04\%, 11.39\% and 10.32\% with 20 bins.
 
 The 50-bin disjoint sampler keeps 2.5 times the references of the 20-bin one at the same bin interval, and it costs
 little more. We timed it as M7 timed the samplers, on miniVite at 8,192 vertices at matched bin intervals of 1 in 500,
@@ -757,15 +760,17 @@ deviation ratio 0.955 to 1.105). The result is consistent with a period in LULES
 sampling period of two aliases with. The bootstrap sampler keeps one reference in ten at 1 in 100 and is not
 affected.
 
-\paragraph{The evaluation set at 50 bins.} Together, B50 and the corpus programs give 35 workloads at 50 bins
-(Table~\ref{tab:ch2unified}). L2O extrapolates with a mean of 9.29\% and a median of 5.36\% (maximum 74.01\%, GAP
-pr) and interpolates with 2.75\% and 2.37\%. NZ has medians of 8.62\% and 4.76\% and MT of 11.11\% and 3.86\%. Over
-the 35 workloads M3's decision rule selects the bootstrap sampler, because the median ratio of the bootstrap
-sampler's standard deviation across bins to the splitter's is 0.9004, at the rule's bound of 0.9 (median difference
-in test MAPE 0.71 point). With the selection on all inputs the ratio was 0.897, and the rule selected the disjoint
-sampler. On the bootstrap sampler's bins, L2O extrapolates with a mean of 9.71\% and interpolates with 2.74\%
-(medians 4.18\% and 2.19\%). The disjoint sampler gives 8.53\% and 4.58\% (medians 5.66\% and 2.14\%), where the mean
-of the interpolation includes LULESH's 69.08\%.
+\paragraph{The evaluation set at 50 bins.} Together, B50, durbin and jacobi-1d at 50 bins and the corpus programs
+give 37 workloads at 50 bins (Table~\ref{tab:ch2unified}). L2O extrapolates with a mean of 8.85\% and a median of
+4.83\% (maximum 74.01\%, GAP pr) and interpolates with 2.61\% and 2.32\%. NZ has medians of 8.60\% and 4.23\% and MT
+of 10.79\% and 3.50\%. Over the 37 workloads M3's decision rule selects the bootstrap sampler, because the median
+ratio of the bootstrap sampler's standard deviation across bins to the splitter's is 0.903, within 0.003 of the
+rule's bound of 0.9 (median difference in test MAPE 0.64 point). Over the 35 workloads without durbin and jacobi-1d
+it was 0.9004, and with the selection on all inputs 0.897, where the rule selected the disjoint sampler. On the
+bootstrap sampler's bins, L2O extrapolates with a mean of 9.28\% and interpolates with 2.60\% (medians 4.12\% and
+1.76\%). The disjoint sampler gives 8.16\% and 4.34\% (medians 5.60\% and 2.09\%), where the mean of the
+interpolation includes LULESH's 69.08\%. L2O extrapolates within 10\% for 27 of the 37 workloads on the splitter's
+bins, 26 on the bootstrap sampler's and 31 on the disjoint sampler's, and interpolates within 10\% for 36 on each.
 
 The rule's choice between the samplers is not a property of the bin count. The bootstrap sampler ran with the same
 setting in M3 and B50, so on the 234 runs that match in workload, input, interval and seed (78 combinations of
@@ -794,7 +799,8 @@ regressions take 1.2 s.
 
 \begin{table}[htbp]
 \centering
-\caption{Chapter 2's evaluation set at 50 bins: the 27 PolyBench kernels, miniVite and the seven corpus programs.
+\caption{Chapter 2's evaluation set at 50 bins: the 27 PolyBench kernels, durbin, jacobi-1d, miniVite and the seven
+corpus programs (37 workloads).
 Test MAPE (\%) at each subset's training-best interval on the splitter's bins (mean / median, maximum, number of
 workloads) and on M3's samplers' bins at the held-out inputs (mean / median, mean of 3 seeds per workload).}
 \label{tab:ch2unified}
@@ -974,16 +980,22 @@ simulator reproduces the published rows exactly. The scripts are \texttt{dissert
 
 \paragraph{E1. \memprint{} as an oracle.} No oracle of the motivation uses \memprint{}'s sampled prediction. The
 oracle \texttt{memprint-peak} reserves the true peak times $1 + e$, with $e$ drawn per job from \memprint{}'s signed
-L2O extrapolation errors on the 35-workload set (the mean of the per-bin estimates over the truth, minus one, at the
+L2O extrapolation errors on the 37-workload set (the mean of the per-bin estimates over the truth, minus one, at the
 training-best interval, one value per workload and seed). Its calibrated margin is the 90th percentile of the margins
-the other workloads need. With the bootstrap sampler's errors, \memprint{} under-estimates in 71\% of the runs
-(median $-1.8\%$, 10th to 90th percentile $-15.7\%$ to $+8.0\%$), and the margin is about 17\%. Table~\ref{tab:motive1}
-gives the result. With calibrated 90\% margins it gives 1{,}179 minutes under the bytes-touched truth, 58\% of the
-gap between the request (2{,}208) and the exact peak (448), against 68\% for the DHAT peak, and 1{,}078 and
-1{,}081 minutes (64\%) with the disjoint sampler's and the splitter's bins. It needs 9.0\,TB, as DHAT does, which is
-40\% of the memory between the request (11.0\,TB) and the exact peak (6.0\,TB). Its errors run in both directions, so
-a margin that covers 90\% of the workloads leaves 320 to 420 kills per stream, and a margin that covers all of them
-is set by GAP pr ($-40\%$) and gives 6{,}829 minutes. \memprint{}'s sampled peak is therefore worth about as much as
+the other workloads need. With the disjoint sampler's errors, \memprint{} under-estimates in 62\% of the runs
+(median $-1.1\%$, 10th to 90th percentile $-12.1\%$ to $+8.7\%$), and the margin is 14\% to 15\%. With the bootstrap
+sampler's errors it under-estimates in 73\% (median $-1.8\%$, $-14.7\%$ to $+6.9\%$), and the margin is 16\% to 20\%.
+Table~\ref{tab:motive1} gives the result. With calibrated 90\% margins and the disjoint sampler's errors it gives
+1{,}023 minutes under the bytes-touched truth with 297 kills per stream, 67\% of the gap between the request
+(2{,}208) and the exact peak (448), against 68\% for the DHAT peak. The bootstrap sampler's and the splitter's errors
+give 1{,}100 and 1{,}115 minutes (63\% and 62\%). With either sampler's errors it needs 9.0\,TB under the
+bytes-touched truth, as DHAT does, which is 40\% of the memory between the request (11.0\,TB) and the exact peak
+(6.0\,TB). Under the RSS truth the disjoint sampler's errors need 7.0\,TB and the bootstrap's 9.0\,TB, against 9.0\,TB
+for both the request and DHAT. Its errors run in both directions, so a margin that covers 90\% of the workloads leaves
+297 to 406 kills per stream, and a margin that covers all of them is set by GAP pr ($-40\%$) and gives 6{,}700
+minutes with the bootstrap sampler's errors. These numbers use the 37-workload errors. With the 35-workload errors
+they were 1{,}078 minutes, 319 kills and 64\% for the disjoint sampler and 1{,}179 minutes and 58\% for the
+bootstrap. \memprint{}'s sampled peak is therefore worth about as much as
 DHAT's peak in this simulator. The full version of E1, which would run \memprint{}'s build and prediction on the
 corpus programs themselves, needs several hours of Pin runs per program and was not run.
 

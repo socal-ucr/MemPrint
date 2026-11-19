@@ -261,3 +261,9 @@ margins) for boot/disj/split errors and every margin policy, e1cap its memory sw
 intercept of peak on INPUT_SIZE, clipped to [0, smallest-input peak]; run.Setup.required on the curves without them),
 e3cap its sweep. Data ~/memprint-data/2026-11-18-motivchecks. The MetaCentrum2 grid lost 3 tasks and 1 run to memory
 (28 workers each parsing the SWF log); those 4 were rerun with 4 workers.
+
+### durbin and jacobi-1d in the evaluation set (added Nov 19)
+`tables.py unified` adds b50more/m5's fits and m3_{mape,runs}_m5 (37 workloads; prints the within-10% counts);
+`mp_errors.py` over the same 37 (35-workload errors kept as mp_errors_35.csv); `motiv_checks.py e1 e1cap e1cap_disj`
+rerun (35-workload results in results/old35/); `figures.py cumulative_b50` (miniVite fewer-inputs curve at 50 bins,
+splitter times from bins50 done.txt).
