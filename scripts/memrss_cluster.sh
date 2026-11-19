@@ -15,7 +15,8 @@ PY=${PY:-$HOME/environments/memfp/bin/python}
 mkdir -p "$D"
 
 if [[ $STEP == runs || $STEP == all ]]; then
-    names=$(ls "$R/runs/corpus" | grep -vx miniVite; echo minivite; ls "$R/runs/ml")   # miniVite: the pass build only
+    # directories only (runs/corpus also holds summary.csv); miniVite: the pass build only
+    names=$(cd "$R/runs/corpus" && ls -d */ | tr -d / | grep -vx miniVite; echo minivite; ls "$R/runs/ml")
     for w in $names; do
         [[ -f $D/runs/done.txt ]] && grep -qx "$w" "$D/runs/done.txt" && continue
         OUT=$D/runs MONITOR=1 MPR_TRIM=-1 BUILDS="trim selftrim" "$HOME/MemPrint/scripts/trim_eval.sh" "$w"
