@@ -823,7 +823,8 @@ static AFUNPTR SpatialSelector(UINT32 refSize)
 
 static inline ADDRINT PIN_FAST_ANALYSIS_CALL ShouldSample(THREADID tid, UINT32 rate)
 {
-    return ((lcg_step(threads[tid].seed) % rate) == 0) ? 1 : 0;
+    // keep test on the high bits (the LCG's low bit alternates): keep iff lcg < 2^32 / rate
+    return (((UINT64)lcg_step(threads[tid].seed) * rate) >> 32) == 0 ? 1 : 0;
 }
 
 /* ===================================================================== */
@@ -2386,7 +2387,7 @@ static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
 {
     if (disjointBins)
     {
-        UINT32 bin = lcg_step(threads[tid].seed) % numBins;
+        UINT32 bin = (lcg_step(threads[tid].seed) >> 8) % numBins;
         footprint.Record(address, size);
         bins[bin].Record(address, size);
         ++binObservations[bin];
@@ -2402,7 +2403,7 @@ static VOID BootstrapReference(THREADID tid, ADDRINT address, UINT32 size)
     UINT32 count = 0;
     while (count < times)
     {
-        UINT32 bin = lcg_step(threads[tid].seed) % numBins;
+        UINT32 bin = (lcg_step(threads[tid].seed) >> 8) % numBins;
         if (used[bin]) continue;
         used[bin] = true;
         count++;

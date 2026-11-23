@@ -267,3 +267,10 @@ e3cap its sweep. Data ~/memprint-data/2026-11-18-motivchecks. The MetaCentrum2 g
 `mp_errors.py` over the same 37 (35-workload errors kept as mp_errors_35.csv); `motiv_checks.py e1 e1cap e1cap_disj`
 rerun (35-workload results in results/old35/); `figures.py cumulative_b50` (miniVite fewer-inputs curve at 50 bins,
 splitter times from bins50 done.txt).
+
+### Draft-note checks (added Nov 23)
+`jobs_per_hour.py` (throughput beside response time: Ch2 load08 and E1, Ch3 policies and memprint, libmpr cost
+grids -> tables/jobs_per_hour.csv); `metric_check.py` (per-bin MAPE against the mean estimate and eq. mp-estimate,
+37 workloads); gemm at 1 in 100 and GAP pr's signed errors from existing data; the sampler's keep test on the high
+bits (pintool/memprint_trace.cpp: ShouldSample and the samplers' bin choice), LULESH 22 at 1 in 100 rerun with that
+build, 3 seeds per sampler -> ~/memprint-data/2026-11-23-hibits (tool copy memprint_trace_hibits.so).

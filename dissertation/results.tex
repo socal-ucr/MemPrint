@@ -758,7 +758,15 @@ the splitter's, with the same values for all three seeds (68.9\% to 69.4\% error
 rather than random. At 1 in 250 ($i = 5$) the same sampler matches the splitter (mean ratio 1.000, standard
 deviation ratio 0.955 to 1.105). The result is consistent with a period in LULESH's reference stream that a
 sampling period of two aliases with. The bootstrap sampler keeps one reference in ten at 1 in 100 and is not
-affected.
+affected. The cause is the sampler's keep test, which keeps a reference when the 32-bit linear congruential
+generator's value is divisible by $i$. The generator's lowest bit alternates from one step to the next, so with
+$i = 2$ the references kept follow a fixed pattern. Testing the generator's high bits instead (keep when the value is
+below $2^{32}/i$, and choose the bin from the value shifted by 8 bits, as the splitter does) removes the effect. With
+that tool, the disjoint sampler's bins at LULESH's middle input are 1.000 of the splitter's at the mean with a standard
+deviation of 0.93 to 0.95 of the splitter's, and the L2O error is $-8.1\%$, $-8.1\%$ and $-7.1\%$ for the three seeds,
+against $-10.4\%$ on the splitter's bins. The bootstrap sampler gives $-0.4\%$, $0.0\%$ and $+3.9\%$ with the new tool.
+Every sampler result in this document used the old keep test, and the disjoint sampler's rate $i = k/50$ is even at
+11 of the 13 intervals.
 
 \paragraph{The evaluation set at 50 bins.} Together, B50, durbin and jacobi-1d at 50 bins and the corpus programs
 give 37 workloads at 50 bins (Table~\ref{tab:ch2unified}). L2O extrapolates with a mean of 8.85\% and a median of
@@ -992,8 +1000,9 @@ give 1{,}100 and 1{,}115 minutes (63\% and 62\%). With either sampler's errors i
 bytes-touched truth, as DHAT does, which is 40\% of the memory between the request (11.0\,TB) and the exact peak
 (6.0\,TB). Under the RSS truth the disjoint sampler's errors need 7.0\,TB and the bootstrap's 9.0\,TB, against 9.0\,TB
 for both the request and DHAT. Its errors run in both directions, so a margin that covers 90\% of the workloads leaves
-297 to 406 kills per stream, and a margin that covers all of them is set by GAP pr ($-40\%$) and gives 6{,}700
-minutes with the bootstrap sampler's errors. These numbers use the 37-workload errors. With the 35-workload errors
+297 to 406 kills per stream, and a margin that covers all of them is set by bicg, whose extrapolation the bootstrap sampler's bins under-estimate by 62\% (a margin of 167\%), and
+gives 6{,}700 minutes with the bootstrap sampler's errors. GAP pr, the largest error in size, over-estimates by 70\%
+to 72\% on every seed, as on the splitter's bins (74\%), and needs no margin. These numbers use the 37-workload errors. With the 35-workload errors
 they were 1{,}078 minutes, 319 kills and 64\% for the disjoint sampler and 1{,}179 minutes and 58\% for the
 bootstrap. \memprint{}'s sampled peak is therefore worth about as much as
 DHAT's peak in this simulator. The full version of E1, which would run \memprint{}'s build and prediction on the
@@ -1071,6 +1080,32 @@ Oracle & Med. & 90th & Med. & 90th & Med. & 90th & Med. & 90th \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Checks of the chapter's draft notes}
+\label{sec:draftchecks}
+
+\paragraph{gemm at 1 in 100.} The mean $\alpha$ at 1 in 100 falls from 18.4 at MINI to 1.74 at SMALL2, 1.30 at SMALL3
+and 1.19 at MEDIUM (50 bins), so the bins hold most of the footprint from SMALL2 on. The standard deviation across
+the 50 bins grows by 4\% from SMALL2 to SMALL3 and by 4\% from SMALL3 to MEDIUM (800, 832 and 865 bytes), against a
+factor of 1.5 from SMALL to SMALL2. With 20 bins it is not monotone (742, 1{,}282 and 1{,}016 bytes).
+
+\paragraph{The error the tables report.} Every MAPE in the tables is the mean over bins of $|\alpha_i b_i / T - 1|$,
+with $\alpha_i$ predicted for bin $i$ and $b_i$ its footprint. The estimate of eq.\ mp-estimate applies one $\alpha$,
+predicted at the mean bin, to the mean bin. On the 37 workloads at 50 bins the two differ by at most 0.3 point in the
+means (L2O extrapolation 9.28\% against 9.23\% on the bootstrap sampler's bins, 8.16\% against 8.12\% on the disjoint
+sampler's, 8.85\% against 8.82\% on the splitter's) and give the same number of workloads within 10\% in every
+setting, because a run's bins err in the same direction. Per run they agree to 0.1 point for bicg, GAP pr and LULESH.
+The bicg values in the draft note come from two splits: 52.27\% is its extrapolation error on the bootstrap sampler's
+bins, the mean of $-62.5\%$, $+32.0\%$ and $-62.2\%$, and $+8.1\%$, $-30.2\%$ and $+8.3\%$ are its interpolation errors.
+
+\paragraph{The sign of the largest errors.} GAP pr's extrapolation (L2O, 1 in 250) over-estimates on every run, by
+70.2\%, 71.2\% and 72.0\% on the bootstrap sampler's bins and 74.5\%, 72.1\% and 70.8\% on the disjoint sampler's,
+as on the splitter's bins (74.0\%, where the model predicts an $\alpha$ of 18.49 against 10.63). Its estimate is
+therefore 1.70 to 1.75 times the truth, within a factor of 2. The largest under-estimate is bicg's extrapolation on
+the bootstrap sampler's bins, $-62.5\%$ and $-62.2\%$ on two of the three seeds, which puts the truth at 2.67 times
+the estimate. With the bootstrap sampler, the estimate is therefore within a factor of 2 of the truth on 36 of the 37
+workloads at the largest input, and with the disjoint sampler LULESH's middle input ($-69\%$, a factor of 3.2) is the
+only miss, which the keep test causes.
 
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}

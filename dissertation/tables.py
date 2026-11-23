@@ -344,18 +344,20 @@ def unified():
         if split == "EXTRA":
             rows.append("\\midrule")
     write("ch2_accuracy", "\n".join(rows) + "\n")
-    rows = []
-    for w in WORKLOADS + ["durbin", "jacobi-1d"] + CORPUS50:
-        cells = [w]
-        for split in ("EXTRA", "INTER"):
-            t = TACO[(TACO.workload == w) & (TACO.split == split) & (TACO.subset == "L2O")]
-            b = f[(f.workload == w) & (f.split == split) & (f.subset == "L2O")]
-            cells += [pct(t.test_mape_train_si.iloc[0]) if len(t) else "--",
-                      pct(b.test_mape_train_si.iloc[0]) if len(b) else "--",
-                      str(int(b.train_si.iloc[0])) if len(b) else "--",
-                      pct(sm.get((chosen, split, "L2O", w), np.nan))]
-        rows.append(" & ".join(cells) + " \\\\")
-    write("ch2_l2o", "\n".join(rows) + "\n")
+    # ch2_l2o: the sampler the rule selects; ch2_l2o_boot and ch2_l2o_disj: each sampler, for the appendix
+    for name, x in (("ch2_l2o", chosen), ("ch2_l2o_boot", "boot"), ("ch2_l2o_disj", "disj")):
+        rows = []
+        for w in WORKLOADS + ["durbin", "jacobi-1d"] + CORPUS50:
+            cells = [w]
+            for split in ("EXTRA", "INTER"):
+                t = TACO[(TACO.workload == w) & (TACO.split == split) & (TACO.subset == "L2O")]
+                b = f[(f.workload == w) & (f.split == split) & (f.subset == "L2O")]
+                cells += [pct(t.test_mape_train_si.iloc[0]) if len(t) else "--",
+                          pct(b.test_mape_train_si.iloc[0]) if len(b) else "--",
+                          str(int(b.train_si.iloc[0])) if len(b) else "--",
+                          pct(sm.get((x, split, "L2O", w), np.nan))]
+            rows.append(" & ".join(cells) + " \\\\")
+        write(name, "\n".join(rows) + "\n")
     rows = []
     for x, name in (("boot", "Bootstrap, $s=100$, $r=10$"), ("disj", "Disjoint, 50 bins")):
         r = runs[runs.sampler == x]
