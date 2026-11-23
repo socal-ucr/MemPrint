@@ -83,6 +83,10 @@ class Setup:
         if self.opts.get("mp"):
             e = pd.read_csv(self.opts["mp"])
             self.mp = e[e.sampler == self.opts.get("mp_sampler", "boot")].reset_index(drop=True)
+        self.mp_own = None
+        if self.opts.get("mp_own"):   # MemPrint on the corpus programs themselves (dissertation/corpus_e1.py)
+            o = pd.read_csv(self.opts["mp_own"])
+            self.mp_own = {p: g.reset_index(drop=True) for p, g in o.groupby("workload")}
         cm5 = real.cm5_ratios(f"{traces}/LANL-CM5-1994-4.1-cln.swf.gz")
         self.cm5_train, self.cm5_test = ml.split_users(cm5)
         self.model = ml.PeakModel(self.cm5_train)
@@ -101,7 +105,8 @@ class Setup:
             self._trace[seed] = (real.synthetic_trace(self.n, seed, cluster=ref) if self.kind == "synthetic"
                                  else real.trace_jobs(self.trace_path, ref, self.n, seed))
         jobs = real.make_jobs(self._trace[seed], self.curves, self.cm5_test, scenario, seed=seed,
-                              overestimate=self.opts.get("overestimate"), fixed=self.fixed, mp=self.mp)
+                              overestimate=self.opts.get("overestimate"), fixed=self.fixed, mp=self.mp,
+                              mp_own=self.mp_own)
         gbmin = sum(at_slots(j.resident, j.base).sum() for j in jobs)
         t = real.scale_arrivals([j.arrival for j in jobs], load, ref, gbmin)
         for j, a in zip(jobs, t):
@@ -142,10 +147,11 @@ class Setup:
     def mp_margin(self, workload, q=0.9):
         """memprint-peak's calibrated margin: the q-quantile over the other MemPrint workloads of the margin each
         needs (over its runs) for its estimate to cover the truth, 1 / (1 + e) - 1 for an under-estimate."""
-        if not hasattr(self, "_mp_req"):
-            need = (1 / (1 + self.mp.e) - 1).clip(lower=0)
-            self._mp_req = need.groupby(self.mp.workload).max()
-        return float(np.quantile(self._mp_req.drop(workload), q))
+        if not hasattr(self, "_mp_req"):   # with mp_own, calibrated on the corpus programs' own errors
+            t = pd.concat(self.mp_own.values()) if self.mp_own else self.mp
+            need = (1 / (1 + t.e) - 1).clip(lower=0)
+            self._mp_req = need.groupby(t.workload).max()
+        return float(np.quantile(self._mp_req.drop(workload, errors="ignore"), q))
 
     def oracle(self, name):
         if name == "ml-peak":

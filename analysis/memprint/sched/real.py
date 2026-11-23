@@ -142,14 +142,17 @@ def scale_curves(info, truth_method, peak, prog, fixed=None):
     return out, s
 
 
-def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0, overestimate=None, fixed=None, mp=None):
+def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0, overestimate=None, fixed=None, mp=None,
+              mp_own=None):
     """Jobs whose resident curve is the corpus truth of a random program, scaled to the job's peak.
 
     curves: corpus curves (prog, input, method, k, bytes), largest input per program. info gets every method's
     curve on the same scale, the user request, and the CM5 record (u and features).
     overestimate: the request is this factor times the job's peak (peak = request / factor) instead of request x u
     from CM5. fixed: the fixed parts (fixed_parts) that scale_curves keeps unscaled. mp: MemPrint's signed
-    extrapolation errors (rows with workload, e), one drawn per job into info["mp_e"], info["mp_w"]."""
+    extrapolation errors (rows with workload, e), one drawn per job into info["mp_e"], info["mp_w"]. mp_own: per
+    program, MemPrint's errors on that program itself (corpus_e1.py); a job of a program in it draws from its own
+    rows (and mp_w is the program), any other job from mp."""
     rng = np.random.default_rng(seed + 1)
     rng_mp = np.random.default_rng(seed + 101)   # its own stream, so the jobs are the same with or without it
     truth_method = TRUTHS[scenario][0]
@@ -168,8 +171,10 @@ def make_jobs(trace, curves, cm5, scenario="rss", programs=None, seed=0, overest
         info, s = scale_curves(info, truth_method, peak, prog, fixed)
         info.update(request=r.req_gb, cm5=c, prog=prog, scale=s)
         if mp is not None:
-            e = mp.iloc[rng_mp.integers(len(mp))]
-            info.update(mp_e=float(e.e), mp_w=e.workload)
+            own = mp_own.get(prog) if mp_own else None
+            pool = own if own is not None else mp
+            e = pool.iloc[rng_mp.integers(len(pool))]
+            info.update(mp_e=float(e.e), mp_w=prog if own is not None else e.workload)
         if rss_view(info, scenario) is not None:
             info["rssview"] = rss_view(info, scenario)
         # arrival in trace time; run.Setup rescales it to the offered load
