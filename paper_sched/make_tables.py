@@ -93,13 +93,14 @@ def grid_table(data, out, load=0.8, pattern="grid_all*.csv", name=None):
         cells = [run_label(o)]
         for sc in ("bytes", "rss"):
             d = g[(g.scenario == sc) & (g.oracle == o)]
-            cells += [fmt(d.steady_response.mean(), 0), fmt(d.steady_bsld.mean(), 1), fmt(d.kills.mean(), 0),
+            cells += [fmt(d.steady_response.mean(), 0), fmt(d.throughput.mean(), 1), fmt(d.steady_bsld.mean(), 1),
+                      fmt(d.kills.mean(), 0),
                       fmt(d.steady_reserved.mean() * 100, 0), fmt(d.steady_resident.mean() * 100, 0)]
         rows.append(" & ".join(cells) + r" \\")
-    head = (r"\begin{tabular}{lrrrrrrrrrr}" "\n" r"\toprule" "\n"
-            r" & \multicolumn{5}{c}{Truth = bytes touched} & \multicolumn{5}{c}{Truth = RSS} \\" "\n"
-            r"\cmidrule(lr){2-6} \cmidrule(lr){7-11}" "\n"
-            r"Oracle & Resp. (min) & BSLD & Kills & Res. \% & Used \% & Resp. (min) & BSLD & Kills & Res. \% & Used \% \\"
+    head = (r"\begin{tabular}{lrrrrrrrrrrrr}" "\n" r"\toprule" "\n"
+            r" & \multicolumn{6}{c}{Truth = bytes touched} & \multicolumn{6}{c}{Truth = RSS} \\" "\n"
+            r"\cmidrule(lr){2-7} \cmidrule(lr){8-13}" "\n"
+            r"Oracle & Resp. (min) & Jobs/h & BSLD & Kills & Res. \% & Used \% & Resp. (min) & Jobs/h & BSLD & Kills & Res. \% & Used \% \\"
             "\n" r"\midrule")
     open(f"{out}/{name or 'grid_' + str(load).replace('.', '')}.tex", "w").write(
         head + "\n" + "\n".join(rows) + "\n" r"\bottomrule" "\n" r"\end{tabular}" "\n")

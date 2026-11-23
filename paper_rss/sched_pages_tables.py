@@ -4,7 +4,7 @@ resident-memory chapter, in the layout of paper_sched/make_tables.py, with the c
 
     PYTHONPATH=analysis ~/environments/memfp/bin/python paper_rss/sched_pages_tables.py   ->  paper_rss/tables/sched/
 
-sched_policies.tex   every oracle at load 0.8: response, bounded slowdown, kills, memory reserved and used
+sched_policies.tex   every oracle at load 0.8: response, throughput, bounded slowdown, kills, memory reserved and used
 sched_loads.tex      mean response time (min) of every oracle at every load
 sched_llm.tex        the LLM stream at load 0.8, as sched_policies
 sched_capacity.tex   total memory (TB) each oracle needs for the service target, at every load
@@ -85,12 +85,13 @@ def write(name, lines):
 def policies(g, name, load=0.8):
     g = g[g.load == load]
     order = g[g.scenario == SC[0]].groupby("oracle").steady_response.mean().sort_values().index
-    lines = head(["Resp.\\ (min)", "BSLD", "Kills", "Res.\\ \\%", "Used \\%"], "Oracle", 5)
+    lines = head(["Resp.\\ (min)", "Jobs/h", "BSLD", "Kills", "Res.\\ \\%", "Used \\%"], "Oracle", 6)
     for o in order:
         cells = [label(o)]
         for sc in SC:
             d = g[(g.scenario == sc) & (g.oracle == o)]
-            cells += [fmt(d.steady_response.mean()), fmt(d.steady_bsld.mean(), 1), fmt(d.kills.mean()),
+            cells += [fmt(d.steady_response.mean()), fmt(d.throughput.mean(), 1), fmt(d.steady_bsld.mean(), 1),
+                      fmt(d.kills.mean()),
                       fmt(d.steady_reserved.mean() * 100), fmt(d.steady_resident.mean() * 100)]
         lines.append(" & ".join(cells) + r" \\")
     write(name, lines)
