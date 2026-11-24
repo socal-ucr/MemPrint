@@ -706,8 +706,8 @@ samplers at the held-out inputs, 186 runs per sampler and seed). L2O extrapolate
 median of 9.21\% (11.50\% and 9.93\% with 20 bins) and interpolates with 2.47\% and 2.15\% (3.24\% and 2.73\%). On
 the samplers' bins it extrapolates with a median of 15.26\% (bootstrap) and 12.61\% (disjoint), and interpolates
 with 1.66\% and 2.20\%. M3's decision rule selects the bootstrap sampler here (median ratio of standard deviations
-0.911, median difference 0.37 point), as on the bytes-touched tables (0.903), so the rule's choice at 50 bins rests
-on ratios within 0.011 of its bound. Against the resident-memory model of
+0.911, median difference 0.37 point), as on the bytes-touched tables with the old keep test (0.903), so with that tool the rule's choice at 50 bins
+rests on ratios within 0.011 of its bound. Against the resident-memory model of
 Section~\ref{sec:r1} on the same truth, the comparison of Section~\ref{sec:r1} holds with 50 bins. At the largest
 inputs the model's prediction (b) has a median error of 0.56\%, against 9.21\% for \memprint{} on the splitter's
 bins and 12.61\% to 15.26\% on the samplers'. At the middle inputs \memprint{} is more accurate, 2.15\% on the
@@ -724,7 +724,7 @@ middle one, and every workload keeps all 13 intervals.
 \begin{table}[htbp]
 \centering
 \caption{\memprint{} on the corpus programs with an input size, 50 bins, bytes touched. Test MAPE (\%) at the
-training-best interval on the splitter's bins (NZ, L2O) and of the L2O model on the samplers' bins (mean of 3 seeds).}
+training-best interval on the splitter's bins (NZ, L2O) and of the L2O model on the samplers' bins (mean of 3 seeds, the high-bit keep test).}
 \label{tab:b50corpus}
 \footnotesize
 \setlength{\tabcolsep}{3.5pt}
@@ -741,10 +741,11 @@ Program & Inputs & $n$ & Truth (MB) & NZ & L2O & Boot. & Disj. & NZ & L2O & Boot
 
 On these seven programs, NZ extrapolates with a mean of 3.72\% and a median of 3.04\% and interpolates with 2.64\%
 and 1.03\%. L2O has the lower median (2.58\% and 1.11\%) but a mean of 13.44\% for extrapolation, because GAP pr's
-L2O model, fitted at 1 in 250, misses its largest input by 74.01\%, on the samplers' bins as well (71.14\% and
-72.45\%), while its NZ model is within 8.57\%. Without GAP pr, L2O extrapolates within 9.25\% for every program. On
-the samplers' bins, one further outlier appears: the disjoint sampler misses LULESH's middle input by 69.08\%,
-against 2.65\% for the bootstrap. The PolyBench result therefore carries over to programs with irregular memory
+L2O model, fitted at 1 in 250, misses its largest input by 74.01\%, on the samplers' bins as well (71.05\% and
+71.53\%), while its NZ model is within 8.57\%. Without GAP pr, L2O extrapolates within 9.25\% for every program. With
+the old keep test, one further outlier appeared on the samplers' bins: the disjoint sampler missed LULESH's middle
+input by 69.08\%, against 2.65\% for the bootstrap. With the high-bit keep test the two samplers give 2.28\% and
+1.40\% (Table~\ref{tab:b50corpus}). The PolyBench result therefore carries over to programs with irregular memory
 access, except that the L2O subset can choose an interval that does not transfer, as it did for bicg in M1.
 
 Both outliers have a visible cause. GAP pr's $\alpha$, the truth over the mean bin footprint, does not grow
@@ -765,20 +766,28 @@ below $2^{32}/i$, and choose the bin from the value shifted by 8 bits, as the sp
 that tool, the disjoint sampler's bins at LULESH's middle input are 1.000 of the splitter's at the mean with a standard
 deviation of 0.93 to 0.95 of the splitter's, and the L2O error is $-8.1\%$, $-8.1\%$ and $-7.1\%$ for the three seeds,
 against $-10.4\%$ on the splitter's bins. The bootstrap sampler gives $-0.4\%$, $0.0\%$ and $+3.9\%$ with the new tool.
-Every sampler result in this document used the old keep test, and the disjoint sampler's rate $i = k/50$ is even at
-11 of the 13 intervals.
+The disjoint sampler's rate $i = k/50$ is even at 11 of the 13 intervals. We therefore repeated every sampler run
+of the 37-workload set with the new tool (1{,}230 runs, all exiting without an error), and the evaluation set below
+and Tables~\ref{tab:ch2unified} and~\ref{tab:b50corpus} report those runs. The other sampler results in this
+document (M3 at 20 bins, M11, B50's 28 workloads alone and the pages-touched follow-ups) used the old keep test.
 
 \paragraph{The evaluation set at 50 bins.} Together, B50, durbin and jacobi-1d at 50 bins and the corpus programs
 give 37 workloads at 50 bins (Table~\ref{tab:ch2unified}). L2O extrapolates with a mean of 8.85\% and a median of
 4.83\% (maximum 74.01\%, GAP pr) and interpolates with 2.61\% and 2.32\%. NZ has medians of 8.60\% and 4.23\% and MT
-of 10.79\% and 3.50\%. Over the 37 workloads M3's decision rule selects the bootstrap sampler, because the median
-ratio of the bootstrap sampler's standard deviation across bins to the splitter's is 0.903, within 0.003 of the
-rule's bound of 0.9 (median difference in test MAPE 0.64 point). Over the 35 workloads without durbin and jacobi-1d
-it was 0.9004, and with the selection on all inputs 0.897, where the rule selected the disjoint sampler. On the
-bootstrap sampler's bins, L2O extrapolates with a mean of 9.28\% and interpolates with 2.60\% (medians 4.12\% and
-1.76\%). The disjoint sampler gives 8.16\% and 4.34\% (medians 5.60\% and 2.09\%), where the mean of the
-interpolation includes LULESH's 69.08\%. L2O extrapolates within 10\% for 27 of the 37 workloads on the splitter's
-bins, 26 on the bootstrap sampler's and 31 on the disjoint sampler's, and interpolates within 10\% for 36 on each.
+of 10.79\% and 3.50\%. With the high-bit keep test, M3's decision rule selects the bootstrap sampler over the 37
+workloads. The median ratio of its standard deviation across bins to the splitter's is 0.925, and its test MAPE is
+0.39 point above the splitter's at the median. The disjoint sampler has a median ratio of 0.953 and a median
+difference of 0.40 point. On the bootstrap sampler's bins, L2O extrapolates with a mean of 7.54\% and interpolates
+with 2.50\% (medians 3.83\% and 2.19\%). The disjoint sampler gives 7.96\% and 2.55\% (medians 4.61\% and
+2.19\%), and LULESH's interpolation error falls from 69.08\% with the old keep test to 2.28\%. L2O extrapolates
+within 10\% for 27 of the 37 workloads on the splitter's bins and 29 on each sampler's, and interpolates within
+10\% for 36 on the splitter's bins and all 37 on each sampler's. With the old keep test the rule also selected the
+bootstrap sampler, but on a median ratio of 0.903, within 0.003 of its bound. The bootstrap sampler then
+extrapolated with 9.28\% and interpolated with 2.60\% (medians 4.12\% and 1.76\%), and the disjoint sampler with
+8.16\% and 4.34\% (medians 5.60\% and 2.09\%), within 10\% for 26 and 31 workloads in extrapolation.
+\memprint{} therefore uses the bootstrap sampler. It extrapolates with the lower mean and median error of the two,
+the rule selects it with a margin of 0.025 above the bound, and its estimate is within a factor of 2 of the truth on
+every workload (below).
 
 The rule's choice between the samplers is not a property of the bin count. The bootstrap sampler ran with the same
 setting in M3 and B50, so on the 234 runs that match in workload, input, interval and seed (78 combinations of
@@ -799,8 +808,9 @@ mean of 12.60\% and a median of 5.78\% and interpolates with 4.36\% and 3.77\%, 
 2.58\% with 50, because GAP pr's error is 22.12\% with 20 bins. NZ goes the other way, with a mean of 7.28\% with 20
 bins against 3.72\% with 50, so on these seven programs neither bin count is better for every subset. M3's rule
 selects the disjoint sampler on both sets (ratios 0.879 and 0.879). durbin and jacobi-1d, now with sampler runs at
-50 bins, extrapolate within 2.11\% and interpolate within 0.26\% on both samplers' bins, and the rule selects the
-bootstrap sampler for them (0.931). The 50-bin splitter takes 3.35 h over the 44 inputs, from 9.3 s (GAP bfs at
+50 bins, extrapolate within 1.32\% and interpolate within 0.45\% on both samplers' bins with the high-bit keep test
+(2.11\% and 0.26\% with the old), and the rule selects the bootstrap sampler for them (0.939, and 0.931 with the
+old). The 50-bin splitter takes 3.35 h over the 44 inputs, from 9.3 s (GAP bfs at
 scale 12) to 1,558 s (HPCCG at 48), and needs up to 33.0 GB (HPCCG at 48), against at most 3.85 GB on PolyBench and
 miniVite. Fitting all 35 workloads takes 496 s of preprocessing and 7.7 s of fitting (median of 3), of which the
 regressions take 1.2 s.
@@ -810,7 +820,7 @@ regressions take 1.2 s.
 \caption{Chapter 2's evaluation set at 50 bins: the 27 PolyBench kernels, durbin, jacobi-1d, miniVite and the seven
 corpus programs (37 workloads).
 Test MAPE (\%) at each subset's training-best interval on the splitter's bins (mean / median, maximum, number of
-workloads) and on M3's samplers' bins at the held-out inputs (mean / median, mean of 3 seeds per workload).}
+workloads) and on M3's samplers' bins at the held-out inputs (mean / median, mean of 3 seeds per workload, the high-bit keep test).}
 \label{tab:ch2unified}
 \small
 \begin{tabular}{@{}llrrrrr@{}}
@@ -1097,15 +1107,20 @@ sampler's, 8.85\% against 8.82\% on the splitter's) and give the same number of 
 setting, because a run's bins err in the same direction. Per run they agree to 0.1 point for bicg, GAP pr and LULESH.
 The bicg values in the draft note come from two splits: 52.27\% is its extrapolation error on the bootstrap sampler's
 bins, the mean of $-62.5\%$, $+32.0\%$ and $-62.2\%$, and $+8.1\%$, $-30.2\%$ and $+8.3\%$ are its interpolation errors.
+The values in this paragraph come from the old keep test.
 
-\paragraph{The sign of the largest errors.} GAP pr's extrapolation (L2O, 1 in 250) over-estimates on every run, by
-70.2\%, 71.2\% and 72.0\% on the bootstrap sampler's bins and 74.5\%, 72.1\% and 70.8\% on the disjoint sampler's,
-as on the splitter's bins (74.0\%, where the model predicts an $\alpha$ of 18.49 against 10.63). Its estimate is
-therefore 1.70 to 1.75 times the truth, within a factor of 2. The largest under-estimate is bicg's extrapolation on
-the bootstrap sampler's bins, $-62.5\%$ and $-62.2\%$ on two of the three seeds, which puts the truth at 2.67 times
-the estimate. With the bootstrap sampler, the estimate is therefore within a factor of 2 of the truth on 36 of the 37
-workloads at the largest input, and with the disjoint sampler LULESH's middle input ($-69\%$, a factor of 3.2) is the
-only miss, which the keep test causes.
+\paragraph{The sign of the largest errors.} GAP pr's extrapolation (L2O, 1 in 250) over-estimates on every run. With
+the high-bit keep test it errs by $+72.1\%$, $+69.8\%$ and $+71.2\%$ on the bootstrap sampler's bins and $+74.0\%$,
+$+70.6\%$ and $+70.0\%$ on the disjoint sampler's, as on the splitter's bins ($+74.0\%$, where the model predicts
+an $\alpha$ of 18.49 against 10.63). Its estimate is therefore 1.70 to 1.74 times the truth, within a factor of 2.
+The largest under-estimates are adi's on the bootstrap sampler's bins ($-17.2\%$ to $-18.8\%$) and seidel-2d's on
+the disjoint sampler's ($-23.1\%$ on one seed). With either sampler, the estimate is therefore within a factor of 2
+of the truth on all 37 workloads at the largest input. With the old keep test, bicg's extrapolation on the bootstrap
+sampler's bins erred by $-62.5\%$ and $-62.2\%$ on two of the three seeds (the truth 2.67 times the estimate), and
+LULESH's middle input on the disjoint sampler's bins by $-69\%$ (a factor of 3.2), the only misses of the two
+samplers. With the new tool bicg's errors are $+6.2\%$, $+14.5\%$ and $+10.2\%$ on the bootstrap sampler's bins
+and LULESH's middle input's are $-8.1\%$, $-8.1\%$ and $-7.1\%$ on the disjoint sampler's, so both misses came
+from the keep test.
 
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}

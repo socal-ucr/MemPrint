@@ -310,6 +310,10 @@ MORE = os.path.expanduser("~/memprint-data/2026-11-12-b50more")
 CORPUS50 = ["gap-bfs", "gap-cc", "gap-pr", "gap-sssp", "hpccg", "lulesh", "minife"]
 
 
+# sampler scores of the 37-workload set: "hb" the high-bit keep test (hibits_score.py), "" the old tool
+HB = os.environ.get("HB", "hb")
+
+
 def unified():
     """Chapter 2's evaluation set at 50 bins: the 28 workloads of B50 (27 PolyBench kernels and miniVite) and the 7
     corpus programs with an input size (B50 follow-ups), 35 in all. Writes ch2_accuracy.tex (b50.tex's layout),
@@ -319,8 +323,8 @@ def unified():
     f = pd.concat([f[f.bins == 50].drop(columns="bins"), pd.read_csv(f"{MORE}/c50/data/fits.csv"),
                    pd.read_csv(f"{MORE}/m5/data/fits.csv")], ignore_index=True)
     tags = ("b50", "c50", "m5")   # B50's 28, the 7 corpus programs, durbin and jacobi-1d (M5 at 50 bins): 37
-    mp = pd.concat([pd.read_csv(f"{OUT}/m3_mape_{t}.csv") for t in tags], ignore_index=True)
-    runs = pd.concat([pd.read_csv(f"{OUT}/m3_runs_{t}.csv") for t in tags], ignore_index=True)
+    mp = pd.concat([pd.read_csv(f"{OUT}/m3_mape_{t}{HB}.csv") for t in tags], ignore_index=True)
+    runs = pd.concat([pd.read_csv(f"{OUT}/m3_runs_{t}{HB}.csv") for t in tags], ignore_index=True)
     mp = mp[mp.basis == "train_si"]
     g = mp.groupby(["sampler", "split", "subset", "workload"])[["sampler_mape", "splitter_mape"]].mean()
     g["diff"] = g.sampler_mape - g.splitter_mape
@@ -383,7 +387,7 @@ def b50_corpus():
               "hpccg": "HPCCG & 16 to 48 & 7 & 2.0 to 43.2", "lulesh": "LULESH & 10 to 30 & 6 & 1.2 to 30.7",
               "minife": "MiniFE & 16 to 40 & 7 & 6.1 to 36.3"}
     f = pd.read_csv(f"{MORE}/c50/data/fits.csv").set_index(["workload", "split", "subset"]).test_mape_train_si
-    sm = sampler_mape("_c50")
+    sm = sampler_mape("_c50" + HB)
     rows = []
     for w in CORPUS50:
         cells = [static[w]]

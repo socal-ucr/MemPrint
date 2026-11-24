@@ -29,7 +29,9 @@ from memprint.sched.model import Cluster  # noqa: E402
 
 D = os.path.expanduser("~/memprint-data/2026-10-13-sched-llm")
 R = os.path.expanduser("~/memprint-data/2026-11-18-motivchecks")
-MP = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2/mp_errors.csv")
+# the 37-workload errors with the high-bit keep test (hibits_score.py); the old tool's E1 results are in results/oldtool
+MP = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2/mp_errors_hb.csv")
+PROCS = int(os.environ.get("PROCS", 28))
 TAB = os.path.join(HERE, "tables")
 # the oracles of tab:mp-load08 (the motivation's grid_08), and MemPrint's sampled peak
 LOAD08 = ["exact", "exact-coarse", "exact-peak", "zacarias", "zacarias-past", "reactive", "rss-peak", "dhat", "ksplus",
@@ -38,7 +40,7 @@ LOAD08 = ["exact", "exact-coarse", "exact-peak", "zacarias", "zacarias-past", "r
 SWEEP = ["dhat", "dhat-curve", "exact", "exact-coarse", "exact-peak", "gperf", "heaptrack", "massif", "massif-i",
          "ml-peak", "reactive", "request", "rss-peak", "pond", "zacarias", "ksplus"]
 SIZES = (48, 64, 96, 128, 160, 192, 256, 320, 384, 512)
-COMMON = dict(loads=(0.8,), seeds=(0, 1, 2), n=3000, procs=28, scenarios=("bytes", "rss"))
+COMMON = dict(loads=(0.8,), seeds=(0, 1, 2), n=3000, procs=PROCS, scenarios=("bytes", "rss"))
 MPO = dict(mp=MP, mp_sampler="boot")
 
 
