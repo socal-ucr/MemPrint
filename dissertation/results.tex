@@ -398,7 +398,8 @@ Vertices & Start address & Bytes, with allocator & Bytes touched & vs.\ with all
 
 \begin{table}[htbp]
 \centering
-\caption{miniVite's test MAPE (\%) at the training-best interval $k$, against the published values.}
+\caption{miniVite's test MAPE (\%) at the training-best interval $k$, against the published values. The sampler
+bins are the bootstrap sampler's with the high-bit keep test (mean of 3 seeds).}
 \label{tab:m4mape}
 \small
 \begin{tabular}{@{}llrrrr@{}}
@@ -412,8 +413,9 @@ Split & Subset & Published & $k$ & Bytes, splitter bins & Bytes, sampler bins \\
 
 Under the corrected truth, miniVite's L2O error is 10.32\% for extrapolation and 1.79\% for interpolation, against
 the published 12.90\% and 1.57\% (Table~\ref{tab:m4mape}). The chapter's claim that MT is consistently best for
-miniVite no longer holds. MT extrapolates worst (15.72\%), NZ best (3.17\%), and on the sampler's own bins L2O and
-NZ are within 0.5 point of each other. Figure~\ref{fig:alpha} redraws the chapter's two figures of $\alpha$ for
+miniVite no longer holds. MT extrapolates worst (15.72\%), NZ best (3.17\%), and on the sampler's own bins (the high-bit keep test)
+NZ extrapolates with 9.46\%, L2O with 12.93\% and MT with 14.77\%. With the original keep test the sampler's L2O and
+NZ errors were within 0.5 point of each other (10.59\% and 10.18\%). Figure~\ref{fig:alpha} redraws the chapter's two figures of $\alpha$ for
 miniVite. As before, $\alpha$ falls with the input at every interval and rises in proportion to the interval at
 every input, which is the structure the model's terms capture.
 
@@ -500,10 +502,11 @@ miniVite allocates memory that it never touches, and underestimate from 8,192 ve
 results do not conflict but show that the error changes sign with the input.
 
 The chapter's statement that Massif and DHAT ``substantially underestimate'' is therefore true for gemm and for
-the largest miniVite inputs, and false for the smallest miniVite inputs. \memprint{}'s estimate is within 7\% of
-the truth at three of the four held-out inputs (0.94$\times$ and 1.05$\times$ for gemm, 1.00$\times$ for miniVite
-at 4,096 vertices) and 0.89$\times$ at 16,384 vertices. At the largest inputs it is no closer than the heap
-profilers, which are within 9\% there, but unlike them it does not depend on the input's mix of heap and non-heap
+the largest miniVite inputs, and false for the smallest miniVite inputs. \memprint{}'s estimate, from the sampler runs with the high-bit keep test
+(Section~\ref{sec:b50more}), is within 7\% of the truth at three of the four held-out inputs (0.94$\times$ and
+1.05$\times$ for gemm, 1.00$\times$ for miniVite at 4,096 vertices) and 0.87$\times$ at 16,384 vertices
+(0.89$\times$ with the original keep test). At the largest inputs it is no closer than the heap profilers, which are
+within 9\% there, but unlike them it does not depend on the input's mix of heap and non-heap
 memory.
 
 \subsection{M7. What the sampler costs}

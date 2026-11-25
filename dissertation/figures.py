@@ -137,6 +137,11 @@ def valgrind():
     save(fig, "valgrind")
 
 
+# the bootstrap runs of gemm and miniVite at M3's intervals with the high-bit keep test (run.sh m3 m3mv with
+# TOOL_SRC=memprint_trace_hibits.so); f"{OUT}" for the original keep test
+M3RUNS = os.environ.get("M3RUNS", os.path.expanduser("~/memprint-data/2026-11-23-hibits/m20"))
+
+
 def memprint_estimates():
     """MemPrint's L2O estimate of the footprint at the EXTRA and INTER inputs from the bootstrap runs (seed 1 to 3,
     the mean predicted footprint over bins, then over seeds), at the fit's training-best interval."""
@@ -150,7 +155,7 @@ def memprint_estimates():
             model = Model.from_row(f)
             preds = []
             for seed in (1, 2, 3):
-                d = f"{OUT}/m3/boot/{seed}/{w}/{c}/{int(f.train_si)}"
+                d = f"{M3RUNS}/m3/boot/{seed}/{w}/{c}/{int(f.train_si)}"
                 b = pd.Series([pd.read_csv(x).MemUsageObs.iloc[0] for x in glob.glob(f"{d}/*_bin_*.csv")], dtype=float)
                 t = pd.DataFrame({"MemUsageObs": b, "SamplingInterval": f.train_si, "SD_MemUsage": b.std()})
                 preds.append((model.predict(t).Predicted_Alpha * b).mean())

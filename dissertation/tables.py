@@ -109,7 +109,7 @@ def m4():
     rows = [f"{num(r.Config)} & {num(r.starts_B)} & {num(r.bytes_alloc_B)} & {num(r.bytes_B)} & "
             f"{r.vs_alloc_pct:.2f} & {r.vs_starts_pct:.2f} \\\\" for r in t.itertuples()]
     write("m4_truth", "\n".join(rows) + "\n")
-    m4_mape()
+    m4_mape(tag="_m20hb")   # the sampler column from the high-bit keep-test runs (hibits.sh's m20; "" the original)
 
 
 def m4_mape(fits=None, tag="", name="m4_mape", sampler="boot"):
@@ -300,10 +300,10 @@ def b50_workloads():
     f = f[f.bins == 50]
     l2o(f, "_b50", "l2o_b50")
     m3("_b50", "m3_b50", "Disjoint, 50 bins")
-    m4_mape(f, "_b50", "m4_mape_b50")
+    m4_mape(f, "_b50hb", "m4_mape_b50")
     # the same with the disjoint sampler (50 bins), which M3's decision rule selects at 50 bins
     l2o(f, "_b50", "l2o_b50_disj", sampler="disj")
-    m4_mape(f, "_b50", "m4_mape_b50_disj", sampler="disj")
+    m4_mape(f, "_b50hb", "m4_mape_b50_disj", sampler="disj")
 
 
 MORE = os.path.expanduser("~/memprint-data/2026-11-12-b50more")

@@ -36,6 +36,13 @@ def rescore():
         S.m3(f"{root}/data", [(p, rc.get(p, "1")) for p in runs], f"_{tag}hb", wl)
 
 
+def m20():
+    """M3's 20-bin runs of gemm and miniVite again (run.sh m3 m3mv, OUT=$N/m20) -> m3_{runs,mape}_m20hb.csv, for
+    tab:m4mape's sampler column and the heap-profiler comparison (figures.py memprint_estimates)."""
+    done = [x.split() for x in open(f"{N}/m20/m3/done.txt")]
+    S.m3(S.FINAL, done, "_m20hb", ["gemm", "miniVite"])
+
+
 def errors():
     """mp_errors.py's rows from the new runs (and the splitter's, unchanged)."""
     MPE_SETS = MPE.SETS
