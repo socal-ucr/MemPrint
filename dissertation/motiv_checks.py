@@ -98,6 +98,28 @@ def e3cap():
         go(f"e3cap_{gb}", SWEEP + ["memprint-peak"], cluster=Cluster(local=gb), fixed=True, **MPO)
 
 
+def mp_hb():
+    """memprint-peak alone again in every E2 and E3 file with MP (the high-bit errors); its old rows are replaced in
+    place, the old files kept in results/oldtool."""
+    old = f"{R}/results/oldtool"
+    jobs = [(f"e2_x{f}", dict(overestimate=f), LOAD08) for f in (1.5, 2.0, 3.0)]
+    jobs += [("e2_metacentrum", dict(kind="trace"), LOAD08), ("e3", dict(fixed=True), LOAD08)]
+    jobs += [(f"e3cap_{gb}", dict(cluster=Cluster(local=gb), fixed=True), SWEEP) for gb in SIZES]
+    for name, kw, _ in jobs:
+        f = f"{R}/results/{name}.csv"
+        if not os.path.exists(f"{old}/{name}.csv"):
+            os.makedirs(old, exist_ok=True)
+            os.replace(f, f"{old}/{name}.csv")
+            if os.path.exists(f + ".jsonl"):
+                os.replace(f + ".jsonl", f"{old}/{name}.csv.jsonl")
+        tmp = f"hb_{name}"
+        go(tmp, ["memprint-peak"], **kw, **MPO)
+        a = pd.read_csv(f"{old}/{name}.csv")
+        b = pd.read_csv(f"{R}/results/{tmp}.csv")
+        pd.concat([a[a.oracle != "memprint-peak"], b], ignore_index=True).to_csv(f, index=False)
+        print("spliced", name, len(b), flush=True)
+
+
 def _load(pattern, root=R):
     files = sorted(glob.glob(f"{root}/results/{pattern}"))
     g = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)

@@ -69,16 +69,16 @@ Inputs that select the intervals and subset & all, the held-out one included & t
   (Section~\ref{sec:trainsel}) \\
 L2O maximum, extrapolation & 46.83 (atax) & 71.79 (bicg) \\
 Largest test MAPE, any subset & 109.23 (trisolv, MT) & 99.56 (bicg, MT) \\
-L2O on the sampler's own bins & not measured & 12.92 and 3.37 (Table~\ref{tab:m3}) \\
+L2O on the sampler's own bins & not measured & 11.06 and 3.32 (Table~\ref{tab:m3}) \\
 miniVite L2O, extrapolation and interpolation & 12.90 and 1.57 & 10.32 and 1.79 (Table~\ref{tab:m4mape}) \\
 Bins per interval & 50 (text) & 20 in every table (Section~\ref{sec:m8}); 50 in the rerun of Section~\ref{sec:b50} \\
-L2O test MAPE with 50 bins & 9.78 and 3.70 (with 20) & 8.25 and 2.65; 8.94 and 2.87 on the sampler's bins
+L2O test MAPE with 50 bins & 9.78 and 3.70 (with 20) & 8.25 and 2.65; 6.58 and 2.79 on the sampler's bins
   (Table~\ref{tab:b50}) \\
 Intervals used per workload & ``12 or 13'' & 9 to 13 (Table~\ref{tab:m8}) \\
 Sampler wall time, miniVite 8,192 vertices & 42.1 s at 1 in 500; 52.2 s at 1 in 1,000; 46.1 s at 1 in 2,500
   & 30.9 s, 27.9 s and 25.6 s at those actual bin intervals (Table~\ref{tab:m7}) \\
-L2O test MAPE under the pages-touched truth & not measured & 11.50 and 3.24 on the splitter's bins, 14.93 and
-  3.05 on the sampler's (Table~\ref{tab:m11}) \\
+L2O test MAPE under the pages-touched truth & not measured & 11.50 and 3.24 on the splitter's bins, 13.13 and
+  2.94 on the sampler's (Table~\ref{tab:m11}) \\
 Splitter wall time, miniVite 8,192 vertices & 373.6 s & 87.7 s with one thread; the published splitter takes 113.0 s
   with one thread and 386.9 s with 32 (Section~\ref{sec:m7}) \\
 Sampler cost against full instrumentation & ``a fraction'' & 1.9$\times$ and 2.5$\times$ faster than the truth
@@ -162,7 +162,8 @@ points. The deployed models' test MAPE, which the published selection minimized 
 M3's decision rule changes its choice in two sets, because the new intervals add runs to the median spread ratio.
 At 50 bins (B50) the ratio moves from 0.896 to 0.903, and over the 35 workloads from 0.897 to 0.9004, so the rule
 now selects the bootstrap sampler in both, where it selected the disjoint sampler before. Both ratios lie within
-0.003 of the bound.
+0.003 of the bound. These ratios come from the original keep test (Section~\ref{sec:b50more}). With the high-bit keep
+test the two ratios are 0.922 and 0.923, and the rule selects the bootstrap sampler with a margin of 0.02.
 
 \begin{table}[htbp]
 \centering
@@ -327,7 +328,9 @@ prediction, at the extrapolation and interpolation inputs of all 28 workloads, w
 of which 120 at the intervals that the selection on the training inputs added). The
 bootstrap used the published defaults ($s=100$, $r=10$, $i=k/10$), and the disjoint sampler used 20 bins
 ($i=k/20$), so both sample about 1 in $k$ per bin. We then scored each workload's fitted models on the sampler's
-bins.
+bins. All runs of this section were made again with the high-bit keep test (Section~\ref{sec:b50more}), and the
+table, the figure and the text report those runs, with the original keep test's values in parentheses where they
+differ.
 
 \begin{table}[htbp]
 \centering
@@ -358,18 +361,19 @@ training-best interval. Points on the diagonal have the same error. Both axes ar
 \end{figure}
 
 The bootstrap's bins are close to the splitter's (Table~\ref{tab:m3} and Figure~\ref{fig:m3}). Their mean
-footprint is 0.998 of the splitter's at the median, and their spread is 0.943 of the splitter's, which is smaller
-as expected but by only 6\%. Across workloads the sampler-bin MAPE is 0.08 point above the splitter-bin MAPE at
-the median. Under the decision rule fixed before the runs, the chapter reports the bootstrap, because the MAPE
-difference is below 2 points and the median spread ratio lies between 0.9 and 1.1. With the sampler's own bins,
-the L2O error is 12.92\% for extrapolation and 3.37\% for interpolation, 0.48 and 0.21 point above the splitter
-bins. The disjoint sampler extrapolates slightly better and interpolates worse (12.64\% and 3.77\%), and its median
-spread ratio of 0.969 is closer to 1, so the bootstrap's correlation between bins has no consistent cost here.
+footprint is 1.000 of the splitter's at the median (0.998), and their spread is 0.964 of the splitter's (0.943),
+which is smaller as expected but by only 4\%. Across workloads the sampler-bin MAPE is 0.02 point below the
+splitter-bin MAPE at the median (0.08 point above). Under the decision rule fixed before the runs, the chapter
+reports the bootstrap, because the MAPE difference is below 2 points and the median spread ratio lies between 0.9 and
+1.1. With the sampler's own bins, the L2O error is 11.06\% for extrapolation and 3.32\% for interpolation (12.92\%
+and 3.37\%), against 12.44\% and 3.16\% on the splitter's bins. The disjoint sampler extrapolates slightly better
+and interpolates slightly worse (10.63\% and 3.45\%, against 12.64\% and 3.77\%), and its median spread ratio of
+0.974 is closer to 1, so the bootstrap's correlation between bins has no consistent cost here.
 
 The per-workload spread is wider than the averages suggest. Between the 10th and 90th percentiles of runs, the
-spread ratio ranges from 0.72 to 1.22 for the bootstrap, and individual workloads move by several points in both
-directions in Figure~\ref{fig:m3}, for example 3mm (0.20\% to 6.54\% for extrapolation) and 2mm (19.01\% to
-3.51\%). Three seeds per run therefore matter for a per-workload claim, while the aggregate changes little.
+spread ratio ranges from 0.73 to 1.24 for the bootstrap, and individual workloads move by several points in both
+directions in Figure~\ref{fig:m3}, for example 3mm (0.20\% to 2.22\% for extrapolation) and 2mm (19.01\% to
+4.38\%). Three seeds per run therefore matter for a per-workload claim, while the aggregate changes little.
 
 \subsection{M4. miniVite under the bytes-touched truth}
 \label{sec:m4}
@@ -665,13 +669,15 @@ and the means of the NZ and MT subsets improve as well. The improvement is not u
 extrapolate better and 8 worse, and the largest increases are 15.0 to 28.3 points (ludcmp, adi and cholesky), while
 bicg, trisolv, trmm, gemver, 2mm and seidel-2d improve by 17.5 to 50.6 points. The pipeline keeps 332 of the 364 interval and
 workload pairs, against 335 with 20 bins, so more bins do not make the sparse intervals unusable. On the samplers'
-bins, L2O extrapolates with 8.94\% (bootstrap) and 7.27\% (disjoint) and interpolates with 2.87\% and 2.83\%, against
-12.92\% and 3.37\% for the bootstrap sampler with 20 splitter bins. M3's decision rule selects the bootstrap sampler,
-but only just. The median ratio of the bootstrap sampler's standard deviation across bins to the splitter's is
-0.903, within 0.003 of the rule's bound of 0.9 (with the selection on all inputs it was 0.896, and the rule selected
-the disjoint sampler). The rule's other test passes. The bootstrap sampler's test MAPE is 0.88 point above the
-splitter bins' at the median over the workloads, splits and subsets, and the disjoint sampler's is 1.21 point above,
-with a median ratio of standard deviations of 0.931.
+bins, with the high-bit keep test (Section~\ref{sec:b50more}), L2O extrapolates with 6.58\% (bootstrap) and 7.11\%
+(disjoint) and interpolates with 2.79\% and 2.85\%, against 11.06\% and 3.32\% for the bootstrap sampler with 20
+bins. M3's decision rule selects the bootstrap sampler. The median ratio of the bootstrap sampler's standard deviation
+across bins to the splitter's is 0.922, and the bootstrap sampler's test MAPE is 0.60 point above the splitter bins' at
+the median over the workloads, splits and subsets. The disjoint sampler's test MAPE is 0.58 point above, with a median
+ratio of standard deviations of 0.955. With the original keep test the bootstrap sampler extrapolated with 8.94\% and
+the disjoint sampler with 7.27\%, and the rule selected the bootstrap sampler only on a median ratio of 0.903, within
+0.003 of the rule's bound of 0.9 (0.896 with the selection on all inputs, where the rule selected the disjoint
+sampler).
 
 The cost of training grows with the number of bins. On miniVite at 8,192 vertices, the splitter takes 188.6 s and
 1.85 GB with 50 bins against 104.7 s and 1.03 GB with 20 (median of 5 interleaved rounds, bytes touched with the
@@ -707,14 +713,14 @@ interpolation), against 1.07\%, 0.36\%, 1.06\% and 0.19\% with 20 bins, and thei
 \paragraph{The pages-touched truth.} We repeated M11 with 50 bins (\texttt{-footprint pages}, the refit, and both
 samplers at the held-out inputs, 186 runs per sampler and seed). L2O extrapolates with a mean of 11.16\% and a
 median of 9.21\% (11.50\% and 9.93\% with 20 bins) and interpolates with 2.47\% and 2.15\% (3.24\% and 2.73\%). On
-the samplers' bins it extrapolates with a median of 15.26\% (bootstrap) and 12.61\% (disjoint), and interpolates
-with 1.66\% and 2.20\%. M3's decision rule selects the bootstrap sampler here (median ratio of standard deviations
-0.911, median difference 0.37 point), as on the bytes-touched tables with the old keep test (0.903), so with that tool the rule's choice at 50 bins
-rests on ratios within 0.011 of its bound. Against the resident-memory model of
-Section~\ref{sec:r1} on the same truth, the comparison of Section~\ref{sec:r1} holds with 50 bins. At the largest
+the samplers' bins, with the high-bit keep test, it extrapolates with a median of 12.81\% (bootstrap) and 10.97\%
+(disjoint), and interpolates with 1.90\% and 1.95\% (15.26\%, 12.61\%, 1.66\% and 2.20\% with the original keep
+test). M3's decision rule selects the bootstrap sampler here (median ratio of standard deviations 0.931, median
+difference 0.40 point, against 0.911 and 0.37 point with the original keep test). Against the resident-memory model
+of Section~\ref{sec:r1} on the same truth, the comparison of Section~\ref{sec:r1} holds with 50 bins. At the largest
 inputs the model's prediction (b) has a median error of 0.56\%, against 9.21\% for \memprint{} on the splitter's
-bins and 12.61\% to 15.26\% on the samplers'. At the middle inputs \memprint{} is more accurate, 2.15\% on the
-splitter's bins and 1.66\% to 2.20\% on the samplers', against 4.09\% for the model's transfer rule.
+bins and 10.97\% to 12.81\% on the samplers'. At the middle inputs \memprint{} is more accurate, 2.15\% on the
+splitter's bins and 1.90\% to 1.95\% on the samplers', against 4.09\% for the model's transfer rule.
 
 \paragraph{The scheduling corpus.} \memprint{} is evaluated on PolyBench and miniVite because they have five to seven
 inputs each, against three for each program of Chapter 3's corpus. Seven corpus programs take an input size that
@@ -771,8 +777,10 @@ deviation of 0.93 to 0.95 of the splitter's, and the L2O error is $-8.1\%$, $-8.
 against $-10.4\%$ on the splitter's bins. The bootstrap sampler gives $-0.4\%$, $0.0\%$ and $+3.9\%$ with the new tool.
 The disjoint sampler's rate $i = k/50$ is even at 11 of the 13 intervals. We therefore repeated every sampler run
 of the 37-workload set with the new tool (1{,}230 runs, all exiting without an error), and the evaluation set below
-and Tables~\ref{tab:ch2unified} and~\ref{tab:b50corpus} report those runs. The other sampler results in this
-document (M3 at 20 bins, M11, B50's 28 workloads alone and the pages-touched follow-ups) used the old keep test.
+and Tables~\ref{tab:ch2unified} and~\ref{tab:b50corpus} report those runs. We then repeated the other sampler
+runs of this document with the new tool as well (M3 at 20 bins, M11, the pages-touched set at 50 bins, and the corpus
+programs under the pages-touched truth and at 20 bins, 2{,}031 runs, all exiting without an error and without an empty
+bin), and each section reports those runs, with the old keep test's values in parentheses where they are kept.
 
 \paragraph{The evaluation set at 50 bins.} Together, B50, durbin and jacobi-1d at 50 bins and the corpus programs
 give 37 workloads at 50 bins (Table~\ref{tab:ch2unified}). L2O extrapolates with a mean of 8.85\% and a median of
@@ -795,13 +803,15 @@ every workload (below).
 The rule's choice between the samplers is not a property of the bin count. The bootstrap sampler ran with the same
 setting in M3 and B50, so on the 234 runs that match in workload, input, interval and seed (78 combinations of
 workload, input and interval, 26 workloads), only the splitter's standard deviation in the denominator changes. On
-these runs the median ratio is 0.919 against the 20-bin splitter and 0.917 against the 50-bin one, and the 50-bin
-splitter's standard deviation is 1.015 times the 20-bin one's at the median (0.77 to 1.41 for 10\% to 90\% of the
-runs), which is the spread expected of a standard deviation estimated from 20 values. The runs that only one set has
-differ more (median 0.958 over 312 runs at 20 bins and 0.886 over 219 runs at 50 bins), and the 95\% intervals of the
-two matched medians over workloads overlap (0.889 to 0.955 and 0.877 to 0.954). The rule's choice therefore depends on
-which intervals the fits select, through a median within 0.01 of the bound at 50 bins, and the same holds on the
-corpus programs (0.879 for both sets below).
+these runs, with the high-bit keep test, the median ratio is 0.952 against the 20-bin splitter and 0.941 against the
+50-bin one, and the 50-bin splitter's standard deviation is 1.034 times the 20-bin one's at the median (0.77 to 1.40
+for 10\% to 90\% of the runs), which is the spread expected of a standard deviation estimated from 20 values. The runs
+that only one set has differ more (median 0.975 over 312 runs at 20 bins and 0.907 over 219 runs at 50 bins), and the
+95\% intervals of the two matched medians over workloads overlap (0.920 to 0.977 and 0.909 to 0.982). The median over
+all runs is therefore lower at 50 bins (0.922 against 0.964) because of which intervals the fits select, but with the
+high-bit keep test it stays above the bound in every set of this document except the corpus programs at 20 bins
+(below). With the original keep test the matched medians were 0.919 and 0.917, the unmatched ones 0.958 and 0.886, and
+the rule's choice at 50 bins rested on a median within 0.01 of the bound.
 
 \paragraph{The remaining results on the corpus programs.} We ran the corpus programs' 44 inputs again with the
 pages-touched truth at 50 bins and with the bytes-touched truth at 20 bins, ran both samplers at the held-out inputs
@@ -809,8 +819,12 @@ of each, and timed the 50-bin splitter on every input alone. Under the pages-tou
 mean of 12.60\% and a median of 5.78\% and interpolates with 4.36\% and 3.77\%, and GAP pr is again the outlier
 (61.61\%). With 20 bins, L2O extrapolates with a mean of 7.41\% and a median of 4.86\%, against 13.44\% and
 2.58\% with 50, because GAP pr's error is 22.12\% with 20 bins. NZ goes the other way, with a mean of 7.28\% with 20
-bins against 3.72\% with 50, so on these seven programs neither bin count is better for every subset. M3's rule
-selects the disjoint sampler on both sets (ratios 0.879 and 0.879). durbin and jacobi-1d, now with sampler runs at
+bins against 3.72\% with 50, so on these seven programs neither bin count is better for every subset. With the
+high-bit keep test, M3's rule selects the bootstrap sampler under the pages-touched truth (median ratio 0.909, median
+difference 0.22 point) and the disjoint sampler at 20 bins (0.870, 0.65 point), where it selected the disjoint sampler
+on both sets with the original keep test (0.879 and 0.879). On the bootstrap sampler's bins, L2O extrapolates with a
+mean of 12.42\% under the pages-touched truth and 9.58\% at 20 bins, and interpolates with 2.77\% and 1.55\%. On the
+disjoint sampler's bins it gives 11.90\%, 11.42\%, 3.08\% and 2.47\%. durbin and jacobi-1d, now with sampler runs at
 50 bins, extrapolate within 1.32\% and interpolate within 0.45\% on both samplers' bins with the high-bit keep test
 (2.11\% and 0.26\% with the old), and the rule selects the bootstrap sampler for them (0.939, and 0.931 with the
 old). The 50-bin splitter takes 3.35 h over the 44 inputs, from 9.3 s (GAP bfs at
@@ -1063,7 +1077,8 @@ the corpus. In the CM5 draw the median request is 1.52 times the peak (1.63 time
 1.5, 2 and 3 times every job's peak, the request over the exact peak grows from 4.9 (CM5) to 7.0, 14.6 and 18.9 under
 the bytes-touched truth (Table~\ref{tab:motive2}), because the offered load is fixed on resident memory, so a request
 of twice the peak saturates memory. Every oracle captures a larger share of the larger bounds, and their order holds.
-DHAT captures 68\%, 69\%, 91\% and 95\%. On the MetaCentrum2 stream, with its own requests and arrivals and $u$ from
+DHAT captures 68\%, 69\%, 91\% and 95\%, and \memprint{}'s sampled peak, with its errors from the high-bit keep
+test, 68\%, 71\%, 91\% and 95\% (59\%, 88\% and 94\% at 1.5, 2 and 3 times with the original keep test). On the MetaCentrum2 stream, with its own requests and arrivals and $u$ from
 CM5, memory is not the contended resource (the exact curve keeps 25\% of memory resident), the request over the exact
 peak is 3.7, and every footprint estimator, including \memprint{}'s sampled peak, gives a response time within 37\%
 of the exact peak's (131 minutes), against 479 minutes for the request.
@@ -1091,7 +1106,7 @@ true peaks (cc1 the largest), and llama.cpp has none because its two inputs shar
 heap profilers' margins do not shrink (Table~\ref{tab:motive3}). The 90th percentile of gperftools' needed margin
 rises from 233\% to 271\% and Massif's pages-as-heap curve's from 28\% to 100\%, while DHAT's peak stays at 6\%. At
 load 0.8 the oracles keep their order, with the exact peak at 469 minutes (448 with proportional scaling), the DHAT
-peak at 1{,}103 (1{,}011) and the request at 2{,}220 (2{,}208), and the memory sweep gives the same totals for every
+peak at 1{,}103 (1{,}011), \memprint{}'s sampled peak at 1{,}043 (1{,}018) and the request at 2{,}220 (2{,}208), and the memory sweep gives the same totals for every
 oracle except the RSS peak of an earlier run, which needs 7.0\,TB instead of 9.0\,TB. The heap profilers' shortfall
 therefore does not come from scaling a fixed runtime footprint.
 
@@ -1190,9 +1205,10 @@ with a mean of 3.24\% against 3.16\%. The largest L2O extrapolation error falls 
 (trisolv), because bicg's training-best interval moves from 1 in 7,500 to 1 in 25,000 and its error falls to 5.18\%.
 Of the 27 workloads with an L2O fit, 14 extrapolate worse and 13 better, and the largest increases are 14.1 to 17.0
 points (mvt, jacobi-2d and adi). The NZ and MT subsets extrapolate worse on average (22.71\% and 20.46\% against
-15.18\% and 16.74\%). On the samplers' bins, L2O extrapolates with a mean of 14.93\% (bootstrap) and 15.14\%
-(disjoint) and interpolates with 3.05\% and 2.94\%. M3's decision rule again selects the bootstrap sampler, with a
-median difference from the splitter's bins of 0.46 point and a median ratio of the standard deviations of 0.927. Section~\ref{sec:r1} compares these errors with the resident-memory model's against the same truth.
+15.18\% and 16.74\%). On the samplers' bins, with the high-bit keep test, L2O extrapolates with a mean of 13.13\%
+(bootstrap) and 13.47\% (disjoint) and interpolates with 2.94\% and 3.25\% (14.93\%, 15.14\%, 3.05\% and 2.94\% with the
+original keep test). M3's decision rule again selects the bootstrap sampler, with a median difference from the
+splitter's bins of 0.26 point and a median ratio of the standard deviations of 0.936 (0.46 and 0.927). Section~\ref{sec:r1} compares these errors with the resident-memory model's against the same truth.
 
 \section{Chapter 3: the resident-memory model on \memprint{}'s inputs}
 \label{sec:ch3}
@@ -1323,8 +1339,8 @@ With the event sampler and the pages-touched truth, the native measurement plus 
 largest inputs with a median error of 0.56\% and a mean of 1.45\%, and 27 of 28 workloads are within 10\%
 (Table~\ref{tab:r1}). The exception is miniVite ($-$16.5\%, Section~\ref{sec:r11}). The transfer rule (c) has a
 median error of 3.65\% and all 28 workloads within 10\%. Against the same pages-touched truth, \memprint{}'s L2O
-extrapolates with a median error of 9.93\% on the splitter's bins and 14.67\% on the bootstrap sampler's
-(Section~\ref{sec:m11}), and against its own bytes-touched truth with 8.14\% and 9.87\%. The native
+extrapolates with a median error of 9.93\% on the splitter's bins and 13.21\% on the bootstrap sampler's
+(Section~\ref{sec:m11}), and against its own bytes-touched truth with 8.14\% and 9.27\%. The native
 prediction costs one run of the program, against one sampled Pin run that M9 timed at 1.6 s to 11.3 s for PolyBench at
 MEDIUM and 35.9 s for miniVite at 8,192 vertices.
 

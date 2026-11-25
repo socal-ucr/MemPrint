@@ -43,6 +43,39 @@ def m20():
     S.m3(S.FINAL, done, "_m20hb", ["gemm", "miniVite"])
 
 
+H = os.path.expanduser("~/memprint-data")
+# every sampler set: tag of score.py's CSVs, data root (the fits), workloads; the runs are $N/<set>/m3 (hibits.sh,
+# hibits2.sh, links for the runs two sets share)
+ALL = {"": ("m20", S.FINAL, None), "_pages": ("m11", f"{S.M11}/data", None), "_b50": ("b50", f"{S.B50}/data", None),
+       "_p50": ("p50", f"{S.MORE}/p50/data", None), "_c50": ("c50", f"{S.MORE}/c50/data", S.CORPUS50),
+       "_cp50": ("cp50", f"{S.CM}/cp50/data", S.CORPUS50), "_c20": ("c20", f"{S.CM}/c20/data", S.CORPUS50),
+       "_m5": ("m5", f"{S.MORE}/m5/data", ["durbin", "jacobi-1d"])}
+
+
+def rescore_all():
+    """Every set's scores from the high-bit runs -> m3_{runs,mape}<tag>hb.csv (a run is scored when it has bins)."""
+    only = os.environ.get("TAGS")
+    for tag, (st, root, wl) in ALL.items():
+        if only is not None and tag not in only.split(","):
+            continue
+        runs = sorted(glob.glob(f"{N}/{st}/m3/*/*/*/*/*"))
+        bad = [p for p in runs if not glob.glob(f"{p}/*_bin_*")]
+        print(f"== {st}: {len(runs)} runs, {len(bad)} without bins", flush=True)
+        S.m3(root, [(p, "1" if p in bad else "0") for p in runs], f"{tag}hb", wl)
+
+
+def promote():
+    """The high-bit scores become every set's scores (score.py's names); the original keep test's go to $OUT/oldkeep."""
+    os.makedirs(f"{OUT}/oldkeep", exist_ok=True)
+    for tag in ALL:
+        for kind in ("runs", "mape"):
+            f = f"{OUT}/m3_{kind}{tag}.csv"
+            if not os.path.exists(f"{OUT}/oldkeep/m3_{kind}{tag}.csv"):
+                os.replace(f, f"{OUT}/oldkeep/m3_{kind}{tag}.csv")
+            pd.read_csv(f"{OUT}/m3_{kind}{tag}hb.csv").to_csv(f, index=False)
+    print("promoted", list(ALL))
+
+
 def errors():
     """mp_errors.py's rows from the new runs (and the splitter's, unchanged)."""
     MPE_SETS = MPE.SETS
