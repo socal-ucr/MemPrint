@@ -1026,9 +1026,9 @@ For each program, the splitter (20 bins) traces its two smaller inputs, the L2O 
 training-best interval, and the bootstrap sampler (the high-bit keep test, 3 seeds) runs at the largest input, which
 is the input the scheduler simulates. 21 of the 22 programs with three inputs completed. llama2.c's sampler needs
 more than the machine's 62\,GB. The estimate is within a factor of 2 of the truth on 86\% of the 63 runs, with a
-median absolute error of 16.7\%, and under-estimates in 79\% of them. The largest errors are the PolyBench kernels
-whose two training inputs are 20 to 150 times smaller than the third (jacobi-2d $-82\%$, cc1 $-63\%$, 2mm $-59\%$,
-atax $-47\%$, gemm $-41\%$). For jacobi-2d, 2mm and gemm the model extrapolates $\alpha$ below 1 (0.18 to 0.59),
+median absolute error of 16.7\%, and under-estimates in 79\% of them. The largest errors are on the programs whose
+larger training input has a footprint 8 to 25 times smaller than the third input's (jacobi-2d $-82\%$, cc1 $-63\%$,
+2mm $-59\%$, atax $-47\%$, gemm $-41\%$), against 2 to 3 times for most of the other programs. For jacobi-2d, 2mm and gemm the model extrapolates $\alpha$ below 1 (0.18 to 0.59),
 although a bin is a subset of the footprint and the true $\alpha$ is 1.00 to 1.02. Clipping the predicted $\alpha$ at 1
 brings these three within 2.4\% and the median absolute error to 12.0\% (95\% of the runs within a factor of 2).
 With each job's error drawn from its own program (llama2.c's from the 37-workload errors), the calibrated margin is set
