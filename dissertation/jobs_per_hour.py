@@ -7,6 +7,7 @@ Jobs/h is the simulator's throughput, the stream's jobs over the time from the f
 Load 0.8, calibrated 90% margins (10% for the oracles without a profile), mean of three seeds.
   ch2_load08   tab:mp-load08 (2026-10-13-sched-llm, grid_all*.csv), truths bytes and rss
   ch2_e1       E1, memprint-peak per error source and margin policy (2026-11-18-motivchecks, e1_*.csv)
+  ch2_e1own_* the same with each job's error from its own program, raw and with alpha clipped at 1 (e1own_*.csv)
   ch3_policies tab:rss-policies (2026-11-10-pagesnat, grid_all*.csv with the *_model.csv rows), truths pagesnat and rss
   ch3_memprint memprint-peak beside MemRSS (2026-11-10-pagesnat, grid_memprint.csv)
   libmpr_cost  the resize cluster with libmpr's own cost (native) and with the Pin profiler's (pin), every policy
@@ -48,6 +49,9 @@ def main():
     out.append(summ(g[g.load == 0.8], ["scenario", "oracle"]).assign(table="ch2_load08"))
     g = load(f"{H}/2026-11-18-motivchecks/results/e1_*.csv")
     out.append(summ(g[g.load == 0.8], ["scenario", "opt_mp_sampler", "margin"]).assign(table="ch2_e1", oracle="memprint-peak"))
+    for f in ("e1own_boot", "e1own_floor"):   # full E1: each job's error from its own program (corpus_e1.py)
+        g = load(f"{H}/2026-11-18-motivchecks/results/{f}.csv")
+        out.append(summ(g[g.load == 0.8], ["scenario", "margin"]).assign(table=f"ch2_{f}", oracle="memprint-peak"))
     P = f"{H}/2026-11-10-pagesnat/results"
     g = load(f"{P}/grid_all.csv")
     m = load(f"{P}/grid_all_model.csv")

@@ -13,7 +13,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$HERE/..
 source "$ROOT/scripts/lib.sh"
 export PIN_ROOT=${PIN_ROOT:-/home/nmust004/memory_estimator/pin/pin-3.30-98830-g1d7b601b3-gcc-linux}
 OUT=${OUT:-$HOME/memprint-data/2026-11-05-diss-ch2}; mkdir -p "$OUT"
-TOOL=$OUT/memprint_trace.so; cp "$ROOT/pintool/obj-intel64/memprint_trace.so" "$TOOL"   # frozen copy
+TOOL=$OUT/memprint_trace.so; cp "${TOOL_SRC:-$ROOT/pintool/obj-intel64/memprint_trace.so}" "$TOOL"   # frozen copy
 OLD=$PIN_ROOT/source/tools/ManualExamples/obj-intel64/buffer_memtrace_poissonBS.so          # the published sampler
 export OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive
 
