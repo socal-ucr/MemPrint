@@ -362,8 +362,8 @@ training-best interval. Points on the diagonal have the same error. Both axes ar
 
 The bootstrap's bins are close to the splitter's (Table~\ref{tab:m3} and Figure~\ref{fig:m3}). Their mean
 footprint is 1.000 of the splitter's at the median (0.998), and their spread is 0.964 of the splitter's (0.943),
-which is smaller as expected but by only 4\%. Across workloads the sampler-bin MAPE is 0.02 point below the
-splitter-bin MAPE at the median (0.08 point above). Under the decision rule fixed before the runs, the chapter
+which is smaller as expected but by only 4\%. Across workloads the sampler-bin MAPE equals the splitter-bin MAPE at the
+median (0.08 point above with the original keep test). Under the decision rule fixed before the runs, the chapter
 reports the bootstrap, because the MAPE difference is below 2 points and the median spread ratio lies between 0.9 and
 1.1. With the sampler's own bins, the L2O error is 11.06\% for extrapolation and 3.32\% for interpolation (12.92\%
 and 3.37\%), against 12.44\% and 3.16\% on the splitter's bins. The disjoint sampler extrapolates slightly better
@@ -1050,8 +1050,10 @@ by these under-estimates and exceeds 100\%, so \memprint{}'s sampled peak gives 
 hour, slower than the request (2{,}208 minutes, 23.5 jobs per hour). A fixed margin of 10\% gives 1{,}112 minutes
 (62\% of the gap) and 29.5 jobs per hour, with 2{,}488 kills per stream. With $\alpha$ clipped at 1, the calibrated
 margin gives 2{,}024 minutes (10\%) and the fixed 10\% margin 1{,}154 minutes (60\%). Under the pages-in-use truth of
-Chapter 3, the own errors give 4{,}696 minutes (1{,}941 with $\alpha$ clipped), against 1{,}069 with the 37-workload
-errors. \memprint{}'s value as an oracle therefore depends on how far its training inputs are from the input it
+Chapter 3, the own errors give 4{,}700 minutes (1{,}966 with $\alpha$ clipped), against 1{,}023 minutes, 34.1 jobs
+per hour and 235 kills per stream with the 37-workload errors of the high-bit keep test (1{,}069 minutes, 32.3 jobs per
+hour and 402 kills with the original keep test). These are steady-state means over the middle 80\% of arrivals, as in
+every table of this document. The mean over all jobs is 1{,}058 minutes (1{,}112 with the original keep test). \memprint{}'s value as an oracle therefore depends on how far its training inputs are from the input it
 predicts, and with two small training inputs its worst under-estimates set any margin calibrated from its errors.
 
 \begin{table}[htbp]
@@ -1159,6 +1161,23 @@ samplers. With the new tool bicg's errors are $+6.2\%$, $+14.5\%$ and $+10.2\%$ 
 and LULESH's middle input's are $-8.1\%$, $-8.1\%$ and $-7.1\%$ on the disjoint sampler's, so both misses came
 from the keep test.
 
+\paragraph{The predicted $\alpha$ clipped at 1.} A bin is a subset of the program's footprint, so the true $\alpha$
+is at least 1, and the model now clips its prediction at 1 (\texttt{Model.predict}, on by default, off with
+\texttt{MEMPRINT\_ALPHA\_FLOOR=0}). Every table in this document is computed with the clip. We rebuilt every table
+set with it and scored the samplers' bins again. The clip changes no training-best interval and no deployed subset
+in any set, because the training predictions below 1 lie at intervals that no model selects. On the 37 workloads at
+50 bins, no model predicts $\alpha$ below 1 at its training-best interval on the held-out input, so
+Tables~\ref{tab:ch2unified} and~\ref{tab:b50corpus}, \memprint{}'s errors and E1 (1{,}018 minutes, 68\%) do not
+change. At 20 bins the clip changes two NZ extrapolation models, adi (37.18\% to 8.17\%) and floyd-warshall (28.37\%
+to 15.80\%), so NZ extrapolates with a mean of 13.70\% instead of 15.18\% and a maximum of 35.76\% (gramschmidt)
+instead of 37.18\% (Table~\ref{tab:m1}). Under the pages-touched truth it changes seidel-2d's NZ extrapolation
+(38.00\% to 31.39\%), so NZ extrapolates with a mean of 22.47\% instead of 22.71\% and a maximum of 36.70\% (jacobi-2d)
+(Table~\ref{tab:m11}). On the samplers' bins the NZ extrapolation mean falls from 15.71\% to 14.28\% (bootstrap,
+20 bins) and from 24.05\% to 23.81\% (bootstrap, pages-touched truth). No L2O or MT error at the training-best
+interval changes in any set. The clip matters for the corpus programs of the full E1, where the model trained on two
+small inputs extrapolates $\alpha$ below 1 for jacobi-2d, 2mm and gemm (Section~\ref{sec:motivchecks}), and their training
+intervals do not change with it either.
+
 \subsection{M10. The published models against the refitted ones}
 \label{sec:m10}
 
@@ -1204,8 +1223,8 @@ L2O extrapolates with a mean of 11.50\% against 12.44\% and a median of 9.93\% a
 with a mean of 3.24\% against 3.16\%. The largest L2O extrapolation error falls from 71.79\% (bicg) to 39.76\%
 (trisolv), because bicg's training-best interval moves from 1 in 7,500 to 1 in 25,000 and its error falls to 5.18\%.
 Of the 27 workloads with an L2O fit, 14 extrapolate worse and 13 better, and the largest increases are 14.1 to 17.0
-points (mvt, jacobi-2d and adi). The NZ and MT subsets extrapolate worse on average (22.71\% and 20.46\% against
-15.18\% and 16.74\%). On the samplers' bins, with the high-bit keep test, L2O extrapolates with a mean of 13.13\%
+points (mvt, jacobi-2d and adi). The NZ and MT subsets extrapolate worse on average (22.47\% and 20.46\% against
+13.70\% and 16.74\%). On the samplers' bins, with the high-bit keep test, L2O extrapolates with a mean of 13.13\%
 (bootstrap) and 13.47\% (disjoint) and interpolates with 2.94\% and 3.25\% (14.93\%, 15.14\%, 3.05\% and 2.94\% with the
 original keep test). M3's decision rule again selects the bootstrap sampler, with a median difference from the
 splitter's bins of 0.26 point and a median ratio of the standard deviations of 0.936 (0.46 and 0.927). Section~\ref{sec:r1} compares these errors with the resident-memory model's against the same truth.

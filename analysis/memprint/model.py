@@ -5,6 +5,7 @@ and their pairwise and three-way products. A model is an intercept plus the
 seven coefficients b1..b7 in FEATURES order.
 """
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -56,11 +57,16 @@ class Model:
     def coefficients(self):
         return [self.intercept] + list(self.coef)
 
-    def predict(self, data, sd_col="SD_MemUsage"):
-        """Return a copy of data with Predicted_Alpha and, if Alpha is known, ErrorRate (%)."""
+    def predict(self, data, sd_col="SD_MemUsage", floor=None):
+        """Return a copy of data with Predicted_Alpha and, if Alpha is known, ErrorRate (%).
+
+        A bin is a subset of the program's footprint, so the true alpha is at least 1 and the prediction is clipped
+        at 1 (floor=False, or MEMPRINT_ALPHA_FLOOR=0 in the environment, keeps the unclipped value)."""
+        if floor is None:
+            floor = os.environ.get("MEMPRINT_ALPHA_FLOOR", "1") != "0"
         data = data.copy()
         log_alpha = features(data, sd_col, self.extra).to_numpy() @ self.coef + self.intercept
-        data["Predicted_Alpha"] = np.exp(log_alpha)
+        data["Predicted_Alpha"] = np.exp(np.maximum(log_alpha, 0) if floor else log_alpha)
         if "Alpha" in data:
             data["ErrorRate"] = (data["Predicted_Alpha"] - data["Alpha"]) / data["Alpha"] * 100
         return data

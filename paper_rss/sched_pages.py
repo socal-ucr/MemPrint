@@ -130,7 +130,8 @@ def part_lisa():
     go("lisa/lisa_hybrid_32", names=HYBRID, cluster=lisa_cluster(32), kind="lisa-hybrid")
 
 
-MP = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2/mp_errors.csv")   # dissertation/mp_errors.py (37 workloads)
+MP = os.path.expanduser("~/memprint-data/2026-11-05-diss-ch2/mp_errors_hb.csv")   # dissertation/mp_errors.py (37
+# workloads, high-bit keep test; the original keep test's grid is in oldtool/)
 
 
 def part_memprint():
@@ -140,6 +141,20 @@ def part_memprint():
     in the same run (all loads)."""
     go("grid_memprint", names=["memprint-peak", "model1-rep", "exact", "exact-coarse", "exact-peak", "rss-peak",
                                "request"], opts=dict(mp=MP, mp_sampler="boot"))
+
+
+def part_memprint_hb():
+    """part_memprint's memprint-peak row again with the high-bit keep test's errors, spliced into grid_memprint.csv
+    (the other rows do not depend on MemPrint's errors); the original file moves to oldtool/."""
+    import shutil
+    import pandas as pd
+    os.makedirs(f"{P}/results/oldtool", exist_ok=True)
+    if not os.path.exists(f"{P}/results/oldtool/grid_memprint.csv"):
+        shutil.move(f"{P}/results/grid_memprint.csv", f"{P}/results/oldtool/grid_memprint.csv")
+    go("hb_grid_memprint", names=["memprint-peak"], opts=dict(mp=MP, mp_sampler="boot"))
+    old = pd.read_csv(f"{P}/results/oldtool/grid_memprint.csv")
+    new = pd.read_csv(f"{P}/results/hb_grid_memprint.csv")
+    pd.concat([old[old.oracle != "memprint-peak"], new]).to_csv(f"{P}/results/grid_memprint.csv", index=False)
 
 
 OWN = os.path.expanduser("~/memprint-data/2026-11-23-corpus-e1/mp_errors_corpus.csv")   # dissertation/corpus_e1.py

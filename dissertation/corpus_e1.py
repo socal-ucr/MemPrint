@@ -68,12 +68,7 @@ def errors(floor=False):
     """floor: alpha_i clipped at 1 (a bin is a subset of the footprint, so the true alpha is at least 1)
     -> $E/mp_errors_corpus_floor.csv"""
     from metric_check import errors as err
-    if floor:
-        orig = Model.predict
-        def clipped(self, d):
-            p = orig(self, d)
-            return p.assign(Predicted_Alpha=p.Predicted_Alpha.clip(lower=1))
-        Model.predict = clipped
+    os.environ["MEMPRINT_ALPHA_FLOOR"] = "1" if floor else "0"   # Model.predict's floor
     fits = pd.read_csv(f"{E}/fits.csv")
     rows = []
     for f in fits.itertuples():
