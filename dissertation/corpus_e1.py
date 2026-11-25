@@ -64,8 +64,16 @@ def truth(prog, inp):
     return float(t[(t.FunctionName == "Total") & (t.SamplingInterval == 1)].MemUsageObs.iloc[0])
 
 
-def errors():
+def errors(floor=False):
+    """floor: alpha_i clipped at 1 (a bin is a subset of the footprint, so the true alpha is at least 1)
+    -> $E/mp_errors_corpus_floor.csv"""
     from metric_check import errors as err
+    if floor:
+        orig = Model.predict
+        def clipped(self, d):
+            p = orig(self, d)
+            return p.assign(Predicted_Alpha=p.Predicted_Alpha.clip(lower=1))
+        Model.predict = clipped
     fits = pd.read_csv(f"{E}/fits.csv")
     rows = []
     for f in fits.itertuples():
@@ -81,12 +89,16 @@ def errors():
             rows.append(dict(sampler="boot", workload=f.workload, seed=seed, k=f.train_si, truth=T, e=e["mean_est"] / 100,
                              per_bin_mape=e["per_bin"], subset=f.subset))
     d = pd.DataFrame(rows)
-    d.to_csv(f"{E}/mp_errors_corpus.csv", index=False)
+    d.to_csv(f"{E}/mp_errors_corpus{'_floor' if floor else ''}.csv", index=False)
     pd.set_option("display.width", 200)
     print(d.groupby(["workload", "subset"]).e.agg(["min", "mean", "max"]).mul(100).round(1).to_string())
     print(f"{d.workload.nunique()} programs, {len(d)} runs; |e| median {d.e.abs().median() * 100:.2f}%, mean "
           f"{d.e.abs().mean() * 100:.2f}%; under-estimates {(d.e < 0).mean() * 100:.0f}%; within a factor of 2: "
           f"{((1 + d.e > 0.5) & (1 + d.e < 2)).mean() * 100:.0f}% of runs")
+
+
+def errors_floor():
+    errors(floor=True)
 
 
 if __name__ == "__main__":

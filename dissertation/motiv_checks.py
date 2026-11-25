@@ -59,6 +59,17 @@ def e1():
         go(f"e1_{s}", ["memprint-peak"], margins=("cal", "cal100", 0.1, 0.3), mp=MP, mp_sampler=s)
 
 
+OWN = os.path.expanduser("~/memprint-data/2026-11-23-corpus-e1/mp_errors_corpus.csv")   # dissertation/corpus_e1.py
+
+
+def e1own():
+    """Full E1: each job's error drawn from its own program's runs (corpus_e1.py), the 37-workload bootstrap errors for
+    a program without them (llama2c, hpccg until rerun); own_floor with alpha clipped at 1."""
+    go("e1own_boot", ["memprint-peak"], margins=("cal", "cal100", 0.1, 0.3), mp=MP, mp_sampler="boot", mp_own=OWN)
+    go("e1own_floor", ["memprint-peak"], margins=("cal", "cal100", 0.1, 0.3), mp=MP, mp_sampler="boot",
+       mp_own=OWN.replace(".csv", "_floor.csv"))
+
+
 def e1cap():
     for gb in SIZES:
         go(f"e1cap_{gb}", ["memprint-peak"], cluster=Cluster(local=gb), **MPO)

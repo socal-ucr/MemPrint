@@ -27,7 +27,7 @@ P = os.path.expanduser("~/memprint-data/2026-11-10-pagesnat")
 SC = ("pagesnat", "rss")
 LOADS = (0.4, 0.6, 0.8, 1.0, 1.2)
 SEEDS = (0, 1, 2)
-PROCS = 28
+PROCS = int(os.environ.get("PROCS", 28))
 SCHED = ["exact", "exact-coarse", "exact-peak", "memprint-W1", "memprint-W5", "memprint-P", "memprint-W5-peak",
          "massif", "massif-i", "massif-pages", "massif-pages-i", "heaptrack", "dhat", "dhat-curve", "dhat-hold", "gperf",
          "rss-peak", "request", "ml-peak", "reactive", "pond", "zacarias", "zacarias-past", "ksplus"]
@@ -140,6 +140,16 @@ def part_memprint():
     in the same run (all loads)."""
     go("grid_memprint", names=["memprint-peak", "model1-rep", "exact", "exact-coarse", "exact-peak", "rss-peak",
                                "request"], opts=dict(mp=MP, mp_sampler="boot"))
+
+
+OWN = os.path.expanduser("~/memprint-data/2026-11-23-corpus-e1/mp_errors_corpus.csv")   # dissertation/corpus_e1.py
+
+
+def part_memprint_own():
+    """part_memprint with each job's error from its own program (MemPrint run on the corpus programs), raw and with
+    alpha clipped at 1."""
+    for name, own in (("grid_memprint_own", OWN), ("grid_memprint_own_floor", OWN.replace(".csv", "_floor.csv"))):
+        go(name, names=["memprint-peak"], opts=dict(mp=MP, mp_sampler="boot", mp_own=own))
 
 
 def part_capacity():
