@@ -1021,8 +1021,24 @@ seed, as on the splitter's bins (74\%), and needs no margin. With the old keep t
 gave 1{,}100 minutes (63\%) with the bootstrap sampler's errors and 1{,}023 minutes (67\%) with 297 kills with the
 disjoint sampler's, and bicg's under-estimate of 62\% set the margin that covers every workload at 167\%, which gave
 6{,}700 minutes. \memprint{}'s sampled peak is therefore worth about as much as
-DHAT's peak in this simulator. The full version of E1, which would run \memprint{}'s build and prediction on the
-corpus programs themselves, needs several hours of Pin runs per program and was not run.
+DHAT's peak in this simulator. The full version of E1 runs \memprint{} on the corpus programs themselves (\texttt{dissertation/corpus\_e1.sh}).
+For each program, the splitter (20 bins) traces its two smaller inputs, the L2O model is fitted on them at its
+training-best interval, and the bootstrap sampler (the high-bit keep test, 3 seeds) runs at the largest input, which
+is the input the scheduler simulates. 21 of the 22 programs with three inputs completed. llama2.c's sampler needs
+more than the machine's 62\,GB. The estimate is within a factor of 2 of the truth on 86\% of the 63 runs, with a
+median absolute error of 16.7\%, and under-estimates in 79\% of them. The largest errors are the PolyBench kernels
+whose two training inputs are 20 to 150 times smaller than the third (jacobi-2d $-82\%$, cc1 $-63\%$, 2mm $-59\%$,
+atax $-47\%$, gemm $-41\%$). For jacobi-2d, 2mm and gemm the model extrapolates $\alpha$ below 1 (0.18 to 0.59),
+although a bin is a subset of the footprint and the true $\alpha$ is 1.00 to 1.02. Clipping the predicted $\alpha$ at 1
+brings these three within 2.4\% and the median absolute error to 12.0\% (95\% of the runs within a factor of 2).
+With each job's error drawn from its own program (llama2.c's from the 37-workload errors), the calibrated margin is set
+by these under-estimates and exceeds 100\%, so \memprint{}'s sampled peak gives 4{,}796 minutes and 13.2 jobs per
+hour, slower than the request (2{,}208 minutes, 23.5 jobs per hour). A fixed margin of 10\% gives 1{,}112 minutes
+(62\% of the gap) and 29.5 jobs per hour, with 2{,}488 kills per stream. With $\alpha$ clipped at 1, the calibrated
+margin gives 2{,}024 minutes (10\%) and the fixed 10\% margin 1{,}154 minutes (60\%). Under the pages-in-use truth of
+Chapter 3, the own errors give 4{,}696 minutes (1{,}941 with $\alpha$ clipped), against 1{,}069 with the 37-workload
+errors. \memprint{}'s value as an oracle therefore depends on how far its training inputs are from the input it
+predicts, and with two small training inputs its worst under-estimates set any margin calibrated from its errors.
 
 \begin{table}[htbp]
 \centering
