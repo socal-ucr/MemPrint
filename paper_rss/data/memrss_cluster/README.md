@@ -10,3 +10,7 @@ Where MemRSS's estimate is the target (commit after 801dea5, same policies, RESI
   capacity_reclaim.csv the same at load 0.8 over local memory 64 to 256 GB per node
   grid_inflate.csv     requests 1.3, 1.6 and 2 times the program's allocation (--inflate 0.3 0.6 1.0), truths rss and
                        reclaim, loads 0.4 to 1.2
+MemRSS aligned by instructions (scripts/memrss_instr.sh, runs in ~/memprint-data/2026-11-25-memrss-instr/runs):
+  grid_align.csv       truth and estimate from the monitored runs with perf instructions; a job on run k, MemRSS's
+                       estimate from run k+1; memrss[-i1][-w|-d2]: by wall time or by instructions (+-1% of them),
+                       the raw curve, 20 widened windows or +-2% of progress; truths rss and reclaim, loads 0.4 to 1.2

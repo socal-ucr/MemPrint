@@ -39,7 +39,9 @@ esac
 cd "$cwd" || exit 1
 start=$(date +%s.%N)
 # only the program gets libmpr (env inside the sampled command), not the sampler
-python3 "$HERE/rss_sampler.py" -i 0.02 --commit -o "$out/$label.csv" -- env "${env[@]}" "${args[@]}" \
+# PERF_INSTR=1: the program's user-space instructions every 10 ms (<label>.instr, perf stat -I), perf left out of the RSS
+perf=(); [[ ${PERF_INSTR:-0} == 1 ]] && perf=(--skip perf -- perf stat -I 10 -e instructions:u -x, -o "$out/$label.instr")
+python3 "$HERE/rss_sampler.py" -i 0.02 --commit -o "$out/$label.csv" "${perf[@]}" -- env "${env[@]}" "${args[@]}" \
     < "$input" > "$out/$label.out" 2> "$out/$label.err"
 status=$?
 secs=$(echo "$(date +%s.%N) - $start" | bc)

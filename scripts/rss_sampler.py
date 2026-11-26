@@ -28,11 +28,20 @@ import time
 FIELDS = {"Rss:": 0, "Pss:": 1, "Anonymous:": 2}
 
 
+SKIP = set()   # --skip: process names left out of the sums (their children still counted), e.g. perf
+
+
 def descendants(pid):
     out, todo = [], [pid]
     while todo:
         p = todo.pop()
-        out.append(p)
+        try:
+            with open(f"/proc/{p}/comm") as f:
+                skip = f.read().strip() in SKIP
+        except OSError:
+            skip = False
+        if not skip:
+            out.append(p)
         try:
             for t in os.listdir(f"/proc/{p}/task"):
                 with open(f"/proc/{p}/task/{t}/children") as f:
@@ -97,8 +106,10 @@ def main():
     ap.add_argument("--limit", type=float, default=None)
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--code", action="store_true")
+    ap.add_argument("--skip", action="append", default=[], help="a process name to leave out (its children counted)")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args()
+    SKIP.update(a.skip)
     cmd = a.cmd[1:] if a.cmd and a.cmd[0] == "--" else a.cmd
     t0 = time.monotonic()
     proc = subprocess.Popen(cmd, start_new_session=True)

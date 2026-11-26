@@ -73,6 +73,8 @@ RESIZE = os.path.expanduser("~/memprint-data/2026-10-12-resize")
 RUNS = os.environ.get("RESIZE_RUNS")   # scripts/trim_eval.sh's runs: every build, the trim builds among them
 TRIM_RUNS = os.environ.get("RESIZE_TRIM_RUNS")   # the trim builds alone from another share's runs (default RUNS)
 EST_RUNS = os.environ.get("RESIZE_EST_RUNS")   # trim_eval.sh's runs with MONITOR=1: the data estimate's curves
+ALIGN_RUNS = os.environ.get("RESIZE_ALIGN_RUNS")   # the same with PERF_INSTR=1: truth and estimate from these runs,
+# the estimate from another run of the same build, aligned by wall time or by instructions (align_workloads)
 BUILDS = ("mprh", "mprt", "mpre", "mpr", "trim", "est")
 SCHED = os.path.expanduser("~/memprint-data/2026-10-13-sched-llm")
 LLM = {"llamacpp-135m-n32": ("llamacpp", "135m-n32"), "llamacpp-135m-n128": ("llamacpp", "135m-n128"),
@@ -123,16 +125,34 @@ def _widened(e):
 
 
 def _shape(e, mode):
-    """MemRSS's estimate as a policy reserves it: the curve (None), widened ("w") or its peak held ("peak")."""
+    """MemRSS's estimate as a policy reserves it: the curve (None), widened ("w"), its peak held ("peak"), or with a
+    tolerance of +-N% of progress ("dN": each point the largest value within N% of it on either side)."""
     if mode == "w":
         return _widened(e)
     if mode == "peak":
         return np.full(K, float(np.max(e)))
+    if mode and mode.startswith("d"):
+        r = max(1, int(round(float(mode[1:]) * K / 100)))
+        padded = np.pad(np.asarray(e, float), r, mode="edge")
+        return np.max([padded[i:i + K] for i in range(2 * r + 1)], axis=0)
     return e
 
 
 def _mode(policy):
-    return "w" if policy.endswith("-w") else "peak" if policy.endswith("-peak") else None
+    """A MemRSS policy's shape: [mpr+]memrss[-i][-w|-peak|-dN] (-i: the estimate aligned by instructions)."""
+    last = policy.rsplit("-", 1)[-1]
+    return last if last in ("w", "peak") or (last.startswith("d") and last[1:].replace(".", "").isdigit()) else None
+
+
+def _aligned(policy):
+    """The estimate's alignment: "" (wall time) or "i<tol>" (instructions, tolerance in %), as -i<tol> in the name."""
+    if not is_memrss(policy):
+        return ""
+    return next((x for x in policy.split("-")[1:] if x.startswith("i") and x[1:].replace(".", "").isdigit()), "")
+
+
+def is_memrss(policy):
+    return policy.split("+")[-1].split("-")[0] == "memrss"
 
 
 def build_of(policy):
@@ -210,6 +230,74 @@ def workloads():
     return out
 
 
+def _instr(path):
+    """A run's cumulative user-space instructions at the end of each perf interval: (seconds, count)."""
+    t, c = [], []
+    for line in open(path):
+        f = line.strip().split(",")
+        if len(f) > 3 and not line.startswith("#"):
+            t.append(float(f[0]))
+            c.append(float(f[1]) if f[1].replace(".", "").isdigit() else 0.0)
+    return np.array(t), np.cumsum(c)
+
+
+def _on_instructions(truth_t, est_t, est_v, it_t, it_c, ie_t, ie_c, tol=0.0):
+    """The estimate (est_v at est_t in its own run) at each truth sample, indexed by instructions: at truth time t
+    the job has retired I(t), so the reservation is the estimate's largest value between the previous sample's
+    instruction share and this one's (shares of the estimate run's total, as a running system would know it),
+    widened by tol (a share of the instructions) on both sides: the kernel frees a program's memory after its
+    last instructions, so the truth can lag the estimate where memory falls."""
+    total = max(ie_c[-1], 1.0)
+    fe = np.interp(est_t, ie_t, ie_c, left=0.0) / total
+    ft = np.minimum(np.interp(truth_t, it_t, it_c, left=0.0) / total, 1.0)
+    hi = np.clip(np.searchsorted(fe, ft + tol, side="right") - 1, 0, len(est_v) - 1)
+    lo = np.clip(np.searchsorted(fe, np.concatenate([[0.0], ft[:-1]]) - tol, side="right") - 1, 0, len(est_v) - 1)
+    return np.array([est_v[min(a, b):max(a, b) + 1].max() for a, b in zip(lo, hi)])
+
+
+ITOL = (0, 0.1, 0.5, 1)   # instruction tolerances of the -i<tol> policies (% of the run's instructions)
+
+
+def align_workloads():
+    """workloads() with every curve from the runs of RESIZE_ALIGN_RUNS (scripts/trim_eval.sh with MONITOR=1
+    MPR_TRIM=-1 PERF_INSTR=1, labels trim and selftrim): a job on run k is checked against that run's RSS and
+    commit, and MemRSS's estimate comes from run k+1 of the same build, on the progress axis by wall time (memrss)
+    or by instructions (memrss_i); reclaim is run k's RSS less its own allocator's free bytes."""
+    meta = workloads()
+    out = {}
+    for name, m in meta.items():
+        d = f"{ALIGN_RUNS}/{'minivite' if name == 'miniVite (pass)' else name}"
+        builds = {}
+        for label, key in (("trim", ""), ("selftrim", "mpr_")):
+            ks = sorted(int(f.rsplit("-", 1)[1].split(".")[0]) for f in glob.glob(f"{d}/{label}-[0-9].instr"))
+            if not ks:
+                break
+            ts = [pd.read_csv(f"{d}/{label}-{k}.csv") for k in ks]
+            ms = [pd.read_csv(f"{d}/{label}-{k}.monitor.csv").dropna() for k in ks]   # (a last row cut off at exit)
+            ins = [_instr(f"{d}/{label}-{k}.instr") for k in ks]
+            builds[key] = (ts, ms, ins)
+        if len(builds) < 2:
+            continue
+        b = builds[""][0][0].rss_bytes.min()
+        w = dict(prog=m["prog"], input=m["input"])
+        for key, (ts, ms, ins) in builds.items():
+            n = len(ts)
+            runs = [(_curve(t, "rss_bytes", b), _curve(t, "commit_bytes", b)) for t in ts]
+            est = [(mm.data_bytes + mm.file_bytes).to_numpy(float) for mm in ms]
+            gap = [at_slots(np.maximum(mm.rss_bytes - mm.data_bytes - mm.file_bytes, 0).to_numpy(float), K) for mm in ms]
+            j = [(k + 1) % n for k in range(n)]   # the estimate's run
+            w["mpr" if key else "glibc"] = runs
+            w[key + "reclaim"] = [(np.maximum(r - g, 0), c) for (r, c), g in zip(runs, gap)]
+            w[key + "memrss"] = [at_slots(np.maximum(est[j[k]] - b, 0), K) for k in range(n)]
+            for tol in ITOL:   # memrss_i<tol in % of instructions>
+                w[f"{key}memrss_i{tol:g}"] = [at_slots(np.maximum(_on_instructions(
+                    ts[k].seconds.to_numpy(float), ms[j[k]].seconds.to_numpy(float), est[j[k]], *ins[k], *ins[j[k]],
+                    tol / 100) - b, 0), K) for k in range(n)]
+        w["mprh"] = w["mpr"]
+        out[name] = w
+    return out
+
+
 def untouched(runs):
     """Pond's history: the smallest untouched share (1 - peak RSS / request) of the runs."""
     return max(min(1 - rss.max() / max(np.maximum(rss, com).max(), 1e-12) for rss, com in runs), 0.0)
@@ -217,7 +305,7 @@ def untouched(runs):
 
 class Setup:
     def __init__(self, n=3000, overheads="none"):
-        self.wl = workloads()
+        self.wl = align_workloads() if ALIGN_RUNS else workloads()
         self.overheads = overheads
         self.ratio, self.native, self.pin = overhead_tables()
         self.names = sorted(self.wl)
@@ -229,12 +317,13 @@ class Setup:
         self._trace = {}
         self._need = {}
 
-    def need(self, truth, build, widened=None):
+    def need(self, truth, build, widened=None, aligned=""):
         """Per workload: the headroom (share of the estimate's peak) MemRSS's curve needs to cover the truth in
         every run of the build (glibc: None, or "mpr"), the runs paired by index (widened: of the -w curve)."""
-        key = (truth, build, widened)
+        key = (truth, build, widened, aligned)
         if key not in self._need:
             runs, est = ("mpr", "mpr_memrss") if build == "mpr" else ("glibc", "memrss")
+            est += f"_{aligned}" if aligned else ""
             if truth == "reclaim":
                 runs = "mpr_reclaim" if build == "mpr" else "reclaim"
             out = {}
@@ -251,9 +340,9 @@ class Setup:
             self._need[key] = out
         return self._need[key]
 
-    def margin(self, truth, build, name, q=0.9, widened=None):
+    def margin(self, truth, build, name, q=0.9, widened=None, aligned=""):
         """The q-quantile of the other workloads' needed headroom (leave one workload out)."""
-        need = self.need(truth, build, widened)
+        need = self.need(truth, build, widened, aligned)
         return float(np.quantile([m for p, m in need.items() if p != name], q))
 
     def stream(self, truth, load, seed, inflate=0.0):
@@ -296,7 +385,7 @@ class Setup:
                         # Pond's history sees the user's request: the untouched share includes the over-request
                         um=1 - (1 - um) / (1 + inflate), mpr_um=untouched(mothers), mprh_um=untouched(hothers),
                         truth=truth, **extra)
-            for est in ("memrss", "mpr_memrss"):   # (RESIZE_EST_RUNS only)
+            for est in [x for x in w if x.endswith("memrss") or "memrss_i" in x]:   # (RESIZE_EST_RUNS, ALIGN_RUNS)
                 if w.get(est):
                     info[f"{est}_est"] = w[est][k % len(w[est])] * s
             for bld in ("trim", "est"):   # the glibc build with trimming: the user's request all the same (or its own
@@ -339,10 +428,11 @@ class Setup:
             um = i[f"{build}_um"] if build else i["um"]
             if policy in ("exact", "mpr-exact"):
                 j.reservation = j.resident.copy()
-            elif policy in MEMRSS_POLICIES:
-                widened = _mode(policy)
-                e = _shape(i["mpr_memrss_est" if mpr else "memrss_est"], widened)
-                j.reservation = e + self.margin(i["truth"], "mpr" if mpr else None, j.shape, widened=widened) * e.max()
+            elif is_memrss(policy):
+                widened, al = _mode(policy), _aligned(policy)
+                e = _shape(i[("mpr_memrss" if mpr else "memrss") + (f"_{al}" if al else "") + "_est"], widened)
+                j.reservation = e + self.margin(i["truth"], "mpr" if mpr else None, j.shape, widened=widened,
+                                                aligned=al) * e.max()
             elif policy == "ksplus":
                 j.reservation = np.asarray(ks(j, 0.0), float)
                 j.retry = ks.attrs(j, 0.0)["retry"]
