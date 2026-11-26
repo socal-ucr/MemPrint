@@ -1,0 +1,174 @@
+\begin{thebibliography}{10}
+
+\bibitem{agarwal2017thermostat}
+Neha Agarwal and Thomas~F. Wenisch.
+\newblock Thermostat: Application-transparent page management for two-tiered
+  main memory.
+\newblock In {\em Proceedings of the 22nd International Conference on
+  Architectural Support for Programming Languages and Operating Systems
+  (ASPLOS)}, pages 631--644, 2017.
+
+\bibitem{KSplus2024}
+Jonathan Bader, Ansgar L{\"o}{\ss}er, Lauritz Thamsen, Bj{\"o}rn Scheuermann,
+  and Odej Kao.
+\newblock {KS+}: Predicting workflow task memory usage over time.
+\newblock In {\em IEEE 20th International Conference on e-Science}, 2024.
+
+\bibitem{beamer2015gap}
+Scott Beamer, Krste Asanovi{\'c}, and David Patterson.
+\newblock The {GAP} benchmark suite.
+\newblock {\em arXiv preprint arXiv:1508.03619}, 2015.
+
+\bibitem{denning1968}
+Peter~J. Denning.
+\newblock The working set model for program behavior.
+\newblock {\em Communications of the ACM}, 11(5):323--333, 1968.
+
+\bibitem{Evans2006jemalloc}
+Jason Evans.
+\newblock A scalable concurrent malloc(3) implementation for {FreeBSD}.
+\newblock In {\em BSDCan}, 2006.
+
+\bibitem{glibcmanual}
+Free Software Foundation.
+\newblock {\em The {GNU C} Library Reference Manual}, 2024.
+\newblock Section ``Memory Allocation Tunables'' (\texttt{M\_MMAP\_THRESHOLD}),
+  \url{https://www.gnu.org/software/libc/manual/}.
+
+\bibitem{minivite}
+Sayan Ghosh, Mahantesh Halappanavar, Antonino Tumeo, Ananth Kalyanaraman, and
+  Assefaw~H. Gebremedhin.
+\newblock {miniVite}: A graph analytics benchmarking tool for massively
+  parallel systems.
+\newblock In {\em Proceedings of the IEEE/ACM Performance Modeling,
+  Benchmarking and Simulation of High Performance Computer Systems Workshop
+  (PMBS)}, 2018.
+
+\bibitem{Hunter2021Temeraire}
+A.~H. Hunter, Chris Kennelly, Paul Turner, Darryl Gove, Tipp Moseley, and
+  Parthasarathy Ranganathan.
+\newblock Beyond malloc efficiency to fleet efficiency: A hugepage-aware memory
+  allocator.
+\newblock In {\em Proceedings of the 15th USENIX Symposium on Operating Systems
+  Design and Implementation (OSDI)}, pages 257--273, 2021.
+
+\bibitem{ierusalimschy1996lua}
+Roberto Ierusalimschy, Luiz~Henrique de~Figueiredo, and Waldemar Celes.
+\newblock {Lua}---an extensible extension language.
+\newblock {\em Software: Practice and Experience}, 26(6):635--652, 1996.
+
+\bibitem{Kwon2016Ingens}
+Youngjin Kwon, Hangchen Yu, Simon Peter, Christopher~J. Rossbach, and Emmett
+  Witchel.
+\newblock Coordinated and efficient huge page management with {Ingens}.
+\newblock In {\em Proceedings of the 12th USENIX Symposium on Operating Systems
+  Design and Implementation (OSDI)}, pages 705--721, 2016.
+
+\bibitem{Lee2023Memtis}
+Taehyung Lee, Sumit~Kumar Monga, Changwoo Min, and Young~Ik Eom.
+\newblock {MEMTIS}: Efficient memory tiering with dynamic page classification
+  and page size determination.
+\newblock In {\em ACM Symposium on Operating Systems Principles (SOSP)}, 2023.
+
+\bibitem{Li2023Pond}
+Huaicheng Li et~al.
+\newblock Pond: {CXL}-based memory pooling systems for cloud platforms.
+\newblock In {\em International Conference on Architectural Support for
+  Programming Languages and Operating Systems (ASPLOS)}, 2023.
+
+\bibitem{LinuxTHP}
+The Linux Kernel Documentation.
+\newblock {\em Transparent Hugepage Support}.
+\newblock Documentation/admin-guide/mm/transhuge.rst.
+
+\bibitem{Luk2005Pin}
+Chi-Keung Luk, Robert Cohn, Robert Muth, Harish Patil, Artur Klauser, Geoff
+  Lowney, Steven Wallace, Vijay~Janapa Reddi, and Kim Hazelwood.
+\newblock Pin: building customized program analysis tools with dynamic
+  instrumentation.
+\newblock In {\em Proceedings of the 2005 ACM SIGPLAN Conference on Programming
+  Language Design and Implementation}, PLDI '05, page 190–200, New York, NY,
+  USA, 2005. Association for Computing Machinery.
+
+\bibitem{Maruf2023TPP}
+Hasan~Al Maruf, Hao Wang, Abhishek Dhanotia, Johannes Weiner, Niket Agarwal,
+  Pallab Bhattacharya, Chris Petersen, Mosharaf Chowdhury, Shobhit Kanaujia,
+  and Prakash Chauhan.
+\newblock {TPP}: Transparent page placement for {CXL}-enabled tiered-memory.
+\newblock In {\em International Conference on Architectural Support for
+  Programming Languages and Operating Systems (ASPLOS)}, 2023.
+
+\bibitem{memprintstatic}
+Nafis Mustakin.
+\newblock From source code to sampling correction: Predicting memory-footprint
+  models for unseen programs.
+\newblock Manuscript, 2026.
+
+\bibitem{dhat}
+Nicholas Nethercote and Julian Seward.
+\newblock {\em {DHAT}: a dynamic heap analysis tool}.
+\newblock Valgrind user manual,
+  \url{https://valgrind.org/docs/manual/dh-manual.html}.
+
+\bibitem{Nethercote2007Valgrind}
+Nicholas Nethercote and Julian Seward.
+\newblock Valgrind: a framework for heavyweight dynamic binary instrumentation.
+\newblock In {\em Proceedings of the 28th ACM SIGPLAN Conference on Programming
+  Language Design and Implementation}, PLDI '07, page 89–100, New York, NY,
+  USA, 2007. Association for Computing Machinery.
+
+\bibitem{roca_nonell2020pebs}
+Aleix~Roca Nonell, Balazs Gerofi, Leonardo Bautista-Gomez, Dominique Martinet,
+  Vicen\c{c}~Beltran Querol, and Yutaka Ishikawa.
+\newblock On the applicability of pebs based online memory access tracking for
+  heterogeneous memory management at scale.
+\newblock In {\em Proceedings of the Workshop on Memory Centric High
+  Performance Computing}, MCHPC'18, page 50–57, New York, NY, USA, 2018.
+  Association for Computing Machinery.
+
+\bibitem{Panwar2019HawkEye}
+Ashish Panwar, Sorav Bansal, and K.~Gopinath.
+\newblock {HawkEye}: Efficient fine-grained {OS} support for huge pages.
+\newblock In {\em Proceedings of the 24th International Conference on
+  Architectural Support for Programming Languages and Operating Systems
+  (ASPLOS)}, 2019.
+
+\bibitem{park2019damon}
+SeongJae Park, Yunjae Lee, and Heon~Y. Yeom.
+\newblock Profiling dynamic data access patterns with controlled overhead and
+  quality.
+\newblock In {\em Proceedings of the 20th International Middleware Conference
+  Industrial Track}, pages 1--7, 2019.
+
+\bibitem{Peng2020Underutilization}
+Ivy Peng et~al.
+\newblock On the memory underutilization: Exploring disaggregated memory on
+  {HPC} systems.
+\newblock In {\em International Symposium on Computer Architecture and High
+  Performance Computing (SBAC-PAD)}, 2020.
+
+\bibitem{Powers2019Mesh}
+Bobby Powers, David Tench, Emery~D. Berger, and Andrew McGregor.
+\newblock Mesh: Compacting memory management for {C/C++} applications.
+\newblock In {\em Proceedings of the 40th ACM SIGPLAN Conference on Programming
+  Language Design and Implementation (PLDI)}, 2019.
+
+\bibitem{Raybuck2021HeMem}
+Amanda Raybuck, Tim Stamler, Wei Zhang, Mattan Erez, and Simon Peter.
+\newblock {HeMem}: Scalable tiered memory management for big data applications
+  and real {NVM}.
+\newblock In {\em ACM Symposium on Operating Systems Principles (SOSP)}, 2021.
+
+\bibitem{Zacarias2021Accurate}
+Felippe~Vieira Zacarias, Paul Carpenter, and Vinicius Petrucci.
+\newblock Memory demands in disaggregated {HPC}: How accurate do we need to be?
+\newblock In {\em International Workshop on Performance Modeling, Benchmarking
+  and Simulation of High Performance Computer Systems (PMBS)}, 2021.
+
+\bibitem{Zacarias2023Dynamic}
+Felippe~Vieira Zacarias, Paul Carpenter, and Vinicius Petrucci.
+\newblock Dynamic memory provisioning on disaggregated {HPC} systems.
+\newblock In {\em Workshops of the International Conference for High
+  Performance Computing, Networking, Storage and Analysis (SC-W)}, 2023.
+
+\end{thebibliography}

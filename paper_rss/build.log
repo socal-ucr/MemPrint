@@ -1,0 +1,478 @@
+This is pdfTeX, Version 3.14159265-2.6-1.40.19 (TeX Live 2018) (preloaded format=pdflatex)
+ restricted \write18 enabled.
+entering extended mode
+(./main.tex
+LaTeX2e <2017-04-15>
+Babel <3.17> and hyphenation patterns for 3 language(s) loaded.
+(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls
+Document Class: article 2014/09/29 v1.4h Standard LaTeX document class
+(/usr/share/texlive/texmf-dist/tex/latex/base/size11.clo))
+(/usr/share/texlive/texmf-dist/tex/latex/geometry/geometry.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/keyval.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/ifpdf.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/ifvtex.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/ifxetex/ifxetex.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/base/inputenc.sty
+(/usr/share/texlive/texmf-dist/tex/latex/base/utf8.def
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1enc.dfu)
+(/usr/share/texlive/texmf-dist/tex/latex/base/ot1enc.dfu)
+(/usr/share/texlive/texmf-dist/tex/latex/base/omsenc.dfu)))
+(/usr/share/texlive/texmf-dist/tex/latex/base/fontenc.sty
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1enc.def))
+(/usr/share/texlive/texmf-dist/tex/latex/lm/lmodern.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsmath.sty
+For additional information on amsmath, use the `?' option.
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amstext.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsgen.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsbsy.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsopn.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amssymb.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amsfonts.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/graphicx.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/graphics.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/trig.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-cfg/graphics.cfg)
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-def/pdftex.def)))
+(/usr/share/texlive/texmf-dist/tex/latex/booktabs/booktabs.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/tools/array.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/xcolor/xcolor.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-cfg/color.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/listings/listings.sty
+(/usr/share/texlive/texmf-dist/tex/latex/listings/lstmisc.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/listings/listings.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/hyperref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/hobsub-hyperref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/hobsub-generic.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/auxhook.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/kvoptions.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/pd1enc.def)
+(/usr/share/texlive/texmf-dist/tex/latex/latexconfig/hyperref.cfg)
+(/usr/share/texlive/texmf-dist/tex/latex/url/url.sty))
+
+Package hyperref Message: Driver (autodetected): hpdftex.
+
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/hpdftex.def
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/rerunfilecheck.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/caption/caption.sty
+(/usr/share/texlive/texmf-dist/tex/latex/caption/caption3.sty)) (./main.aux)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/t1lmr.fd)
+*geometry* driver: auto-detecting
+*geometry* detected driver: pdftex
+(/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
+[Loading MPS to PDF converter (version 2006.09.02).]
+) (/usr/share/texlive/texmf-dist/tex/latex/oberdiek/epstopdf-base.sty
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/grfext.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/nameref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/gettitlestring.sty))
+(./main.out) (./main.out) (/usr/share/texlive/texmf-dist/tex/latex/lm/ot1lmr.fd
+) (/usr/share/texlive/texmf-dist/tex/latex/lm/omllmm.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omslmsy.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omxlmex.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd) [1{/usr/share/texliv
+e/texmf-dist/fonts/map/pdftex/updmap/pdftex.map}]
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omslmr.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/t1lmtt.fd) [2] [3]
+Underfull \hbox (badness 1371) in paragraph at lines 207--214
+[]\T1/lmr/bx/n/10.95 Free bytes. \T1/lmr/m/n/10.95 The li-brary looks up the al
+-lo-ca-tor's in-ter-face when it starts. With
+
+Underfull \hbox (badness 5064) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 je-mal-loc (\T1/lmtt/m/n/10.95 mallctl\T1/lmr/m/n/10.95 ), th
+e free bytes are \T1/lmtt/m/n/10.95 stats.resident \T1/lmr/m/n/10.95 mi-nus \T1
+/lmtt/m/n/10.95 stats.allocated \T1/lmr/m/n/10.95 mi-
+
+Underfull \hbox (badness 4981) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 nus \T1/lmtt/m/n/10.95 stats.metadata\T1/lmr/m/n/10.95 , af-t
+er a re-fresh of the statis-tics through \T1/lmtt/m/n/10.95 epoch\T1/lmr/m/n/10
+.95 . With TC-
+
+Underfull \hbox (badness 10000) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 Mal-loc (\T1/lmtt/m/n/10.95 MallocExtension_GetNumericPropert
+y\T1/lmr/m/n/10.95 ), they are \T1/lmtt/m/n/10.95 generic.heap_size \T1/lmr/m/n
+/10.95 mi-nus
+
+Underfull \hbox (badness 4454) in paragraph at lines 207--214
+\T1/lmtt/m/n/10.95 tcmalloc.pageheap_unmapped_bytes \T1/lmr/m/n/10.95 mi-nus \T
+1/lmtt/m/n/10.95 generic.current_allocated_bytes\T1/lmr/m/n/10.95 . Oth-er-
+[4] [5] (./tables/summary.tex) (./tables/model.tex) [6]
+(./tables/components.tex) [7] (./tables/transfer.tex) (./tables/sampling.tex)
+[8] [9] (./tables/grid_pagesnat.tex) [10] (./tables/alloc.tex)
+(./tables/thp.tex) [11] [12] (./tables/llm.tex) [13] (./tables/inrun.tex)
+(./tables/blind.tex) [14] [15] (./tables/blind_splits.tex) (./tables/borrow.tex
+) [16] (./tables/similar.tex) [17] [18] (./tables/zero.tex) [19]
+(./tables/options.tex) [20] [21] (./tables/trim_totals.tex) (./tables/trim.tex)
+
+Underfull \hbox (badness 1142) in paragraph at lines 1037--1043
+[]\T1/lmr/m/n/10.95 Trimming re-turns less mem-ory than the model sub-tracts on
+ some pro-grams, be-cause
+[22] (./tables/trim_share.tex) [23] (./tables/trim_grid.tex) [24]
+(./tables/place_refs.tex) [25] (./tables/place_static.tex) [26]
+(./tables/place_migrate.tex) [27] (./tables/place_libmpr.tex) [28]
+(./tables/place_combo.tex) [29] (./tables/place_cxl.tex) [30]
+(./tables/cxl_grid.tex) (./tables/cxl_minute.tex)
+
+LaTeX Warning: Reference `tab:cxl-minute' on page 31 undefined on input line 14
+38.
+
+[31] [32]
+Overfull \hbox (18.33405pt too wide) in paragraph at lines 1475--1525
+ [][] 
+[33] [34] [35] [36]
+Underfull \hbox (badness 3780) in paragraph at lines 1668--1680
+[]\T1/lmr/bx/n/10.95 Artifacts. \T1/lmtt/m/n/10.95 paper_rss/tools/mprshim.c \T
+1/lmr/m/n/10.95 is the sam-pling li-brary. \T1/lmtt/m/n/10.95 run_model.sh\T1/l
+mr/m/n/10.95 ,
+
+Underfull \hbox (badness 1668) in paragraph at lines 1668--1680
+\T1/lmtt/m/n/10.95 run_transfer.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_op
+tions.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_alloc.sh \T1/lmr/m/n/10.95 a
+nd \T1/lmtt/m/n/10.95 run_llm.sh \T1/lmr/m/n/10.95 run the ex-per-i-ments,
+
+Underfull \hbox (badness 1668) in paragraph at lines 1668--1680
+\T1/lmtt/m/n/10.95 run_place.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_lplac
+e.sh \T1/lmr/m/n/10.95 and \T1/lmtt/m/n/10.95 run_combo.sh \T1/lmr/m/n/10.95 ru
+n the ex-per-i-ments, \T1/lmtt/m/n/10.95 place_plans.py\T1/lmr/m/n/10.95 ,
+(./main.bbl [37] [38]) [39] (./main.aux)
+
+LaTeX Warning: There were undefined references.
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
+ )
+(see the transcript file for additional information){/usr/share/texlive/texmf-d
+ist/fonts/enc/dvips/lm/lm-ec.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips
+/lm/lm-mathsy.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips/lm/lm-rm.enc}{
+/usr/share/texlive/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc}{/usr/share/texl
+ive/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc}</usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmbx10.pfb></usr/share/texlive/texmf-dist/fonts/type1/pub
+lic/lm/lmbx12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmex10.p
+fb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmmi10.pfb></usr/share/
+texlive/texmf-dist/fonts/type1/public/lm/lmmi8.pfb></usr/share/texlive/texmf-di
+st/fonts/type1/public/lm/lmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/p
+ublic/lm/lmr12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmr17.p
+fb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmr7.pfb></usr/share/te
+xlive/texmf-dist/fonts/type1/public/lm/lmr8.pfb></usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmr9.pfb></usr/share/texlive/texmf-dist/fonts/type1/publi
+c/lm/lmri10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmri8.pfb>
+</usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmsy10.pfb></usr/share/tex
+live/texmf-dist/fonts/type1/public/lm/lmsy7.pfb></usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/publ
+ic/lm/lmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmtt8.pfb
+>
+Output written on main.pdf (39 pages, 505304 bytes).
+Transcript written on main.log.
+This is BibTeX, Version 0.99d (TeX Live 2018)
+The top-level auxiliary file: main.aux
+The style file: plain.bst
+Database file #1: references.bib
+This is pdfTeX, Version 3.14159265-2.6-1.40.19 (TeX Live 2018) (preloaded format=pdflatex)
+ restricted \write18 enabled.
+entering extended mode
+(./main.tex
+LaTeX2e <2017-04-15>
+Babel <3.17> and hyphenation patterns for 3 language(s) loaded.
+(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls
+Document Class: article 2014/09/29 v1.4h Standard LaTeX document class
+(/usr/share/texlive/texmf-dist/tex/latex/base/size11.clo))
+(/usr/share/texlive/texmf-dist/tex/latex/geometry/geometry.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/keyval.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/ifpdf.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/ifvtex.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/ifxetex/ifxetex.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/base/inputenc.sty
+(/usr/share/texlive/texmf-dist/tex/latex/base/utf8.def
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1enc.dfu)
+(/usr/share/texlive/texmf-dist/tex/latex/base/ot1enc.dfu)
+(/usr/share/texlive/texmf-dist/tex/latex/base/omsenc.dfu)))
+(/usr/share/texlive/texmf-dist/tex/latex/base/fontenc.sty
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1enc.def))
+(/usr/share/texlive/texmf-dist/tex/latex/lm/lmodern.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsmath.sty
+For additional information on amsmath, use the `?' option.
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amstext.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsgen.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsbsy.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsopn.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amssymb.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amsfonts.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/graphicx.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/graphics.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/trig.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-cfg/graphics.cfg)
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-def/pdftex.def)))
+(/usr/share/texlive/texmf-dist/tex/latex/booktabs/booktabs.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/tools/array.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/xcolor/xcolor.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-cfg/color.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/listings/listings.sty
+(/usr/share/texlive/texmf-dist/tex/latex/listings/lstmisc.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/listings/listings.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/hyperref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/hobsub-hyperref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/hobsub-generic.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/auxhook.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/kvoptions.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/pd1enc.def)
+(/usr/share/texlive/texmf-dist/tex/latex/latexconfig/hyperref.cfg)
+(/usr/share/texlive/texmf-dist/tex/latex/url/url.sty))
+
+Package hyperref Message: Driver (autodetected): hpdftex.
+
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/hpdftex.def
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/rerunfilecheck.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/caption/caption.sty
+(/usr/share/texlive/texmf-dist/tex/latex/caption/caption3.sty)) (./main.aux)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/t1lmr.fd)
+*geometry* driver: auto-detecting
+*geometry* detected driver: pdftex
+(/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
+[Loading MPS to PDF converter (version 2006.09.02).]
+) (/usr/share/texlive/texmf-dist/tex/latex/oberdiek/epstopdf-base.sty
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/grfext.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/nameref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/gettitlestring.sty))
+(./main.out) (./main.out) (/usr/share/texlive/texmf-dist/tex/latex/lm/ot1lmr.fd
+) (/usr/share/texlive/texmf-dist/tex/latex/lm/omllmm.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omslmsy.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omxlmex.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd) [1{/usr/share/texliv
+e/texmf-dist/fonts/map/pdftex/updmap/pdftex.map}]
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omslmr.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/t1lmtt.fd) [2] [3]
+Underfull \hbox (badness 1371) in paragraph at lines 207--214
+[]\T1/lmr/bx/n/10.95 Free bytes. \T1/lmr/m/n/10.95 The li-brary looks up the al
+-lo-ca-tor's in-ter-face when it starts. With
+
+Underfull \hbox (badness 5064) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 je-mal-loc (\T1/lmtt/m/n/10.95 mallctl\T1/lmr/m/n/10.95 ), th
+e free bytes are \T1/lmtt/m/n/10.95 stats.resident \T1/lmr/m/n/10.95 mi-nus \T1
+/lmtt/m/n/10.95 stats.allocated \T1/lmr/m/n/10.95 mi-
+
+Underfull \hbox (badness 4981) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 nus \T1/lmtt/m/n/10.95 stats.metadata\T1/lmr/m/n/10.95 , af-t
+er a re-fresh of the statis-tics through \T1/lmtt/m/n/10.95 epoch\T1/lmr/m/n/10
+.95 . With TC-
+
+Underfull \hbox (badness 10000) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 Mal-loc (\T1/lmtt/m/n/10.95 MallocExtension_GetNumericPropert
+y\T1/lmr/m/n/10.95 ), they are \T1/lmtt/m/n/10.95 generic.heap_size \T1/lmr/m/n
+/10.95 mi-nus
+
+Underfull \hbox (badness 4454) in paragraph at lines 207--214
+\T1/lmtt/m/n/10.95 tcmalloc.pageheap_unmapped_bytes \T1/lmr/m/n/10.95 mi-nus \T
+1/lmtt/m/n/10.95 generic.current_allocated_bytes\T1/lmr/m/n/10.95 . Oth-er-
+[4] [5] (./tables/summary.tex) (./tables/model.tex) [6]
+(./tables/components.tex) [7] (./tables/transfer.tex) (./tables/sampling.tex)
+[8] [9] (./tables/grid_pagesnat.tex) [10] (./tables/alloc.tex)
+(./tables/thp.tex) [11] [12] (./tables/llm.tex) [13] (./tables/inrun.tex)
+(./tables/blind.tex) [14] [15] (./tables/blind_splits.tex) (./tables/borrow.tex
+) [16] (./tables/similar.tex) [17] [18] (./tables/zero.tex) [19]
+(./tables/options.tex) [20] [21] (./tables/trim_totals.tex) (./tables/trim.tex)
+
+Underfull \hbox (badness 1142) in paragraph at lines 1037--1043
+[]\T1/lmr/m/n/10.95 Trimming re-turns less mem-ory than the model sub-tracts on
+ some pro-grams, be-cause
+[22] (./tables/trim_share.tex) [23] (./tables/trim_grid.tex) [24]
+(./tables/place_refs.tex) [25] (./tables/place_static.tex) [26]
+(./tables/place_migrate.tex) [27] (./tables/place_libmpr.tex) [28]
+(./tables/place_combo.tex) [29] (./tables/place_cxl.tex) [30]
+(./tables/cxl_grid.tex) (./tables/cxl_minute.tex) [31] [32]
+Overfull \hbox (18.33405pt too wide) in paragraph at lines 1475--1525
+ [][] 
+[33] [34] [35] [36]
+Underfull \hbox (badness 3780) in paragraph at lines 1668--1680
+[]\T1/lmr/bx/n/10.95 Artifacts. \T1/lmtt/m/n/10.95 paper_rss/tools/mprshim.c \T
+1/lmr/m/n/10.95 is the sam-pling li-brary. \T1/lmtt/m/n/10.95 run_model.sh\T1/l
+mr/m/n/10.95 ,
+
+Underfull \hbox (badness 1668) in paragraph at lines 1668--1680
+\T1/lmtt/m/n/10.95 run_transfer.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_op
+tions.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_alloc.sh \T1/lmr/m/n/10.95 a
+nd \T1/lmtt/m/n/10.95 run_llm.sh \T1/lmr/m/n/10.95 run the ex-per-i-ments,
+
+Underfull \hbox (badness 1668) in paragraph at lines 1668--1680
+\T1/lmtt/m/n/10.95 run_place.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_lplac
+e.sh \T1/lmr/m/n/10.95 and \T1/lmtt/m/n/10.95 run_combo.sh \T1/lmr/m/n/10.95 ru
+n the ex-per-i-ments, \T1/lmtt/m/n/10.95 place_plans.py\T1/lmr/m/n/10.95 ,
+(./main.bbl [37] [38]) [39] (./main.aux) )
+(see the transcript file for additional information){/usr/share/texlive/texmf-d
+ist/fonts/enc/dvips/lm/lm-ec.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips
+/lm/lm-mathsy.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips/lm/lm-rm.enc}{
+/usr/share/texlive/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc}{/usr/share/texl
+ive/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc}</usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmbx10.pfb></usr/share/texlive/texmf-dist/fonts/type1/pub
+lic/lm/lmbx12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmex10.p
+fb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmmi10.pfb></usr/share/
+texlive/texmf-dist/fonts/type1/public/lm/lmmi8.pfb></usr/share/texlive/texmf-di
+st/fonts/type1/public/lm/lmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/p
+ublic/lm/lmr12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmr17.p
+fb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmr7.pfb></usr/share/te
+xlive/texmf-dist/fonts/type1/public/lm/lmr8.pfb></usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmr9.pfb></usr/share/texlive/texmf-dist/fonts/type1/publi
+c/lm/lmri10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmri8.pfb>
+</usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmsy10.pfb></usr/share/tex
+live/texmf-dist/fonts/type1/public/lm/lmsy7.pfb></usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/publ
+ic/lm/lmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmtt8.pfb
+>
+Output written on main.pdf (39 pages, 505143 bytes).
+Transcript written on main.log.
+This is pdfTeX, Version 3.14159265-2.6-1.40.19 (TeX Live 2018) (preloaded format=pdflatex)
+ restricted \write18 enabled.
+entering extended mode
+(./main.tex
+LaTeX2e <2017-04-15>
+Babel <3.17> and hyphenation patterns for 3 language(s) loaded.
+(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls
+Document Class: article 2014/09/29 v1.4h Standard LaTeX document class
+(/usr/share/texlive/texmf-dist/tex/latex/base/size11.clo))
+(/usr/share/texlive/texmf-dist/tex/latex/geometry/geometry.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/keyval.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/ifpdf.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/ifvtex.sty)
+(/usr/share/texlive/texmf-dist/tex/generic/ifxetex/ifxetex.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/base/inputenc.sty
+(/usr/share/texlive/texmf-dist/tex/latex/base/utf8.def
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1enc.dfu)
+(/usr/share/texlive/texmf-dist/tex/latex/base/ot1enc.dfu)
+(/usr/share/texlive/texmf-dist/tex/latex/base/omsenc.dfu)))
+(/usr/share/texlive/texmf-dist/tex/latex/base/fontenc.sty
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1enc.def))
+(/usr/share/texlive/texmf-dist/tex/latex/lm/lmodern.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsmath.sty
+For additional information on amsmath, use the `?' option.
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amstext.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsgen.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsbsy.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsopn.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amssymb.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amsfonts.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/graphicx.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/graphics.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics/trig.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-cfg/graphics.cfg)
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-def/pdftex.def)))
+(/usr/share/texlive/texmf-dist/tex/latex/booktabs/booktabs.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/tools/array.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/xcolor/xcolor.sty
+(/usr/share/texlive/texmf-dist/tex/latex/graphics-cfg/color.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/listings/listings.sty
+(/usr/share/texlive/texmf-dist/tex/latex/listings/lstmisc.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/listings/listings.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/hyperref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/hobsub-hyperref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/hobsub-generic.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/auxhook.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/kvoptions.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/pd1enc.def)
+(/usr/share/texlive/texmf-dist/tex/latex/latexconfig/hyperref.cfg)
+(/usr/share/texlive/texmf-dist/tex/latex/url/url.sty))
+
+Package hyperref Message: Driver (autodetected): hpdftex.
+
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/hpdftex.def
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/rerunfilecheck.sty))
+(/usr/share/texlive/texmf-dist/tex/latex/caption/caption.sty
+(/usr/share/texlive/texmf-dist/tex/latex/caption/caption3.sty)) (./main.aux)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/t1lmr.fd)
+*geometry* driver: auto-detecting
+*geometry* detected driver: pdftex
+(/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
+[Loading MPS to PDF converter (version 2006.09.02).]
+) (/usr/share/texlive/texmf-dist/tex/latex/oberdiek/epstopdf-base.sty
+(/usr/share/texlive/texmf-dist/tex/latex/oberdiek/grfext.sty)
+(/usr/share/texlive/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg))
+(/usr/share/texlive/texmf-dist/tex/latex/hyperref/nameref.sty
+(/usr/share/texlive/texmf-dist/tex/generic/oberdiek/gettitlestring.sty))
+(./main.out) (./main.out) (/usr/share/texlive/texmf-dist/tex/latex/lm/ot1lmr.fd
+) (/usr/share/texlive/texmf-dist/tex/latex/lm/omllmm.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omslmsy.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omxlmex.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd) [1{/usr/share/texliv
+e/texmf-dist/fonts/map/pdftex/updmap/pdftex.map}]
+(/usr/share/texlive/texmf-dist/tex/latex/lm/omslmr.fd)
+(/usr/share/texlive/texmf-dist/tex/latex/lm/t1lmtt.fd) [2] [3]
+Underfull \hbox (badness 1371) in paragraph at lines 207--214
+[]\T1/lmr/bx/n/10.95 Free bytes. \T1/lmr/m/n/10.95 The li-brary looks up the al
+-lo-ca-tor's in-ter-face when it starts. With
+
+Underfull \hbox (badness 5064) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 je-mal-loc (\T1/lmtt/m/n/10.95 mallctl\T1/lmr/m/n/10.95 ), th
+e free bytes are \T1/lmtt/m/n/10.95 stats.resident \T1/lmr/m/n/10.95 mi-nus \T1
+/lmtt/m/n/10.95 stats.allocated \T1/lmr/m/n/10.95 mi-
+
+Underfull \hbox (badness 4981) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 nus \T1/lmtt/m/n/10.95 stats.metadata\T1/lmr/m/n/10.95 , af-t
+er a re-fresh of the statis-tics through \T1/lmtt/m/n/10.95 epoch\T1/lmr/m/n/10
+.95 . With TC-
+
+Underfull \hbox (badness 10000) in paragraph at lines 207--214
+\T1/lmr/m/n/10.95 Mal-loc (\T1/lmtt/m/n/10.95 MallocExtension_GetNumericPropert
+y\T1/lmr/m/n/10.95 ), they are \T1/lmtt/m/n/10.95 generic.heap_size \T1/lmr/m/n
+/10.95 mi-nus
+
+Underfull \hbox (badness 4454) in paragraph at lines 207--214
+\T1/lmtt/m/n/10.95 tcmalloc.pageheap_unmapped_bytes \T1/lmr/m/n/10.95 mi-nus \T
+1/lmtt/m/n/10.95 generic.current_allocated_bytes\T1/lmr/m/n/10.95 . Oth-er-
+[4] [5] (./tables/summary.tex) (./tables/model.tex) [6]
+(./tables/components.tex) [7] (./tables/transfer.tex) (./tables/sampling.tex)
+[8] [9] (./tables/grid_pagesnat.tex) [10] (./tables/alloc.tex)
+(./tables/thp.tex) [11] [12] (./tables/llm.tex) [13] (./tables/inrun.tex)
+(./tables/blind.tex) [14] [15] (./tables/blind_splits.tex) (./tables/borrow.tex
+) [16] (./tables/similar.tex) [17] [18] (./tables/zero.tex) [19]
+(./tables/options.tex) [20] [21] (./tables/trim_totals.tex) (./tables/trim.tex)
+
+Underfull \hbox (badness 1142) in paragraph at lines 1037--1043
+[]\T1/lmr/m/n/10.95 Trimming re-turns less mem-ory than the model sub-tracts on
+ some pro-grams, be-cause
+[22] (./tables/trim_share.tex) [23] (./tables/trim_grid.tex) [24]
+(./tables/place_refs.tex) [25] (./tables/place_static.tex) [26]
+(./tables/place_migrate.tex) [27] (./tables/place_libmpr.tex) [28]
+(./tables/place_combo.tex) [29] (./tables/place_cxl.tex) [30]
+(./tables/cxl_grid.tex) (./tables/cxl_minute.tex) [31] [32]
+Overfull \hbox (18.33405pt too wide) in paragraph at lines 1475--1525
+ [][] 
+[33] [34] [35] [36]
+Underfull \hbox (badness 3780) in paragraph at lines 1668--1680
+[]\T1/lmr/bx/n/10.95 Artifacts. \T1/lmtt/m/n/10.95 paper_rss/tools/mprshim.c \T
+1/lmr/m/n/10.95 is the sam-pling li-brary. \T1/lmtt/m/n/10.95 run_model.sh\T1/l
+mr/m/n/10.95 ,
+
+Underfull \hbox (badness 1668) in paragraph at lines 1668--1680
+\T1/lmtt/m/n/10.95 run_transfer.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_op
+tions.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_alloc.sh \T1/lmr/m/n/10.95 a
+nd \T1/lmtt/m/n/10.95 run_llm.sh \T1/lmr/m/n/10.95 run the ex-per-i-ments,
+
+Underfull \hbox (badness 1668) in paragraph at lines 1668--1680
+\T1/lmtt/m/n/10.95 run_place.sh\T1/lmr/m/n/10.95 , \T1/lmtt/m/n/10.95 run_lplac
+e.sh \T1/lmr/m/n/10.95 and \T1/lmtt/m/n/10.95 run_combo.sh \T1/lmr/m/n/10.95 ru
+n the ex-per-i-ments, \T1/lmtt/m/n/10.95 place_plans.py\T1/lmr/m/n/10.95 ,
+(./main.bbl [37] [38]) [39] (./main.aux) )
+(see the transcript file for additional information){/usr/share/texlive/texmf-d
+ist/fonts/enc/dvips/lm/lm-ec.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips
+/lm/lm-mathsy.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips/lm/lm-rm.enc}{
+/usr/share/texlive/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc}{/usr/share/texl
+ive/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc}</usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmbx10.pfb></usr/share/texlive/texmf-dist/fonts/type1/pub
+lic/lm/lmbx12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmex10.p
+fb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmmi10.pfb></usr/share/
+texlive/texmf-dist/fonts/type1/public/lm/lmmi8.pfb></usr/share/texlive/texmf-di
+st/fonts/type1/public/lm/lmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/p
+ublic/lm/lmr12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmr17.p
+fb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmr7.pfb></usr/share/te
+xlive/texmf-dist/fonts/type1/public/lm/lmr8.pfb></usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmr9.pfb></usr/share/texlive/texmf-dist/fonts/type1/publi
+c/lm/lmri10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmri8.pfb>
+</usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmsy10.pfb></usr/share/tex
+live/texmf-dist/fonts/type1/public/lm/lmsy7.pfb></usr/share/texlive/texmf-dist/
+fonts/type1/public/lm/lmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/publ
+ic/lm/lmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/lm/lmtt8.pfb
+>
+Output written on main.pdf (39 pages, 505143 bytes).
+Transcript written on main.log.

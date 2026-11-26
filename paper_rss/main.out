@@ -1,0 +1,28 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{Background: what RSS counts}{}% 2
+\BOOKMARK [1][-]{section.3}{The footprint model}{}% 3
+\BOOKMARK [1][-]{section.4}{Methodology}{}% 4
+\BOOKMARK [1][-]{section.5}{Accuracy on the job's own input}{}% 5
+\BOOKMARK [2][-]{subsection.5.1}{Where the remaining RSS goes}{section.5}% 6
+\BOOKMARK [1][-]{section.6}{Transfer to a larger input}{}% 7
+\BOOKMARK [1][-]{section.7}{Scheduling with the model's curves}{}% 8
+\BOOKMARK [1][-]{section.8}{Other allocators and transparent huge pages}{}% 9
+\BOOKMARK [1][-]{section.9}{Language model engines}{}% 10
+\BOOKMARK [1][-]{section.10}{Programs and inputs not seen before}{}% 11
+\BOOKMARK [2][-]{subsection.10.1}{The runtime's pages from the job's own run}{section.10}% 12
+\BOOKMARK [2][-]{subsection.10.2}{The companion study's blind programs}{section.10}% 13
+\BOOKMARK [2][-]{subsection.10.3}{Borrowing the growth of other programs}{section.10}% 14
+\BOOKMARK [2][-]{subsection.10.4}{Similarity of the code instead of the run}{section.10}% 15
+\BOOKMARK [2][-]{subsection.10.5}{A prediction with no run of the program}{section.10}% 16
+\BOOKMARK [1][-]{section.11}{Other ways to correct RSS}{}% 17
+\BOOKMARK [1][-]{section.12}{Returning free memory at run time}{}% 18
+\BOOKMARK [1][-]{section.13}{Hot and cold memory for a memory pool}{}% 19
+\BOOKMARK [2][-]{subsection.13.1}{Measuring hot and cold memory without privileges}{section.13}% 20
+\BOOKMARK [2][-]{subsection.13.2}{Placement on an emulated pool}{section.13}% 21
+\BOOKMARK [2][-]{subsection.13.3}{Moving memory while the program runs}{section.13}% 22
+\BOOKMARK [2][-]{subsection.13.4}{Placement in libmpr}{section.13}% 23
+\BOOKMARK [2][-]{subsection.13.5}{A slower pool}{section.13}% 24
+\BOOKMARK [1][-]{section.14}{Costs and effects of the approaches}{}% 25
+\BOOKMARK [1][-]{section.15}{Limitations}{}% 26
+\BOOKMARK [1][-]{section.16}{Related work}{}% 27
+\BOOKMARK [1][-]{section.17}{Conclusion}{}% 28

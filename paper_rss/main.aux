@@ -1,0 +1,200 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{KSplus2024}
+\citation{Zacarias2021Accurate}
+\citation{Li2023Pond}
+\citation{Luk2005Pin}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}}
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\citation{minivite}
+\citation{memprintstatic}
+\citation{glibcmanual}
+\citation{Evans2006jemalloc}
+\citation{Hunter2021Temeraire}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background: what RSS counts}{3}{section.2}}
+\newlabel{sec:background}{{2}{3}{Background: what RSS counts}{section.2}{}}
+\citation{LinuxTHP}
+\citation{Kwon2016Ingens}
+\citation{Panwar2019HawkEye}
+\@writefile{toc}{\contentsline {section}{\numberline {3}The footprint model}{4}{section.3}}
+\newlabel{sec:model}{{3}{4}{The footprint model}{section.3}{}}
+\citation{beamer2015gap}
+\citation{ierusalimschy1996lua}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Methodology}{5}{section.4}}
+\newlabel{sec:method}{{4}{5}{Methodology}{section.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Medians over programs, each the median of 3 runs. Whole-run errors and peak errors are percentages of the truth (pages touched plus the runtime's pages, on the native clock). The 90th percentile of the absolute error and the lowest peak error show the worst cases. Overhead is the run time over a plain RSS run ($\times $). Data $\mathaccentV {hat}05Ef_1$ is the data footprint, $\qopname  \relax m{max}(A - F, 0) + M + B$, and Charged $\mathaccentV {hat}05Ef_2$ is the charged footprint, $\qopname  \relax m{max}(P - F, 0)$ (Section\nobreakspace  {}\ref  {sec:model}).\relax }}{6}{table.caption.1}}
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:summary}{{1}{6}{Medians over programs, each the median of 3 runs. Whole-run errors and peak errors are percentages of the truth (pages touched plus the runtime's pages, on the native clock). The 90th percentile of the absolute error and the lowest peak error show the worst cases. Overhead is the run time over a plain RSS run ($\times $). Data $\hat f_1$ is the data footprint, $\max (A - F, 0) + M + B$, and Charged $\hat f_2$ is the charged footprint, $\max (P - F, 0)$ (\secref {sec:model}).\relax }{table.caption.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Accuracy on the job's own input}{6}{section.5}}
+\newlabel{sec:repeat}{{5}{6}{Accuracy on the job's own input}{section.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Whole-run error per program (\% of the truth), signed and absolute, median of 3 runs. Overhead is the run time over a plain RSS run ($\times $). The model's two estimates come from the same run. MemPrint{} has no W5 run of darknet.\relax }}{7}{table.caption.2}}
+\newlabel{tab:model}{{2}{7}{Whole-run error per program (\% of the truth), signed and absolute, median of 3 runs. Overhead is the run time over a plain RSS run ($\times $). The model's two estimates come from the same run. \memprint {} has no W5 run of darknet.\relax }{table.caption.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Where the remaining RSS goes}{7}{subsection.5.1}}
+\newlabel{sec:gap}{{5.1}{7}{Where the remaining RSS goes}{subsection.5.1}{}}
+\citation{KSplus2024}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Parts of the model's run, each summed over the run as a percentage of the truth's sum (the truth is 100). Data is estimate 1. Free is glibc's free bytes. File RSS and file PSS are the RSS and PSS of file-backed pages (RSS minus anonymous RSS, and PSS minus anonymous RSS). Median of 3 runs.\relax }}{8}{table.caption.3}}
+\newlabel{tab:components}{{3}{8}{Parts of the model's run, each summed over the run as a percentage of the truth's sum (the truth is 100). Data is estimate 1. Free is glibc's free bytes. File RSS and file PSS are the RSS and PSS of file-backed pages (RSS minus anonymous RSS, and PSS minus anonymous RSS). Median of 3 runs.\relax }{table.caption.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Transfer to a larger input}{8}{section.6}}
+\newlabel{sec:transfer}{{6}{8}{Transfer to a larger input}{section.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Whole-run error (\% of the truth), signed and absolute, of each estimate predicted for a program's largest input from its smaller inputs. The peak is a linear regression of the smaller inputs' peaks on the input size, never below the largest of them, and the shape is the largest smaller input's curve. -- marks a program whose smaller inputs show nothing above the runtime's pages, for which the scheduler falls back to the user's request.\relax }}{9}{table.caption.4}}
+\newlabel{tab:transfer}{{4}{9}{Whole-run error (\% of the truth), signed and absolute, of each estimate predicted for a program's largest input from its smaller inputs. The peak is a linear regression of the smaller inputs' peaks on the input size, never below the largest of them, and the shape is the largest smaller input's curve. -- marks a program whose smaller inputs show nothing above the runtime's pages, for which the scheduler falls back to the user's request.\relax }{table.caption.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces The model under four samplers: \texttt  {smaps\_rollup} every 5\tmspace  +\thinmuskip {.1667em}ms (the model's) and every 1\tmspace  +\thinmuskip {.1667em}ms, the RSS counters of \texttt  {/proc/self/status} every 100\tmspace  +\thinmuskip {.1667em}$\mu $s, and a sample after every 256 page faults. Transfer as in Table\nobreakspace  {}\ref  {tab:transfer}, rebuilt from each sampler's runs of the smaller inputs; blind configurations as in Table\nobreakspace  {}\ref  {tab:blind} and Table\nobreakspace  {}\ref  {tab:blind-splits}, variant (b). Run time at the largest inputs, 3 runs interleaved with runs of the program alone.\relax }}{10}{table.caption.5}}
+\newlabel{tab:sampling}{{5}{10}{The model under four samplers: \texttt {smaps\_rollup} every 5\,ms (the model's) and every 1\,ms, the RSS counters of \texttt {/proc/self/status} every 100\,$\mu $s, and a sample after every 256 page faults. Transfer as in \tabref {tab:transfer}, rebuilt from each sampler's runs of the smaller inputs; blind configurations as in \tabref {tab:blind} and \tabref {tab:blind-splits}, variant (b). Run time at the largest inputs, 3 runs interleaved with runs of the program alone.\relax }{table.caption.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Scheduling with the model's curves}{10}{section.7}}
+\newlabel{sec:sched}{{7}{10}{Scheduling with the model's curves}{section.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Scheduling simulation under the pages-touched truth on the native clock: mean response time (minutes) at three offered loads, and throughput (jobs per hour), OOM kills and core-hours lost to them at a load of 0.8. Means over 3 seeds of 3000 jobs on 32 nodes. Every estimate's margin is the 90th percentile of the margins the other programs need (leave one program out), and the user's request takes 10\%. The second block profiles the job's own input, and the third transfers from the program's smaller inputs.\relax }}{11}{table.caption.6}}
+\newlabel{tab:sched}{{6}{11}{Scheduling simulation under the pages-touched truth on the native clock: mean response time (minutes) at three offered loads, and throughput (jobs per hour), OOM kills and core-hours lost to them at a load of 0.8. Means over 3 seeds of 3000 jobs on 32 nodes. Every estimate's margin is the 90th percentile of the margins the other programs need (leave one program out), and the user's request takes 10\%. The second block profiles the job's own input, and the third transfers from the program's smaller inputs.\relax }{table.caption.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Other allocators and transparent huge pages}{11}{section.8}}
+\newlabel{sec:alloc}{{8}{11}{Other allocators and transparent huge pages}{section.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Signed whole-run error (\% of the truth under the same allocator) under jemalloc and TCMalloc, with transparent huge pages enabled (the machine's setting) and disabled for the process. \emph  {Anon} is the data estimate without the allocator's free bytes. Median of 3 runs. Overhead is the run time over a plain RSS run under the same allocator.\relax }}{12}{table.caption.7}}
+\newlabel{tab:alloc}{{7}{12}{Signed whole-run error (\% of the truth under the same allocator) under jemalloc and TCMalloc, with transparent huge pages enabled (the machine's setting) and disabled for the process. \emph {Anon} is the data estimate without the allocator's free bytes. Median of 3 runs. Overhead is the run time over a plain RSS run under the same allocator.\relax }{table.caption.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces The corpus under glibc with transparent huge pages enabled and disabled for the process: median signed and absolute whole-run error (\% of the truth). The data estimate here comes from the mode that reads \texttt  {smaps}.\relax }}{13}{table.caption.8}}
+\newlabel{tab:thp}{{8}{13}{The corpus under glibc with transparent huge pages enabled and disabled for the process: median signed and absolute whole-run error (\% of the truth). The data estimate here comes from the mode that reads \texttt {smaps}.\relax }{table.caption.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Signed whole-run error (\% of the pages-touched truth) on the language model engines, median of 3 runs. Data $\mathaccentV {hat}05Ef_1$ without files is $\qopname  \relax m{max}(A - F, 0) + B$. The model's overhead is the run time of the mode that reads \texttt  {smaps} over a plain RSS run, and MemPrint{}'s is its W5 and counter runs over a native run ($\times $).\relax }}{13}{table.caption.9}}
+\newlabel{tab:llm}{{9}{13}{Signed whole-run error (\% of the pages-touched truth) on the language model engines, median of 3 runs. Data $\hat f_1$ without files is $\max (A - F, 0) + B$. The model's overhead is the run time of the mode that reads \texttt {smaps} over a plain RSS run, and \memprint {}'s is its W5 and counter runs over a native run ($\times $).\relax }{table.caption.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Language model engines}{13}{section.9}}
+\newlabel{sec:llm}{{9}{13}{Language model engines}{section.9}{}}
+\citation{memprintstatic}
+\citation{memprintstatic}
+\citation{memprintstatic}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Programs and inputs not seen before}{14}{section.10}}
+\newlabel{sec:general}{{10}{14}{Programs and inputs not seen before}{section.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.1}The runtime's pages from the job's own run}{14}{subsection.10.1}}
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces Estimate 1 with $B$ from an earlier plain run (the smallest RSS) and from the model's own run (the file-backed RSS at the first sample, after the shared libraries are loaded). Median over programs of the median of 3 runs; whole-run errors and the peak error in \% of the truth, whose $B$ stays the earlier run's.\relax }}{14}{table.caption.10}}
+\newlabel{tab:inrun}{{10}{14}{Estimate 1 with $B$ from an earlier plain run (the smallest RSS) and from the model's own run (the file-backed RSS at the first sample, after the shared libraries are loaded). Median over programs of the median of 3 runs; whole-run errors and the peak error in \% of the truth, whose $B$ stays the earlier run's.\relax }{table.caption.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.2}The companion study's blind programs}{14}{subsection.10.2}}
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces The model on the companion study's blind configurations\nobreakspace  {}\cite  {memprintstatic}, against its Pin truth (the distinct bytes touched over the whole run, MB): the measured footprint (the largest $A - F$ of the run, median of 3 runs, MB), its error alone (a) and with a runtime constant fitted on the other programs (b), and the companion study's prediction from source, in \% of the truth.\relax }}{15}{table.caption.11}}
+\newlabel{tab:blind}{{11}{15}{The model on the companion study's blind configurations~\cite {memprintstatic}, against its Pin truth (the distinct bytes touched over the whole run, MB): the measured footprint (the largest $A - F$ of the run, median of 3 runs, MB), its error alone (a) and with a runtime constant fitted on the other programs (b), and the companion study's prediction from source, in \% of the truth.\relax }{table.caption.11}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces Transfer on the blind programs: the largest configuration with a truth (EXTRA) or the middle one (INTER) predicted from the others' measured footprints by the rule of Section\nobreakspace  {}\ref  {sec:transfer}, plus $R$, in \% of the truth; with the floor taken from the smaller configurations only (post hoc); the model measured on that configuration; and the prediction from source.\relax }}{16}{table.caption.12}}
+\newlabel{tab:blind-splits}{{12}{16}{Transfer on the blind programs: the largest configuration with a truth (EXTRA) or the middle one (INTER) predicted from the others' measured footprints by the rule of \secref {sec:transfer}, plus $R$, in \% of the truth; with the floor taken from the smaller configurations only (post hoc); the model measured on that configuration; and the prediction from source.\relax }{table.caption.12}{}}
+\citation{memprintstatic}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Borrowing the growth of other programs}{17}{subsection.10.3}}
+\@writefile{lot}{\contentsline {table}{\numberline {13}{\ignorespaces A program's largest input predicted from one run at a smaller input, scaled by the input sizes to the power $\beta $, with $\beta $ chosen by each method: the median and 90th percentile of the absolute whole-run error (\% of the truth) and the number of the 22 programs within 10\%. The method marked as an oracle chooses after the fact, and the last row uses all of the program's own inputs. Left: the run at the smallest input, as committed; right: at the largest smaller input (post hoc).\relax }}{17}{table.caption.13}}
+\newlabel{tab:borrow}{{13}{17}{A program's largest input predicted from one run at a smaller input, scaled by the input sizes to the power $\beta $, with $\beta $ chosen by each method: the median and 90th percentile of the absolute whole-run error (\% of the truth) and the number of the 22 programs within 10\%. The method marked as an oracle chooses after the fact, and the last row uses all of the program's own inputs. Left: the run at the smallest input, as committed; right: at the largest smaller input (post hoc).\relax }{table.caption.13}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Similarity of the code instead of the run}{18}{subsection.10.4}}
+\@writefile{lot}{\contentsline {table}{\numberline {14}{\ignorespaces Code similarity and the model's terms, over the 22 programs with code of their own (all but \texttt  {cc1}). $\rho $: Spearman correlation over program pairs of the code distance and the difference in the term (Mantel test, 10{,}000 permutations; in parentheses when $p \ge 0.05$). $R'$: median absolute error (MB) of the term taken from the nearest program, each program held out in turn. Borrowed $\beta $: the absolute whole-run error (\% of the truth) of the prediction of Table\nobreakspace  {}\ref  {tab:borrow} from the largest smaller input, with $\beta $ from the nearest program, for the 21 programs with a smaller input: median, 90th percentile and the number within 10\%. Memory code: the lines that allocate, free or grow memory, with 10 lines on each side.\relax }}{18}{table.caption.14}}
+\newlabel{tab:similar}{{14}{18}{Code similarity and the model's terms, over the 22 programs with code of their own (all but \texttt {cc1}). $\rho $: Spearman correlation over program pairs of the code distance and the difference in the term (Mantel test, 10{,}000 permutations; in parentheses when $p \ge 0.05$). $R'$: median absolute error (MB) of the term taken from the nearest program, each program held out in turn. Borrowed $\beta $: the absolute whole-run error (\% of the truth) of the prediction of \tabref {tab:borrow} from the largest smaller input, with $\beta $ from the nearest program, for the 21 programs with a smaller input: median, 90th percentile and the number within 10\%. Memory code: the lines that allocate, free or grow memory, with 10 lines on each side.\relax }{table.caption.14}{}}
+\citation{memprintstatic}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.5}A prediction with no run of the program}{19}{subsection.10.5}}
+\@writefile{lot}{\contentsline {table}{\numberline {15}{\ignorespaces Predictions with no run of the program: the companion study's interpreter on the source at the largest input, plus the runtime's pages as the other programs' runs show them. Interpreter: its time over the plain native run's ($\times $). Peak error and signed whole-run error in \% of the truth, for the prediction with no run, the model's own run, the model's transfer from the smaller inputs and MemPrint{}; and the peak error of the prediction against the plain run's RSS. The C++ interpreter has no timeline mode, and PolyBench's timeline mode needs more than 16\tmspace  +\thinmuskip {.1667em}GB except on atax, so these predictions hold the footprint over the whole run.\relax }}{19}{table.caption.15}}
+\newlabel{tab:zero}{{15}{19}{Predictions with no run of the program: the companion study's interpreter on the source at the largest input, plus the runtime's pages as the other programs' runs show them. Interpreter: its time over the plain native run's ($\times $). Peak error and signed whole-run error in \% of the truth, for the prediction with no run, the model's own run, the model's transfer from the smaller inputs and \memprint {}; and the peak error of the prediction against the plain run's RSS. The C++ interpreter has no timeline mode, and PolyBench's timeline mode needs more than 16\,GB except on atax, so these predictions hold the footprint over the whole run.\relax }{table.caption.15}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {11}Other ways to correct RSS}{20}{section.11}}
+\newlabel{sec:options}{{11}{20}{Other ways to correct RSS}{section.11}{}}
+\citation{denning1968}
+\@writefile{lot}{\contentsline {table}{\numberline {16}{\ignorespaces Signed whole-run error (\% of the truth) of each alternative used alone on the allocator-heavy programs, median of 3 runs, and its overhead over a plain RSS run ($\times $). Runtime statistics exist only for CPython and Lua. These runs keep the file-backed pages in every estimate.\relax }}{21}{table.caption.16}}
+\newlabel{tab:options}{{16}{21}{Signed whole-run error (\% of the truth) of each alternative used alone on the allocator-heavy programs, median of 3 runs, and its overhead over a plain RSS run ($\times $). Runtime statistics exist only for CPython and Lua. These runs keep the file-backed pages in every estimate.\relax }{table.caption.16}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {12}Returning free memory at run time}{21}{section.12}}
+\newlabel{sec:trim}{{12}{21}{Returning free memory at run time}{section.12}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {17}{\ignorespaces Memory summed over the workloads under each build, mean of 3 runs: the peak RSS and the time-averaged RSS (MB), RSS integrated over the run (GB\tmspace  +\thinmuskip {.1667em}s), and the time-averaged reservation of dynamic provisioning, which holds the request for the first sixth of the run and then each sixth's largest RSS (MB). Trimming at $s = 0.1$, from \texttt  {free}.\relax }}{22}{table.caption.17}}
+\newlabel{tab:trim-totals}{{17}{22}{Memory summed over the workloads under each build, mean of 3 runs: the peak RSS and the time-averaged RSS (MB), RSS integrated over the run (GB\,s), and the time-averaged reservation of dynamic provisioning, which holds the request for the first sixth of the run and then each sixth's largest RSS (MB). Trimming at $s = 0.1$, from \texttt {free}.\relax }{table.caption.17}{}}
+\citation{Powers2019Mesh}
+\@writefile{lot}{\contentsline {table}{\numberline {18}{\ignorespaces The workloads on which trimming happened (more than one trim in a run): time-averaged RSS (MB), run time over the glibc run's, and the trims per run, mean of 3 runs. On the other 17 workloads, libmpr made at most one trim per run.\relax }}{23}{table.caption.18}}
+\newlabel{tab:trim}{{18}{23}{The workloads on which trimming happened (more than one trim in a run): time-averaged RSS (MB), run time over the glibc run's, and the trims per run, mean of 3 runs. On the other 17 workloads, libmpr made at most one trim per run.\relax }{table.caption.18}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {19}{\ignorespaces Trimming under glibc at three shares $s$: the trims per run summed over the allocator-heavy programs, the time-averaged RSS summed over the allocator-heavy programs and over all 29 workloads (MB), and the run time over the glibc run's in the same set of runs ($\times $), median and largest over the workloads, mean of 3 runs. The untrimmed row and the row at $s = 0.1$ come from the same runs.\relax }}{23}{table.caption.19}}
+\newlabel{tab:trim-share}{{19}{23}{Trimming under glibc at three shares $s$: the trims per run summed over the allocator-heavy programs, the time-averaged RSS summed over the allocator-heavy programs and over all 29 workloads (MB), and the run time over the glibc run's in the same set of runs ($\times $), median and largest over the workloads, mean of 3 runs. The untrimmed row and the row at $s = 0.1$ come from the same runs.\relax }{table.caption.19}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {20}{\ignorespaces Cluster simulation of the resizing study (DMSched-Sim, 3{,}000 jobs, the RSS as the job's truth): throughput and mean response time of each policy with glibc's RSS, with trimming at $s = 0.1$ and at the bound of returning every free byte, mean of 3 seeds, and the number of the 6 seed and load pairs on which the throughput is higher than with glibc's RSS. The standard deviation of the response over seeds is about 200\tmspace  +\thinmuskip {.1667em}min for the dynamic policies.\relax }}{24}{table.caption.20}}
+\newlabel{tab:trim-grid}{{20}{24}{Cluster simulation of the resizing study (DMSched-Sim, 3{,}000 jobs, the RSS as the job's truth): throughput and mean response time of each policy with glibc's RSS, with trimming at $s = 0.1$ and at the bound of returning every free byte, mean of 3 seeds, and the number of the 6 seed and load pairs on which the throughput is higher than with glibc's RSS. The standard deviation of the response over seeds is about 200\,min for the dynamic policies.\relax }{table.caption.20}{}}
+\citation{Li2023Pond}
+\citation{Peng2020Underutilization}
+\citation{park2019damon}
+\@writefile{toc}{\contentsline {section}{\numberline {13}Hot and cold memory for a memory pool}{25}{section.13}}
+\newlabel{sec:place}{{13}{25}{Hot and cold memory for a memory pool}{section.13}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.1}Measuring hot and cold memory without privileges}{25}{subsection.13.1}}
+\citation{Li2023Pond}
+\@writefile{lot}{\contentsline {table}{\numberline {21}{\ignorespaces Measuring hot and cold memory: run time with windows of 0.1\tmspace  +\thinmuskip {.1667em}s over the library's run without a mode, for the zones alone (refs) and with call sites (sites); the share of the resident anonymous memory referenced within a window at three window lengths (memory-time weighted); the share of anonymous memory in site blocks at the peak (site share); and the cold bytes at 2\tmspace  +\thinmuskip {.1667em}MiB chunk granularity over the cold bytes at page granularity at the peak, with windows of 0.1\tmspace  +\thinmuskip {.1667em}s (cold named). Median of 3 runs, one run for the windows of 0.02 and 0.5\tmspace  +\thinmuskip {.1667em}s.\relax }}{26}{table.caption.21}}
+\newlabel{tab:place-refs}{{21}{26}{Measuring hot and cold memory: run time with windows of 0.1\,s over the library's run without a mode, for the zones alone (refs) and with call sites (sites); the share of the resident anonymous memory referenced within a window at three window lengths (memory-time weighted); the share of anonymous memory in site blocks at the peak (site share); and the cold bytes at 2\,MiB chunk granularity over the cold bytes at page granularity at the peak, with windows of 0.1\,s (cold named). Median of 3 runs, one run for the windows of 0.02 and 0.5\,s.\relax }{table.caption.21}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.2}Placement on an emulated pool}{26}{subsection.13.2}}
+\citation{Maruf2023TPP}
+\citation{Raybuck2021HeMem}
+\citation{Lee2023Memtis}
+\@writefile{lot}{\contentsline {table}{\numberline {22}{\ignorespaces Static placement: run time with a plan over the run with no plan ($\times $), median of 5 runs, for all memory on node 1 (remote) and for plans that place 25\% or 50\% of the memory-time in the pool, cold, random or hot first. The plans from the smaller input come from GAP at a scale of 16 and CPython and Lua at a quarter of the input, with windows of 0.02\tmspace  +\thinmuskip {.1667em}s, applied at a scale of 18 and the full input. They ran in a separate set of runs with its own baseline.\relax }}{27}{table.caption.22}}
+\newlabel{tab:place-static}{{22}{27}{Static placement: run time with a plan over the run with no plan ($\times $), median of 5 runs, for all memory on node 1 (remote) and for plans that place 25\% or 50\% of the memory-time in the pool, cold, random or hot first. The plans from the smaller input come from GAP at a scale of 16 and CPython and Lua at a quarter of the input, with windows of 0.02\,s, applied at a scale of 18 and the full input. They ran in a separate set of runs with its own baseline.\relax }{table.caption.22}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.3}Moving memory while the program runs}{27}{subsection.13.3}}
+\@writefile{lot}{\contentsline {table}{\numberline {23}{\ignorespaces Moving memory while the program runs, against the static cold plan from a profile of the same input: run time over the run with no plan ($\times $), median of 5 runs. Monitor: the accessed bits sampled and cleared at the window length, no memory moved. Fill, threshold and slow at $f = 0.25$ or $0.5$ of the anonymous RSS. Three sets of runs, each with its own baseline.\relax }}{28}{table.caption.23}}
+\newlabel{tab:place-migrate}{{23}{28}{Moving memory while the program runs, against the static cold plan from a profile of the same input: run time over the run with no plan ($\times $), median of 5 runs. Monitor: the accessed bits sampled and cleared at the window length, no memory moved. Fill, threshold and slow at $f = 0.25$ or $0.5$ of the anonymous RSS. Three sets of runs, each with its own baseline.\relax }{table.caption.23}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.4}Placement in libmpr}{28}{subsection.13.4}}
+\@writefile{lot}{\contentsline {table}{\numberline {24}{\ignorespaces Placement through libmpr, plans from the smaller input except ``same 25'': libmpr with no plan over the run without libmpr (libmpr), and run time with a plan over libmpr with no plan ($\times $), median of 5 runs. Pool share: the share of the anonymous memory-time on node 1 under the transferred cold plan at $f = 0.25$.\relax }}{29}{table.caption.24}}
+\newlabel{tab:place-libmpr}{{24}{29}{Placement through libmpr, plans from the smaller input except ``same 25'': libmpr with no plan over the run without libmpr (libmpr), and run time with a plan over libmpr with no plan ($\times $), median of 5 runs. Pool share: the share of the anonymous memory-time on node 1 under the transferred cold plan at $f = 0.25$.\relax }{table.caption.24}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {25}{\ignorespaces Reservations and placement together through libmpr: peak commit, peak anonymous memory on node 0 and on node 1 (MB), and run time over libmpr with neither ($\times $), median of 5 runs. Plans profiled on the same input. Every run turns transparent huge pages off.\relax }}{29}{table.caption.25}}
+\newlabel{tab:place-combo}{{25}{29}{Reservations and placement together through libmpr: peak commit, peak anonymous memory on node 0 and on node 1 (MB), and run time over libmpr with neither ($\times $), median of 5 runs. Plans profiled on the same input. Every run turns transparent huge pages off.\relax }{table.caption.25}{}}
+\citation{Li2023Pond}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.5}A slower pool}{30}{subsection.13.5}}
+\newlabel{sec:cxl}{{13.5}{30}{A slower pool}{subsection.13.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {26}{\ignorespaces A slower pool: run time with all anonymous memory in the pool or with the transferred cold or hot plan at $f = 0.25$ over the run with all memory local ($\times $, median of 5 runs), for the pool's added latency over local memory of 56\tmspace  +\thinmuskip {.1667em}ns (node 1 idle) and 107\tmspace  +\thinmuskip {.1667em}ns (node 1 busy), measured, and of 200 and 300\tmspace  +\thinmuskip {.1667em}ns, about $3\times $ and $4\times $ the local latency, predicted. darknet and llama.cpp run with their reservations, over the reservations alone. Error: the largest difference between the predicted and the measured slowdown at 107\tmspace  +\thinmuskip {.1667em}ns.\relax }}{31}{table.caption.26}}
+\newlabel{tab:place-cxl}{{26}{31}{A slower pool: run time with all anonymous memory in the pool or with the transferred cold or hot plan at $f = 0.25$ over the run with all memory local ($\times $, median of 5 runs), for the pool's added latency over local memory of 56\,ns (node 1 idle) and 107\,ns (node 1 busy), measured, and of 200 and 300\,ns, about $3\times $ and $4\times $ the local latency, predicted. darknet and llama.cpp run with their reservations, over the reservations alone. Error: the largest difference between the predicted and the measured slowdown at 107\,ns.\relax }{table.caption.26}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {27}{\ignorespaces Cluster simulation with a slower pool (the setup of Table\nobreakspace  {}\ref  {tab:trim-grid}, load 0.8, 32 nodes of 128\tmspace  +\thinmuskip {.1667em}GB and a 1{,}024\tmspace  +\thinmuskip {.1667em}GB pool of 64\tmspace  +\thinmuskip {.1667em}GB/s): throughput in jobs per hour, mean of 3 seeds, with the flat cost $\beta = 0.5$ and with each workload's modelled cost at the pool's idle added latency over local memory in ns, when the pool holds the job's coldest, a random or its hottest memory. The standard deviation over seeds is about 0.8 jobs per hour.\relax }}{32}{table.caption.27}}
+\newlabel{tab:cxl-grid}{{27}{32}{Cluster simulation with a slower pool (the setup of \tabref {tab:trim-grid}, load 0.8, 32 nodes of 128\,GB and a 1{,}024\,GB pool of 64\,GB/s): throughput in jobs per hour, mean of 3 seeds, with the flat cost $\beta = 0.5$ and with each workload's modelled cost at the pool's idle added latency over local memory in ns, when the pool holds the job's coldest, a random or its hottest memory. The standard deviation over seeds is about 0.8 jobs per hour.\relax }{table.caption.27}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {28}{\ignorespaces The pool minute by minute, at an idle added latency of 300\tmspace  +\thinmuskip {.1667em}ns: the jobs' demand on the pool (mean, 95th percentile and largest minute), the share of the steady minutes in which it exceeds the bandwidth, the pool's added latency, and the throughput with each placement, means over the 6 policies, both loads and 3 seeds (36 runs per cell); the last column is the throughput of the cold plan with the latency set from the mean demand (Table\nobreakspace  {}\ref  {tab:cxl-grid}), which the 16\tmspace  +\thinmuskip {.1667em}GB/s pool was not run with.\relax }}{32}{table.caption.28}}
+\newlabel{tab:cxl-minute}{{28}{32}{The pool minute by minute, at an idle added latency of 300\,ns: the jobs' demand on the pool (mean, 95th percentile and largest minute), the share of the steady minutes in which it exceeds the bandwidth, the pool's added latency, and the throughput with each placement, means over the 6 policies, both loads and 3 seeds (36 runs per cell); the last column is the throughput of the cold plan with the latency set from the mean demand (\tabref {tab:cxl-grid}), which the 16\,GB/s pool was not run with.\relax }{table.caption.28}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {14}Costs and effects of the approaches}{33}{section.14}}
+\newlabel{sec:space}{{14}{33}{Costs and effects of the approaches}{section.14}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {29}{\ignorespaces The approaches to the gap between RSS and the footprint that we measured, in this paper and in the resizing study, grouped by where they act. One-time cost: paid once per program and input or model, as a run time over the native run's ($\times $). Cost per run: the run time of every production run over glibc's ($\times $), median and the largest we observed. Effect: on the 7 allocator-heavy programs unless stated (whole-run error against the truth, or memory), and in the cluster simulation at load 0.8 (jobs per hour and mean response time).\relax }}{34}{table.caption.29}}
+\newlabel{tab:space}{{29}{34}{The approaches to the gap between RSS and the footprint that we measured, in this paper and in the resizing study, grouped by where they act. One-time cost: paid once per program and input or model, as a run time over the native run's ($\times $). Cost per run: the run time of every production run over glibc's ($\times $), median and the largest we observed. Effect: on the 7 allocator-heavy programs unless stated (whole-run error against the truth, or memory), and in the cluster simulation at load 0.8 (jobs per hour and mean response time).\relax }{table.caption.29}{}}
+\citation{Nethercote2007Valgrind}
+\citation{dhat}
+\@writefile{toc}{\contentsline {section}{\numberline {15}Limitations}{35}{section.15}}
+\newlabel{sec:limits}{{15}{35}{Limitations}{section.15}{}}
+\citation{park2019damon}
+\citation{agarwal2017thermostat}
+\citation{roca_nonell2020pebs}
+\citation{denning1968}
+\citation{Maruf2023TPP}
+\citation{Raybuck2021HeMem}
+\citation{Lee2023Memtis}
+\citation{Li2023Pond}
+\citation{KSplus2024}
+\citation{Zacarias2021Accurate}
+\citation{Zacarias2023Dynamic}
+\citation{Li2023Pond}
+\citation{Powers2019Mesh}
+\citation{Hunter2021Temeraire}
+\citation{Kwon2016Ingens}
+\citation{Panwar2019HawkEye}
+\@writefile{toc}{\contentsline {section}{\numberline {16}Related work}{36}{section.16}}
+\newlabel{sec:related}{{16}{36}{Related work}{section.16}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {17}Conclusion}{36}{section.17}}
+\newlabel{sec:conclusion}{{17}{36}{Conclusion}{section.17}{}}
+\bibstyle{plain}
+\bibdata{references}
+\bibcite{agarwal2017thermostat}{1}
+\bibcite{KSplus2024}{2}
+\bibcite{beamer2015gap}{3}
+\bibcite{denning1968}{4}
+\bibcite{Evans2006jemalloc}{5}
+\bibcite{glibcmanual}{6}
+\bibcite{minivite}{7}
+\bibcite{Hunter2021Temeraire}{8}
+\bibcite{ierusalimschy1996lua}{9}
+\bibcite{Kwon2016Ingens}{10}
+\bibcite{Lee2023Memtis}{11}
+\bibcite{Li2023Pond}{12}
+\bibcite{LinuxTHP}{13}
+\bibcite{Luk2005Pin}{14}
+\bibcite{Maruf2023TPP}{15}
+\bibcite{memprintstatic}{16}
+\bibcite{dhat}{17}
+\bibcite{Nethercote2007Valgrind}{18}
+\bibcite{roca_nonell2020pebs}{19}
+\bibcite{Panwar2019HawkEye}{20}
+\bibcite{park2019damon}{21}
+\bibcite{Peng2020Underutilization}{22}
+\bibcite{Powers2019Mesh}{23}
+\bibcite{Raybuck2021HeMem}{24}
+\bibcite{Zacarias2021Accurate}{25}
+\bibcite{Zacarias2023Dynamic}{26}
