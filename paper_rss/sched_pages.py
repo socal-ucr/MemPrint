@@ -157,6 +157,15 @@ def part_memprint_hb():
     pd.concat([old[old.oracle != "memprint-peak"], new]).to_csv(f"{P}/results/grid_memprint.csv", index=False)
 
 
+def part_windows():
+    """The window-count sweep: the exact curve (exact-coarse) and MemRSS's curve (model1-rep) coarsened to 10, 20, 50 and
+    100 windows (oracles.WINDOWS), each widened by one window on each side, at load 0.8, with the exact curve and the
+    exact peak as references. As in the main grid, MemRSS's margin is calibrated and the exact curve keeps 10%."""
+    from memprint.sched.oracles import WINDOWS
+    names = ["exact", "exact-peak"] + [f"{o}-w{n}" for o in ("exact-coarse", "model1-rep") for n in WINDOWS]
+    go("windows", loads=(0.8,), names=names)
+
+
 OWN = os.path.expanduser("~/memprint-data/2026-11-23-corpus-e1/mp_errors_corpus.csv")   # dissertation/corpus_e1.py
 
 

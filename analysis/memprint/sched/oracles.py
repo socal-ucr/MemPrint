@@ -49,8 +49,8 @@ SYNTHETIC = {
 # Oracles on jobs from real.py: info holds every corpus method's curve on the job's scale. Curve oracles are
 # coarsened to 20 windows widened by one on each side, as each method's clock (references, Valgrind ms,
 # seconds) maps to wall-clock progress only approximately.
-def _curve(method):
-    return lambda j, m: curve(j.info[method], m, windows=20, widen=1, headroom=True)
+def _curve(method, windows=20):
+    return lambda j, m: curve(j.info[method], m, windows=windows, widen=1, headroom=True)
 
 
 def _peak(method):
@@ -135,13 +135,20 @@ EARLIER = {"rss-peak-rep": ("peak", "rssrep1", None), "rss-curve-rep": ("curve",
            "model1-x": ("curve", "model1X", None), "model2-x": ("curve", "model2X", None)}
 
 
-def _earlier(kind, method, level):
+def _earlier(kind, method, level, windows=20):
     """An EARLIER oracle; without its curves (a transfer with nothing to extrapolate) it reserves the request."""
-    f = _scaled_to_rss(method, level) if level else _peak(method) if kind == "peak" else _curve(method)
+    f = _scaled_to_rss(method, level) if level else _peak(method) if kind == "peak" else _curve(method, windows)
     return lambda j, m: (f(j, m) if all(x in j.info for x in (method, level) if x)
                          else np.full(K, float(j.info["request"])))
 
+# The window-count sweep (paper_rss/sched_pages.py part windows): the exact curve and MemRSS's curve (model1-rep)
+# coarsened to N windows instead of 20, each widened by one window on each side as at 20.
+WINDOWS = (10, 20, 50, 100)
+EARLIER_W = {f"model1-rep-w{n}": ("curve", "model1", None, n) for n in WINDOWS}
+
 REAL = {
+    **{f"exact-coarse-w{n}": (lambda n: lambda j, m: curve(j.resident, windows=n, widen=1))(n) for n in WINDOWS},
+    **{n: _earlier(*v) for n, v in EARLIER_W.items()},
     "reactive": reactive,
     "zacarias": zacarias,
     "zacarias-past": zacarias_past,
@@ -177,8 +184,9 @@ def available(jobs, name):
             **{f"memprint-{n}": m for n, m in CLOCK_PAGES.items()}, **HYBRID}.get(name)
     if name == "memprint-peak":
         return all("mp_e" in j.info for j in jobs)
-    if name in EARLIER:
-        return all(all(m in j.info for m in EARLIER[name][1:] if m) or "request" in j.info for j in jobs)
+    if name in EARLIER or name in EARLIER_W:
+        e = EARLIER.get(name) or EARLIER_W[name][:3]
+        return all(all(m in j.info for m in e[1:] if m) or "request" in j.info for j in jobs)
     return need is None or all(need in j.info and (name not in HYBRID or "rss" in j.info) for j in jobs)
 
 
