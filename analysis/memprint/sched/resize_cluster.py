@@ -199,6 +199,14 @@ def workloads():
                 return [_curve(t.assign(memrss=t.data_bytes + t.file_bytes), "memrss", b)
                         for t in map(pd.read_csv, sorted(glob.glob(f"{e}/{label}-[0-9].monitor.csv")))]
             out[name].update(memrss=memrss("trim"), mpr_memrss=memrss("selftrim"))
+            # the "reclaim" truth: a node that takes the allocator's free bytes back, so a job holds its RSS less
+            # them (the monitored run's of the same index, as est without the trimmed run's bound): MemRSS's target
+            g, ms = gaps("trim"), gaps("selftrim")
+            if g and ms:
+                out[name].update(reclaim=[(np.maximum(rss - g[k % len(g)], 0), com) for k, (rss, com) in
+                                          enumerate(out[name]["glibc"])],
+                                 mpr_reclaim=[(np.maximum(rss - ms[k % len(ms)], 0), com) for k, (rss, com) in
+                                              enumerate(out[name]["mpr"])])
     return out
 
 
@@ -227,6 +235,8 @@ class Setup:
         key = (truth, build, widened)
         if key not in self._need:
             runs, est = ("mpr", "mpr_memrss") if build == "mpr" else ("glibc", "memrss")
+            if truth == "reclaim":
+                runs = "mpr_reclaim" if build == "mpr" else "reclaim"
             out = {}
             for name, w in self.wl.items():
                 if not w.get(est):
@@ -260,8 +270,12 @@ class Setup:
             k = rng.integers(len(w["glibc"]))
             rss, com = w["glibc"][k]
             mrss, mcom = w["mpr"][min(k, len(w["mpr"]) - 1)]
+            req = np.maximum(rss, com).max()   # the user's request: what the program allocates, under any truth
+            mreq = np.maximum(mrss, mcom).max()   # libmpr's request from its profile, under any truth
+            if truth == "reclaim":   # (RESIZE_EST_RUNS only)
+                rss = w["reclaim"][k][0]
+                mrss = w["mpr_reclaim"][min(k, len(w["mpr_reclaim"]) - 1)][0]
             hrss, hcom = w["mprh"][min(k, len(w["mprh"]) - 1)]
-            req = np.maximum(rss, com).max()
             s = r.req_gb / max(req, 1e-12)   # GB per byte of the program's own scale
             extra = {}
             for bld in ("trim", "mprt", "est", "mpre"):   # (RESIZE_RUNS, RESIZE_EST_RUNS only)
@@ -277,7 +291,7 @@ class Setup:
             cap = Cluster().local + Cluster().pool
             um = untouched(others)
             info = dict(prog=name, scale=s, request=min(req * s * (1 + inflate), cap),
-                        mpr_request=np.maximum(mrss, mcom).max() * s, mprh_request=np.maximum(hrss, hcom).max() * s,
+                        mpr_request=mreq * s, mprh_request=np.maximum(hrss, hcom).max() * s,
                         glibc_truth=pick(rss, com) * s, mpr_truth=pick(mrss, mcom) * s, mprh_truth=pick(hrss, hcom) * s,
                         # Pond's history sees the user's request: the untouched share includes the over-request
                         um=1 - (1 - um) / (1 + inflate), mpr_um=untouched(mothers), mprh_um=untouched(hothers),
@@ -394,7 +408,7 @@ def run(out, truths=("rss", "strict"), loads=(0.4, 0.6, 0.8, 1.0, 1.2), seeds=(0
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--truths", nargs="+", default=["rss", "strict"])
+    ap.add_argument("--truths", nargs="+", default=["rss", "strict"])   # or reclaim (RESIZE_EST_RUNS)
     ap.add_argument("--loads", type=float, nargs="+", default=[0.4, 0.6, 0.8, 1.0, 1.2])
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--policies", nargs="+", default=POLICIES)
